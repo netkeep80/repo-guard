@@ -82,7 +82,7 @@ function runCheckDiff(roots, args) {
     if (args[i] === "--base" && args[i + 1]) base = args[++i];
     else if (args[i] === "--head" && args[i + 1]) head = args[++i];
     else if (args[i] === "--contract" && args[i + 1]) {
-      const contractPath = resolve(args[++i]);
+      const contractPath = resolve(roots.repoRoot, args[++i]);
       contract = loadJSON(contractPath);
       ok = validate(ajv, contractSchema, contract, contractPath) && ok;
     }
@@ -186,7 +186,7 @@ function runValidate(roots, args) {
 
   const contractArg = args[0];
   if (contractArg) {
-    const contract = loadJSON(resolve(contractArg));
+    const contract = loadJSON(resolve(roots.repoRoot, contractArg));
     ok = validate(ajv, contractSchema, contract, contractArg) && ok;
   }
 

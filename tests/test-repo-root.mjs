@@ -173,6 +173,105 @@ function expect(label, actual, expected) {
   rmSync(tmp, { recursive: true });
 }
 
+// --- validate resolves contract path relative to repoRoot ---
+
+{
+  const tmp = mkdtempSync(join(tmpdir(), "rg-contract-validate-"));
+  const policy = {
+    policy_format_version: "0.1.0",
+    repository_kind: "library",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: { max_new_docs: 5, max_new_files: 20 },
+    content_rules: [],
+    cochange_rules: [],
+  };
+  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
+
+  mkdirSync(join(tmp, "contracts"));
+  const contract = {
+    change_type: "feature",
+    scope: ["src/**"],
+    budgets: { max_new_files: 5 },
+    must_touch: [],
+    must_not_touch: [],
+    expected_effects: ["test"],
+  };
+  writeFileSync(join(tmp, "contracts", "change.json"), JSON.stringify(contract));
+
+  try {
+    const output = execSync(
+      `node src/repo-guard.mjs --repo-root ${tmp} contracts/change.json`,
+      { encoding: "utf-8", cwd: projectRoot }
+    );
+    expect("validate resolves contract relative to repoRoot", output.includes("OK: repo-policy.json"), true);
+    expect("validate contract passes schema check", output.includes("OK: contracts/change.json"), true);
+  } catch (e) {
+    const stderr = e.stderr || e.message || "";
+    expect("validate resolves contract relative to repoRoot (no ENOENT)", !stderr.includes("ENOENT"), true);
+    expect("validate resolves contract relative to repoRoot", false, true);
+  }
+
+  rmSync(tmp, { recursive: true });
+}
+
+// --- check-diff resolves --contract path relative to repoRoot ---
+
+{
+  const tmp = mkdtempSync(join(tmpdir(), "rg-contract-diff-"));
+  execSync("git init", { cwd: tmp });
+  execSync("git config user.email test@test.com && git config user.name Test", { cwd: tmp });
+
+  const policy = {
+    policy_format_version: "0.1.0",
+    repository_kind: "library",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
+    content_rules: [],
+    cochange_rules: [],
+  };
+  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
+
+  mkdirSync(join(tmp, "contracts"));
+  const contract = {
+    change_type: "feature",
+    scope: ["**"],
+    budgets: { max_new_files: 5, max_net_added_lines: 500 },
+    must_touch: ["hello.txt"],
+    must_not_touch: [],
+    expected_effects: ["test"],
+  };
+  writeFileSync(join(tmp, "contracts", "change.json"), JSON.stringify(contract));
+
+  writeFileSync(join(tmp, "hello.txt"), "hello");
+  execSync("git add -A && git commit -m init", { cwd: tmp });
+
+  writeFileSync(join(tmp, "hello.txt"), "hello world");
+  execSync("git add -A && git commit -m second", { cwd: tmp });
+
+  try {
+    const output = execSync(
+      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD --contract contracts/change.json`,
+      { encoding: "utf-8", cwd: projectRoot }
+    );
+    expect("check-diff resolves --contract relative to repoRoot", output.includes("1 file(s) changed"), true);
+    expect("check-diff --contract passes with repoRoot", output.includes("0 failed"), true);
+  } catch (e) {
+    const stderr = e.stderr || e.message || "";
+    expect("check-diff resolves --contract relative to repoRoot (no ENOENT)", !stderr.includes("ENOENT"), true);
+    expect("check-diff resolves --contract relative to repoRoot", false, true);
+  }
+
+  rmSync(tmp, { recursive: true });
+}
+
 // --- check-pr respects repo root via roots parameter ---
 
 {
