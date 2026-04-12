@@ -282,6 +282,16 @@ const noOpFiles = [
 ];
 expect("9. no operational match", filterOperationalPaths(noOpFiles, [".claude/**"]).length, 1);
 
+// .gitkeep bot artifact filtered by exact-match operational path
+const gitkeepFiles = [
+  { path: ".gitkeep", addedLines: [""], status: "added" },
+  { path: "src/app.mjs", addedLines: ["code"], status: "modified" },
+  { path: ".claude/memory/note.md", addedLines: ["note"], status: "added" },
+];
+const gitkeepFiltered = filterOperationalPaths(gitkeepFiles, [".claude/**", ".gitkeep"]);
+expect("9. .gitkeep filtered as operational", gitkeepFiltered.length, 1);
+expect("9. .gitkeep: only src file remains", gitkeepFiltered[0].path, "src/app.mjs");
+
 // --- Summary ---
 
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);

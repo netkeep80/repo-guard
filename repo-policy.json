@@ -15,7 +15,8 @@
       "schemas/"
     ],
     "operational_paths": [
-      ".claude/**"
+      ".claude/**",
+      ".gitkeep"
     ]
   },
   "diff_rules": {
