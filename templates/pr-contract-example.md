@@ -6,7 +6,7 @@ validate the proposed changes against the repository policy:
 ```json
 {
   "change_type": "bugfix",
-  "scope": "Fix off-by-one in pagination",
+  "scope": ["src/pagination.mjs"],
   "budgets": {
     "max_new_files": 0,
     "max_new_docs": 0

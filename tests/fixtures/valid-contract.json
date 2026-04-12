@@ -1,6 +1,6 @@
 {
   "change_type": "feature",
-  "scope": "Bootstrap MVP skeleton",
+  "scope": ["src/**", "schemas/**", "tests/**"],
   "budgets": {
     "max_new_files": 15,
     "max_new_docs": 2

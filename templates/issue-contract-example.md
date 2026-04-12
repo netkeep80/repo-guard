@@ -6,7 +6,7 @@ as a JSON code block so `repo-guard` can validate it:
 ```json
 {
   "change_type": "feature",
-  "scope": "Add user authentication module",
+  "scope": ["src/auth.mjs", "src/middleware/**"],
   "budgets": {
     "max_new_files": 5,
     "max_new_docs": 1

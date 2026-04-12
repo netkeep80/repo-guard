@@ -76,12 +76,20 @@
       "type": "array",
       "items": {
         "type": "object",
+        "required": ["if_changed", "must_change_any"],
+        "additionalProperties": false,
         "properties": {
-          "if_touched": { "type": "string" },
-          "must_also_touch": { "type": "string" }
-        },
-        "required": ["if_touched", "must_also_touch"],
-        "additionalProperties": false
+          "if_changed": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "must_change_any": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        }
       }
     }
   }

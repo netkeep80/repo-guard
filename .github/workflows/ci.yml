@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: "20"
 
-      - run: npm install
+      - run: npm ci
 
       - name: Validate repo-policy.json
         run: node src/repo-guard.mjs
