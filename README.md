@@ -211,13 +211,13 @@ repo-guard doctor
 | `fetch-depth` | Обнаружение shallow clone | PASS / WARN |
 | `repo-policy.json` | Поиск, парсинг, валидация схемы, компиляция regex | PASS / FAIL |
 | `event-context` | `GITHUB_EVENT_PATH` и структура PR event | PASS / WARN / FAIL |
-| `auth-token` | `GH_TOKEN`/`GITHUB_TOKEN` или `gh auth` | PASS / FAIL |
+| `auth-token` | `GH_TOKEN`/`GITHUB_TOKEN` или `gh auth` | PASS / WARN |
 | `gh-cli` | Доступность `gh` CLI | PASS / FAIL |
 | `workflow-config` | Наличие workflow с `repo-guard`, `fetch-depth: 0`, токен | PASS / WARN |
 
 Exit code: 0 если нет FAIL (WARN допустимы), 1 если есть хотя бы один FAIL.
 
-Уровни серьёзности `gh-cli` и `auth-token` соответствуют поведению `check-pr`: если `gh` отсутствует или нет аутентификации, `check-pr` завершится с ошибкой, и `doctor` сообщает об этом как FAIL.
+Уровень серьёзности `gh-cli` соответствует поведению `check-pr`: если `gh` отсутствует, `check-pr` завершится с ошибкой, и `doctor` сообщает об этом как FAIL. `auth-token` сообщает WARN, так как аутентификация требуется только при использовании fallback на linked issue для получения change contract.
 
 ```bash
 # Диагностика текущей директории
