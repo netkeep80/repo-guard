@@ -80,6 +80,7 @@ Operational paths (bot-артефакты) исключаются из всех 
 | Contract extractor | `src/markdown-contract.mjs` | Извлечение contract из markdown |
 | PR интеграция | `src/github-pr.mjs` | PR gate для GitHub Actions |
 | Init scaffolding | `src/init.mjs` | Генерация начальной конфигурации |
+| Диагностика | `src/doctor.mjs` | `doctor` — проверка окружения и конфигурации |
 | Шаблоны | `templates/` | Примеры policy и contract |
 
 ## Быстрый старт
@@ -194,6 +195,37 @@ repo-guard check-pr
 - `git` CLI с достаточной глубиной fetch для base...head diff;
 - `gh` CLI с авторизацией (для fallback на linked issue);
 - event payload типа `pull_request` с base/head SHA.
+
+### Диагностика окружения
+
+```bash
+repo-guard doctor
+```
+
+Проверяет, что окружение корректно настроено для работы `repo-guard` (особенно для `check-pr`). Выводит отчёт с PASS / WARN / FAIL для каждой проверки и remediation hint при проблемах.
+
+| Проверка | Что проверяет | Уровни |
+|---|---|---|
+| `repository-root` | Путь существует и является директорией | PASS / FAIL |
+| `git-available` | git CLI установлен, директория — git-репозиторий | PASS / WARN / FAIL |
+| `fetch-depth` | Обнаружение shallow clone | PASS / WARN |
+| `repo-policy.json` | Поиск, парсинг, валидация схемы, компиляция regex | PASS / FAIL |
+| `event-context` | `GITHUB_EVENT_PATH` и структура PR event | PASS / WARN / FAIL |
+| `auth-token` | `GH_TOKEN`/`GITHUB_TOKEN` или `gh auth` | PASS / WARN |
+| `gh-cli` | Доступность `gh` CLI | PASS / FAIL |
+| `workflow-config` | Наличие workflow с `repo-guard`, `fetch-depth: 0`, токен | PASS / WARN |
+
+Exit code: 0 если нет FAIL (WARN допустимы), 1 если есть хотя бы один FAIL.
+
+Уровень серьёзности `gh-cli` соответствует поведению `check-pr`: если `gh` отсутствует, `check-pr` завершится с ошибкой, и `doctor` сообщает об этом как FAIL. `auth-token` сообщает WARN, так как аутентификация требуется только при использовании fallback на linked issue для получения change contract.
+
+```bash
+# Диагностика текущей директории
+repo-guard doctor
+
+# Диагностика конкретного репозитория
+repo-guard --repo-root /path/to/repo doctor
+```
 
 ### Использование в другом репозитории
 
