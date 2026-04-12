@@ -35,6 +35,9 @@ jobs:
       - name: Run GitHub PR integration tests
         run: npm run test:github-pr
 
+      - name: Run hardening tests
+        run: npm run test:hardening
+
       - name: Run repo-root separation tests
         run: npm run test:repo-root
 
