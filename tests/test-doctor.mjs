@@ -39,6 +39,13 @@ function makeTmpDir() {
   return mkdtempSync(join(tmpdir(), "repo-guard-doctor-"));
 }
 
+function initGitRepo(dir) {
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+}
+
 function validPolicy() {
   return JSON.stringify({
     policy_format_version: "0.3.0",
@@ -81,8 +88,7 @@ console.log("\n--- self-hosting: doctor on repo-guard itself ---");
 console.log("\n--- self-hosting: doctor catches broken-policy fixture ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
   const brokenPolicy = resolve(projectRoot, "tests/fixtures/broken-policy.json");
   const dest = resolve(dir, "repo-policy.json");
   writeFileSync(dest, readFileSync(brokenPolicy, "utf-8"));
@@ -99,8 +105,7 @@ console.log("\n--- self-hosting: doctor catches broken-policy fixture ---");
 console.log("\n--- missing repo-policy.json ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
 
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 1 for missing policy", code, 1);
@@ -113,8 +118,7 @@ console.log("\n--- missing repo-policy.json ---");
 console.log("\n--- malformed JSON in repo-policy.json ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), "{ not valid json }}}");
 
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
@@ -128,8 +132,7 @@ console.log("\n--- malformed JSON in repo-policy.json ---");
 console.log("\n--- schema-invalid repo-policy.json ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), JSON.stringify({
     policy_format_version: "0.3.0",
     repository_kind: "unknown_kind",
@@ -170,8 +173,7 @@ console.log("\n--- non-existent repo root ---");
 console.log("\n--- no workflow directory ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
 
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
@@ -185,8 +187,7 @@ console.log("\n--- no workflow directory ---");
 console.log("\n--- workflow without repo-guard reference ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
   mkdirSync(resolve(dir, ".github/workflows"), { recursive: true });
   writeFileSync(resolve(dir, ".github/workflows/ci.yml"), "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n");
@@ -202,8 +203,7 @@ console.log("\n--- workflow without repo-guard reference ---");
 console.log("\n--- workflow missing fetch-depth ---");
 {
   const dir = makeTmpDir();
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
   mkdirSync(resolve(dir, ".github/workflows"), { recursive: true });
   writeFileSync(resolve(dir, ".github/workflows/ci.yml"), "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npx repo-guard check-pr\n");
