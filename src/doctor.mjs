@@ -141,7 +141,7 @@ function checkAuth() {
         execSync("gh auth status", { encoding: "utf-8", stdio: "pipe" });
         return { name: "auth-token", status: PASS, message: "gh CLI authenticated (no explicit token)" };
       } catch {
-        return { name: "auth-token", status: WARN, message: "No GH_TOKEN/GITHUB_TOKEN and gh CLI not authenticated", hint: "Set GH_TOKEN or GITHUB_TOKEN in your workflow env, or run 'gh auth login' locally" };
+        return { name: "auth-token", status: FAIL, message: "No GH_TOKEN/GITHUB_TOKEN and gh CLI not authenticated", hint: "Set GH_TOKEN or GITHUB_TOKEN in your workflow env, or run 'gh auth login' locally. check-pr requires auth for linked-issue fallback" };
       }
     }
     return { name: "auth-token", status: PASS, message: "Token present via environment" };
@@ -154,7 +154,7 @@ function checkGhCli() {
       const version = execSync("gh --version", { encoding: "utf-8", stdio: "pipe" }).trim().split("\n")[0];
       return { name: "gh-cli", status: PASS, message: version };
     } catch {
-      return { name: "gh-cli", status: WARN, message: "gh CLI not found", hint: "Install gh CLI for linked-issue fallback in check-pr: https://cli.github.com/" };
+      return { name: "gh-cli", status: FAIL, message: "gh CLI not found", hint: "Install gh CLI — check-pr requires it for linked-issue fallback: https://cli.github.com/" };
     }
   });
 }

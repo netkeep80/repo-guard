@@ -237,6 +237,15 @@ console.log("\n--- event context adapts to environment ---");
   }
 }
 
+// --- gh-cli and auth-token are FAIL (not WARN) when missing, consistent with check-pr ---
+
+console.log("\n--- gh-cli and auth-token severity matches check-pr ---");
+{
+  const { stdout } = runDoctor("doctor");
+  expectNotIncludes("gh-cli is never WARN (must be PASS or FAIL)", stdout, "WARN: gh-cli");
+  expectNotIncludes("auth-token is never WARN when gh authenticated", stdout, "WARN: auth-token");
+}
+
 // --- --repo-root works with doctor ---
 
 console.log("\n--- --repo-root flag works with doctor ---");
