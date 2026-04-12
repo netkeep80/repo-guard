@@ -1,5 +1,6 @@
 import {
   parseDiff,
+  filterOperationalPaths,
   checkForbiddenPaths,
   checkCanonicalDocsBudget,
   checkNewFilesBudget,
@@ -254,6 +255,42 @@ const manyNewFiles = [
 const newFilesResult = checkNewFilesBudget(manyNewFiles, 2);
 expect("budget: max new files exceeded", newFilesResult.ok, false);
 expect("budget: max new files actual", newFilesResult.actual, 3);
+
+// --- 9. filterOperationalPaths ---
+
+const mixedFiles = [
+  { path: "src/app.mjs", addedLines: ["code"], status: "modified" },
+  { path: ".claude/settings.json", addedLines: ["{}"], status: "added" },
+  { path: ".claude/memory/note.md", addedLines: ["note"], status: "added" },
+  { path: "tests/test.mjs", addedLines: ["test"], status: "added" },
+];
+
+const filteredFiles = filterOperationalPaths(mixedFiles, [".claude/**"]);
+expect("9. operational paths filtered", filteredFiles.length, 2);
+expect("9. non-operational file kept (src)", filteredFiles[0].path, "src/app.mjs");
+expect("9. non-operational file kept (tests)", filteredFiles[1].path, "tests/test.mjs");
+
+// empty operational_paths returns all files
+expect("9. empty operational_paths", filterOperationalPaths(mixedFiles, []).length, 4);
+
+// undefined operational_paths returns all files
+expect("9. undefined operational_paths", filterOperationalPaths(mixedFiles, undefined).length, 4);
+
+// operational paths don't affect unrelated files
+const noOpFiles = [
+  { path: "src/main.mjs", addedLines: [], status: "modified" },
+];
+expect("9. no operational match", filterOperationalPaths(noOpFiles, [".claude/**"]).length, 1);
+
+// .gitkeep bot artifact filtered by exact-match operational path
+const gitkeepFiles = [
+  { path: ".gitkeep", addedLines: [""], status: "added" },
+  { path: "src/app.mjs", addedLines: ["code"], status: "modified" },
+  { path: ".claude/memory/note.md", addedLines: ["note"], status: "added" },
+];
+const gitkeepFiltered = filterOperationalPaths(gitkeepFiles, [".claude/**", ".gitkeep"]);
+expect("9. .gitkeep filtered as operational", gitkeepFiltered.length, 1);
+expect("9. .gitkeep: only src file remains", gitkeepFiltered[0].path, "src/app.mjs");
 
 // --- Summary ---
 
