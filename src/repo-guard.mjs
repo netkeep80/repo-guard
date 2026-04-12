@@ -19,7 +19,20 @@ import {
 } from "./diff-checker.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = resolve(__dirname, "..");
+const packageRoot = resolve(__dirname, "..");
+
+export function resolveRoots(args) {
+  let repoRoot = process.cwd();
+  const filtered = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--repo-root" && args[i + 1]) {
+      repoRoot = resolve(args[++i]);
+    } else {
+      filtered.push(args[i]);
+    }
+  }
+  return { packageRoot, repoRoot, args: filtered };
+}
 
 function loadJSON(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
@@ -38,19 +51,19 @@ function validate(ajv, schema, data, label) {
   return true;
 }
 
-function getDiff(base, head) {
+function getDiff(base, head, cwd) {
   if (base && head) {
-    return execSync(`git diff ${base}...${head}`, { encoding: "utf-8", cwd: root });
+    return execSync(`git diff ${base}...${head}`, { encoding: "utf-8", cwd });
   }
-  const staged = execSync("git diff --cached", { encoding: "utf-8", cwd: root });
+  const staged = execSync("git diff --cached", { encoding: "utf-8", cwd });
   if (staged.trim()) return staged;
-  return execSync("git diff HEAD", { encoding: "utf-8", cwd: root });
+  return execSync("git diff HEAD", { encoding: "utf-8", cwd });
 }
 
-function runCheckDiff(args) {
-  const policySchemaPath = resolve(root, "schemas/repo-policy.schema.json");
-  const contractSchemaPath = resolve(root, "schemas/change-contract.schema.json");
-  const policyPath = resolve(root, "repo-policy.json");
+function runCheckDiff(roots, args) {
+  const policySchemaPath = resolve(roots.packageRoot, "schemas/repo-policy.schema.json");
+  const contractSchemaPath = resolve(roots.packageRoot, "schemas/change-contract.schema.json");
+  const policyPath = resolve(roots.repoRoot, "repo-policy.json");
 
   const policySchema = loadJSON(policySchemaPath);
   const contractSchema = loadJSON(contractSchemaPath);
@@ -75,7 +88,7 @@ function runCheckDiff(args) {
     }
   }
 
-  const diffText = getDiff(base, head);
+  const diffText = getDiff(base, head, roots.repoRoot);
   const allFiles = parseDiff(diffText);
   const files = filterOperationalPaths(allFiles, policy.paths.operational_paths);
 
@@ -157,10 +170,10 @@ function runCheckDiff(args) {
   process.exit(ok ? 0 : 1);
 }
 
-function runValidate(args) {
-  const policySchemaPath = resolve(root, "schemas/repo-policy.schema.json");
-  const contractSchemaPath = resolve(root, "schemas/change-contract.schema.json");
-  const policyPath = resolve(root, "repo-policy.json");
+function runValidate(roots, args) {
+  const policySchemaPath = resolve(roots.packageRoot, "schemas/repo-policy.schema.json");
+  const contractSchemaPath = resolve(roots.packageRoot, "schemas/change-contract.schema.json");
+  const policyPath = resolve(roots.repoRoot, "repo-policy.json");
 
   const policySchema = loadJSON(policySchemaPath);
   const contractSchema = loadJSON(contractSchemaPath);
@@ -180,13 +193,20 @@ function runValidate(args) {
   process.exit(ok ? 0 : 1);
 }
 
-const command = process.argv[2];
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(__dirname, "repo-guard.mjs");
 
-if (command === "check-diff") {
-  runCheckDiff(process.argv.slice(3));
-} else if (command === "check-pr") {
-  const { runCheckPR } = await import("./github-pr.mjs");
-  runCheckPR();
-} else {
-  runValidate(process.argv.slice(2));
+if (isMain) {
+  const command = process.argv[2];
+
+  if (command === "check-diff") {
+    const roots = resolveRoots(process.argv.slice(3));
+    runCheckDiff(roots, roots.args);
+  } else if (command === "check-pr") {
+    const roots = resolveRoots(process.argv.slice(3));
+    const { runCheckPR } = await import("./github-pr.mjs");
+    runCheckPR(roots);
+  } else {
+    const roots = resolveRoots(process.argv.slice(2));
+    runValidate(roots, roots.args);
+  }
 }

@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import Ajv from "ajv";
 import { extractContract, extractLinkedIssueNumbers, resolveContract } from "./markdown-contract.mjs";
 import {
@@ -16,9 +15,6 @@ import {
   checkMustTouch,
   checkMustNotTouch,
 } from "./diff-checker.mjs";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = resolve(__dirname, "..");
 
 function loadJSON(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
@@ -77,7 +73,7 @@ export function fetchIssueBody(repoFullName, issueNumber) {
   }
 }
 
-export function runCheckPR() {
+export function runCheckPR(roots) {
   const eventInfo = loadGitHubEvent();
   if (!eventInfo.ok) {
     console.error(`ERROR: ${eventInfo.message}`);
@@ -113,9 +109,9 @@ export function runCheckPR() {
   const contract = contractResult.contract;
   console.log("OK: change-contract extracted");
 
-  const policySchema = loadJSON(resolve(root, "schemas/repo-policy.schema.json"));
-  const contractSchema = loadJSON(resolve(root, "schemas/change-contract.schema.json"));
-  const policy = loadJSON(resolve(root, "repo-policy.json"));
+  const policySchema = loadJSON(resolve(roots.packageRoot, "schemas/repo-policy.schema.json"));
+  const contractSchema = loadJSON(resolve(roots.packageRoot, "schemas/change-contract.schema.json"));
+  const policy = loadJSON(resolve(roots.repoRoot, "repo-policy.json"));
 
   const ajv = new Ajv({ allErrors: true });
 
@@ -128,7 +124,7 @@ export function runCheckPR() {
     process.exit(1);
   }
 
-  const diffText = execSync(`git diff ${base}...${head}`, { encoding: "utf-8", cwd: root });
+  const diffText = execSync(`git diff ${base}...${head}`, { encoding: "utf-8", cwd: roots.repoRoot });
   const allFiles = parseDiff(diffText);
   const files = filterOperationalPaths(allFiles, policy.paths.operational_paths);
 

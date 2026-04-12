@@ -35,6 +35,9 @@ jobs:
       - name: Run GitHub PR integration tests
         run: npm run test:github-pr
 
+      - name: Run repo-root separation tests
+        run: npm run test:repo-root
+
       - name: Run PR policy check
         if: github.event_name == 'pull_request'
         run: node src/repo-guard.mjs check-pr
