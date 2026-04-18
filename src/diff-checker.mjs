@@ -114,6 +114,103 @@ export function checkCochangeRules(files, rules) {
   return violations;
 }
 
+function uniqueSorted(values) {
+  return [...new Set(values)].sort();
+}
+
+function formatList(values) {
+  return values && values.length > 0 ? values.join(", ") : "(none)";
+}
+
+export function detectTouchedSurfaces(files, surfaces = {}) {
+  const filesBySurface = {};
+
+  for (const [surface, patterns] of Object.entries(surfaces || {})) {
+    const matchedFiles = uniqueSorted(
+      files
+        .filter((f) => matchesAny(f.path, patterns || []))
+        .map((f) => f.path)
+    );
+
+    if (matchedFiles.length > 0) {
+      filesBySurface[surface] = matchedFiles;
+    }
+  }
+
+  return {
+    touched_surfaces: Object.keys(filesBySurface).sort(),
+    files_by_surface: filesBySurface,
+  };
+}
+
+export function checkSurfaceMatrix(files, surfaces, surfaceMatrix, changeClass) {
+  if (!surfaceMatrix || Object.keys(surfaceMatrix).length === 0) return { ok: true };
+
+  const detected = detectTouchedSurfaces(files, surfaces);
+  const touchedSurfaces = detected.touched_surfaces;
+  const changeClassValue = changeClass || null;
+
+  if (touchedSurfaces.length === 0) {
+    return {
+      ok: true,
+      change_class: changeClassValue,
+      touched_surfaces: touchedSurfaces,
+      files_by_surface: detected.files_by_surface,
+    };
+  }
+
+  if (!changeClassValue) {
+    return {
+      ok: false,
+      message: "surface_matrix requires a declared change_class",
+      change_class: null,
+      touched_surfaces: touchedSurfaces,
+      files_by_surface: detected.files_by_surface,
+      hint: "Set change_class in the contract or pass --change-class <name>.",
+    };
+  }
+
+  const matrixEntry = surfaceMatrix[changeClassValue];
+  if (!matrixEntry) {
+    return {
+      ok: false,
+      message: `change_class "${changeClassValue}" is not defined in surface_matrix`,
+      change_class: changeClassValue,
+      touched_surfaces: touchedSurfaces,
+      files_by_surface: detected.files_by_surface,
+      details: [`known change classes: ${formatList(Object.keys(surfaceMatrix).sort())}`],
+      hint: "Define the change class in surface_matrix or use one of the configured classes.",
+    };
+  }
+
+  const allowedSurfaces = uniqueSorted(matrixEntry.allow || []);
+  const forbiddenSurfaces = uniqueSorted(matrixEntry.forbid || []);
+  const allowedSet = new Set(allowedSurfaces);
+  const forbiddenSet = new Set(forbiddenSurfaces);
+
+  const notAllowed = allowedSurfaces.length > 0
+    ? touchedSurfaces.filter((surface) => !allowedSet.has(surface))
+    : [];
+  const explicitlyForbidden = touchedSurfaces.filter((surface) => forbiddenSet.has(surface));
+  const violatingSurfaces = uniqueSorted([...notAllowed, ...explicitlyForbidden]);
+
+  return {
+    ok: violatingSurfaces.length === 0,
+    message: violatingSurfaces.length === 0
+      ? undefined
+      : `change_class "${changeClassValue}" cannot touch surfaces: ${violatingSurfaces.join(", ")}`,
+    change_class: changeClassValue,
+    touched_surfaces: touchedSurfaces,
+    allowed_surfaces: allowedSurfaces,
+    forbidden_surfaces: forbiddenSurfaces,
+    violating_surfaces: violatingSurfaces,
+    files_by_surface: detected.files_by_surface,
+    details: violatingSurfaces.map(
+      (surface) => `surface ${surface} matched: ${detected.files_by_surface[surface].join(", ")}`
+    ),
+  };
+}
+
 export function checkContentRules(files, rules) {
   const violations = [];
 

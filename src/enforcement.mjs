@@ -42,6 +42,14 @@ function writeViolation(mode, message) {
   }
 }
 
+function formatList(values) {
+  return values && values.length > 0 ? values.join(", ") : "(none)";
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function printCheckDetails(mode, check) {
   const write = (message) => writeViolation(mode, message);
 
@@ -63,6 +71,21 @@ function printCheckDetails(mode, check) {
   if (check.must_not_touch) {
     write(`    must_not_touch: ${check.must_not_touch.join(", ")}`);
   }
+  if (hasOwn(check, "change_class")) {
+    write(`    change_class: ${check.change_class || "(missing)"}`);
+  }
+  if (check.touched_surfaces) {
+    write(`    touched_surfaces: ${formatList(check.touched_surfaces)}`);
+  }
+  if (check.allowed_surfaces) {
+    write(`    allowed_surfaces: ${formatList(check.allowed_surfaces)}`);
+  }
+  if (check.forbidden_surfaces) {
+    write(`    forbidden_surfaces: ${formatList(check.forbidden_surfaces)}`);
+  }
+  if (check.violating_surfaces) {
+    write(`    violating_surfaces: ${formatList(check.violating_surfaces)}`);
+  }
   if (check.details) {
     for (const detail of check.details) write(`    ${detail}`);
   }
@@ -82,6 +105,11 @@ function detailFromCheck(check) {
   if (check.touched) details.push(...check.touched.map((f) => `touched: ${f}`));
   if (check.must_touch) details.push(`must_touch: ${check.must_touch.join(", ")}`);
   if (check.must_not_touch) details.push(`must_not_touch: ${check.must_not_touch.join(", ")}`);
+  if (hasOwn(check, "change_class")) details.push(`change_class: ${check.change_class || "(missing)"}`);
+  if (check.touched_surfaces) details.push(`touched_surfaces: ${formatList(check.touched_surfaces)}`);
+  if (check.allowed_surfaces) details.push(`allowed_surfaces: ${formatList(check.allowed_surfaces)}`);
+  if (check.forbidden_surfaces) details.push(`forbidden_surfaces: ${formatList(check.forbidden_surfaces)}`);
+  if (check.violating_surfaces) details.push(`violating_surfaces: ${formatList(check.violating_surfaces)}`);
   if (check.details) details.push(...check.details);
   if (check.errors) details.push(...check.errors);
   if (check.hint) details.push(`hint: ${check.hint}`);
@@ -89,7 +117,7 @@ function detailFromCheck(check) {
 }
 
 function violationFromCheck(name, check) {
-  return {
+  const violation = {
     rule: name,
     message: check.message,
     actual: check.actual,
@@ -102,6 +130,15 @@ function violationFromCheck(name, check) {
     errors: check.errors || [],
     hint: check.hint,
   };
+
+  if (hasOwn(check, "change_class")) violation.change_class = check.change_class;
+  if (check.touched_surfaces) violation.touched_surfaces = check.touched_surfaces;
+  if (check.allowed_surfaces) violation.allowed_surfaces = check.allowed_surfaces;
+  if (check.forbidden_surfaces) violation.forbidden_surfaces = check.forbidden_surfaces;
+  if (check.violating_surfaces) violation.violating_surfaces = check.violating_surfaces;
+  if (check.files_by_surface) violation.files_by_surface = check.files_by_surface;
+
+  return violation;
 }
 
 function renderMarkdownTableCell(value) {

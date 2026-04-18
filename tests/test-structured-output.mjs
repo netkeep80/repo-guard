@@ -81,6 +81,68 @@ function makeRepo() {
   };
 }
 
+function makeSurfaceRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-surfaces-"));
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+
+  const policy = {
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 5,
+      max_net_added_lines: 500,
+    },
+    surfaces: {
+      kernel: ["src/**"],
+      tests: ["tests/**"],
+      docs: ["docs/**", "README.md"],
+      governance: ["repo-policy.json", ".github/**"],
+      generated: ["single_include/**"],
+      release: ["CHANGELOG.md", "package.json"],
+    },
+    change_classes: ["docs-cleanup", "kernel-hardening", "generated-refresh"],
+    surface_matrix: {
+      "docs-cleanup": {
+        allow: ["docs", "governance"],
+        forbid: ["kernel", "tests", "generated", "release"],
+      },
+      "kernel-hardening": {
+        allow: ["kernel", "tests"],
+        forbid: ["generated", "release"],
+      },
+      "generated-refresh": {
+        allow: ["generated", "release"],
+        forbid: ["kernel", "docs", "governance"],
+      },
+    },
+    content_rules: [],
+    cochange_rules: [],
+  };
+
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
+  writeFileSync(join(dir, "README.md"), "# Test\n");
+  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+
+  execSync("mkdir -p docs src", { cwd: dir, stdio: "pipe" });
+  writeFileSync(join(dir, "docs", "guide.md"), "# Guide\n");
+  writeFileSync(join(dir, "src", "feature.mjs"), "export const value = 1;\n");
+  execSync("git add -A && git commit -m docs-plus-kernel", { cwd: dir, stdio: "pipe" });
+
+  return {
+    dir,
+    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
+    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
+  };
+}
+
 console.log("\n--- check-diff --format json emits stable machine-readable result ---");
 {
   const repo = makeRepo();
@@ -114,6 +176,39 @@ console.log("\n--- check-diff --format json emits stable machine-readable result
     true);
   expect("cochange violation is detailed",
     parsed?.violations.some((v) => v.rule.startsWith("cochange:") && v.must_touch.includes("tests/**")),
+    true);
+
+  rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- check-diff --change-class enforces surface_matrix ---");
+{
+  const repo = makeSurfaceRepo();
+  const result = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", repo.base,
+    "--head", repo.head,
+    "--change-class", "docs-cleanup",
+  ]);
+
+  expect("surface matrix exit code follows blocking failure", result.code, 1);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+    expect("surface matrix stdout is valid json", true, true);
+  } catch (e) {
+    expect("surface matrix stdout is valid json", e.message, "valid json");
+  }
+  expect("surface matrix violation is detailed",
+    parsed?.violations.some((v) =>
+      v.rule === "surface-matrix" &&
+      v.change_class === "docs-cleanup" &&
+      v.touched_surfaces.includes("docs") &&
+      v.touched_surfaces.includes("kernel") &&
+      v.violating_surfaces.includes("kernel")
+    ),
     true);
 
   rmSync(repo.dir, { recursive: true });

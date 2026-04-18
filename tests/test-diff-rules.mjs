@@ -9,6 +9,8 @@ import {
   checkContentRules,
   checkMustTouch,
   checkMustNotTouch,
+  detectTouchedSurfaces,
+  checkSurfaceMatrix,
 } from "../src/diff-checker.mjs";
 
 let failures = 0;
@@ -291,6 +293,61 @@ const gitkeepFiles = [
 const gitkeepFiltered = filterOperationalPaths(gitkeepFiles, [".claude/**", ".gitkeep"]);
 expect("9. .gitkeep filtered as operational", gitkeepFiltered.length, 1);
 expect("9. .gitkeep: only src file remains", gitkeepFiltered[0].path, "src/app.mjs");
+
+// --- 10. surface matrix ---
+
+const surfaceFiles = [
+  { path: "src/core.mjs", addedLines: ["code"], deletedLines: [], status: "modified" },
+  { path: "tests/core.test.mjs", addedLines: ["test"], deletedLines: [], status: "modified" },
+  { path: "docs/guide.md", addedLines: ["docs"], deletedLines: [], status: "modified" },
+];
+
+const surfaces = {
+  kernel: ["src/**"],
+  tests: ["tests/**"],
+  docs: ["docs/**", "README.md"],
+  generated: ["single_include/**"],
+  release: ["CHANGELOG.md", "package.json"],
+};
+
+const touchedSurfaces = detectTouchedSurfaces(surfaceFiles, surfaces);
+expect("10. detects touched surface count", touchedSurfaces.touched_surfaces.length, 3);
+expect("10. detects docs surface", touchedSurfaces.touched_surfaces.includes("docs"), true);
+expect("10. maps files by surface", touchedSurfaces.files_by_surface.kernel[0], "src/core.mjs");
+
+const surfaceMatrix = {
+  "kernel-hardening": {
+    allow: ["kernel", "tests"],
+    forbid: ["generated", "release"],
+  },
+  "docs-cleanup": {
+    allow: ["docs", "governance"],
+    forbid: ["kernel", "tests", "generated", "release"],
+  },
+};
+
+const kernelOnlyFiles = [
+  { path: "src/core.mjs", addedLines: ["code"], deletedLines: [], status: "modified" },
+  { path: "tests/core.test.mjs", addedLines: ["test"], deletedLines: [], status: "modified" },
+];
+
+const kernelSurfaceResult = checkSurfaceMatrix(kernelOnlyFiles, surfaces, surfaceMatrix, "kernel-hardening");
+expect("10. allowed kernel/test surface combination passes", kernelSurfaceResult.ok, true);
+expect("10. allowed combination reports change_class", kernelSurfaceResult.change_class, "kernel-hardening");
+
+const docsSurfaceResult = checkSurfaceMatrix(surfaceFiles, surfaces, surfaceMatrix, "docs-cleanup");
+expect("10. docs class rejects kernel/test surfaces", docsSurfaceResult.ok, false);
+expect("10. reports declared change_class", docsSurfaceResult.change_class, "docs-cleanup");
+expect("10. reports touched surfaces", docsSurfaceResult.touched_surfaces.join(","), "docs,kernel,tests");
+expect("10. reports violating surfaces", docsSurfaceResult.violating_surfaces.join(","), "kernel,tests");
+
+const missingClassResult = checkSurfaceMatrix(surfaceFiles, surfaces, surfaceMatrix, null);
+expect("10. surface matrix requires change_class", missingClassResult.ok, false);
+expect("10. missing change_class message", missingClassResult.message, "surface_matrix requires a declared change_class");
+
+const unknownClassResult = checkSurfaceMatrix(surfaceFiles, surfaces, surfaceMatrix, "release");
+expect("10. undefined change_class fails", unknownClassResult.ok, false);
+expect("10. undefined change_class is reported", unknownClassResult.change_class, "release");
 
 // --- Summary ---
 
