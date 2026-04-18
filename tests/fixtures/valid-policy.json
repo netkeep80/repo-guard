@@ -22,6 +22,7 @@
     "generated": ["single_include/**"]
   },
   "change_classes": ["kernel-hardening", "docs-cleanup", "generated-refresh"],
+  "allow_unclassified_files": false,
   "surface_matrix": {
     "kernel-hardening": {
       "allow": ["kernel", "tests"],

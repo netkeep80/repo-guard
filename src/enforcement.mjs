@@ -86,6 +86,9 @@ function printCheckDetails(mode, check) {
   if (check.violating_surfaces) {
     write(`    violating_surfaces: ${formatList(check.violating_surfaces)}`);
   }
+  if (check.unclassified_files && check.unclassified_files.length > 0) {
+    write(`    unclassified_files: ${formatList(check.unclassified_files)}`);
+  }
   if (check.details) {
     for (const detail of check.details) write(`    ${detail}`);
   }
@@ -110,6 +113,9 @@ function detailFromCheck(check) {
   if (check.allowed_surfaces) details.push(`allowed_surfaces: ${formatList(check.allowed_surfaces)}`);
   if (check.forbidden_surfaces) details.push(`forbidden_surfaces: ${formatList(check.forbidden_surfaces)}`);
   if (check.violating_surfaces) details.push(`violating_surfaces: ${formatList(check.violating_surfaces)}`);
+  if (check.unclassified_files && check.unclassified_files.length > 0) {
+    details.push(`unclassified_files: ${formatList(check.unclassified_files)}`);
+  }
   if (check.details) details.push(...check.details);
   if (check.errors) details.push(...check.errors);
   if (check.hint) details.push(`hint: ${check.hint}`);
@@ -137,6 +143,9 @@ function violationFromCheck(name, check) {
   if (check.forbidden_surfaces) violation.forbidden_surfaces = check.forbidden_surfaces;
   if (check.violating_surfaces) violation.violating_surfaces = check.violating_surfaces;
   if (check.files_by_surface) violation.files_by_surface = check.files_by_surface;
+  if (check.unclassified_files && check.unclassified_files.length > 0) {
+    violation.unclassified_files = check.unclassified_files;
+  }
 
   return violation;
 }

@@ -242,7 +242,16 @@ function runCheckDiff(roots, args) {
 
   if (policy.surface_matrix) {
     const declaredChangeClass = cliChangeClass || contract?.change_class || null;
-    reporter.report("surface-matrix", checkSurfaceMatrix(files, policy.surfaces, policy.surface_matrix, declaredChangeClass));
+    reporter.report(
+      "surface-matrix",
+      checkSurfaceMatrix(
+        files,
+        policy.surfaces,
+        policy.surface_matrix,
+        declaredChangeClass,
+        { allow_unclassified_files: policy.allow_unclassified_files }
+      )
+    );
   }
 
   const cochangeViolations = checkCochangeRules(files, policy.cochange_rules);

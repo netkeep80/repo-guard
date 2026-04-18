@@ -314,6 +314,7 @@ const touchedSurfaces = detectTouchedSurfaces(surfaceFiles, surfaces);
 expect("10. detects touched surface count", touchedSurfaces.touched_surfaces.length, 3);
 expect("10. detects docs surface", touchedSurfaces.touched_surfaces.includes("docs"), true);
 expect("10. maps files by surface", touchedSurfaces.files_by_surface.kernel[0], "src/core.mjs");
+expect("10. reports no unclassified files for fully classified diff", touchedSurfaces.unclassified_files.length, 0);
 
 const surfaceMatrix = {
   "kernel-hardening": {
@@ -334,6 +335,27 @@ const kernelOnlyFiles = [
 const kernelSurfaceResult = checkSurfaceMatrix(kernelOnlyFiles, surfaces, surfaceMatrix, "kernel-hardening");
 expect("10. allowed kernel/test surface combination passes", kernelSurfaceResult.ok, true);
 expect("10. allowed combination reports change_class", kernelSurfaceResult.change_class, "kernel-hardening");
+
+const unclassifiedOnlyFiles = [
+  { path: "scripts/tool.mjs", addedLines: ["code"], deletedLines: [], status: "modified" },
+];
+
+const unclassifiedSurfaces = detectTouchedSurfaces(unclassifiedOnlyFiles, surfaces);
+expect("10. detects unclassified changed file", unclassifiedSurfaces.unclassified_files[0], "scripts/tool.mjs");
+
+const unclassifiedResult = checkSurfaceMatrix(unclassifiedOnlyFiles, surfaces, surfaceMatrix, "docs-cleanup");
+expect("10. surface matrix rejects unclassified files by default", unclassifiedResult.ok, false);
+expect("10. reports unclassified files", unclassifiedResult.unclassified_files[0], "scripts/tool.mjs");
+expect("10. unclassified failure message names file", unclassifiedResult.message.includes("scripts/tool.mjs"), true);
+
+const allowedUnclassifiedResult = checkSurfaceMatrix(
+  unclassifiedOnlyFiles,
+  surfaces,
+  surfaceMatrix,
+  "docs-cleanup",
+  { allow_unclassified_files: true }
+);
+expect("10. policy can explicitly allow unclassified files", allowedUnclassifiedResult.ok, true);
 
 const docsSurfaceResult = checkSurfaceMatrix(surfaceFiles, surfaces, surfaceMatrix, "docs-cleanup");
 expect("10. docs class rejects kernel/test surfaces", docsSurfaceResult.ok, false);

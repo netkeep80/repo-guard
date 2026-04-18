@@ -124,6 +124,7 @@ function formatList(values) {
 
 export function detectTouchedSurfaces(files, surfaces = {}) {
   const filesBySurface = {};
+  const classifiedFiles = new Set();
 
   for (const [surface, patterns] of Object.entries(surfaces || {})) {
     const matchedFiles = uniqueSorted(
@@ -134,28 +135,64 @@ export function detectTouchedSurfaces(files, surfaces = {}) {
 
     if (matchedFiles.length > 0) {
       filesBySurface[surface] = matchedFiles;
+      for (const file of matchedFiles) {
+        classifiedFiles.add(file);
+      }
     }
   }
+
+  const changedFiles = uniqueSorted(files.map((f) => f.path));
 
   return {
     touched_surfaces: Object.keys(filesBySurface).sort(),
     files_by_surface: filesBySurface,
+    unclassified_files: changedFiles.filter((file) => !classifiedFiles.has(file)),
   };
 }
 
-export function checkSurfaceMatrix(files, surfaces, surfaceMatrix, changeClass) {
+function unclassifiedFilesMessage(unclassifiedFiles) {
+  return `surface_matrix found changed files that match no declared surface: ${unclassifiedFiles.join(", ")}`;
+}
+
+function unclassifiedFilesHint() {
+  return "Add matching surface globs or set allow_unclassified_files: true if unclassified files are intentional.";
+}
+
+export function checkSurfaceMatrix(files, surfaces, surfaceMatrix, changeClass, options = {}) {
   if (!surfaceMatrix || Object.keys(surfaceMatrix).length === 0) return { ok: true };
 
   const detected = detectTouchedSurfaces(files, surfaces);
   const touchedSurfaces = detected.touched_surfaces;
+  const unclassifiedFiles = detected.unclassified_files;
   const changeClassValue = changeClass || null;
+  const allowUnclassifiedFiles = Boolean(
+    options.allow_unclassified_files || options.allowUnclassifiedFiles
+  );
+  const hasUnclassifiedViolation = unclassifiedFiles.length > 0 && !allowUnclassifiedFiles;
+  const unclassifiedDetails = hasUnclassifiedViolation
+    ? [`changed files matched no declared surface: ${unclassifiedFiles.join(", ")}`]
+    : [];
 
-  if (touchedSurfaces.length === 0) {
+  if (touchedSurfaces.length === 0 && !hasUnclassifiedViolation) {
     return {
       ok: true,
       change_class: changeClassValue,
       touched_surfaces: touchedSurfaces,
       files_by_surface: detected.files_by_surface,
+      unclassified_files: unclassifiedFiles,
+    };
+  }
+
+  if (touchedSurfaces.length === 0 && hasUnclassifiedViolation) {
+    return {
+      ok: false,
+      message: unclassifiedFilesMessage(unclassifiedFiles),
+      change_class: changeClassValue,
+      touched_surfaces: touchedSurfaces,
+      files_by_surface: detected.files_by_surface,
+      unclassified_files: unclassifiedFiles,
+      details: unclassifiedDetails,
+      hint: unclassifiedFilesHint(),
     };
   }
 
@@ -166,7 +203,11 @@ export function checkSurfaceMatrix(files, surfaces, surfaceMatrix, changeClass) 
       change_class: null,
       touched_surfaces: touchedSurfaces,
       files_by_surface: detected.files_by_surface,
-      hint: "Set change_class in the contract or pass --change-class <name>.",
+      unclassified_files: unclassifiedFiles,
+      details: unclassifiedDetails,
+      hint: hasUnclassifiedViolation
+        ? `Set change_class in the contract or pass --change-class <name>. ${unclassifiedFilesHint()}`
+        : "Set change_class in the contract or pass --change-class <name>.",
     };
   }
 
@@ -178,8 +219,14 @@ export function checkSurfaceMatrix(files, surfaces, surfaceMatrix, changeClass) 
       change_class: changeClassValue,
       touched_surfaces: touchedSurfaces,
       files_by_surface: detected.files_by_surface,
-      details: [`known change classes: ${formatList(Object.keys(surfaceMatrix).sort())}`],
-      hint: "Define the change class in surface_matrix or use one of the configured classes.",
+      unclassified_files: unclassifiedFiles,
+      details: [
+        `known change classes: ${formatList(Object.keys(surfaceMatrix).sort())}`,
+        ...unclassifiedDetails,
+      ],
+      hint: hasUnclassifiedViolation
+        ? `Define the change class in surface_matrix or use one of the configured classes. ${unclassifiedFilesHint()}`
+        : "Define the change class in surface_matrix or use one of the configured classes.",
     };
   }
 
@@ -193,21 +240,33 @@ export function checkSurfaceMatrix(files, surfaces, surfaceMatrix, changeClass) 
     : [];
   const explicitlyForbidden = touchedSurfaces.filter((surface) => forbiddenSet.has(surface));
   const violatingSurfaces = uniqueSorted([...notAllowed, ...explicitlyForbidden]);
+  const details = [
+    ...violatingSurfaces.map(
+      (surface) => `surface ${surface} matched: ${detected.files_by_surface[surface].join(", ")}`
+    ),
+    ...unclassifiedDetails,
+  ];
+  let message;
+  if (violatingSurfaces.length > 0 && hasUnclassifiedViolation) {
+    message = `change_class "${changeClassValue}" cannot touch surfaces: ${violatingSurfaces.join(", ")}; unclassified files: ${unclassifiedFiles.join(", ")}`;
+  } else if (violatingSurfaces.length > 0) {
+    message = `change_class "${changeClassValue}" cannot touch surfaces: ${violatingSurfaces.join(", ")}`;
+  } else if (hasUnclassifiedViolation) {
+    message = unclassifiedFilesMessage(unclassifiedFiles);
+  }
 
   return {
-    ok: violatingSurfaces.length === 0,
-    message: violatingSurfaces.length === 0
-      ? undefined
-      : `change_class "${changeClassValue}" cannot touch surfaces: ${violatingSurfaces.join(", ")}`,
+    ok: violatingSurfaces.length === 0 && !hasUnclassifiedViolation,
+    message,
     change_class: changeClassValue,
     touched_surfaces: touchedSurfaces,
     allowed_surfaces: allowedSurfaces,
     forbidden_surfaces: forbiddenSurfaces,
     violating_surfaces: violatingSurfaces,
     files_by_surface: detected.files_by_surface,
-    details: violatingSurfaces.map(
-      (surface) => `surface ${surface} matched: ${detected.files_by_surface[surface].join(", ")}`
-    ),
+    unclassified_files: unclassifiedFiles,
+    details,
+    hint: hasUnclassifiedViolation ? unclassifiedFilesHint() : undefined,
   };
 }
 

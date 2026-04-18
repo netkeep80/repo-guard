@@ -103,6 +103,10 @@
       "minItems": 1,
       "uniqueItems": true
     },
+    "allow_unclassified_files": {
+      "type": "boolean",
+      "description": "When surface_matrix is enabled, changed files that match no declared surface fail by default. Set this true only when partial surface coverage is intentional."
+    },
     "surface_matrix": {
       "type": "object",
       "description": "Allowed repository surface combinations for each named change class.",

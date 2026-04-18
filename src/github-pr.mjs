@@ -250,7 +250,16 @@ export function runCheckPR(roots, args = []) {
   reporter.report("max-net-added-lines", checkNetAddedLinesBudget(files, maxNetAddedLines));
 
   if (policy.surface_matrix) {
-    reporter.report("surface-matrix", checkSurfaceMatrix(files, policy.surfaces, policy.surface_matrix, contract?.change_class || null));
+    reporter.report(
+      "surface-matrix",
+      checkSurfaceMatrix(
+        files,
+        policy.surfaces,
+        policy.surface_matrix,
+        contract?.change_class || null,
+        { allow_unclassified_files: policy.allow_unclassified_files }
+      )
+    );
   }
 
   const cochangeViolations = checkCochangeRules(files, policy.cochange_rules);

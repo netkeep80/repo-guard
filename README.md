@@ -511,6 +511,7 @@ Result: passed (mode: blocking; exit code 0)
     "docs-cleanup",
     "generated-refresh"
   ],
+  "allow_unclassified_files": false,
   "surface_matrix": {
     "kernel-hardening": {
       "allow": ["kernel", "tests"],
@@ -562,7 +563,19 @@ repo-guard check-diff --base main --head feature --change-class generated-refres
     surface kernel matched: src/core.mjs
 ```
 
-Файл может совпасть с несколькими surfaces; repo-guard считает все совпадения. Для catch-all поведения можно объявить явную surface вроде `"other": ["**"]` и включить её в матрицу там, где это допустимо.
+Файл может совпасть с несколькими surfaces; repo-guard считает все совпадения. Когда `surface_matrix` включён, changed file, который не совпал ни с одной surface, по умолчанию считается нарушением:
+
+```text
+  FAIL: surface-matrix
+    surface_matrix found changed files that match no declared surface: scripts/tool.mjs
+    change_class: docs-cleanup
+    touched_surfaces: (none)
+    unclassified_files: scripts/tool.mjs
+    changed files matched no declared surface: scripts/tool.mjs
+    hint: Add matching surface globs or set allow_unclassified_files: true if unclassified files are intentional.
+```
+
+Если policy намеренно описывает только часть репозитория, можно явно включить `"allow_unclassified_files": true`. По умолчанию это `false`, чтобы matrix-проверку нельзя было обойти файлами вне объявленных surfaces.
 
 ## GitHub Action (reusable)
 
