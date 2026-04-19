@@ -476,6 +476,7 @@ Diff analysis: 3 file(s) changed
   PASS: canonical-docs-budget
   PASS: max-new-files
   PASS: max-net-added-lines
+  PASS: registry-rules
   PASS: new-file-rules
   PASS: cochange-rules
   PASS: content-rules
@@ -556,6 +557,57 @@ Result: passed (mode: blocking; exit code 0)
 ```
 
 Файлы, которые не совпали ни с одним glob из `new_file_classes`, считаются unclassified и тоже fail, когда `new_file_rules` активны. Старое поведение `max_new_files` не меняется: если `new_file_classes` и `new_file_rules` отсутствуют, repo-guard продолжает применять только плоские budgets.
+
+## Registry Integrity Rules
+
+`registry_rules` сравнивает две canonical list и помогает держать несколько registry в согласованном состоянии. Правило не зависит от diff contents: `check-diff` читает указанные файлы из рабочей директории и проверяет agreement перед остальными policy checks.
+
+```json
+{
+  "registry_rules": [
+    {
+      "id": "canonical-docs-sync",
+      "kind": "set_equality",
+      "left": {
+        "type": "json_array",
+        "file": "repo-policy.json",
+        "json_pointer": "/paths/canonical_docs"
+      },
+      "right": {
+        "type": "markdown_section_links",
+        "file": "docs/index.md",
+        "section": "Canonical Documents",
+        "prefix": "docs/"
+      }
+    }
+  ]
+}
+```
+
+Supported `kind` values:
+
+- `set_equality`: both registries must contain the same entries.
+- `left_subset_of_right`: every left entry must appear on the right.
+- `right_subset_of_left`: every right entry must appear on the left.
+
+Supported source types in v1:
+
+- `json_array`: reads an array from `file` using `json_pointer`.
+- `markdown_section_links`: reads markdown links from a named heading section. Relative links are normalized to repository paths. `prefix` can map links inside the markdown file directory to canonical registry paths, for example `policy.md` in `docs/index.md` becomes `docs/policy.md`.
+
+When a rule fails, output identifies the rule, both registry contents, and the missing or extra entries:
+
+```text
+  FAIL: registry-rules
+    failed_rules: canonical-docs-sync
+    [canonical-docs-sync] registry rule "canonical-docs-sync" failed set_equality
+    left entries: README.md, docs/policy.md
+    right entries: README.md, docs/architecture.md
+    missing from right: docs/policy.md
+    extra in right: docs/architecture.md
+```
+
+Policies without `registry_rules` keep the previous behavior and report `PASS: registry-rules`.
 
 ## Issue Type Rules
 

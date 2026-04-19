@@ -235,6 +235,70 @@ function makeUnclassifiedOnlySurfaceRepo() {
   };
 }
 
+function makeRegistryRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-registry-"));
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+
+  const policy = {
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md", "docs/policy.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 5,
+      max_net_added_lines: 500,
+    },
+    registry_rules: [
+      {
+        id: "canonical-docs-sync",
+        kind: "set_equality",
+        left: {
+          type: "json_array",
+          file: "repo-policy.json",
+          json_pointer: "/paths/canonical_docs",
+        },
+        right: {
+          type: "markdown_section_links",
+          file: "docs/index.md",
+          section: "Canonical Documents",
+          prefix: "docs/",
+        },
+      },
+    ],
+    content_rules: [],
+    cochange_rules: [],
+  };
+
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
+  writeFileSync(join(dir, "README.md"), "# Test\n");
+  execSync("mkdir -p docs", { cwd: dir, stdio: "pipe" });
+  writeFileSync(join(dir, "docs", "policy.md"), "# Policy\n");
+  writeFileSync(join(dir, "docs", "index.md"), [
+    "# Docs",
+    "",
+    "## Canonical Documents",
+    "",
+    "- [Readme](../README.md)",
+    "- [Architecture](architecture.md)",
+  ].join("\n"));
+  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+
+  writeFileSync(join(dir, "README.md"), "# Test\n\nChange.\n");
+  execSync("git add -A && git commit -m change", { cwd: dir, stdio: "pipe" });
+
+  return {
+    dir,
+    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
+    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
+  };
+}
+
 console.log("\n--- check-diff --format json emits stable machine-readable result ---");
 {
   const repo = makeRepo();
@@ -375,6 +439,44 @@ console.log("\n--- check-diff reports surface debt status in JSON output ---");
   expect("surface debt rule exposes declared status",
     debtResult?.details.includes("status: declared"),
     true);
+
+  rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- check-diff evaluates registry_rules in JSON output ---");
+{
+  const repo = makeRegistryRepo();
+  const result = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", repo.base,
+    "--head", repo.head,
+  ]);
+
+  expect("registry rule exit code follows blocking failure", result.code, 1);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+    expect("registry rule stdout is valid json", true, true);
+  } catch (e) {
+    expect("registry rule stdout is valid json", e.message, "valid json");
+  }
+  const registryViolation = parsed?.violations.find((v) => v.rule === "registry-rules");
+  expect("registry violation is present", Boolean(registryViolation), true);
+  expect("registry failed rule id reported", registryViolation?.failed_rules[0], "canonical-docs-sync");
+  expect(
+    "registry result includes left entries",
+    registryViolation?.results[0].left_entries.includes("docs/policy.md"),
+    true
+  );
+  expect(
+    "registry result includes right entries",
+    registryViolation?.results[0].right_entries.includes("docs/architecture.md"),
+    true
+  );
+  expect("registry missing item is reported", registryViolation?.results[0].missing_from_right[0], "docs/policy.md");
+  expect("registry extra item is reported", registryViolation?.results[0].extra_in_right[0], "docs/architecture.md");
 
   rmSync(repo.dir, { recursive: true });
 }
