@@ -59,6 +59,12 @@ function printCheckDetails(mode, check) {
   if (check.actual !== undefined) {
     write(`    actual: ${check.actual}, limit: ${check.limit}`);
   }
+  if (check.status) {
+    write(`    status: ${check.status}`);
+  }
+  if (check.growth) {
+    write(`    growth: new_files=${check.growth.new_files}, net_added_lines=${check.growth.net_added_lines}`);
+  }
   if (check.files) {
     for (const f of check.files) write(`    - ${f}`);
   }
@@ -104,6 +110,10 @@ function detailFromCheck(check) {
   const details = [];
   if (check.message) details.push(check.message);
   if (check.actual !== undefined) details.push(`actual: ${check.actual}, limit: ${check.limit}`);
+  if (check.status) details.push(`status: ${check.status}`);
+  if (check.growth) {
+    details.push(`growth: new_files=${check.growth.new_files}, net_added_lines=${check.growth.net_added_lines}`);
+  }
   if (check.files) details.push(...check.files.map((f) => `file: ${f}`));
   if (check.touched) details.push(...check.touched.map((f) => `touched: ${f}`));
   if (check.must_touch) details.push(`must_touch: ${check.must_touch.join(", ")}`);
@@ -137,6 +147,9 @@ function violationFromCheck(name, check) {
     hint: check.hint,
   };
 
+  if (check.status) violation.status = check.status;
+  if (check.growth) violation.growth = check.growth;
+  if (check.surface_debt) violation.surface_debt = check.surface_debt;
   if (hasOwn(check, "change_class")) violation.change_class = check.change_class;
   if (check.touched_surfaces) violation.touched_surfaces = check.touched_surfaces;
   if (check.allowed_surfaces) violation.allowed_surfaces = check.allowed_surfaces;

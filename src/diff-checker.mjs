@@ -94,6 +94,89 @@ export function checkNetAddedLinesBudget(files, maxNetAddedLines) {
   };
 }
 
+export function calculateDiffGrowth(files) {
+  const newFiles = files.filter((f) => f.status === "added").map((f) => f.path);
+  let netAddedLines = 0;
+  for (const f of files) {
+    netAddedLines += f.addedLines.length - (f.deletedLines ? f.deletedLines.length : 0);
+  }
+
+  return {
+    new_files: newFiles.length,
+    new_files_list: newFiles,
+    net_added_lines: netAddedLines,
+  };
+}
+
+export function checkSurfaceDebt(files, surfaceDebt) {
+  const growth = calculateDiffGrowth(files);
+  const hasGrowth = growth.new_files > 0 || growth.net_added_lines > 0;
+
+  if (!hasGrowth) {
+    return {
+      ok: true,
+      status: "not_needed",
+      growth,
+    };
+  }
+
+  if (!surfaceDebt) {
+    return {
+      ok: false,
+      status: "undeclared_growth",
+      message: "diff grows repository surface but no surface_debt is declared",
+      growth,
+      details: [
+        `new files: ${growth.new_files}`,
+        `net added lines: ${growth.net_added_lines}`,
+      ],
+      hint: "Declare surface_debt with kind, reason, expected_delta, and repayment_issue when temporary growth is intentional.",
+    };
+  }
+
+  const missing = [];
+  if (!surfaceDebt.repayment_issue) missing.push("repayment_issue");
+
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      status: "missing_repayment_target",
+      message: `declared surface debt is missing repayment target: ${missing.join(", ")}`,
+      growth,
+      surface_debt: surfaceDebt,
+      details: missing.map((field) => `missing ${field}`),
+      hint: "Set repayment_issue to the issue number where the temporary growth will be repaid.",
+    };
+  }
+
+  const expectedDelta = surfaceDebt.expected_delta || {};
+  const exceeded = [];
+  if (
+    expectedDelta.max_new_files !== undefined &&
+    growth.new_files > expectedDelta.max_new_files
+  ) {
+    exceeded.push(`new files ${growth.new_files} exceeds declared debt ${expectedDelta.max_new_files}`);
+  }
+  if (
+    expectedDelta.max_net_added_lines !== undefined &&
+    growth.net_added_lines > expectedDelta.max_net_added_lines
+  ) {
+    exceeded.push(`net added lines ${growth.net_added_lines} exceeds declared debt ${expectedDelta.max_net_added_lines}`);
+  }
+
+  return {
+    ok: exceeded.length === 0,
+    status: exceeded.length === 0 ? "declared" : "declared_debt_exceeded",
+    message: exceeded.length > 0 ? "declared surface debt is smaller than actual diff growth" : undefined,
+    growth,
+    surface_debt: surfaceDebt,
+    details: exceeded,
+    hint: exceeded.length > 0
+      ? "Update expected_delta to match intentional temporary growth or reduce the diff."
+      : undefined,
+  };
+}
+
 export function checkCochangeRules(files, rules) {
   const changedPaths = files.map((f) => f.path);
   const violations = [];

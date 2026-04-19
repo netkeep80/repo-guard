@@ -45,6 +45,41 @@
         }
       }
     },
+    "surface_debt": {
+      "type": "object",
+      "description": "Explicit temporary repository surface growth declaration.",
+      "required": ["kind", "reason", "expected_delta", "repayment_issue"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["temporary_growth"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_delta": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "max_new_files": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_net_added_lines": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "repayment_issue": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "must_touch": {
       "type": "array",
       "items": { "type": "string" },
