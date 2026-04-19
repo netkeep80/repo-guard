@@ -247,6 +247,29 @@
         }
       }
     },
+    "advisory_text_rules": {
+      "type": "object",
+      "description": "Optional heuristic markdown duplication advisories. These warnings never block the PR in v1.",
+      "additionalProperties": false,
+      "properties": {
+        "canonical_files": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "warn_on_similarity_above": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.7
+        },
+        "max_reported_matches": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        }
+      }
+    },
     "content_rules": {
       "type": "array",
       "items": {

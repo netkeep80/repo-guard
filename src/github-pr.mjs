@@ -33,10 +33,17 @@ import {
   checkMustNotTouch,
   checkChangeTypeRules,
   checkRegistryRules,
+  checkAdvisoryTextRules,
 } from "./diff-checker.mjs";
 
 function loadJSON(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
+}
+
+function listTrackedFiles(repoRoot) {
+  return execSync("git ls-files", { encoding: "utf-8", cwd: repoRoot })
+    .split(/\r?\n/)
+    .filter(Boolean);
 }
 
 function validate(ajv, schema, data, label) {
@@ -274,6 +281,13 @@ export function runCheckPR(roots, args = []) {
   reporter.report("max-net-added-lines", checkNetAddedLinesBudget(files, maxNetAddedLines));
   reporter.report("surface-debt", checkSurfaceDebt(files, contract?.surface_debt));
   reporter.report("registry-rules", checkRegistryRules(policy.registry_rules, { repoRoot: roots.repoRoot }));
+  reporter.report(
+    "advisory-text-rules",
+    checkAdvisoryTextRules(files, policy.advisory_text_rules, {
+      repoRoot: roots.repoRoot,
+      allFiles: listTrackedFiles(roots.repoRoot),
+    })
+  );
 
   if (policy.change_type_rules) {
     reporter.report("change-type-rules", checkChangeTypeRules(files, policy, contract?.change_type));

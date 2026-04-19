@@ -145,6 +145,65 @@ function makeSurfaceRepo() {
   };
 }
 
+function makeAdvisoryTextRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-advisory-text-"));
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+
+  const policy = {
+    policy_format_version: "0.3.0",
+    repository_kind: "documentation",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["docs/canonical.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 5,
+      max_net_added_lines: 500,
+    },
+    advisory_text_rules: {
+      canonical_files: ["docs/canonical.md"],
+      warn_on_similarity_above: 0.7,
+      max_reported_matches: 2,
+    },
+    content_rules: [],
+    cochange_rules: [],
+  };
+
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
+  execSync("mkdir -p docs", { cwd: dir, stdio: "pipe" });
+  writeFileSync(
+    join(dir, "docs", "canonical.md"),
+    [
+      "# Release Policy",
+      "",
+      "Policy prose belongs in the canonical document so maintainers update one source.",
+      "Release approvals require a changelog entry, owner review, and a documented rollback path.",
+    ].join("\n")
+  );
+  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+
+  writeFileSync(
+    join(dir, "docs", "copy.md"),
+    [
+      "# Release Policy",
+      "",
+      "Policy prose belongs in the canonical document so maintainers update one source.",
+      "Release approvals require a changelog entry, owner review, and a documented rollback path.",
+    ].join("\n")
+  );
+  execSync("git add -A && git commit -m duplicate-doc", { cwd: dir, stdio: "pipe" });
+
+  return {
+    dir,
+    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
+    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
+  };
+}
+
 function makeSurfaceDebtRepo(contract) {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-debt-"));
   execSync("git init", { cwd: dir, stdio: "pipe" });
@@ -534,6 +593,30 @@ console.log("\n--- check-diff treats undeclared growth as non-blocking and enfor
     exceededParsed.violations.find((v) => v.rule === "surface-debt")?.status,
     "declared_debt_exceeded");
   rmSync(exceededRepo.dir, { recursive: true });
+}
+
+console.log("\n--- advisory text rules warn without blocking in blocking mode ---");
+{
+  const repo = makeAdvisoryTextRepo();
+  const result = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", repo.base,
+    "--head", repo.head,
+  ]);
+
+  expect("advisory text exit code stays zero", result.code, 0);
+  const parsed = JSON.parse(result.stdout);
+  expect("advisory text result has warnings", parsed.result, "passed_with_warnings");
+  expect("advisory text warning count", parsed.warnings, 1);
+  const warning = parsed.advisoryWarnings.find((item) => item.rule === "advisory-text-rules");
+  expect("advisory text warning present", Boolean(warning), true);
+  expect("advisory text changed file in structured output", warning?.matches[0]?.changed_file, "docs/copy.md");
+  expect("advisory text canonical file in structured output", warning?.matches[0]?.canonical_file, "docs/canonical.md");
+  expect("advisory text has no enforced violations", parsed.violations.length, 0);
+
+  rmSync(repo.dir, { recursive: true });
 }
 
 console.log("\n--- check-diff --format summary emits GitHub-friendly concise summary ---");

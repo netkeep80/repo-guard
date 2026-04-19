@@ -110,6 +110,14 @@ function printCheckDetails(mode, check) {
   if (check.failed_rules) {
     write(`    failed_rules: ${formatList(check.failed_rules)}`);
   }
+  if (check.matches) {
+    for (const match of check.matches) {
+      const sections = match.duplicate_section_titles && match.duplicate_section_titles.length > 0
+        ? `, duplicate_sections=${formatList(match.duplicate_section_titles)}`
+        : "";
+      write(`    match: ${match.changed_file} -> ${match.canonical_file}, score=${match.score}, threshold=${match.threshold}${sections}`);
+    }
+  }
   if (check.unclassified_files && check.unclassified_files.length > 0) {
     write(`    unclassified_files: ${formatList(check.unclassified_files)}`);
   }
@@ -152,6 +160,14 @@ function detailFromCheck(check) {
   if (check.forbidden_surfaces) details.push(`forbidden_surfaces: ${formatList(check.forbidden_surfaces)}`);
   if (check.violating_surfaces) details.push(`violating_surfaces: ${formatList(check.violating_surfaces)}`);
   if (check.failed_rules) details.push(`failed_rules: ${formatList(check.failed_rules)}`);
+  if (check.matches) {
+    details.push(...check.matches.map((match) => {
+      const sections = match.duplicate_section_titles && match.duplicate_section_titles.length > 0
+        ? `, duplicate_sections=${formatList(match.duplicate_section_titles)}`
+        : "";
+      return `match: ${match.changed_file} -> ${match.canonical_file}, score=${match.score}, threshold=${match.threshold}${sections}`;
+    }));
+  }
   if (check.unclassified_files && check.unclassified_files.length > 0) {
     details.push(`unclassified_files: ${formatList(check.unclassified_files)}`);
   }
@@ -199,6 +215,8 @@ function violationFromCheck(name, check) {
   if (check.files_by_surface) violation.files_by_surface = check.files_by_surface;
   if (check.failed_rules) violation.failed_rules = check.failed_rules;
   if (check.results) violation.results = check.results;
+  if (check.matches) violation.matches = check.matches;
+  if (check.advisory) violation.advisory = true;
   if (check.unclassified_files && check.unclassified_files.length > 0) {
     violation.unclassified_files = check.unclassified_files;
   }
@@ -215,9 +233,11 @@ function renderMarkdownTableCell(value) {
 export function createCheckReporter(mode, options = {}) {
   let passed = 0;
   let violations = 0;
+  let warnings = 0;
   const quiet = options.quiet || false;
   const ruleResults = [];
   const violationDetails = [];
+  const warningDetails = [];
   const hints = [];
 
   return {
@@ -228,6 +248,19 @@ export function createCheckReporter(mode, options = {}) {
       if (check.ok) {
         passed++;
         if (!quiet) console.log(`  PASS: ${name}`);
+        return;
+      }
+
+      if (check.advisory) {
+        warnings++;
+        const warning = violationFromCheck(name, check);
+        warning.advisory = true;
+        warningDetails.push(warning);
+        if (check.hint) hints.push({ rule: name, message: check.hint });
+        if (!quiet) {
+          writeViolation("advisory", `  WARN: ${name}`);
+          printCheckDetails("advisory", check);
+        }
         return;
       }
 
@@ -247,10 +280,11 @@ export function createCheckReporter(mode, options = {}) {
       const advisoryPart = mode === "advisory" ? `, ${violations} advisory violation(s)` : "";
       const modePart = mode === "advisory" ? "violations reported as warnings" : "violations enforced";
       const exitCode = enforcedFailures > 0 ? 1 : 0;
-      const result = violations > 0 ? "failed" : "passed";
+      const warningPart = warnings > 0 ? `, ${warnings} warning(s)` : "";
+      const result = violations > 0 ? "failed" : warnings > 0 ? "passed_with_warnings" : "passed";
 
       if (!quiet) {
-        console.log(`\nSummary: ${passed} passed, ${enforcedFailures} failed${advisoryPart} (mode: ${mode}; ${modePart})`);
+        console.log(`\nSummary: ${passed} passed, ${enforcedFailures} failed${advisoryPart}${warningPart} (mode: ${mode}; ${modePart})`);
         console.log(`Result: ${result} (mode: ${mode}; exit code ${exitCode})`);
       }
 
@@ -260,6 +294,8 @@ export function createCheckReporter(mode, options = {}) {
         result,
         passed,
         violations: violationDetails,
+        advisoryWarnings: warningDetails,
+        warnings,
         violationCount: violations,
         failed: enforcedFailures,
         exitCode,
@@ -282,7 +318,7 @@ export function renderCheckSummary(result) {
     `- Result: ${result.result}`,
     `- Mode: ${result.mode}`,
     `- Repository root: \`${result.repositoryRoot}\``,
-    `- Checks: ${result.passed} passed, ${result.failed} failed${result.mode === "advisory" ? `, ${result.violationCount} advisory violation(s)` : ""}`,
+    `- Checks: ${result.passed} passed, ${result.failed} failed${result.mode === "advisory" ? `, ${result.violationCount} advisory violation(s)` : ""}${result.warnings ? `, ${result.warnings} warning(s)` : ""}`,
   ];
 
   if (result.diff) {
@@ -294,6 +330,14 @@ export function renderCheckSummary(result) {
     for (const violation of result.violations) {
       const details = detailFromCheck(violation).join("<br>") || "Violation reported";
       lines.push(`| ${renderMarkdownTableCell(violation.rule)} | ${renderMarkdownTableCell(details)} |`);
+    }
+  }
+
+  if (result.advisoryWarnings && result.advisoryWarnings.length > 0) {
+    lines.push("", "| Advisory | Details |", "|---|---|");
+    for (const warning of result.advisoryWarnings) {
+      const details = detailFromCheck(warning).join("<br>") || "Warning reported";
+      lines.push(`| ${renderMarkdownTableCell(warning.rule)} | ${renderMarkdownTableCell(details)} |`);
     }
   }
 

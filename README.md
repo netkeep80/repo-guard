@@ -609,6 +609,34 @@ When a rule fails, output identifies the rule, both registry contents, and the m
 
 Policies without `registry_rules` keep the previous behavior and report `PASS: registry-rules`.
 
+## Advisory Text Duplication Rules
+
+`advisory_text_rules` enables heuristic markdown duplication warnings. This check is advisory-only in v1: it can print `WARN` and appear in structured output, but it never changes the command exit code and never blocks a PR, even when enforcement mode is `blocking`.
+
+```json
+{
+  "advisory_text_rules": {
+    "canonical_files": ["docs/index.md", "docs/**/*.md"],
+    "warn_on_similarity_above": 0.70,
+    "max_reported_matches": 3
+  }
+}
+```
+
+The check compares changed markdown files with tracked markdown files that match `canonical_files`. It normalizes markdown prose into word tokens, reports a similarity score, and also flags duplicate section titles against canonical files. This is a practical early-warning heuristic for documentation sprawl, not proof of semantic equivalence, plagiarism, or copyright status.
+
+Example output:
+
+```text
+  WARN: advisory-text-rules
+    heuristic markdown duplication advisory
+    match: docs/new-policy.md -> docs/canonical.md, score=0.82, threshold=0.7, duplicate_sections=Release Policy
+    docs/new-policy.md overlaps docs/canonical.md (score 0.82, threshold 0.7; duplicate sections: Release Policy)
+    hint: Review whether the changed markdown should update the canonical source instead of duplicating policy prose.
+```
+
+Policies without `advisory_text_rules` keep the previous behavior and report `PASS: advisory-text-rules`.
+
 ## Issue Type Rules
 
 `change_type` в contract описывает тип работы: например `governance`, `kernel-hardening`, `docs-cleanup` или любой другой тип, принятый в репозитории. Policy может сделать этот тип first-class input через `change_type_rules`:

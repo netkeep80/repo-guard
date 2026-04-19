@@ -16,6 +16,7 @@ import {
   checkNewFileRules,
   checkChangeTypeRules,
   checkRegistryRules,
+  checkAdvisoryTextRules,
 } from "../src/diff-checker.mjs";
 
 let failures = 0;
@@ -722,6 +723,81 @@ const nonStringRegistryResult = checkRegistryRules(registryRules, {
 });
 expect("13. non-string JSON registry entries fail", nonStringRegistryResult.ok, false);
 expect("13. non-string JSON registry detail", nonStringRegistryResult.results[0].details[0].includes("only strings"), true);
+
+// --- 14. advisory text rules ---
+
+const advisoryFiles = new Map([
+  [
+    "docs/canonical.md",
+    [
+      "# Release Policy",
+      "",
+      "Policy text must live in the canonical document so maintainers update one source.",
+      "Release approvals require a changelog entry, owner review, and a documented rollback path.",
+    ].join("\n"),
+  ],
+  [
+    "docs/new-policy.md",
+    [
+      "# Release Policy",
+      "",
+      "Policy text must live in the canonical document so maintainers update one source.",
+      "Release approvals require a changelog entry, owner review, and a documented rollback path.",
+    ].join("\n"),
+  ],
+  [
+    "docs/other.md",
+    [
+      "# Independent Notes",
+      "",
+      "This document describes a separate maintenance workflow with different words.",
+    ].join("\n"),
+  ],
+]);
+
+const advisoryRules = {
+  canonical_files: ["docs/canonical.md"],
+  warn_on_similarity_above: 0.7,
+  max_reported_matches: 3,
+};
+
+const advisoryResult = checkAdvisoryTextRules(
+  [{ path: "docs/new-policy.md", addedLines: [], deletedLines: [], status: "added" }],
+  advisoryRules,
+  {
+    allFiles: ["docs/canonical.md", "docs/new-policy.md", "docs/other.md"],
+    readFile: (path) => advisoryFiles.get(path),
+  }
+);
+expect("14. advisory duplication warns", advisoryResult.ok, false);
+expect("14. advisory is warning-only", advisoryResult.advisory, true);
+expect("14. advisory changed file reported", advisoryResult.matches[0].changed_file, "docs/new-policy.md");
+expect("14. advisory canonical file reported", advisoryResult.matches[0].canonical_file, "docs/canonical.md");
+expect("14. advisory score crosses threshold", advisoryResult.matches[0].score >= 0.7, true);
+expect("14. duplicate section title reported", advisoryResult.matches[0].duplicate_section_titles[0], "Release Policy");
+
+const cleanAdvisoryResult = checkAdvisoryTextRules(
+  [{ path: "docs/other.md", addedLines: [], deletedLines: [], status: "modified" }],
+  advisoryRules,
+  {
+    allFiles: ["docs/canonical.md", "docs/other.md"],
+    readFile: (path) => advisoryFiles.get(path),
+  }
+);
+expect("14. unrelated markdown passes advisory", cleanAdvisoryResult.ok, true);
+
+const cappedAdvisoryResult = checkAdvisoryTextRules(
+  [
+    { path: "docs/new-policy.md", addedLines: [], deletedLines: [], status: "added" },
+    { path: "docs/other.md", addedLines: [], deletedLines: [], status: "modified" },
+  ],
+  { ...advisoryRules, canonical_files: ["docs/*.md"], max_reported_matches: 1 },
+  {
+    allFiles: ["docs/canonical.md", "docs/new-policy.md", "docs/other.md"],
+    readFile: (path) => advisoryFiles.get(path),
+  }
+);
+expect("14. advisory caps reported matches", cappedAdvisoryResult.matches.length, 1);
 
 // --- Summary ---
 
