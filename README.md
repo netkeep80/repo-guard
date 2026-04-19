@@ -53,7 +53,7 @@ Policy engine для репозитория: формализует правил
 | Canonical docs budget | Ограничивает количество новых `.md` файлов |
 | Max new files | Ограничивает общее количество новых файлов |
 | Max net added lines | Ограничивает `added − deleted` строк |
-| Surface debt | Требует явный `surface_debt`, если diff временно увеличивает поверхность репозитория |
+| Surface debt | Проверяет объявленный `surface_debt`, если contract явно описывает временный рост |
 | Co-change rules | Если изменён X, должен быть изменён и Y |
 | Surface matrix | Проверяет, что объявленный `change_class` трогает только разрешённые surface-классы |
 | Content rules | Запрещает regex-паттерны в добавленных строках |
@@ -230,12 +230,6 @@ The JSON result is intended as an API surface. Field names are stable and intent
       "touched": [],
       "must_touch": [],
       "must_not_touch": [],
-      "status": "undeclared_growth",
-      "growth": {
-        "new_files": 2,
-        "new_files_list": ["src/feature.mjs", "tests/feature.test.mjs"],
-        "net_added_lines": 42
-      },
       "details": [],
       "errors": []
     }
@@ -461,7 +455,7 @@ expected_effects:
 
 Contract говорит: это bugfix, который должен затронуть `src/pagination.mjs`, не должен трогать схемы и policy, и не должен создавать новых файлов. Если diff всё же временно увеличивает поверхность репозитория, `surface_debt` фиксирует причину, ожидаемый рост и issue, где долг будет погашен.
 
-`surface_debt` проверяется только по фактическому росту diff: количеству новых файлов и `added - deleted` строк. Без debt рост получает статус `undeclared_growth`; если фактический рост больше `expected_delta`, статус будет `declared_debt_exceeded`; если нет `repayment_issue`, статус будет `missing_repayment_target`.
+`surface_debt` проверяется только когда contract явно его объявляет. Проверка сравнивает declaration с фактическим ростом diff: количеством новых файлов и `added - deleted` строк. Если рост есть, но `surface_debt` не объявлен, repo-guard сообщает не блокирующий статус `undeclared`; если фактический рост больше `expected_delta`, статус будет `declared_debt_exceeded`; если нет `repayment_issue`, статус будет `missing_repayment_target`.
 
 Для существующих PR сохраняется совместимость с JSON-блоком ` ```repo-guard-json `; оба формата дают одну и ту же нормализованную модель contract перед schema validation.
 

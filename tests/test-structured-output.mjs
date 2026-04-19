@@ -379,7 +379,7 @@ console.log("\n--- check-diff reports surface debt status in JSON output ---");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff distinguishes undeclared growth and exceeded debt ---");
+console.log("\n--- check-diff treats undeclared growth as non-blocking and enforces declared debt ---");
 {
   const undeclaredRepo = makeSurfaceDebtRepo(null);
   const undeclared = runGuard([
@@ -389,11 +389,15 @@ console.log("\n--- check-diff distinguishes undeclared growth and exceeded debt 
     "--base", undeclaredRepo.base,
     "--head", undeclaredRepo.head,
   ]);
-  expect("undeclared growth exit code", undeclared.code, 1);
+  expect("undeclared growth exit code", undeclared.code, 0);
   const undeclaredParsed = JSON.parse(undeclared.stdout);
+  expect("undeclared growth result passes", undeclaredParsed.ok, true);
   expect("undeclared growth status",
-    undeclaredParsed.violations.find((v) => v.rule === "surface-debt")?.status,
-    "undeclared_growth");
+    undeclaredParsed.ruleResults.find((r) => r.rule === "surface-debt")?.details.includes("status: undeclared"),
+    true);
+  expect("undeclared growth has no violation",
+    undeclaredParsed.violations.some((v) => v.rule === "surface-debt"),
+    false);
   rmSync(undeclaredRepo.dir, { recursive: true });
 
   const exceededContract = {

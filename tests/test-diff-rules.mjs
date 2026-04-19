@@ -162,8 +162,8 @@ const growthFiles = [
   { path: "src/extract.mjs", addedLines: new Array(50).fill("new"), deletedLines: [], status: "added" },
 ];
 
-expect("4b. undeclared surface growth fails", checkSurfaceDebt(growthFiles, null).ok, false);
-expect("4b. undeclared surface growth status", checkSurfaceDebt(growthFiles, null).status, "undeclared_growth");
+expect("4b. undeclared surface growth passes by default", checkSurfaceDebt(growthFiles, null).ok, true);
+expect("4b. undeclared surface growth status", checkSurfaceDebt(growthFiles, null).status, "undeclared");
 expect("4b. declared surface debt passes", checkSurfaceDebt(growthFiles, growthDebt).ok, true);
 expect("4b. declared surface debt status", checkSurfaceDebt(growthFiles, growthDebt).status, "declared");
 expect(

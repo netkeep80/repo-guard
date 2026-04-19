@@ -122,15 +122,13 @@ export function checkSurfaceDebt(files, surfaceDebt) {
 
   if (!surfaceDebt) {
     return {
-      ok: false,
-      status: "undeclared_growth",
-      message: "diff grows repository surface but no surface_debt is declared",
+      ok: true,
+      status: "undeclared",
       growth,
       details: [
         `new files: ${growth.new_files}`,
         `net added lines: ${growth.net_added_lines}`,
       ],
-      hint: "Declare surface_debt with kind, reason, expected_delta, and repayment_issue when temporary growth is intentional.",
     };
   }
 
