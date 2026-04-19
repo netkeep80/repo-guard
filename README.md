@@ -1,999 +1,165 @@
 # repo-guard
 
-Policy engine для репозитория: формализует правила репозитория в виде машиночитаемого JSON и проверяет реальные изменения на соответствие этим правилам.
+`repo-guard` - это CLI и GitHub Action для исполняемой политики репозитория. Он
+валидирует `repo-policy.json`, извлекает change contract из PR или issue и
+проверяет реальный git diff: какие файлы изменены, сколько добавлено, какие
+поверхности затронуты и есть ли нарушение правил проекта.
 
-## Какую проблему решает
+Инструмент полезен, когда в репозиторий попадают лишние файлы, PR выходит за
+рамки заявленного намерения, документация дублируется, изменения кода идут без
+тестов или нужно зафиксировать правила для AI-assisted разработки. Это не
+linter, не security scanner и не замена тестам: `repo-guard` проверяет
+структуру и дисциплину изменений, а не качество кода.
 
-При активной разработке — особенно с использованием AI-ассистентов — в репозиторий начинает попадать лишнее: временные документы, промежуточные файлы, process-noise. Pull request'ы разрастаются, намерение изменения и реальный diff расходятся, а ручной контроль не масштабируется.
+## Установка
 
-`repo-guard` решает эту проблему: он позволяет описать допустимые правила репозитория в файле `repo-policy.json` и автоматически проверять каждый diff на соответствие этим правилам. Это исполняемая дисциплина, а не устная договорённость.
-
-В контексте AI-assisted development это особенно важно: AI-агенты генерируют код быстро, но не всегда учитывают структурные ограничения проекта. `repo-guard` выступает автоматическим контролёром, который не пропустит изменения, нарушающие политику репозитория.
-
-## Что это такое
-
-`repo-guard` — это **policy-as-code** движок для Git-репозиториев:
-
-- **Policy** (`repo-policy.json`) — декларативное описание правил: запрещённые пути, бюджеты на файлы и строки, правила совместных изменений, контентные ограничения.
-- **Change contract** — нормализованный документ намерения изменения: что именно должно измениться, чего трогать нельзя, допустимые бюджеты. В PR/issue его удобнее писать как YAML, а внутри он валидируется той же JSON Schema.
-- **Diff-based enforcement** — проверка реального diff против policy и contract.
-- **PR gate** — интеграция в GitHub Actions: CI не даёт PR пройти, если изменения нарушают политику.
-
-Логика работы:
-
-1. Policy описывает, что вообще допустимо в репозитории.
-2. Contract описывает намерение конкретного изменения.
-3. `repo-guard` сравнивает реальный diff с policy и contract.
-4. CI блокирует PR, если diff выходит за рамки.
-
-## Когда repo-guard полезен
-
-- Бот или разработчик тащит в PR лишние документы, промпты, временные файлы — **forbidden paths** и **бюджет на новые файлы** не дадут им пройти.
-- Изменения в `src/**` должны сопровождаться изменениями в `tests/**` — **co-change rules** проверят это автоматически.
-- В коде появляются незакреплённые комментарии-заметки без привязки к issue — **content rules** с regex-паттернами поймают это в добавленных строках.
-- PR раздувается на тысячи строк без контроля — **бюджет net added lines** ограничит размер.
-- Нужно явно зафиксировать intent изменения — **change contract** в теле PR или issue описывает, что должно и что не должно измениться.
-- В репозитории есть bot-артефакты (`.claude/**`, `.gitkeep`), которые не нужно проверять — **operational paths** исключают их из всех проверок.
-
-## Чем repo-guard не является
-
-- **Не code review assistant** — не анализирует качество кода и не даёт советов.
-- **Не security scanner** — не ищет уязвимости.
-- **Не formatter/linter** — не проверяет стиль кода.
-- **Не универсальный GitHub bot** — не пишет комментарии к PR (пока).
-- **Не замена тестам** — проверяет структуру и дисциплину изменений, а не корректность кода.
-
-## Как он работает
-
-### Проверки при анализе diff (`check-diff`)
-
-| Проверка | Что делает |
-|---|---|
-| Forbidden paths | Запрещает файлы по glob-паттернам |
-| Canonical docs budget | Ограничивает количество новых `.md` файлов |
-| Max new files | Ограничивает общее количество новых файлов |
-| Max net added lines | Ограничивает `added − deleted` строк |
-| Surface debt | Проверяет объявленный `surface_debt`, если contract явно описывает временный рост |
-| New file rules | Проверяет классы новых файлов и per-class бюджеты для объявленного `change_class` |
-| Co-change rules | Если изменён X, должен быть изменён и Y |
-| Surface matrix | Проверяет, что объявленный `change_class` трогает только разрешённые surface-классы |
-| Anchor extraction | Извлекает anchor facts из настроенных `regex` и `json_field` sources |
-| Content rules | Запрещает regex-паттерны в добавленных строках |
-| must_touch | Хотя бы один из указанных паттернов должен совпасть с изменённым файлом (из contract) |
-| must_not_touch | Ни один из указанных паттернов не должен совпасть с изменённым файлом (из contract) |
-
-Operational paths (bot-артефакты) исключаются из всех проверок.
-
-### PR policy gate (`check-pr`)
-
-1. Извлекает change contract из тела PR (предпочтительно блок ` ```repo-guard-yaml `; старый ` ```repo-guard-json ` тоже поддерживается).
-2. Если в PR нет contract — ищет в теле привязанного issue (`Fixes #N` / `Closes #N` / `Resolves #N`, включая формат `owner/repo#N`).
-3. Если привязано несколько issue без contract в PR — завершается с ошибкой `issue_link_ambiguous`.
-4. Валидирует contract по JSON Schema.
-5. Запускает полный набор diff-проверок между base и head PR.
-
-## Основные сущности
-
-| Сущность | Файл | Назначение |
-|---|---|---|
-| Политика репозитория | `repo-policy.json` | Декларация правил репозитория |
-| Схема политики | `schemas/repo-policy.schema.json` | Валидация структуры политики |
-| Схема contract | `schemas/change-contract.schema.json` | Валидация change contract |
-| CLI | `src/repo-guard.mjs` | Точка входа: валидация и enforcement |
-| Diff checker | `src/diff-checker.mjs` | Парсинг diff и проверка правил |
-| Contract extractor | `src/markdown-contract.mjs` | Извлечение contract из markdown |
-| PR интеграция | `src/github-pr.mjs` | PR gate для GitHub Actions |
-| Init scaffolding | `src/init.mjs` | Генерация начальной конфигурации |
-| Диагностика | `src/doctor.mjs` | `doctor` — проверка окружения и конфигурации |
-| Шаблоны | `templates/` | Примеры policy и contract |
-
-## Быстрый старт
-
-### Инициализация нового репозитория
-
-Команда `repo-guard init` создаёт минимальную рабочую конфигурацию для репозитория:
-
-```bash
-repo-guard init
-```
-
-По умолчанию создаются:
-- `repo-policy.json` — политика репозитория
-- `.github/workflows/repo-guard.yml` — GitHub Actions workflow
-- `.github/PULL_REQUEST_TEMPLATE.md` — шаблон PR с блоком change contract
-- `.github/ISSUE_TEMPLATE/change-contract.yml` — шаблон issue для change contract
-
-Существующие файлы не перезаписываются — если файл уже есть, он будет пропущен.
-
-#### Пресеты
-
-Пресет определяет начальные значения policy в зависимости от типа репозитория:
-
-```bash
-repo-guard init --preset library
-repo-guard init --preset application   # по умолчанию
-repo-guard init --preset tooling
-repo-guard init --preset documentation
-```
-
-| Пресет | `max_new_files` | `max_new_docs` | `max_net_added_lines` | Co-change rules |
-|---|---|---|---|---|
-| `application` | 20 | 3 | 1500 | нет |
-| `library` | 15 | 2 | 1000 | `src/**` → `tests/**` |
-| `tooling` | 15 | 2 | 2000 | `src/**` → `tests/**` |
-| `documentation` | 20 | 10 | — | нет |
-
-#### Режим enforcement
-
-```bash
-repo-guard init --mode enforce    # по умолчанию — blocking enforcement
-repo-guard init --mode advisory   # non-blocking advisory enforcement
-```
-
-Режим `advisory` удобен для начала: `repo-guard` по-прежнему запускает все проверки и сообщает о нарушениях, но завершает policy run с exit code `0`, чтобы CI не блокировал PR из-за policy violations. Режим `enforce` является alias для `blocking`: нарушения policy приводят к exit code `1`.
-
-Бюджеты policy одинаково применяются в обоих режимах. Разница только в exit semantics и summary messaging.
-
-#### Использование с --repo-root
-
-```bash
-repo-guard --repo-root /path/to/other/repo init --preset library --mode advisory
-```
-
-### Установка
-
-Рекомендуемый способ — установить как глобальный CLI через npm:
+Требования: Node.js 20 или новее. Для `check-pr` в GitHub Actions также нужны
+`git`, `gh`, pull request event context и полный checkout history.
 
 ```bash
 npm install -g repo-guard
-```
 
-Или запустить без предварительной установки через npx:
-
-```bash
+# или без глобальной установки
 npx repo-guard
 ```
 
-Требования: Node.js ≥ 20.
+В репозитории с исходниками можно запускать напрямую:
 
-### Валидация policy
+```bash
+npm ci
+node src/repo-guard.mjs
+```
+
+## Быстрый старт
+
+Создайте базовую конфигурацию:
+
+```bash
+repo-guard init --preset application --mode advisory
+```
+
+`init` не перезаписывает существующие файлы и создает:
+
+| Файл | Назначение |
+| --- | --- |
+| `repo-policy.json` | Политика репозитория |
+| `.github/workflows/repo-guard.yml` | GitHub Actions workflow |
+| `.github/PULL_REQUEST_TEMPLATE.md` | Шаблон PR с change contract |
+| `.github/ISSUE_TEMPLATE/change-contract.yml` | Issue template для contract |
+
+Пресеты:
+
+| Пресет | Для чего | Базовые ограничения |
+| --- | --- | --- |
+| `application` | Прикладной проект | 20 новых файлов, 3 новых docs, 1500 net lines |
+| `library` | Библиотека | 15 новых файлов, 2 новых docs, `src/**` требует `tests/**` |
+| `tooling` | CLI/tooling | 15 новых файлов, 2 новых docs, `src/**` требует `tests/**` |
+| `documentation` | Документационный репозиторий | 20 новых файлов, 10 новых docs |
+
+Режим enforcement:
+
+```bash
+repo-guard init --mode enforce    # alias для blocking
+repo-guard init --mode advisory   # нарушения видны, но exit code остается 0
+```
+
+Проверьте конфигурацию:
 
 ```bash
 repo-guard
+repo-guard doctor
 ```
 
-Проверяет `repo-policy.json` в текущей директории по JSON Schema. Выводит `OK` или список ошибок.
+## Основной процесс
+
+1. В `repo-policy.json` описывается, что разрешено в репозитории.
+2. В PR или issue добавляется change contract: что именно должно измениться.
+3. `repo-guard check-diff` или `repo-guard check-pr` строит diff и проверяет его
+   против policy и contract.
+4. В blocking mode CI падает при нарушениях; в advisory mode нарушения
+   показываются как предупреждения и не блокируют job.
+
+## Команды
+
+| Команда | Что делает |
+| --- | --- |
+| `repo-guard` | Валидирует `repo-policy.json` по schema и компилируемые правила |
+| `repo-guard path/to/contract.json` | Валидирует policy и JSON change contract |
+| `repo-guard check-diff` | Проверяет staged diff, а если staged пуст, `git diff HEAD` |
+| `repo-guard check-diff --base main --head feature` | Проверяет `git diff main...feature` |
+| `repo-guard check-pr` | Проверяет PR внутри GitHub Actions pull_request workflow |
+| `repo-guard init` | Создает стартовую policy, workflow и templates |
+| `repo-guard doctor` | Диагностирует окружение, workflow, policy и auth |
+
+Глобальные флаги можно ставить до или после команды:
 
 ```bash
-# Через npx (без глобальной установки)
-npx repo-guard
+repo-guard --repo-root /path/to/repo check-diff --base main --head feature
+repo-guard check-diff --repo-root /path/to/repo --base main --head feature
+repo-guard --enforcement advisory check-pr
+repo-guard --enforcement blocking check-diff --base main --head feature
 ```
 
-### Валидация change contract
+Флаги `--enforcement` и `--enforcement-mode` принимают:
+
+| Значение | Нормализованный режим | Exit semantics |
+| --- | --- | --- |
+| `blocking`, `enforce` | `blocking` | policy violation дает exit code 1 |
+| `advisory`, `warn` | `advisory` | violation печатается как warning, exit code 0 |
+
+## `check-diff`
 
 ```bash
-repo-guard path/to/contract.json
-```
-
-Проверяет и policy, и contract по соответствующим схемам.
-
-### Проверка diff
-
-```bash
-# Проверить staged изменения (или HEAD если staged пуст)
+# Проверить локальные изменения
 repo-guard check-diff
 
-# Проверить diff между ветками
+# Проверить две ref
 repo-guard check-diff --base main --head feature
 
-# Проверить diff с change contract
-repo-guard check-diff --contract path/to/contract.json
+# Подключить JSON contract из файла, путь считается от repo-root
+repo-guard check-diff --contract contracts/change.json
 
-# Проверить diff с явным change class для surface_matrix
+# Явно объявить change class для surface_matrix/new_file_rules
 repo-guard check-diff --change-class docs-cleanup
 
-# Наблюдать нарушения без падения job
-repo-guard --enforcement advisory check-diff --base main --head feature
-
-# Явно включить blocking mode (default)
-repo-guard --enforcement blocking check-diff --base main --head feature
-
-# Машиночитаемый результат для CI tooling
+# Машиночитаемый вывод
 repo-guard check-diff --format json --base main --head feature
 
 # Краткий Markdown summary для GitHub job summary
 repo-guard check-diff --format summary --base main --head feature
 ```
 
-#### Structured output
+Форматы вывода:
 
-`check-diff` supports three output formats:
+| Формат | Назначение |
+| --- | --- |
+| `text` | Человеческий CLI output по умолчанию |
+| `json` | Stable structured result; stdout содержит только JSON |
+| `summary` | GitHub-flavored Markdown для `$GITHUB_STEP_SUMMARY` |
 
-| Format | Purpose |
-|---|---|
-| `text` | Default human-readable CLI logs. |
-| `json` | Stable machine-readable result for CI pipelines and higher-level tooling. Stdout contains only JSON. |
-| `summary` | Concise GitHub-flavored Markdown suitable for `$GITHUB_STEP_SUMMARY`. |
+В JSON result есть `mode`, `result`, `ok`, `exitCode`, `violations`,
+`advisoryWarnings`, `ruleResults`, `hints`, `repositoryRoot` и краткая статистика
+diff. Если включены anchors, добавляются `anchors` и `traceRuleResults`.
 
-The JSON result is intended as an API surface. Field names are stable and intentionally boring:
+## `check-pr`
 
-```json
-{
-  "mode": "blocking",
-  "ok": false,
-  "result": "failed",
-  "passed": 4,
-  "violations": [
-    {
-      "rule": "max-new-files",
-      "actual": 2,
-      "limit": 0,
-      "files": ["src/feature.mjs", "tests/feature.test.mjs"],
-      "touched": [],
-      "must_touch": [],
-      "must_not_touch": [],
-      "details": [],
-      "errors": []
-    }
-  ],
-  "violationCount": 1,
-  "failed": 1,
-  "exitCode": 1,
-  "ruleResults": [
-    {
-      "rule": "max-new-files",
-      "ok": false,
-      "details": ["actual: 2, limit: 0", "file: src/feature.mjs", "file: tests/feature.test.mjs"]
-    }
-  ],
-  "hints": [],
-  "repositoryRoot": "/path/to/repo",
-  "diff": {
-    "changedFiles": 2,
-    "checkedFiles": 2,
-    "skippedOperationalFiles": 0
-  }
-}
-```
+`check-pr` рассчитан на pull request workflow:
 
-When `repo-policy.json` declares `anchors`, the JSON result keeps the same
-top-level semantics and adds anchor diagnostics:
+1. Читает `GITHUB_EVENT_PATH`.
+2. Берет base/head SHA из pull request event.
+3. Извлекает contract из тела PR.
+4. Если contract в PR нет, ищет ровно один linked issue по `Fixes #N`,
+   `Closes #N` или `Resolves owner/repo#N` и пробует взять contract из issue.
+5. Валидирует contract по `schemas/change-contract.schema.json`.
+6. Проверяет `git diff base...head` тем же policy pipeline, что и `check-diff`.
 
-```json
-{
-  "anchors": {
-    "detected": [
-      { "anchorType": "requirement_id", "value": "FR-001", "file": "requirements/fr-001.json", "sourceKind": "json_field" }
-    ],
-    "changed": [
-      { "anchorType": "code_req_ref", "value": "FR-999", "file": "src/feature.mjs", "sourceKind": "regex", "line": 4, "column": 9 }
-    ],
-    "declaredByContract": {
-      "affects": ["FR-001"],
-      "implements": ["FR-999"],
-      "verifies": [],
-      "all": [
-        { "relation": "affects", "value": "FR-001" },
-        { "relation": "implements", "value": "FR-999" }
-      ]
-    },
-    "unresolved": [
-      {
-        "rule": "code-refs-must-resolve",
-        "kind": "must_resolve",
-        "fromAnchorType": "code_req_ref",
-        "toAnchorType": "requirement_id",
-        "value": "FR-999",
-        "instances": [
-          { "anchorType": "code_req_ref", "value": "FR-999", "file": "src/feature.mjs", "sourceKind": "regex", "line": 4, "column": 9 }
-        ]
-      }
-    ],
-    "stats": {
-      "detected": 3,
-      "changed": 2,
-      "declaredByContract": 2,
-      "unresolved": 1,
-      "extractionErrors": 0,
-      "byType": {
-        "code_req_ref": { "detected": 2, "changed": 2 },
-        "requirement_id": { "detected": 1, "changed": 0 }
-      }
-    }
-  },
-  "traceRuleResults": [
-    {
-      "id": "code-refs-must-resolve",
-      "kind": "must_resolve",
-      "fromAnchorType": "code_req_ref",
-      "toAnchorType": "requirement_id",
-      "ok": false,
-      "resolved": [
-        {
-          "value": "FR-001",
-          "from": [
-            { "anchorType": "code_req_ref", "value": "FR-001", "file": "src/feature.mjs", "sourceKind": "regex", "line": 2, "column": 24 }
-          ],
-          "to": [
-            { "anchorType": "requirement_id", "value": "FR-001", "file": "requirements/fr-001.json", "sourceKind": "json_field" }
-          ]
-        }
-      ],
-      "unresolved": [
-        {
-          "value": "FR-999",
-          "instances": [
-            { "anchorType": "code_req_ref", "value": "FR-999", "file": "src/feature.mjs", "sourceKind": "regex", "line": 4, "column": 9 }
-          ]
-        }
-      ],
-      "stats": { "fromInstances": 2, "fromValues": 2, "toInstances": 1, "toValues": 1, "resolved": 1, "unresolved": 1 }
-    }
-  ]
-}
-```
+Если PR ссылается на несколько issues без contract в PR, команда завершается
+ошибкой `issue_link_ambiguous`. Для fallback на linked issue нужен `GH_TOKEN` или
+`GITHUB_TOKEN`, доступный `gh` CLI и `fetch-depth: 0`.
 
-`anchors.detected` contains all normalized anchor instances found from tracked
-repository files and changed files. `anchors.changed` is the subset located in
-checked diff files. `anchors.declaredByContract` mirrors contract
-`anchors.affects`, `anchors.implements`, and `anchors.verifies`, with `all` as a
-relation/value list for tooling that does not want to inspect each relation.
-`anchors.unresolved` is an aggregate of unresolved trace diagnostics.
-`must_resolve` trace rules are enforced as policy checks: unresolved references
-make `ok: false` and `result: "failed"`. In `blocking` mode they exit `1`; in
-`advisory` mode they are reported as warnings and the command exits `0`.
-Structured violations include `unresolved_anchors` with the offending anchor
-value, source instances, and file/line/column locations. Their rule names use
-the `trace-rule: <id>` form, for example `trace-rule: code-refs-must-resolve`.
-Evidence trace rules use the same `trace-rule: <id>` violation shape but report
-`trace_kind`, `must_touch_any`, `changed_files`, `evidence_files`, and, for
-contract anchor declarations, `contract_field` plus `declared_anchors`; this
-keeps missing evidence diagnostics distinct from missing anchor resolution.
+## GitHub Action
 
-Exit behavior follows the active enforcement mode: in `blocking` mode
-violations exit `1`; in `advisory` mode violations are reported but the command
-exits `0`. Consumers should read both `ok` and `exitCode`: `ok` describes
-policy result, while `exitCode` describes command exit semantics for the active
-enforcement mode.
-
-`--format summary` also includes one concise anchor line when anchors are
-enabled, for example `Anchors: 3 detected, 2 changed, 2 declared, 1 unresolved`.
-When unresolved trace diagnostics exist, the summary adds a short table with the
-rule id, anchor value, and source locations.
-
-Example GitHub Actions usage:
-
-```yaml
-- name: repo-guard JSON
-  run: repo-guard check-diff --format json --base "$BASE_SHA" --head "$HEAD_SHA" > repo-guard-result.json
-
-- name: repo-guard summary
-  run: repo-guard check-diff --format summary --base "$BASE_SHA" --head "$HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
-```
-
-### Проверка PR (в GitHub Actions)
-
-```bash
-repo-guard check-pr
-```
-
-Требования для `check-pr`:
-- переменная окружения `GITHUB_EVENT_PATH` (устанавливается GitHub Actions автоматически);
-- `git` CLI с достаточной глубиной fetch для base...head diff;
-- `gh` CLI с авторизацией (для fallback на linked issue);
-- event payload типа `pull_request` с base/head SHA.
-
-### Normalized Facts Model
-
-`check-diff` and `check-pr` both normalize their inputs before policy checks run. The command modes differ only in how they gather input: `check-diff` reads local CLI refs and an optional contract file, while `check-pr` reads the GitHub pull request event and optionally falls back to a linked issue. After that adapter step, checks consume the same facts object:
-
-```js
-{
-  mode: "check-diff" | "check-pr",
-  repositoryRoot: "/absolute/repo",
-  policy: { /* validated repo-policy.json */ },
-  contract: { /* validated change contract */ } | null,
-  contractSource: "cli file" | "pr body" | "linked issue" | "none",
-  enforcement: { mode: "blocking" | "advisory" },
-  diff: {
-    files: {
-      all: [/* parsed git diff files */],
-      checked: [/* all minus operational paths */],
-      skippedOperational: [/* files ignored by policy.paths.operational_paths */]
-    }
-  },
-  trackedFiles: ["README.md"],
-  anchors: {
-    instances: [/* normalized anchor instances */],
-    byType: { /* instances grouped by anchor type */ },
-    errors: [/* extraction diagnostics */]
-  },
-  derived: {
-    changedPaths: ["src/example.mjs"],
-    touchedSurfaces: { /* surface detection result */ } | null,
-    newFileClasses: { /* new file classification result */ } | null
-  },
-  diagnostics: {
-    skippedOperationalFiles: 0
-  }
-}
-```
-
-Policy checks read from this normalized model instead of from raw command parameters. That keeps runtime checks source-agnostic and leaves PR markdown, linked issue lookup, and CLI file loading in adapter code that can be tested directly.
-
-### Advisory vs blocking
-
-`repo-guard` separates command mode (`check-pr`, `check-diff`) from enforcement behavior:
-
-| Enforcement | Aliases | Exit behavior |
-|---|---|---|
-| `advisory` | `warn` | Policy violations are printed as `WARN` and the command exits `0`. |
-| `blocking` | `enforce` | Policy violations are printed as `FAIL` and the command exits `1`. |
-
-Set the behavior in invocation:
-
-```bash
-repo-guard --enforcement advisory check-pr
-repo-guard --enforcement blocking check-diff --base main --head feature
-```
-
-Or set a default in `repo-policy.json`:
-
-```json
-{
-  "enforcement": {
-    "mode": "advisory"
-  }
-}
-```
-
-CLI invocation wins over policy config. Advisory mode only makes policy violations non-blocking; setup/configuration errors such as invalid policy JSON, missing `git`, or missing GitHub Actions event context still fail.
-
-### Диагностика окружения
-
-```bash
-repo-guard doctor
-```
-
-Проверяет, что окружение корректно настроено для работы `repo-guard` (особенно для `check-pr`). Выводит отчёт с PASS / WARN / FAIL для каждой проверки и remediation hint при проблемах.
-
-| Проверка | Что проверяет | Уровни |
-|---|---|---|
-| `repository-root` | Путь существует и является директорией | PASS / FAIL |
-| `git-available` | git CLI установлен, директория — git-репозиторий | PASS / WARN / FAIL |
-| `fetch-depth` | Обнаружение shallow clone | PASS / WARN |
-| `repo-policy.json` | Поиск, парсинг, валидация схемы, компиляция regex | PASS / FAIL |
-| `event-context` | `GITHUB_EVENT_PATH` и структура PR event | PASS / WARN / FAIL |
-| `auth-token` | `GH_TOKEN`/`GITHUB_TOKEN` или `gh auth` | PASS / WARN |
-| `gh-cli` | Доступность `gh` CLI | PASS / FAIL |
-| `workflow-config` | Наличие workflow с `repo-guard`, `fetch-depth: 0`, токен | PASS / WARN |
-
-Exit code: 0 если нет FAIL (WARN допустимы), 1 если есть хотя бы один FAIL.
-
-Уровень серьёзности `gh-cli` соответствует поведению `check-pr`: если `gh` отсутствует, `check-pr` завершится с ошибкой, и `doctor` сообщает об этом как FAIL. `auth-token` сообщает WARN, так как аутентификация требуется только при использовании fallback на linked issue для получения change contract.
-
-```bash
-# Диагностика текущей директории
-repo-guard doctor
-
-# Диагностика конкретного репозитория
-repo-guard --repo-root /path/to/repo doctor
-```
-
-### Использование в другом репозитории
-
-`--repo-root` — глобальный флаг, который можно ставить как до, так и после команды:
-
-```bash
-# validate
-repo-guard --repo-root /path/to/other/repo
-repo-guard --repo-root /path/to/other/repo contract.json
-
-# check-diff (--repo-root до или после команды)
-repo-guard --repo-root /path/to/other/repo check-diff --base main --head feature
-repo-guard check-diff --repo-root /path/to/other/repo --base main --head feature
-
-# check-pr (--repo-root до или после команды)
-repo-guard --repo-root /path/to/other/repo check-pr
-repo-guard check-pr --repo-root /path/to/other/repo
-```
-
-Флаг `--repo-root` указывает, где искать `repo-policy.json` и выполнять git-операции. Схемы загружаются из пакета `repo-guard`.
-
-### Запуск тестов
-
-```bash
-npm test
-```
-
-## Миграция с source-run на установленный CLI
-
-До версии 1.0.0 рекомендованный способ запуска был через клонирование репозитория:
-
-```bash
-git clone https://github.com/netkeep80/repo-guard.git
-cd repo-guard
-npm install
-node src/repo-guard.mjs
-```
-
-Начиная с версии 1.0.0 рекомендуется использовать установленный CLI.
-
-**Шаги миграции:**
-
-1. Удалите клонированный репозиторий из зависимостей вашего проекта (если он был добавлен как submodule или вручную).
-2. Установите пакет глобально или через npx:
-   ```bash
-   npm install -g repo-guard
-   # или используйте npx repo-guard без установки
-   ```
-3. Замените вызовы `node src/repo-guard.mjs` на `repo-guard` во всех скриптах и CI конфигурациях:
-   ```yaml
-   # Было:
-   run: node src/repo-guard.mjs check-pr
-   # Стало:
-   run: npx repo-guard check-pr
-   ```
-
-Все флаги и команды (`check-diff`, `check-pr`, `--repo-root`, `--base`, `--head`, `--contract`) остаются без изменений — миграция сводится к замене команды запуска.
-
-## Минимальный пример
-
-### 1. Policy
-
-Минимальный `repo-policy.json`:
-
-```json
-{
-  "policy_format_version": "0.1.0",
-  "repository_kind": "application",
-  "enforcement": {
-    "mode": "blocking"
-  },
-  "paths": {
-    "forbidden": [],
-    "canonical_docs": ["README.md"],
-    "governance_paths": ["repo-policy.json"]
-  },
-  "diff_rules": {
-    "max_new_docs": 5,
-    "max_new_files": 30
-  },
-  "content_rules": [],
-  "cochange_rules": []
-}
-```
-
-Эта policy разрешает до 5 новых документов и до 30 новых файлов в одном diff. Нет запрещённых путей и контентных ограничений.
-
-### 2. Change contract
-
-Пример contract в теле PR (предпочтительный YAML-блок ` ```repo-guard-yaml `):
-
-````markdown
-```repo-guard-yaml
-change_type: bugfix
-change_class: kernel-hardening
-scope:
-  - src/pagination.mjs
-budgets:
-  max_new_files: 0
-  max_new_docs: 0
-surface_debt:
-  kind: temporary_growth
-  reason: Introduce extraction path before removing duplicated code
-  expected_delta:
-    max_new_files: 1
-    max_net_added_lines: 60
-  repayment_issue: 123
-anchors:
-  affects:
-    - FR-014
-  implements:
-    - FR-014
-  verifies:
-    - FR-014
-must_touch:
-  - src/pagination.mjs
-must_not_touch:
-  - schemas/
-  - repo-policy.json
-expected_effects:
-  - Pagination returns correct page count
-```
-````
-
-Contract говорит: это bugfix, который должен затронуть `src/pagination.mjs`, не должен трогать схемы и policy, и не должен создавать новых файлов. Опциональный `anchors` фиксирует intent на уровне требований или других якорей: какие anchors изменение affects, implements и verifies. Если diff всё же временно увеличивает поверхность репозитория, `surface_debt` фиксирует причину, ожидаемый рост и issue, где долг будет погашен.
-
-`surface_debt` проверяется только когда contract явно его объявляет. Проверка сравнивает declaration с фактическим ростом diff: количеством новых файлов и `added - deleted` строк. Если рост есть, но `surface_debt` не объявлен, repo-guard сообщает не блокирующий статус `undeclared`; если фактический рост больше `expected_delta`, статус будет `declared_debt_exceeded`; если нет `repayment_issue`, статус будет `missing_repayment_target`.
-
-Для существующих PR сохраняется совместимость с JSON-блоком ` ```repo-guard-json `; оба формата дают одну и ту же нормализованную модель contract перед schema validation.
-
-`change_class` опционален для обычных policy. Он становится обязательным для diff, который трогает объявленные surfaces, если в policy включён `surface_matrix`.
-
-### 3. Что проверяет repo-guard
-
-При запуске `check-diff` или `check-pr` repo-guard сравнивает реальный diff с policy и contract:
-
-```
-OK: repo-policy.json
-Enforcement mode: blocking (policy violations are enforced; exit code is 1 when violations exist)
-  PASS: change-contract
-
-Diff analysis: 3 file(s) changed
-  PASS: forbidden-paths
-  PASS: canonical-docs-budget
-  PASS: max-new-files
-  PASS: max-net-added-lines
-  PASS: registry-rules
-  PASS: new-file-rules
-  PASS: cochange-rules
-  PASS: content-rules
-  PASS: must-touch
-  PASS: must-not-touch
-
-Summary: 9 passed, 0 failed (mode: blocking; violations enforced)
-Result: passed (mode: blocking; exit code 0)
-```
-
-### Anchor Extraction
-
-`anchors` в `repo-policy.json` задают типы якорей и источники, из которых repo-guard строит нормализованные facts перед проверками. Runtime v1 поддерживает два extractor kind:
-
-```json
-{
-  "anchors": {
-    "types": {
-      "requirement_id": {
-        "sources": [
-          { "kind": "json_field", "glob": "requirements/**/*.json", "field": "id" }
-        ]
-      },
-      "code_req_ref": {
-        "sources": [
-          { "kind": "regex", "glob": "src/**", "pattern": "@req\\s+((FR|SR)-[0-9]{3})" }
-        ]
-      }
-    }
-  }
-}
-```
-
-`json_field` читает top-level JSON field и нормализует scalar value в строку. `regex` сканирует matching files и, если pattern содержит capture group, берёт value из первого matched group; без capture group value равен полной matched строке. Каждый instance содержит `anchorType`, `value`, `file`, `sourceKind`, а regex instances также получают `line`, `column`, `captureGroup` и `raw`.
-
-Anchor extraction работает по tracked repository files и по changed files из diff, чтобы global requirement IDs и новые references были доступны в одной facts model. Если JSON не парсится, field отсутствует или source file не читается, check `anchor-extraction` завершается `FAIL` с диагностикой вида `[requirement_id json_field source 0] requirements/fr-001.json: field "id" not found`.
-
-Если policy содержит `trace_rules.kind = "must_resolve"`, structured output
-добавляет `traceRuleResults`: для каждого значения from-anchor проверяется
-наличие matching value среди to-anchor instances. Unresolved references также
-становятся policy violations вида `trace-rule: <id>` и наследуют обычную
-семантику `blocking`/`advisory`.
-
-Evidence rules добавляют второй класс `trace_rules`, который не требует anchor
-extractors:
-
-```json
-{
-  "trace_rules": [
-    {
-      "id": "changed-requirements-need-evidence",
-      "kind": "changed_files_require_evidence",
-      "if_changed": ["requirements/**"],
-      "must_touch_any": ["src/**", "tests/**", "docs/**"]
-    },
-    {
-      "id": "declared-anchors-need-evidence",
-      "kind": "declared_anchors_require_evidence",
-      "contract_field": "anchors.affects",
-      "must_touch_any": ["src/**", "tests/**", "docs/**"]
-    }
-  ]
-}
-```
-
-`changed_files_require_evidence` срабатывает, когда diff затрагивает хотя бы
-один путь из `if_changed`, и требует хотя бы один changed file из
-`must_touch_any`. `declared_anchors_require_evidence` срабатывает, когда change
-contract объявляет values в `anchors.affects`, `anchors.implements` или
-`anchors.verifies`, и требует такой же evidence surface в diff. Missing evidence
-становится policy violation с `trace_kind`, отличным от `must_resolve`, чтобы
-потребители structured output могли различать нерешённые anchors и отсутствие
-причинно-следственного следа в diff.
-
-### 4. Пример failure
-
-Если в PR затронут файл `schemas/repo-policy.schema.json`, который указан в `must_not_touch`:
-
-```
-  FAIL: must-not-touch
-    - schemas/repo-policy.schema.json
-```
-
-Если изменён `src/**`, но не изменён ни один файл в `tests/**` (при наличии co-change rule):
-
-```
-  FAIL: cochange: src/** -> tests/**
-    must_touch: tests/**
-```
-
-## Typed New File Classes
-
-Глобальный `diff_rules.max_new_files` остаётся полезным верхним лимитом, но он не различает смысл новых файлов. Для многих репозиториев новый test file, generated artifact, canonical doc и changelog fragment имеют разный риск. `new_file_classes` и `new_file_rules` позволяют описать это явно:
-
-```json
-{
-  "new_file_classes": {
-    "test": ["tests/**"],
-    "canonical_doc": ["docs/**", "README.md"],
-    "generated": ["single_include/**"],
-    "changelog_fragment": ["changelog.d/*.md"],
-    "script": ["scripts/**"]
-  },
-  "new_file_rules": {
-    "docs-cleanup": {
-      "allow_classes": [],
-      "max_new_files": 0
-    },
-    "kernel-hardening": {
-      "allow_classes": ["test", "changelog_fragment"],
-      "max_per_class": {
-        "test": 2,
-        "changelog_fragment": 1
-      }
-    },
-    "generated-refresh": {
-      "allow_classes": ["generated", "changelog_fragment"],
-      "max_per_class": {
-        "generated": 20,
-        "changelog_fragment": 1
-      }
-    }
-  }
-}
-```
-
-`new_file_rules` проверяет только файлы со статусом `added`; изменения существующих файлов остаются за `surface_matrix`, `cochange_rules` и другими проверками. Если policy включает `new_file_rules`, diff с новыми файлами должен иметь `change_class` в contract или через `--change-class`. Каждая запись `new_file_rules` должна явно задавать `allow_classes`; пустой список `[]` означает намеренный запрет всех классов новых файлов.
-
-Пример: `kernel-hardening` может добавить до двух test files и один changelog fragment, но не может незаметно добавить generated artifact или новый design document. Это точнее, чем плоский `max_new_files: 3`: лимит допускает полезные тесты, но всё ещё блокирует неожиданные классы файлов.
-
-При нарушении output называет offending file, detected class и нарушенное правило:
-
-```text
-  FAIL: new-file-rules
-    change_class "kernel-hardening" cannot add new-file classes: generated
-    change_class: kernel-hardening
-    new_files: changelog.d/core.md, single_include/core.h, tests/core.test.mjs
-    allowed_classes: changelog_fragment, test
-    touched_classes: changelog_fragment, generated, test
-    violating_classes: generated
-    class generated is not allowed by new_file_rules["kernel-hardening"].allow_classes; files: single_include/core.h
-```
-
-Файлы, которые не совпали ни с одним glob из `new_file_classes`, считаются unclassified и тоже fail, когда `new_file_rules` активны. Старое поведение `max_new_files` не меняется: если `new_file_classes` и `new_file_rules` отсутствуют, repo-guard продолжает применять только плоские budgets.
-
-## Registry Integrity Rules
-
-`registry_rules` сравнивает две canonical list и помогает держать несколько registry в согласованном состоянии. Правило не зависит от diff contents: `check-diff` читает указанные файлы из рабочей директории и проверяет agreement перед остальными policy checks.
-
-```json
-{
-  "registry_rules": [
-    {
-      "id": "canonical-docs-sync",
-      "kind": "set_equality",
-      "left": {
-        "type": "json_array",
-        "file": "repo-policy.json",
-        "json_pointer": "/paths/canonical_docs"
-      },
-      "right": {
-        "type": "markdown_section_links",
-        "file": "docs/index.md",
-        "section": "Canonical Documents",
-        "prefix": "docs/"
-      }
-    }
-  ]
-}
-```
-
-Supported `kind` values:
-
-- `set_equality`: both registries must contain the same entries.
-- `left_subset_of_right`: every left entry must appear on the right.
-- `right_subset_of_left`: every right entry must appear on the left.
-
-Supported source types in v1:
-
-- `json_array`: reads an array from `file` using `json_pointer`.
-- `markdown_section_links`: reads markdown links from a named heading section. Relative links are normalized to repository paths. `prefix` can map links inside the markdown file directory to canonical registry paths, for example `policy.md` in `docs/index.md` becomes `docs/policy.md`.
-
-When a rule fails, output identifies the rule, both registry contents, and the missing or extra entries:
-
-```text
-  FAIL: registry-rules
-    failed_rules: canonical-docs-sync
-    [canonical-docs-sync] registry rule "canonical-docs-sync" failed set_equality
-    left entries: README.md, docs/policy.md
-    right entries: README.md, docs/architecture.md
-    missing from right: docs/policy.md
-    extra in right: docs/architecture.md
-```
-
-Policies without `registry_rules` keep the previous behavior and report `PASS: registry-rules`.
-
-## Advisory Text Duplication Rules
-
-`advisory_text_rules` enables heuristic markdown duplication warnings. This check is advisory-only in v1: it can print `WARN` and appear in structured output, but it never changes the command exit code and never blocks a PR, even when enforcement mode is `blocking`.
-
-```json
-{
-  "advisory_text_rules": {
-    "canonical_files": ["docs/index.md", "docs/**/*.md"],
-    "warn_on_similarity_above": 0.70,
-    "max_reported_matches": 3
-  }
-}
-```
-
-The check compares changed markdown files with tracked markdown files that match `canonical_files`. It normalizes markdown prose into word tokens, reports a similarity score, and also flags duplicate section titles against canonical files. This is a practical early-warning heuristic for documentation sprawl, not proof of semantic equivalence, plagiarism, or copyright status.
-
-Example output:
-
-```text
-  WARN: advisory-text-rules
-    heuristic markdown duplication advisory
-    match: docs/new-policy.md -> docs/canonical.md, score=0.82, threshold=0.7, duplicate_sections=Release Policy
-    docs/new-policy.md overlaps docs/canonical.md (score 0.82, threshold 0.7; duplicate sections: Release Policy)
-    hint: Review whether the changed markdown should update the canonical source instead of duplicating policy prose.
-```
-
-Policies without `advisory_text_rules` keep the previous behavior and report `PASS: advisory-text-rules`.
-
-## Issue Type Rules
-
-`change_type` в contract описывает тип работы: например `governance`, `kernel-hardening`, `docs-cleanup` или любой другой тип, принятый в репозитории. Policy может сделать этот тип first-class input через `change_type_rules`:
-
-```json
-{
-  "surfaces": {
-    "kernel": ["src/**"],
-    "tests": ["tests/**"],
-    "docs": ["docs/**", "README.md"],
-    "generated": ["single_include/**"]
-  },
-  "new_file_classes": {
-    "test": ["tests/**"],
-    "changelog_fragment": ["changelog.d/*.md"],
-    "generated": ["single_include/**"]
-  },
-  "change_type_rules": {
-    "governance": {
-      "max_new_docs": 0,
-      "forbid_surfaces": ["kernel", "generated"],
-      "new_file_rules": {
-        "allow_classes": ["changelog_fragment"],
-        "max_per_class": {
-          "changelog_fragment": 1
-        }
-      }
-    },
-    "kernel-hardening": {
-      "require_surfaces": ["tests"]
-    }
-  }
-}
-```
-
-Type rules can constrain touched surfaces with `allow_surfaces`, `forbid_surfaces`, and `require_surfaces`; apply stricter budgets with `max_new_docs`, `max_new_files`, and `max_net_added_lines`; and embed a type-local `new_file_rules` block. When a type rule uses surface constraints, every changed file must match at least one declared surface. This matches the fail-closed `surface_matrix` model so unclassified files cannot bypass type-aware topology checks. Existing repositories that do not define `change_type_rules` keep the previous behavior.
-
-При нарушении output показывает declared type и конкретное type-aware правило:
-
-```text
-  FAIL: change-type-rules
-    change_type "governance" violated change_type_rules
-    change_type: governance
-    touched_surfaces: docs, generated, kernel
-    forbidden_surfaces: generated, kernel
-    violating_surfaces: generated, kernel
-    new docs 1 exceeds change_type_rules["governance"].max_new_docs 0; files: docs/new.md
-```
-
-## Ownership-aware surfaces
-
-Глобальный `paths.forbidden` хорошо работает для файлов, которые нельзя трогать никогда. Но generated, release или governance surfaces часто нельзя запрещать глобально: regeneration PR должен иметь право менять generated-файлы, а обычный docs PR — нет.
-
-Для этого policy может объявить named surfaces, named change classes и матрицу допустимых сочетаний:
-
-```json
-{
-  "surfaces": {
-    "kernel": ["src/**", "include/**"],
-    "tests": ["tests/**"],
-    "docs": ["docs/**", "README.md"],
-    "governance": ["repo-policy.json", ".github/**"],
-    "release": ["CHANGELOG.md", "package.json"],
-    "generated": ["single_include/**"]
-  },
-  "change_classes": [
-    "kernel-hardening",
-    "docs-cleanup",
-    "generated-refresh"
-  ],
-  "allow_unclassified_files": false,
-  "surface_matrix": {
-    "kernel-hardening": {
-      "allow": ["kernel", "tests"],
-      "forbid": ["generated", "release"]
-    },
-    "docs-cleanup": {
-      "allow": ["docs", "governance"],
-      "forbid": ["kernel", "tests", "generated", "release"]
-    },
-    "generated-refresh": {
-      "allow": ["generated", "release"],
-      "forbid": ["kernel", "docs", "governance"]
-    }
-  }
-}
-```
-
-Затем intent задаётся в contract:
-
-```yaml
-change_type: chore
-change_class: generated-refresh
-scope:
-  - single_include/
-budgets: {}
-must_touch:
-  - single_include/
-must_not_touch: []
-expected_effects:
-  - Regenerated bundled artifact
-```
-
-Для local/CI `check-diff` без contract можно передать тот же intent флагом:
-
-```bash
-repo-guard check-diff --base main --head feature --change-class generated-refresh
-```
-
-Если `docs-cleanup` PR затронет `src/core.mjs`, output явно покажет объявленный class, detected surfaces и нарушившую комбинацию:
-
-```text
-  FAIL: surface-matrix
-    change_class "docs-cleanup" cannot touch surfaces: kernel
-    change_class: docs-cleanup
-    touched_surfaces: docs, kernel
-    allowed_surfaces: docs, governance
-    forbidden_surfaces: generated, kernel, release, tests
-    violating_surfaces: kernel
-    surface kernel matched: src/core.mjs
-```
-
-Файл может совпасть с несколькими surfaces; repo-guard считает все совпадения. Когда `surface_matrix` включён, changed file, который не совпал ни с одной surface, по умолчанию считается нарушением:
-
-```text
-  FAIL: surface-matrix
-    surface_matrix found changed files that match no declared surface: scripts/tool.mjs
-    change_class: docs-cleanup
-    touched_surfaces: (none)
-    unclassified_files: scripts/tool.mjs
-    changed files matched no declared surface: scripts/tool.mjs
-    hint: Add matching surface globs or set allow_unclassified_files: true if unclassified files are intentional.
-```
-
-Если policy намеренно описывает только часть репозитория, можно явно включить `"allow_unclassified_files": true`. По умолчанию это `false`, чтобы matrix-проверку нельзя было обойти файлами вне объявленных surfaces.
-
-## GitHub Action (reusable)
-
-`repo-guard` is packaged as a reusable GitHub Action so any repository can adopt it without installing Node.js manually or hand-assembling a custom workflow.
-
-### Quick start
-
-1. Add `repo-policy.json` to your repository root (see [minimum example](#1-policy) or copy `templates/repo-policy.min.json`).
-2. Create `.github/workflows/repo-guard.yml` (replace `vX.Y.Z` with the [latest release tag](https://github.com/netkeep80/repo-guard/releases)):
+Минимальный workflow:
 
 ```yaml
 name: repo-guard policy check
@@ -1009,10 +175,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # required for base...head diff
+          fetch-depth: 0
 
-      - name: Enforce repository policy
-        uses: netkeep80/repo-guard@vX.Y.Z  # replace with latest release tag
+      - uses: netkeep80/repo-guard@vX.Y.Z
         with:
           mode: check-pr
           enforcement: blocking
@@ -1020,144 +185,278 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-3. Add a change contract to each PR description or its linked issue (see [templates/pr-contract-example.md](templates/pr-contract-example.md)).
+Используйте release tag вместо `vX.Y.Z` для воспроизводимых запусков. При
+локальном self-hosting внутри этого репозитория workflow может использовать
+`uses: ./`.
 
-A copy-pasteable version of this workflow is also available at [`templates/example-workflow.yml`](templates/example-workflow.yml).
+Action inputs:
 
-### Inputs
+| Input | Default | Когда нужен |
+| --- | --- | --- |
+| `mode` | `check-pr` | `check-pr` для PR workflow, `check-diff` для явных ref |
+| `enforcement` | `blocking` | `advisory` для мягкого внедрения |
+| `repo-root` | `$GITHUB_WORKSPACE` | Когда policy лежит не в текущей директории |
+| `base` | empty | Base ref для `mode: check-diff` |
+| `head` | empty | Head ref для `mode: check-diff` |
+| `contract` | empty | JSON contract path для `mode: check-diff` |
+| `change-class` | empty | Change class для `surface_matrix` и `new_file_rules` |
+| `node-version` | `20` | Версия Node.js для Action |
 
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `mode` | no | `check-pr` | `check-pr` — validate a PR in GitHub Actions context. `check-diff` — validate a local diff between two refs. |
-| `enforcement` | no | `blocking` | `blocking`/`enforce` fails the job on policy violations. `advisory`/`warn` reports violations but exits successfully. |
-| `repo-root` | no | `$GITHUB_WORKSPACE` | Path to the directory containing `repo-policy.json`. |
-| `base` | no | _(empty)_ | Base git ref for diff (`check-diff` only). |
-| `head` | no | _(empty)_ | Head git ref for diff (`check-diff` only). |
-| `contract` | no | _(empty)_ | Path to a contract JSON file, relative to `repo-root` (`check-diff` only). |
-| `change-class` | no | _(empty)_ | Named change class for `surface_matrix` enforcement (`check-diff` only). Overrides contract `change_class` when set. |
-| `node-version` | no | `20` | Node.js version used to run repo-guard. |
+Action outputs:
 
-### Outputs
+| Output | Значение |
+| --- | --- |
+| `result` | `passed`, `failed` или `error` |
+| `summary` | Однострочное описание результата |
 
-| Output | Description |
-|---|---|
-| `result` | `passed`, `failed`, or `error` |
-| `summary` | Human-readable one-line summary (mirrors the `Summary:` line from CLI output). |
+## Policy
 
-### Enforcement modes
+Минимальный `repo-policy.json`:
 
-**Advisory** — record the result but do not block the PR:
-
-```yaml
-- name: repo-guard (advisory)
-  id: guard
-  uses: netkeep80/repo-guard@vX.Y.Z  # replace with latest release tag
-  with:
-    mode: check-pr
-    enforcement: advisory
-  env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-- name: Show result
-  run: echo "repo-guard result: ${{ steps.guard.outputs.result }}"
+```json
+{
+  "policy_format_version": "0.3.0",
+  "repository_kind": "tooling",
+  "enforcement": {
+    "mode": "blocking"
+  },
+  "paths": {
+    "forbidden": ["*.bak", "*.log"],
+    "canonical_docs": ["README.md"],
+    "governance_paths": ["repo-policy.json"],
+    "operational_paths": [".claude/**", ".gitkeep"]
+  },
+  "diff_rules": {
+    "max_new_docs": 2,
+    "max_new_files": 15,
+    "max_net_added_lines": 2000
+  },
+  "content_rules": [],
+  "cochange_rules": []
+}
 ```
 
-In advisory mode, the Action step exits successfully for policy violations, but `steps.guard.outputs.result` is still `failed` when checks found violations. Configuration/runtime errors still fail the step.
+Основные поля policy:
 
-**Blocking** — the step fails the job if any policy check fails (default behaviour):
+| Поле | Runtime behavior |
+| --- | --- |
+| `paths.forbidden` | Запрещает измененные или новые файлы по glob |
+| `paths.canonical_docs` | Не считает перечисленные Markdown файлы "новыми docs" |
+| `paths.operational_paths` | Полностью исключает bot-artifacts из diff checks |
+| `diff_rules.max_new_docs` | Ограничивает новые `.md` вне `canonical_docs` |
+| `diff_rules.max_new_files` | Ограничивает общее число новых файлов |
+| `diff_rules.max_net_added_lines` | Ограничивает `added - deleted` |
+| `content_rules` | Ищет forbidden regex только в добавленных строках |
+| `cochange_rules` | Требует `must_change_any`, если сработал `if_changed` |
+| `surfaces` | Именованные области репозитория по glob |
+| `surface_matrix` | Разрешенные surfaces для каждого `change_class` |
+| `new_file_classes` | Именованные классы новых файлов |
+| `new_file_rules` | Разрешенные классы и budgets новых файлов по `change_class` |
+| `change_type_rules` | Правила по `change_type`: surfaces, budgets, new file classes |
+| `registry_rules` | Сверяет canonical списки из JSON или Markdown |
+| `advisory_text_rules` | Предупреждает о похожей Markdown-документации, не блокирует |
+| `anchors` | Извлекает trace anchors из regex или JSON field sources |
+| `trace_rules` | Проверяет разрешение anchors и наличие evidence files |
 
-```yaml
-- name: repo-guard (blocking)
-  uses: netkeep80/repo-guard@vX.Y.Z
-  with:
-    mode: check-pr
-    enforcement: blocking
-  env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+Reserved или информационные поля:
+
+| Поле | Поведение сейчас |
+| --- | --- |
+| `paths.governance_paths` | Документирует governance files, не enforced |
+| `paths.public_api` | Reserved; непустое значение дает warning |
+| `contract.overrides` | Reserved; непустое значение дает warning |
+
+Если включены `surface_matrix` или `change_type_rules` с surface constraints,
+файл без matching surface по умолчанию считается нарушением. Для
+`surface_matrix` можно явно разрешить частичное покрытие через
+`allow_unclassified_files: true`.
+
+## Change Contract
+
+В PR и issue предпочтителен YAML fence:
+
+````markdown
+```repo-guard-yaml
+change_type: docs
+change_class: docs-cleanup
+scope:
+  - README.md
+budgets:
+  max_new_files: 0
+  max_new_docs: 0
+  max_net_added_lines: 500
+must_touch:
+  - README.md
+must_not_touch:
+  - src/**
+  - schemas/**
+expected_effects:
+  - README describes the current CLI and Action behavior
+```
+````
+
+Старый JSON fence тоже поддерживается:
+
+````markdown
+```repo-guard-json
+{
+  "change_type": "docs",
+  "scope": ["README.md"],
+  "budgets": {},
+  "must_touch": ["README.md"],
+  "must_not_touch": ["src/**"],
+  "expected_effects": ["README is accurate"]
+}
+```
+````
+
+Обязательные поля contract:
+
+| Поле | Значение |
+| --- | --- |
+| `change_type` | Тип изменения; может включать `change_type_rules` |
+| `scope` | Область заявленного изменения |
+| `budgets` | Перекрывает глобальные diff budgets для PR |
+| `must_touch` | Any-of glob: хотя бы один pattern должен совпасть |
+| `must_not_touch` | Ни один pattern не должен совпасть |
+| `expected_effects` | Ожидаемый эффект изменения |
+
+Опциональные поля:
+
+| Поле | Когда нужно |
+| --- | --- |
+| `change_class` | Для `surface_matrix` и глобальных `new_file_rules` |
+| `surface_debt` | Для явного временного роста surface: новые файлы или net lines |
+| `anchors.affects` | Какие anchors затрагивает изменение |
+| `anchors.implements` | Какие anchors реализуются |
+| `anchors.verifies` | Какие anchors проверяются |
+| `overrides` | Reserved, принимается schema, но не enforced |
+
+`surface_debt` без `repayment_issue` или с фактическим ростом выше
+`expected_delta` считается нарушением. Если рост есть, а `surface_debt` не
+заявлен, проверка сообщает статус `undeclared`, но не блокирует сама по себе.
+
+## Проверки diff
+
+`check-diff` и `check-pr` используют общий pipeline. Operational paths сначала
+исключаются, затем выполняются проверки:
+
+| Check | Что проверяет |
+| --- | --- |
+| `forbidden-paths` | Запрещенные пути |
+| `canonical-docs-budget` | Budget новых Markdown документов |
+| `max-new-files` | Budget новых файлов |
+| `max-net-added-lines` | Budget net added lines |
+| `surface-debt` | Заявленный temporary growth |
+| `registry-rules` | Согласованность canonical registries |
+| `advisory-text-rules` | Heuristic Markdown duplication warnings |
+| `anchor-extraction` | Ошибки regex/json anchor extractors |
+| `trace-rule: <id>` | Trace resolution и evidence requirements |
+| `change-type-rules` | Ограничения по `change_type` |
+| `new-file-rules` | Классы и budgets новых файлов |
+| `surface-matrix` | Разрешенные surfaces по `change_class` |
+| `cochange-rules` | Сопутствующие изменения |
+| `content-rules` | Forbidden regex в added lines |
+| `must-touch` | Contract any-of path requirement |
+| `must-not-touch` | Contract forbidden touch requirement |
+
+## Registry rules
+
+`registry_rules` сравнивает два источника:
+
+| Source type | Что читает |
+| --- | --- |
+| `json_array` | Массив строк из JSON по `json_pointer` |
+| `markdown_section_links` | Links из указанного Markdown section |
+
+Поддерживаются `set_equality`, `left_subset_of_right` и
+`right_subset_of_left`. Ошибки показывают missing и extra entries.
+
+## Anchors и trace rules
+
+`anchors` задает типы trace facts и источники:
+
+| Source kind | Поведение |
+| --- | --- |
+| `regex` | Ищет pattern по glob, берет capture group или весь match |
+| `json_field` | Читает scalar field из JSON file |
+
+`trace_rules` бывают трех видов:
+
+| Kind | Смысл |
+| --- | --- |
+| `must_resolve` | Каждый from-anchor должен иметь matching to-anchor |
+| `changed_files_require_evidence` | Изменения по `if_changed` требуют evidence file |
+| `declared_anchors_require_evidence` | Anchors из contract требуют evidence file |
+
+Structured output включает detected/changed/declared anchors, unresolved
+diagnostics и результаты каждого trace rule.
+
+## Doctor
+
+```bash
+repo-guard doctor
+repo-guard --repo-root /path/to/repo doctor
 ```
 
-### Pinning the version
+`doctor` проверяет:
 
-Pin to a release tag to get reproducible runs. The Action always executes the CLI bundled with that tag, so pinning the Action ref is sufficient. Find available release tags on the [Releases page](https://github.com/netkeep80/repo-guard/releases).
+| Check | Что означает |
+| --- | --- |
+| `repository-root` | Путь существует и является директорией |
+| `git-available` | Git установлен, root похож на git repo |
+| `fetch-depth` | История не shallow |
+| `repo-policy.json` | Policy читается, валидируется и компилируется |
+| `event-context` | Есть pull_request event context для `check-pr` |
+| `auth-token` | Есть token или authenticated `gh` |
+| `gh-cli` | `gh` установлен |
+| `workflow-config` | Workflow содержит repo-guard, `fetch-depth: 0` и token |
 
-```yaml
-- uses: netkeep80/repo-guard@vX.Y.Z   # replace with a release tag, e.g. v1.2.3
-  with:
-    mode: check-pr
-    enforcement: blocking
-  env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-### Using check-diff in CI
-
-```yaml
-- uses: netkeep80/repo-guard@vX.Y.Z  # replace with latest release tag
-  with:
-    mode: check-diff
-    enforcement: advisory
-    base: main
-    head: ${{ github.sha }}
-    contract: path/to/contract.json
-    change-class: docs-cleanup
-```
-
-## Использование в GitHub PR workflow
-
-Типичный рабочий процесс:
-
-1. Создаётся issue с описанием задачи (опционально с change contract).
-2. Создаётся PR с ссылкой на issue (`Fixes #N`).
-3. В теле PR или linked issue размещается change contract в блоке ` ```repo-guard-yaml ` или совместимом ` ```repo-guard-json `.
-4. CI запускает `check-pr` — извлекает contract, валидирует его, проверяет diff.
-5. PR проходит, если все проверки пройдены. Иначе — понятное сообщение об ошибке.
-
-Пример конфигурации CI (`.github/workflows/ci.yml`):
-
-```yaml
-- name: Run PR policy check
-  if: github.event_name == 'pull_request' && !github.event.pull_request.draft
-  run: npx repo-guard --enforcement blocking check-pr
-  env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-Важные детали:
-- **Draft PR** пропускаются — `check-pr` не запускается для черновиков, чтобы не блокировать WIP.
-- Для корректной работы diff нужен `fetch-depth: 0` в `actions/checkout`.
-- `gh` CLI требует токен для доступа к linked issue (через `GH_TOKEN`).
+Локально отсутствие `GITHUB_EVENT_PATH` обычно дает warning, потому что
+`check-pr` нужен только внутри GitHub Actions.
 
 ## Self-hosting
 
-This repository is governed by `repo-guard` itself. The CI workflow runs the checked-out local Action (`uses: ./`) on ready pull requests in `blocking` mode, so changes to the package, schemas, templates, workflow, and docs are checked through the same `check-pr` integration path that downstream repositories use. Draft pull requests are excluded only to keep work-in-progress branches unblocked before review.
+Этот репозиторий проверяет сам себя через локальный reusable Action `uses: ./` в
+blocking mode для ready PR. В `repo-policy.json` как governance surface
+перечислены файлы, которые определяют поведение самого guard: `repo-policy.json`,
+`schemas/`, `.github/workflows/`, `.github/PULL_REQUEST_TEMPLATE.md`,
+`.github/ISSUE_TEMPLATE/`, `templates/` и `action.yml`. Они не являются
+operational escapes и должны проходить обычный PR policy gate.
 
-The same workflow also runs an advisory-mode fixture with `check-diff`. That fixture intentionally creates a policy violation and verifies that advisory mode reports `Result: failed` while keeping the job step successful. This keeps both rollout modes covered by the repo's normal CI.
+CI также запускает advisory fixture для `check-diff`, чтобы проверять, что
+нарушения в advisory mode видны в output, но не ломают job.
 
-The self-hosted governance surface is declared in `repo-policy.json` under `paths.governance_paths`:
+## Разработка
 
-| Path | Why it is governed |
-|---|---|
-| `repo-policy.json` | Defines the policy used by this repository and the default blocking mode. |
-| `schemas/` | Defines the accepted policy and change contract formats. |
-| `.github/workflows/` | Runs the self-hosted checks that protect pull requests. |
-| `.github/PULL_REQUEST_TEMPLATE.md` | Captures the change contract expected by `check-pr`. |
-| `.github/ISSUE_TEMPLATE/` | Captures linked issue contracts used by PR fallback. |
-| `templates/` | Ships the example policy, workflow, and contract templates used by adopters. |
-| `action.yml` | Defines the reusable GitHub Action interface and execution path. |
+```bash
+npm ci
+npm test
+node src/repo-guard.mjs
+node src/repo-guard.mjs check-diff --format summary
+```
 
-`governance_paths` is informational today, but changes in these paths are treated as product changes: failures in self-hosting are bugs in the repository workflow, not downstream-only setup problems. GitHub workflow and template files are deliberately not listed as `operational_paths`, so they cannot bypass normal policy checks.
+Структура проекта:
 
-## Ограничения и текущий статус
+| Путь | Назначение |
+| --- | --- |
+| `src/repo-guard.mjs` | CLI entry point |
+| `src/diff-checker.mjs` | Diff parsing и низкоуровневые проверки |
+| `src/github-pr.mjs` | GitHub PR adapter |
+| `src/markdown-contract.mjs` | Извлечение contract из Markdown |
+| `src/runtime/` | Validation и общий policy pipeline |
+| `src/checks/` | Оркестрация policy checks |
+| `src/extractors/` | Anchor extractors |
+| `schemas/` | JSON Schemas для policy и contract |
+| `templates/` | Примеры policy, workflow и contracts |
+| `tests/` | Unit и integration tests |
 
-- `governance_paths` — информационное поле, не проверяется в runtime. Документирует, какие файлы управляют governance.
-- `public_api` — зарезервировано для будущего использования. Принимается схемой, но не применяется; непустые значения выводят предупреждение.
-- `anchors` (в change contract) — декларативный intent на уровне anchors. Принимается схемой и выводится в structured output как `anchors.declaredByContract`; evidence trace rules can enforce that declared contract anchors are backed by changed evidence surfaces.
-- `trace_rules.kind = "must_resolve"` — enforced runtime rule: unresolved from-anchor values must resolve to at least one matching to-anchor value and are reported in `traceRuleResults`, `anchors.unresolved`, and structured violations.
-- `trace_rules.kind = "changed_files_require_evidence"` and `trace_rules.kind = "declared_anchors_require_evidence"` — enforced runtime evidence rules: changed requirement artifacts or declared contract anchors must be accompanied by at least one changed file in a configured evidence surface.
-- `overrides` (в change contract) — зарезервировано для будущего использования. Принимается схемой, но не применяется; непустые значения выводят предупреждение.
-- `repo-guard` пока не публикует комментарии к PR.
-- Паттерны `forbid_regex` компилируются и проверяются до начала enforcement — ошибки в regex выявляются на этапе загрузки policy.
+## Ограничения
 
-## Лицензия
-
-[Unlicense](LICENSE)
+- `repo-guard` не оставляет комментарии в PR.
+- `check-diff --contract` читает JSON файл; YAML contract поддерживается в
+  Markdown blocks PR/issue.
+- `paths.governance_paths`, `paths.public_api` и `contract.overrides` не
+  изменяют enforcement behavior.
+- Проверки работают по git diff и policy metadata; корректность продукта
+  остается задачей тестов, review и специализированных анализаторов.
