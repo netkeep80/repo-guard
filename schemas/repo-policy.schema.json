@@ -130,6 +130,44 @@
         }
       }
     },
+    "new_file_classes": {
+      "type": "object",
+      "description": "Named classes for newly added files mapped to one or more path globs. A new file can match multiple classes.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "minItems": 1
+      }
+    },
+    "new_file_rules": {
+      "type": "object",
+      "description": "Allowed new-file classes and per-class budgets for each named change class.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["allow_classes"],
+        "additionalProperties": false,
+        "properties": {
+          "allow_classes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "max_per_class": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "max_new_files": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
     "content_rules": {
       "type": "array",
       "items": {

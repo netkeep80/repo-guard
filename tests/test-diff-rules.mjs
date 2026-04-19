@@ -12,6 +12,8 @@ import {
   checkMustNotTouch,
   detectTouchedSurfaces,
   checkSurfaceMatrix,
+  classifyNewFiles,
+  checkNewFileRules,
 } from "../src/diff-checker.mjs";
 
 let failures = 0;
@@ -404,6 +406,110 @@ expect("10. missing change_class message", missingClassResult.message, "surface_
 const unknownClassResult = checkSurfaceMatrix(surfaceFiles, surfaces, surfaceMatrix, "release");
 expect("10. undefined change_class fails", unknownClassResult.ok, false);
 expect("10. undefined change_class is reported", unknownClassResult.change_class, "release");
+
+// --- 11. new file classes ---
+
+const newFileClassFiles = [
+  { path: "src/core.mjs", addedLines: ["code"], deletedLines: [], status: "modified" },
+  { path: "tests/core.test.mjs", addedLines: ["test"], deletedLines: [], status: "added" },
+  { path: "changelog.d/core.md", addedLines: ["note"], deletedLines: [], status: "added" },
+  { path: "single_include/core.h", addedLines: ["generated"], deletedLines: [], status: "added" },
+  { path: "scratch.txt", addedLines: ["temp"], deletedLines: [], status: "added" },
+];
+
+const newFileClasses = {
+  test: ["tests/**"],
+  changelog_fragment: ["changelog.d/*.md"],
+  generated: ["single_include/**"],
+};
+
+const classifiedNewFiles = classifyNewFiles(newFileClassFiles, newFileClasses);
+expect("11. classifies only added files", classifiedNewFiles.new_files.length, 4);
+expect("11. detects test class", classifiedNewFiles.files_by_class.test[0], "tests/core.test.mjs");
+expect("11. reports unclassified new file", classifiedNewFiles.unclassified_files[0], "scratch.txt");
+expect("11. ignores modified files for classification", classifiedNewFiles.new_files.includes("src/core.mjs"), false);
+
+const newFileRules = {
+  "kernel-hardening": {
+    allow_classes: ["test", "changelog_fragment"],
+    max_per_class: {
+      test: 2,
+      changelog_fragment: 1,
+    },
+  },
+  "docs-cleanup": {
+    allow_classes: [],
+    max_new_files: 0,
+  },
+  "generated-refresh": {
+    allow_classes: ["generated"],
+    max_per_class: {
+      generated: 1,
+    },
+  },
+};
+
+const allowedTypedNewFiles = [
+  { path: "tests/core.test.mjs", addedLines: ["test"], deletedLines: [], status: "added" },
+  { path: "changelog.d/core.md", addedLines: ["note"], deletedLines: [], status: "added" },
+];
+
+const allowedNewFileResult = checkNewFileRules(
+  allowedTypedNewFiles,
+  newFileClasses,
+  newFileRules,
+  "kernel-hardening"
+);
+expect("11. allowed new file classes pass", allowedNewFileResult.ok, true);
+expect("11. reports declared new-file change_class", allowedNewFileResult.change_class, "kernel-hardening");
+
+const disallowedNewFileResult = checkNewFileRules(
+  newFileClassFiles,
+  newFileClasses,
+  newFileRules,
+  "kernel-hardening"
+);
+expect("11. rejects disallowed new file class", disallowedNewFileResult.ok, false);
+expect("11. reports generated class violation", disallowedNewFileResult.violating_classes[0], "generated");
+expect("11. failure names offending generated file", disallowedNewFileResult.details.some((d) => d.includes("single_include/core.h")), true);
+expect("11. failure names unclassified file", disallowedNewFileResult.details.some((d) => d.includes("scratch.txt")), true);
+
+const tooManyTestsResult = checkNewFileRules(
+  [
+    { path: "tests/a.test.mjs", addedLines: ["test"], deletedLines: [], status: "added" },
+    { path: "tests/b.test.mjs", addedLines: ["test"], deletedLines: [], status: "added" },
+  ],
+  newFileClasses,
+  {
+    "kernel-hardening": {
+      allow_classes: ["test"],
+      max_per_class: { test: 1 },
+    },
+  },
+  "kernel-hardening"
+);
+expect("11. enforces max_per_class", tooManyTestsResult.ok, false);
+expect("11. max_per_class reports class", tooManyTestsResult.class_budget_violations[0].class, "test");
+
+const docsCleanupResult = checkNewFileRules(
+  allowedTypedNewFiles,
+  newFileClasses,
+  newFileRules,
+  "docs-cleanup"
+);
+expect("11. per-change max_new_files can forbid all new files", docsCleanupResult.ok, false);
+expect("11. per-change max_new_files reports actual", docsCleanupResult.actual, 2);
+
+expect(
+  "11. new file rules require change_class when new files exist",
+  checkNewFileRules(allowedTypedNewFiles, newFileClasses, newFileRules, null).ok,
+  false
+);
+expect(
+  "11. new file rules pass when no new files exist without change_class",
+  checkNewFileRules([{ path: "src/core.mjs", addedLines: ["code"], deletedLines: [], status: "modified" }], newFileClasses, newFileRules, null).ok,
+  true
+);
 
 // --- Summary ---
 

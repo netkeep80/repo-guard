@@ -54,6 +54,7 @@ Policy engine для репозитория: формализует правил
 | Max new files | Ограничивает общее количество новых файлов |
 | Max net added lines | Ограничивает `added − deleted` строк |
 | Surface debt | Проверяет объявленный `surface_debt`, если contract явно описывает временный рост |
+| New file rules | Проверяет классы новых файлов и per-class бюджеты для объявленного `change_class` |
 | Co-change rules | Если изменён X, должен быть изменён и Y |
 | Surface matrix | Проверяет, что объявленный `change_class` трогает только разрешённые surface-классы |
 | Content rules | Запрещает regex-паттерны в добавленных строках |
@@ -475,6 +476,7 @@ Diff analysis: 3 file(s) changed
   PASS: canonical-docs-budget
   PASS: max-new-files
   PASS: max-net-added-lines
+  PASS: new-file-rules
   PASS: cochange-rules
   PASS: content-rules
   PASS: must-touch
@@ -499,6 +501,61 @@ Result: passed (mode: blocking; exit code 0)
   FAIL: cochange: src/** -> tests/**
     must_touch: tests/**
 ```
+
+## Typed New File Classes
+
+Глобальный `diff_rules.max_new_files` остаётся полезным верхним лимитом, но он не различает смысл новых файлов. Для многих репозиториев новый test file, generated artifact, canonical doc и changelog fragment имеют разный риск. `new_file_classes` и `new_file_rules` позволяют описать это явно:
+
+```json
+{
+  "new_file_classes": {
+    "test": ["tests/**"],
+    "canonical_doc": ["docs/**", "README.md"],
+    "generated": ["single_include/**"],
+    "changelog_fragment": ["changelog.d/*.md"],
+    "script": ["scripts/**"]
+  },
+  "new_file_rules": {
+    "docs-cleanup": {
+      "allow_classes": [],
+      "max_new_files": 0
+    },
+    "kernel-hardening": {
+      "allow_classes": ["test", "changelog_fragment"],
+      "max_per_class": {
+        "test": 2,
+        "changelog_fragment": 1
+      }
+    },
+    "generated-refresh": {
+      "allow_classes": ["generated", "changelog_fragment"],
+      "max_per_class": {
+        "generated": 20,
+        "changelog_fragment": 1
+      }
+    }
+  }
+}
+```
+
+`new_file_rules` проверяет только файлы со статусом `added`; изменения существующих файлов остаются за `surface_matrix`, `cochange_rules` и другими проверками. Если policy включает `new_file_rules`, diff с новыми файлами должен иметь `change_class` в contract или через `--change-class`. Каждая запись `new_file_rules` должна явно задавать `allow_classes`; пустой список `[]` означает намеренный запрет всех классов новых файлов.
+
+Пример: `kernel-hardening` может добавить до двух test files и один changelog fragment, но не может незаметно добавить generated artifact или новый design document. Это точнее, чем плоский `max_new_files: 3`: лимит допускает полезные тесты, но всё ещё блокирует неожиданные классы файлов.
+
+При нарушении output называет offending file, detected class и нарушенное правило:
+
+```text
+  FAIL: new-file-rules
+    change_class "kernel-hardening" cannot add new-file classes: generated
+    change_class: kernel-hardening
+    new_files: changelog.d/core.md, single_include/core.h, tests/core.test.mjs
+    allowed_classes: changelog_fragment, test
+    touched_classes: changelog_fragment, generated, test
+    violating_classes: generated
+    class generated is not allowed by new_file_rules["kernel-hardening"].allow_classes; files: single_include/core.h
+```
+
+Файлы, которые не совпали ни с одним glob из `new_file_classes`, считаются unclassified и тоже fail, когда `new_file_rules` активны. Старое поведение `max_new_files` не меняется: если `new_file_classes` и `new_file_rules` отсутствуют, repo-guard продолжает применять только плоские budgets.
 
 ## Ownership-aware surfaces
 

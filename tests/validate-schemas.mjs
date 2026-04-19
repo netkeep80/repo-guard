@@ -49,6 +49,21 @@ expect("old-form content_rules (pattern/severity/message) fails schema", validat
 const invalidOpPaths = loadJSON(resolve(root, "tests/fixtures/invalid-operational-paths.json"));
 expect("invalid operational_paths (string instead of array) fails schema", validatePolicy(invalidOpPaths), false);
 
+const missingAllowClassesPolicy = {
+  change_classes: ["kernel-hardening"],
+  new_file_classes: {
+    test: ["tests/**"],
+  },
+  new_file_rules: {
+    "kernel-hardening": {
+      max_per_class: {
+        test: 1,
+      },
+    },
+  },
+};
+expect("new_file_rules without allow_classes fails schema", validatePolicy(missingAllowClassesPolicy), false);
+
 // Contract tests
 const validContract = loadJSON(resolve(root, "tests/fixtures/valid-contract.json"));
 expect("valid-contract.json passes schema", validateContract(validContract), true);
