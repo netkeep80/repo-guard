@@ -538,7 +538,7 @@ Result: passed (mode: blocking; exit code 0)
 }
 ```
 
-`new_file_rules` проверяет только файлы со статусом `added`; изменения существующих файлов остаются за `surface_matrix`, `cochange_rules` и другими проверками. Если policy включает `new_file_rules`, diff с новыми файлами должен иметь `change_class` в contract или через `--change-class`.
+`new_file_rules` проверяет только файлы со статусом `added`; изменения существующих файлов остаются за `surface_matrix`, `cochange_rules` и другими проверками. Если policy включает `new_file_rules`, diff с новыми файлами должен иметь `change_class` в contract или через `--change-class`. Каждая запись `new_file_rules` должна явно задавать `allow_classes`; пустой список `[]` означает намеренный запрет всех классов новых файлов.
 
 Пример: `kernel-hardening` может добавить до двух test files и один changelog fragment, но не может незаметно добавить generated artifact или новый design document. Это точнее, чем плоский `max_new_files: 3`: лимит допускает полезные тесты, но всё ещё блокирует неожиданные классы файлов.
 

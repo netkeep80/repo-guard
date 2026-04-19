@@ -92,6 +92,13 @@ export function compileNewFilePolicy(policy) {
       });
     }
 
+    if (!Object.hasOwn(rule, "allow_classes")) {
+      errors.push({
+        change_class: changeClass,
+        message: `new_file_rules["${changeClass}"].allow_classes is required; use [] to forbid all new-file classes`,
+      });
+    }
+
     for (const fileClass of rule.allow_classes || []) {
       if (!classNames.has(fileClass)) {
         errors.push({

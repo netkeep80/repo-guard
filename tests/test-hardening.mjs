@@ -168,6 +168,40 @@ describe("new file policy compilation", () => {
     assert.equal(errors.length, 1);
     assert.ok(errors[0].message.includes("change_classes"));
   });
+
+  it("requires explicit allow_classes in every rule", () => {
+    const errors = compileNewFilePolicy({
+      new_file_classes: {
+        test: ["tests/**"],
+      },
+      change_classes: ["kernel-hardening"],
+      new_file_rules: {
+        "kernel-hardening": {
+          max_per_class: {
+            test: 1,
+          },
+        },
+      },
+    });
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("allow_classes is required"));
+  });
+
+  it("accepts empty allow_classes as explicit deny-all semantics", () => {
+    const errors = compileNewFilePolicy({
+      new_file_classes: {
+        test: ["tests/**"],
+      },
+      change_classes: ["docs-cleanup"],
+      new_file_rules: {
+        "docs-cleanup": {
+          allow_classes: [],
+          max_new_files: 0,
+        },
+      },
+    });
+    assert.equal(errors.length, 0);
+  });
 });
 
 describe("overrides reserved semantics", () => {

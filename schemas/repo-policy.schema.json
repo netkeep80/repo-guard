@@ -146,6 +146,7 @@
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
+        "required": ["allow_classes"],
         "additionalProperties": false,
         "properties": {
           "allow_classes": {
