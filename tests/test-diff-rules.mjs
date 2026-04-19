@@ -5,6 +5,7 @@ import {
   checkCanonicalDocsBudget,
   checkNewFilesBudget,
   checkNetAddedLinesBudget,
+  checkSurfaceDebt,
   checkCochangeRules,
   checkContentRules,
   checkMustTouch,
@@ -144,6 +145,39 @@ const shrinkFiles = [
 ];
 expect("4. negative net always passes", checkNetAddedLinesBudget(shrinkFiles, 0).ok, true);
 expect("4. negative net actual", checkNetAddedLinesBudget(shrinkFiles, 0).actual, -15);
+
+// --- 4b. Surface debt validates temporary growth declarations ---
+
+const growthDebt = {
+  kind: "temporary_growth",
+  reason: "Introduce extraction seam before removing duplicate path",
+  expected_delta: {
+    max_new_files: 1,
+    max_net_added_lines: 60,
+  },
+  repayment_issue: 123,
+};
+
+const growthFiles = [
+  { path: "src/extract.mjs", addedLines: new Array(50).fill("new"), deletedLines: [], status: "added" },
+];
+
+expect("4b. undeclared surface growth passes by default", checkSurfaceDebt(growthFiles, null).ok, true);
+expect("4b. undeclared surface growth status", checkSurfaceDebt(growthFiles, null).status, "undeclared");
+expect("4b. declared surface debt passes", checkSurfaceDebt(growthFiles, growthDebt).ok, true);
+expect("4b. declared surface debt status", checkSurfaceDebt(growthFiles, growthDebt).status, "declared");
+expect(
+  "4b. declared debt exceeded fails",
+  checkSurfaceDebt(growthFiles, { ...growthDebt, expected_delta: { max_new_files: 0, max_net_added_lines: 10 } }).status,
+  "declared_debt_exceeded"
+);
+expect(
+  "4b. declared debt missing repayment fails",
+  checkSurfaceDebt(growthFiles, { ...growthDebt, repayment_issue: undefined }).status,
+  "missing_repayment_target"
+);
+expect("4b. shrink needs no surface debt", checkSurfaceDebt(shrinkFiles, null).ok, true);
+expect("4b. shrink surface debt status", checkSurfaceDebt(shrinkFiles, null).status, "not_needed");
 
 // --- 5. Co-change rule violation ---
 

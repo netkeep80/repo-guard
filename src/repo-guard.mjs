@@ -12,6 +12,7 @@ import {
   checkCanonicalDocsBudget,
   checkNewFilesBudget,
   checkNetAddedLinesBudget,
+  checkSurfaceDebt,
   checkCochangeRules,
   checkSurfaceMatrix,
   checkContentRules,
@@ -239,6 +240,7 @@ function runCheckDiff(roots, args) {
   reporter.report("canonical-docs-budget", checkCanonicalDocsBudget(files, policy.paths.canonical_docs, maxNewDocs));
   reporter.report("max-new-files", checkNewFilesBudget(files, maxNewFiles));
   reporter.report("max-net-added-lines", checkNetAddedLinesBudget(files, maxNetAddedLines));
+  reporter.report("surface-debt", checkSurfaceDebt(files, contract?.surface_debt));
 
   if (policy.surface_matrix) {
     const declaredChangeClass = cliChangeClass || contract?.change_class || null;

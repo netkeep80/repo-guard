@@ -53,6 +53,7 @@ Policy engine для репозитория: формализует правил
 | Canonical docs budget | Ограничивает количество новых `.md` файлов |
 | Max new files | Ограничивает общее количество новых файлов |
 | Max net added lines | Ограничивает `added − deleted` строк |
+| Surface debt | Проверяет объявленный `surface_debt`, если contract явно описывает временный рост |
 | Co-change rules | Если изменён X, должен быть изменён и Y |
 | Surface matrix | Проверяет, что объявленный `change_class` трогает только разрешённые surface-классы |
 | Content rules | Запрещает regex-паттерны в добавленных строках |
@@ -435,6 +436,13 @@ scope:
 budgets:
   max_new_files: 0
   max_new_docs: 0
+surface_debt:
+  kind: temporary_growth
+  reason: Introduce extraction path before removing duplicated code
+  expected_delta:
+    max_new_files: 1
+    max_net_added_lines: 60
+  repayment_issue: 123
 must_touch:
   - src/pagination.mjs
 must_not_touch:
@@ -445,7 +453,9 @@ expected_effects:
 ```
 ````
 
-Contract говорит: это bugfix, который должен затронуть `src/pagination.mjs`, не должен трогать схемы и policy, и не должен создавать новых файлов.
+Contract говорит: это bugfix, который должен затронуть `src/pagination.mjs`, не должен трогать схемы и policy, и не должен создавать новых файлов. Если diff всё же временно увеличивает поверхность репозитория, `surface_debt` фиксирует причину, ожидаемый рост и issue, где долг будет погашен.
+
+`surface_debt` проверяется только когда contract явно его объявляет. Проверка сравнивает declaration с фактическим ростом diff: количеством новых файлов и `added - deleted` строк. Если рост есть, но `surface_debt` не объявлен, repo-guard сообщает не блокирующий статус `undeclared`; если фактический рост больше `expected_delta`, статус будет `declared_debt_exceeded`; если нет `repayment_issue`, статус будет `missing_repayment_target`.
 
 Для существующих PR сохраняется совместимость с JSON-блоком ` ```repo-guard-json `; оба формата дают одну и ту же нормализованную модель contract перед schema validation.
 

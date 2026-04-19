@@ -145,6 +145,46 @@ function makeSurfaceRepo() {
   };
 }
 
+function makeSurfaceDebtRepo(contract) {
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-debt-"));
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+
+  const policy = {
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 5,
+      max_net_added_lines: 500,
+    },
+    content_rules: [],
+    cochange_rules: [],
+  };
+
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
+  if (contract) writeFileSync(join(dir, "contract.json"), JSON.stringify(contract, null, 2));
+  writeFileSync(join(dir, "README.md"), "# Test\n");
+  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+
+  execSync("mkdir -p src", { cwd: dir, stdio: "pipe" });
+  writeFileSync(join(dir, "src", "growth.mjs"), `${new Array(12).fill("export const value = 1;").join("\n")}\n`);
+  execSync("git add -A && git commit -m growth", { cwd: dir, stdio: "pipe" });
+
+  return {
+    dir,
+    contractPath: contract ? "contract.json" : null,
+    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
+    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
+  };
+}
+
 function makeUnclassifiedOnlySurfaceRepo() {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-unclassified-"));
   execSync("git init", { cwd: dir, stdio: "pipe" });
@@ -181,9 +221,10 @@ function makeUnclassifiedOnlySurfaceRepo() {
 
   writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
   writeFileSync(join(dir, "README.md"), "# Test\n");
+  execSync("mkdir -p scripts", { cwd: dir, stdio: "pipe" });
+  writeFileSync(join(dir, "scripts", "tool.mjs"), "export const oldTool = true;\nexport const removed = true;\n");
   execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
 
-  execSync("mkdir -p scripts", { cwd: dir, stdio: "pipe" });
   writeFileSync(join(dir, "scripts", "tool.mjs"), "export const tool = true;\n");
   execSync("git add -A && git commit -m script", { cwd: dir, stdio: "pipe" });
 
@@ -290,6 +331,107 @@ console.log("\n--- check-diff honors allow_unclassified_files policy switch ---"
   expect("allow_unclassified_files has no violations", parsed?.violations.length, 0);
 
   rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- check-diff reports surface debt status in JSON output ---");
+{
+  const contract = {
+    change_type: "feature",
+    scope: ["src/**"],
+    budgets: {},
+    surface_debt: {
+      kind: "temporary_growth",
+      reason: "Introduce extraction seam before removing duplicated path",
+      expected_delta: {
+        max_new_files: 1,
+        max_net_added_lines: 20,
+      },
+      repayment_issue: 123,
+    },
+    must_touch: [],
+    must_not_touch: [],
+    expected_effects: ["Temporary growth is explicit and repayable"],
+  };
+  const repo = makeSurfaceDebtRepo(contract);
+  const result = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", repo.base,
+    "--head", repo.head,
+    "--contract", repo.contractPath,
+  ]);
+
+  expect("declared surface debt exit code", result.code, 0);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+    expect("surface debt stdout is valid json", true, true);
+  } catch (e) {
+    expect("surface debt stdout is valid json", e.message, "valid json");
+  }
+  const debtResult = parsed?.ruleResults.find((r) => r.rule === "surface-debt");
+  expect("surface debt rule passes", debtResult?.ok, true);
+  expect("surface debt rule exposes declared status",
+    debtResult?.details.includes("status: declared"),
+    true);
+
+  rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- check-diff treats undeclared growth as non-blocking and enforces declared debt ---");
+{
+  const undeclaredRepo = makeSurfaceDebtRepo(null);
+  const undeclared = runGuard([
+    "--repo-root", undeclaredRepo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", undeclaredRepo.base,
+    "--head", undeclaredRepo.head,
+  ]);
+  expect("undeclared growth exit code", undeclared.code, 0);
+  const undeclaredParsed = JSON.parse(undeclared.stdout);
+  expect("undeclared growth result passes", undeclaredParsed.ok, true);
+  expect("undeclared growth status",
+    undeclaredParsed.ruleResults.find((r) => r.rule === "surface-debt")?.details.includes("status: undeclared"),
+    true);
+  expect("undeclared growth has no violation",
+    undeclaredParsed.violations.some((v) => v.rule === "surface-debt"),
+    false);
+  rmSync(undeclaredRepo.dir, { recursive: true });
+
+  const exceededContract = {
+    change_type: "feature",
+    scope: ["src/**"],
+    budgets: {},
+    surface_debt: {
+      kind: "temporary_growth",
+      reason: "Introduce extraction seam before removing duplicated path",
+      expected_delta: {
+        max_new_files: 0,
+        max_net_added_lines: 1,
+      },
+      repayment_issue: 123,
+    },
+    must_touch: [],
+    must_not_touch: [],
+    expected_effects: ["Temporary growth is explicit and repayable"],
+  };
+  const exceededRepo = makeSurfaceDebtRepo(exceededContract);
+  const exceeded = runGuard([
+    "--repo-root", exceededRepo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", exceededRepo.base,
+    "--head", exceededRepo.head,
+    "--contract", exceededRepo.contractPath,
+  ]);
+  expect("declared debt exceeded exit code", exceeded.code, 1);
+  const exceededParsed = JSON.parse(exceeded.stdout);
+  expect("declared debt exceeded status",
+    exceededParsed.violations.find((v) => v.rule === "surface-debt")?.status,
+    "declared_debt_exceeded");
+  rmSync(exceededRepo.dir, { recursive: true });
 }
 
 console.log("\n--- check-diff --format summary emits GitHub-friendly concise summary ---");

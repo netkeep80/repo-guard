@@ -153,10 +153,10 @@ function expect(label, actual, expected) {
     cochange_rules: [],
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "hello.txt"), "hello");
+  writeFileSync(join(tmp, "hello.txt"), "hello\nworld\n");
   execSync("git add -A && git commit -m init", { cwd: tmp });
 
-  writeFileSync(join(tmp, "world.txt"), "world");
+  writeFileSync(join(tmp, "hello.txt"), "hello\n");
   execSync("git add -A && git commit -m second", { cwd: tmp });
 
   try {
@@ -334,10 +334,10 @@ function expect(label, actual, expected) {
     cochange_rules: [],
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "hello.txt"), "hello");
+  writeFileSync(join(tmp, "hello.txt"), "hello\nworld\n");
   execSync("git add -A && git commit -m init", { cwd: tmp });
 
-  writeFileSync(join(tmp, "world.txt"), "world");
+  writeFileSync(join(tmp, "hello.txt"), "hello\n");
   execSync("git add -A && git commit -m second", { cwd: tmp });
 
   try {
@@ -435,10 +435,10 @@ function expect(label, actual, expected) {
     cochange_rules: [],
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "a.txt"), "a");
+  writeFileSync(join(tmp, "a.txt"), "a\nb\n");
   execSync("git add -A && git commit -m init", { cwd: tmp });
 
-  writeFileSync(join(tmp, "b.txt"), "b");
+  writeFileSync(join(tmp, "a.txt"), "a\n");
   execSync("git add -A && git commit -m second", { cwd: tmp });
 
   try {
@@ -521,10 +521,10 @@ function expect(label, actual, expected) {
     cochange_rules: [],
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "a.txt"), "a");
+  writeFileSync(join(tmp, "a.txt"), "a\nb\n");
   execSync("git add -A && git commit -m init", { cwd: tmp });
 
-  writeFileSync(join(tmp, "b.txt"), "b");
+  writeFileSync(join(tmp, "a.txt"), "a\n");
   execSync("git add -A && git commit -m second", { cwd: tmp });
 
   try {
