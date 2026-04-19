@@ -37,6 +37,33 @@
         }
       }
     },
+    "integration": {
+      "type": "object",
+      "description": "Declarative downstream integration layer for documenting which workflows run repo-guard, which templates carry contract blocks, which docs explain the contract, and which profiles are documented. Accepted as policy metadata; file parsing and enforcement are outside this schema layer.",
+      "additionalProperties": false,
+      "properties": {
+        "workflows": {
+          "type": "array",
+          "description": "Expected automation entry points that invoke repo-guard.",
+          "items": { "$ref": "#/definitions/integration_workflow" }
+        },
+        "templates": {
+          "type": "array",
+          "description": "Expected repository templates that carry or require repo-guard contract blocks.",
+          "items": { "$ref": "#/definitions/integration_template" }
+        },
+        "docs": {
+          "type": "array",
+          "description": "Documentation files that should explain repo-guard workflows, contracts, anchors, or profiles.",
+          "items": { "$ref": "#/definitions/integration_doc" }
+        },
+        "profiles": {
+          "type": "array",
+          "description": "Documented policy/profile contracts exposed to downstream contributors.",
+          "items": { "$ref": "#/definitions/integration_profile" }
+        }
+      }
+    },
     "paths": {
       "type": "object",
       "required": ["forbidden", "canonical_docs", "governance_paths"],
@@ -342,10 +369,68 @@
     }
   },
   "definitions": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
     "non_empty_string_array": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "minItems": 1
+    },
+    "integration_workflow": {
+      "type": "object",
+      "required": ["id", "kind", "path", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/non_empty_string" },
+        "kind": {
+          "type": "string",
+          "enum": ["github_actions"]
+        },
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-local role for this workflow, for example repo_guard_pr_gate."
+        }
+      }
+    },
+    "integration_template": {
+      "type": "object",
+      "required": ["id", "kind", "path", "requires_contract_block"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/non_empty_string" },
+        "kind": {
+          "type": "string",
+          "enum": ["markdown", "github_issue_form"]
+        },
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "requires_contract_block": {
+          "type": "boolean",
+          "description": "Whether the template is expected to include a repo-guard contract block."
+        }
+      }
+    },
+    "integration_doc": {
+      "type": "object",
+      "required": ["id", "path", "must_mention"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/non_empty_string" },
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "must_mention": { "$ref": "#/definitions/non_empty_string_array" }
+      }
+    },
+    "integration_profile": {
+      "type": "object",
+      "required": ["id", "doc_path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/non_empty_string" },
+        "doc_path": { "$ref": "#/definitions/non_empty_string" }
+      }
     },
     "trace_rule": {
       "oneOf": [

@@ -260,6 +260,7 @@ jobs:
 | `advisory_text_rules` | Предупреждает о похожей Markdown-документации, но не блокирует |
 | `anchors` | Извлекает якоря трассировки из regex или источников JSON-полей |
 | `trace_rules` | Проверяет разрешение якорей и наличие файлов-подтверждений |
+| `integration` | Декларативно описывает downstream-интеграцию: workflows, templates, docs и profiles |
 
 Зарезервированные или информационные поля:
 
@@ -273,6 +274,53 @@ jobs:
 областям, файл без подходящей области по умолчанию считается нарушением. Для
 `surface_matrix` можно явно разрешить частичное покрытие через
 `allow_unclassified_files: true`.
+
+## Интеграционный слой
+
+`integration` описывает, как downstream-репозиторий должен подключать
+`repo-guard`: какой workflow запускает проверку, какие шаблоны содержат
+contract block, какие документы объясняют contract/profile/anchor-практики и
+где описаны профили. Это декларативный слой политики. Текущая версия принимает
+и валидирует форму секции, но не читает YAML/Markdown-файлы и не применяет эти
+правила как runtime enforcement.
+
+Пример:
+
+```json
+{
+  "integration": {
+    "workflows": [
+      {
+        "id": "pr-gate",
+        "kind": "github_actions",
+        "path": ".github/workflows/repo-guard.yml",
+        "role": "repo_guard_pr_gate"
+      }
+    ],
+    "templates": [
+      {
+        "id": "pull-request-template",
+        "kind": "markdown",
+        "path": ".github/PULL_REQUEST_TEMPLATE.md",
+        "requires_contract_block": true
+      }
+    ],
+    "docs": [
+      {
+        "id": "readme",
+        "path": "README.md",
+        "must_mention": ["repo-guard", "anchors.affects"]
+      }
+    ],
+    "profiles": [
+      {
+        "id": "requirements-strict",
+        "doc_path": "docs/requirements-strict-profile.md"
+      }
+    ]
+  }
+}
+```
 
 ## Контракт изменения
 
@@ -463,5 +511,7 @@ node src/repo-guard.mjs check-diff --format summary
   Markdown-блоках PR или issue.
 - `paths.governance_paths`, `paths.public_api` и `contract.overrides` не
   изменяют поведение применения правил.
+- `integration` описывает ожидаемую интеграцию, но не проверяет содержимое
+  workflow, template или docs файлов.
 - Проверки работают по git diff и метаданным политики; корректность продукта
   остается задачей тестов, review и специализированных анализаторов.

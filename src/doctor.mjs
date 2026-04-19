@@ -2,7 +2,7 @@ import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { compileAnchorPolicy, compileForbidRegex } from "./policy-compiler.mjs";
+import { compileAnchorPolicy, compileForbidRegex, compileIntegrationPolicy } from "./policy-compiler.mjs";
 
 const PASS = "PASS";
 const WARN = "WARN";
@@ -101,6 +101,12 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
     if (anchorErrors.length > 0) {
       const details = anchorErrors.map(e => e.message).join("; ");
       return { name: "repo-policy.json", status: FAIL, message: `Invalid anchor policy: ${details}`, hint: "Fix anchors and trace_rules references in repo-policy.json" };
+    }
+
+    const integrationErrors = compileIntegrationPolicy(policy);
+    if (integrationErrors.length > 0) {
+      const details = integrationErrors.map(e => e.message).join("; ");
+      return { name: "repo-policy.json", status: FAIL, message: `Invalid integration policy: ${details}`, hint: "Fix duplicate integration ids in repo-policy.json" };
     }
 
     return { name: "repo-policy.json", status: PASS, message: `Valid (${policy.repository_kind}, format ${policy.policy_format_version})` };

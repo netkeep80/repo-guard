@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   compileAnchorPolicy,
   compileForbidRegex,
+  compileIntegrationPolicy,
   compileNewFilePolicy,
   compileSurfacePolicy,
   warnReservedContractFields,
@@ -327,6 +328,83 @@ describe("anchor policy compilation", () => {
 
   it("keeps policies without anchors and trace_rules compatible", () => {
     const errors = compileAnchorPolicy({});
+    assert.equal(errors.length, 0);
+  });
+});
+
+describe("integration policy compilation", () => {
+  it("keeps policies without integration compatible", () => {
+    const errors = compileIntegrationPolicy({});
+    assert.equal(errors.length, 0);
+  });
+
+  it("accepts unique ids within each integration section", () => {
+    const errors = compileIntegrationPolicy({
+      integration: {
+        workflows: [
+          {
+            id: "pr-gate",
+            kind: "github_actions",
+            path: ".github/workflows/repo-guard.yml",
+            role: "repo_guard_pr_gate",
+          },
+        ],
+        templates: [
+          {
+            id: "pull-request-template",
+            kind: "markdown",
+            path: ".github/PULL_REQUEST_TEMPLATE.md",
+            requires_contract_block: true,
+          },
+        ],
+        docs: [
+          {
+            id: "readme",
+            path: "README.md",
+            must_mention: ["repo-guard"],
+          },
+        ],
+        profiles: [
+          {
+            id: "requirements-strict",
+            doc_path: "docs/requirements-strict-profile.md",
+          },
+        ],
+      },
+    });
+    assert.equal(errors.length, 0);
+  });
+
+  it("rejects duplicate ids within an integration section", () => {
+    const errors = compileIntegrationPolicy({
+      integration: {
+        workflows: [
+          {
+            id: "pr-gate",
+            kind: "github_actions",
+            path: ".github/workflows/repo-guard.yml",
+            role: "repo_guard_pr_gate",
+          },
+          {
+            id: "pr-gate",
+            kind: "github_actions",
+            path: ".github/workflows/repo-guard-advisory.yml",
+            role: "repo_guard_advisory",
+          },
+        ],
+      },
+    });
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].section, "workflows");
+    assert.ok(errors[0].message.includes("duplicates"));
+  });
+
+  it("leaves malformed integration shapes to schema validation", () => {
+    const errors = compileIntegrationPolicy({
+      integration: {
+        workflows: [null, "invalid"],
+      },
+    });
     assert.equal(errors.length, 0);
   });
 });
