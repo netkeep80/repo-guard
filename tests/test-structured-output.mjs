@@ -394,6 +394,11 @@ function makeAnchorAwareRepo() {
             { kind: "regex", glob: "src/**", pattern: "@req\\s+([A-Z]+-[0-9]+)" },
           ],
         },
+        doc_req_ref: {
+          sources: [
+            { kind: "regex", glob: "docs/**/*.md", pattern: "\\[([A-Z]+-[0-9]+)\\]" },
+          ],
+        },
       },
     },
     trace_rules: [
@@ -401,6 +406,12 @@ function makeAnchorAwareRepo() {
         id: "code-refs-must-resolve",
         kind: "must_resolve",
         from_anchor_type: "code_req_ref",
+        to_anchor_type: "requirement_id",
+      },
+      {
+        id: "doc-refs-must-resolve",
+        kind: "must_resolve",
+        from_anchor_type: "doc_req_ref",
         to_anchor_type: "requirement_id",
       },
     ],
@@ -415,6 +426,7 @@ function makeAnchorAwareRepo() {
     anchors: {
       affects: ["FR-001"],
       implements: ["FR-999"],
+      verifies: ["FR-404"],
     },
     must_touch: [],
     must_not_touch: [],
@@ -426,9 +438,10 @@ function makeAnchorAwareRepo() {
   writeFileSync(join(dir, "README.md"), "# Test\n");
   execSync("mkdir -p requirements", { cwd: dir, stdio: "pipe" });
   writeFileSync(join(dir, "requirements", "fr-001.json"), JSON.stringify({ id: "FR-001", title: "Login" }));
+  writeFileSync(join(dir, "requirements", "fr-002.json"), JSON.stringify({ id: "FR-002", title: "Docs" }));
   execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
 
-  execSync("mkdir -p src", { cwd: dir, stdio: "pipe" });
+  execSync("mkdir -p docs src", { cwd: dir, stdio: "pipe" });
   writeFileSync(join(dir, "src", "feature.mjs"), [
     "export function feature() {",
     "  return true; // @req FR-001",
@@ -436,6 +449,7 @@ function makeAnchorAwareRepo() {
     "// @req FR-999",
     "",
   ].join("\n"));
+  writeFileSync(join(dir, "docs", "feature.md"), "Covers [FR-002] and [FR-404].\n");
   execSync("git add -A && git commit -m feature", { cwd: dir, stdio: "pipe" });
 
   return {
@@ -512,7 +526,7 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
     "--contract", repo.contractPath,
   ]);
 
-  expect("anchor diagnostics do not change exit semantics before trace enforcement", result.code, 0);
+  expect("unresolved trace diagnostics fail in blocking mode", result.code, 1);
   let parsed = null;
   try {
     parsed = JSON.parse(result.stdout);
@@ -538,19 +552,33 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
     "violations",
     "warnings",
   ]);
-  expect("anchor diagnostics count detected anchors", parsed?.anchors?.stats?.detected, 3);
-  expect("anchor diagnostics count changed anchors", parsed?.anchors?.stats?.changed, 2);
-  expect("anchor diagnostics count declared contract anchors", parsed?.anchors?.stats?.declaredByContract, 2);
-  expect("anchor diagnostics count unresolved anchors", parsed?.anchors?.stats?.unresolved, 1);
+  expect("anchor diagnostics count detected anchors", parsed?.anchors?.stats?.detected, 6);
+  expect("anchor diagnostics count changed anchors", parsed?.anchors?.stats?.changed, 4);
+  expect("anchor diagnostics count declared contract anchors", parsed?.anchors?.stats?.declaredByContract, 3);
+  expect("anchor diagnostics count unresolved anchors", parsed?.anchors?.stats?.unresolved, 2);
   expect("anchor diagnostics expose declared contract affects", parsed?.anchors?.declaredByContract?.affects[0], "FR-001");
   expect("anchor diagnostics expose changed anchor file",
-    parsed?.anchors?.changed.every((anchor) => anchor.file === "src/feature.mjs"),
-    true);
-  expect("trace rule diagnostics include one result", parsed?.traceRuleResults?.length, 1);
-  expect("trace rule diagnostics report non-enforced unresolved status", parsed?.traceRuleResults?.[0]?.ok, false);
+    JSON.stringify(parsed?.anchors?.changed.map((anchor) => anchor.file).sort()),
+    JSON.stringify(["docs/feature.md", "docs/feature.md", "src/feature.mjs", "src/feature.mjs"]));
+  expect("trace rule diagnostics include both results", parsed?.traceRuleResults?.length, 2);
+  expect("trace rule diagnostics report unresolved status", parsed?.traceRuleResults?.[0]?.ok, false);
   expect("trace rule diagnostics report resolved value", parsed?.traceRuleResults?.[0]?.resolved[0]?.value, "FR-001");
   expect("trace rule diagnostics report unresolved value", parsed?.traceRuleResults?.[0]?.unresolved[0]?.value, "FR-999");
   expect("anchor unresolved list links back to rule", parsed?.anchors?.unresolved[0]?.rule, "code-refs-must-resolve");
+  expect("violations include code trace rule",
+    parsed?.violations.some((violation) =>
+      violation.rule === "trace-rule: code-refs-must-resolve" &&
+      violation.unresolved_anchors[0]?.value === "FR-999" &&
+      violation.unresolved_anchors[0]?.locations[0] === "src/feature.mjs:4:9"
+    ),
+    true);
+  expect("violations include doc trace rule",
+    parsed?.violations.some((violation) =>
+      violation.rule === "trace-rule: doc-refs-must-resolve" &&
+      violation.unresolved_anchors[0]?.value === "FR-404" &&
+      violation.unresolved_anchors[0]?.locations[0] === "docs/feature.md:1:22"
+    ),
+    true);
 
   const summary = runGuard([
     "--repo-root", repo.dir,
@@ -560,10 +588,12 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
     "--head", repo.head,
     "--contract", repo.contractPath,
   ]);
-  expect("anchor summary exit semantics", summary.code, 0);
-  expectIncludes("summary reports anchor totals", summary.output, "- Anchors: 3 detected, 2 changed, 2 declared, 1 unresolved");
+  expect("anchor summary exit semantics", summary.code, 1);
+  expectIncludes("summary reports anchor totals", summary.output, "- Anchors: 6 detected, 4 changed, 3 declared, 2 unresolved");
   expectIncludes("summary reports unresolved trace rule", summary.output, "code-refs-must-resolve");
   expectIncludes("summary reports unresolved anchor value", summary.output, "FR-999");
+  expectIncludes("summary reports doc trace rule", summary.output, "doc-refs-must-resolve");
+  expectIncludes("summary reports doc anchor value", summary.output, "FR-404");
 
   rmSync(repo.dir, { recursive: true });
 }

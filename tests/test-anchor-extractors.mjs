@@ -35,8 +35,8 @@ function makeReadFile(files) {
   };
 }
 
-function makePolicy(anchorTypes) {
-  return {
+function makePolicy(anchorTypes, traceRules = []) {
+  const policy = {
     policy_format_version: "0.3.0",
     repository_kind: "tooling",
     paths: {
@@ -56,6 +56,8 @@ function makePolicy(anchorTypes) {
     content_rules: [],
     cochange_rules: [],
   };
+  if (traceRules.length > 0) policy.trace_rules = traceRules;
+  return policy;
 }
 
 console.log("\n--- anchor extractors return normalized instances ---");
@@ -216,6 +218,173 @@ console.log("\n--- anchor extraction errors are predictable and reported by pipe
   expect("pipeline exposes formatted extraction errors",
     violation?.errors.some((error) => error.includes("requirements/bad.json")),
     true);
+}
+
+console.log("\n--- must_resolve trace rules enforce code and doc anchors ---");
+{
+  const traceRules = [
+    {
+      id: "code-refs-must-resolve",
+      kind: "must_resolve",
+      from_anchor_type: "code_req_ref",
+      to_anchor_type: "requirement_id",
+    },
+    {
+      id: "doc-refs-must-resolve",
+      kind: "must_resolve",
+      from_anchor_type: "doc_req_ref",
+      to_anchor_type: "requirement_id",
+    },
+  ];
+  const policy = makePolicy({
+    requirement_id: {
+      sources: [
+        { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
+      ],
+    },
+    code_req_ref: {
+      sources: [
+        { kind: "regex", glob: "src/**", pattern: "@req\\s+(FR-[0-9]+)" },
+      ],
+    },
+    doc_req_ref: {
+      sources: [
+        { kind: "regex", glob: "docs/**/*.md", pattern: "\\[(FR-[0-9]+)\\]" },
+      ],
+    },
+  }, traceRules);
+  const files = {
+    "requirements/fr-001.json": JSON.stringify({ id: "FR-001" }),
+    "requirements/fr-002.json": JSON.stringify({ id: "FR-002" }),
+    "src/feature.mjs": "export const feature = true; // @req FR-001\n// @req FR-404\n",
+    "docs/feature.md": "Covers [FR-002] and [FR-405].\n",
+  };
+  const diffText = [
+    "diff --git a/src/feature.mjs b/src/feature.mjs",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/src/feature.mjs",
+    "+export const feature = true; // @req FR-001",
+    "+// @req FR-404",
+    "diff --git a/docs/feature.md b/docs/feature.md",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/docs/feature.md",
+    "+Covers [FR-002] and [FR-405].",
+  ].join("\n");
+
+  const input = {
+    mode: "check-diff",
+    repositoryRoot: "/tmp/repo",
+    policy,
+    contract: null,
+    contractSource: "none",
+    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+    diffText,
+    trackedFiles: ["requirements/fr-001.json", "requirements/fr-002.json"],
+    readFile: makeReadFile(files),
+    initialChecks: [],
+  };
+  const result = runPolicyPipeline(input, { quiet: true });
+
+  expect("unresolved trace anchors fail blocking mode", result.ok, false);
+  expect("unresolved trace anchors set blocking exit code", result.exitCode, 1);
+  expect("multiple trace rule violations coexist",
+    result.violations
+      .filter((violation) => violation.rule.startsWith("trace-rule:"))
+      .map((violation) => violation.trace_rule)
+      .sort(),
+    ["code-refs-must-resolve", "doc-refs-must-resolve"]);
+
+  const codeViolation = result.violations.find((violation) => violation.trace_rule === "code-refs-must-resolve");
+  const docViolation = result.violations.find((violation) => violation.trace_rule === "doc-refs-must-resolve");
+  expect("code violation lists unresolved anchor value", codeViolation?.unresolved_anchors[0]?.value, "FR-404");
+  expect("code violation lists offending source file", codeViolation?.unresolved_anchors[0]?.locations[0], "src/feature.mjs:2:9");
+  expect("doc violation lists unresolved anchor value", docViolation?.unresolved_anchors[0]?.value, "FR-405");
+  expect("doc violation lists offending source file", docViolation?.unresolved_anchors[0]?.locations[0], "docs/feature.md:1:22");
+  expect("resolved trace values remain visible in diagnostics",
+    result.traceRuleResults.map((traceResult) => traceResult.resolved[0]?.value).sort(),
+    ["FR-001", "FR-002"]);
+
+  const advisoryResult = runPolicyPipeline({
+    ...input,
+    enforcement: { ok: true, mode: "advisory", source: "test", requested: "advisory" },
+  }, { quiet: true });
+  expect("unresolved trace anchors still mark advisory result failed", advisoryResult.ok, false);
+  expect("unresolved trace anchors keep advisory exit code zero", advisoryResult.exitCode, 0);
+  expect("unresolved trace anchors keep advisory enforced failures zero", advisoryResult.failed, 0);
+  expect("unresolved trace anchors remain counted as advisory violations", advisoryResult.violationCount, 2);
+}
+
+console.log("\n--- resolved must_resolve refs pass cleanly ---");
+{
+  const policy = makePolicy({
+    requirement_id: {
+      sources: [
+        { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
+      ],
+    },
+    code_req_ref: {
+      sources: [
+        { kind: "regex", glob: "src/**", pattern: "@req\\s+(FR-[0-9]+)" },
+      ],
+    },
+    doc_req_ref: {
+      sources: [
+        { kind: "regex", glob: "docs/**/*.md", pattern: "\\[(FR-[0-9]+)\\]" },
+      ],
+    },
+  }, [
+    {
+      id: "code-refs-must-resolve",
+      kind: "must_resolve",
+      from_anchor_type: "code_req_ref",
+      to_anchor_type: "requirement_id",
+    },
+    {
+      id: "doc-refs-must-resolve",
+      kind: "must_resolve",
+      from_anchor_type: "doc_req_ref",
+      to_anchor_type: "requirement_id",
+    },
+  ]);
+  const files = {
+    "requirements/fr-001.json": JSON.stringify({ id: "FR-001" }),
+    "requirements/fr-002.json": JSON.stringify({ id: "FR-002" }),
+    "src/feature.mjs": "export const feature = true; // @req FR-001\n",
+    "docs/feature.md": "Covers [FR-002].\n",
+  };
+  const diffText = [
+    "diff --git a/src/feature.mjs b/src/feature.mjs",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/src/feature.mjs",
+    "+export const feature = true; // @req FR-001",
+    "diff --git a/docs/feature.md b/docs/feature.md",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/docs/feature.md",
+    "+Covers [FR-002].",
+  ].join("\n");
+
+  const result = runPolicyPipeline({
+    mode: "check-diff",
+    repositoryRoot: "/tmp/repo",
+    policy,
+    contract: null,
+    contractSource: "none",
+    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+    diffText,
+    trackedFiles: ["requirements/fr-001.json", "requirements/fr-002.json"],
+    readFile: makeReadFile(files),
+    initialChecks: [],
+  }, { quiet: true });
+
+  expect("resolved trace anchors keep the run passing", result.ok, true);
+  expect("resolved trace anchors keep exit code zero", result.exitCode, 0);
+  expect("resolved trace anchors produce no trace violations",
+    result.violations.some((violation) => violation.rule.startsWith("trace-rule:")),
+    false);
 }
 
 console.log(`\n${failures === 0 ? "All anchor extractor tests passed" : `${failures} test(s) failed`}`);

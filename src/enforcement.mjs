@@ -216,6 +216,11 @@ function violationFromCheck(name, check) {
   if (check.failed_rules) violation.failed_rules = check.failed_rules;
   if (check.results) violation.results = check.results;
   if (check.matches) violation.matches = check.matches;
+  if (check.trace_rule) violation.trace_rule = check.trace_rule;
+  if (check.trace_kind) violation.trace_kind = check.trace_kind;
+  if (check.from_anchor_type) violation.from_anchor_type = check.from_anchor_type;
+  if (check.to_anchor_type) violation.to_anchor_type = check.to_anchor_type;
+  if (check.unresolved_anchors) violation.unresolved_anchors = check.unresolved_anchors;
   if (check.advisory) violation.advisory = true;
   if (check.unclassified_files && check.unclassified_files.length > 0) {
     violation.unclassified_files = check.unclassified_files;
