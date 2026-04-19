@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { buildPolicyFacts } from "../src/facts/input.mjs";
 import { runPolicyPipeline } from "../src/runtime/pipeline.mjs";
 
 let failures = 0;
@@ -65,17 +66,31 @@ function runEquivalentInput(extra = {}) {
   }, { quiet: true });
 }
 
+function buildEquivalentFacts(extra = {}) {
+  return buildPolicyFacts({
+    repositoryRoot: "/tmp/repo-guard-test",
+    policy,
+    contract: null,
+    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+    diffText,
+    trackedFiles: ["README.md", "src/existing.mjs"],
+    declaredChangeClass: null,
+    ...extra,
+  });
+}
+
 console.log("\n--- shared policy pipeline normalizes facts and checks ---");
 {
+  const facts = buildEquivalentFacts();
   const result = runEquivalentInput();
   expect("pipeline records changed files before and after operational filtering", result.diff, {
     changedFiles: 2,
     checkedFiles: 1,
     skippedOperationalFiles: 1,
   });
-  expect("pipeline exposes normalized changed paths", result.facts.changedPaths, ["src/feature.mjs"]);
-  expect("pipeline extracts touched surfaces", result.facts.touchedSurfaces.touched_surfaces, ["source"]);
-  expect("pipeline classifies new files", result.facts.newFileClasses.files_by_class, {
+  expect("facts expose normalized changed paths", facts.changedPaths, ["src/feature.mjs"]);
+  expect("facts extract touched surfaces", facts.touchedSurfaces.touched_surfaces, ["source"]);
+  expect("facts classify new files", facts.newFileClasses.files_by_class, {
     source: ["src/feature.mjs"],
   });
   expect(
@@ -91,8 +106,10 @@ console.log("\n--- equivalent command inputs share one result shape ---");
   const checkPrStyle = runEquivalentInput({
     initialChecks: [{ name: "change-contract", check: { ok: true } }],
   });
+  const checkDiffFacts = buildEquivalentFacts();
+  const checkPrFacts = buildEquivalentFacts();
 
-  expect("equivalent facts are identical", checkPrStyle.facts, checkDiffStyle.facts);
+  expect("equivalent facts are identical", checkPrFacts, checkDiffFacts);
   expect(
     "check-pr style input adds contract validation without changing policy check result",
     checkPrStyle.violations.map((violation) => violation.rule),

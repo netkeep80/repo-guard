@@ -29,10 +29,5 @@ export function runPolicyPipeline(input, options = {}) {
       checkedFiles: facts.filteredOperationalFiles.length,
       skippedOperationalFiles: facts.diagnostics.skippedOperationalFiles,
     },
-    facts: {
-      changedPaths: facts.changedPaths,
-      touchedSurfaces: facts.touchedSurfaces,
-      newFileClasses: facts.newFileClasses,
-    },
   });
 }
