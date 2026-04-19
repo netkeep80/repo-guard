@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import Ajv from "ajv";
 import { ajvErrors } from "../enforcement.mjs";
 import {
+  compileAnchorPolicy,
   compileForbidRegex,
   compileNewFilePolicy,
   compileChangeTypePolicy,
@@ -58,6 +59,7 @@ export function loadPolicyRuntime(roots, options = {}) {
     ["surface policy compilation", compileSurfacePolicy(policy), (e) => e.message],
     ["new file policy compilation", compileNewFilePolicy(policy), (e) => e.message],
     ["change type policy compilation", compileChangeTypePolicy(policy), (e) => e.message],
+    ["anchor policy compilation", compileAnchorPolicy(policy), (e) => e.message],
   ];
 
   for (const [label, errors, format] of compileGroups) {

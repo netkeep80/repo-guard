@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  compileAnchorPolicy,
   compileForbidRegex,
   compileNewFilePolicy,
   compileSurfacePolicy,
@@ -200,6 +201,112 @@ describe("new file policy compilation", () => {
         },
       },
     });
+    assert.equal(errors.length, 0);
+  });
+});
+
+describe("anchor policy compilation", () => {
+  it("accepts declared anchor types and trace rule references", () => {
+    const errors = compileAnchorPolicy({
+      anchors: {
+        types: {
+          requirement_id: {
+            sources: [
+              { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
+            ],
+          },
+          code_req_ref: {
+            sources: [
+              { kind: "regex", glob: "src/**", pattern: "@req\\s+((BR|SR)-[0-9]{3})" },
+            ],
+          },
+        },
+      },
+      trace_rules: [
+        {
+          id: "code-refs-must-resolve",
+          kind: "must_resolve",
+          from_anchor_type: "code_req_ref",
+          to_anchor_type: "requirement_id",
+        },
+      ],
+    });
+    assert.equal(errors.length, 0);
+  });
+
+  it("rejects trace rules that reference unknown anchor types", () => {
+    const errors = compileAnchorPolicy({
+      anchors: {
+        types: {
+          requirement_id: {
+            sources: [
+              { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
+            ],
+          },
+        },
+      },
+      trace_rules: [
+        {
+          id: "code-refs-must-resolve",
+          kind: "must_resolve",
+          from_anchor_type: "code_req_ref",
+          to_anchor_type: "missing_requirement_id",
+        },
+      ],
+    });
+    assert.equal(errors.length, 2);
+    assert.ok(errors.some((e) => e.message.includes("code_req_ref")));
+    assert.ok(errors.some((e) => e.message.includes("missing_requirement_id")));
+  });
+
+  it("rejects duplicate trace rule ids", () => {
+    const errors = compileAnchorPolicy({
+      anchors: {
+        types: {
+          requirement_id: {
+            sources: [
+              { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
+            ],
+          },
+        },
+      },
+      trace_rules: [
+        {
+          id: "code-refs-must-resolve",
+          kind: "must_resolve",
+          from_anchor_type: "requirement_id",
+          to_anchor_type: "requirement_id",
+        },
+        {
+          id: "code-refs-must-resolve",
+          kind: "must_resolve",
+          from_anchor_type: "requirement_id",
+          to_anchor_type: "requirement_id",
+        },
+      ],
+    });
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("duplicates"));
+  });
+
+  it("rejects invalid regex extractor patterns", () => {
+    const errors = compileAnchorPolicy({
+      anchors: {
+        types: {
+          code_req_ref: {
+            sources: [
+              { kind: "regex", glob: "src/**", pattern: "[bad" },
+            ],
+          },
+        },
+      },
+    });
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("pattern is invalid"));
+  });
+
+  it("keeps policies without anchors and trace_rules compatible", () => {
+    const errors = compileAnchorPolicy({});
     assert.equal(errors.length, 0);
   });
 });

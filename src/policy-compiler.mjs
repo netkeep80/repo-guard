@@ -191,6 +191,61 @@ export function compileChangeTypePolicy(policy) {
   return errors;
 }
 
+export function compileAnchorPolicy(policy) {
+  const errors = [];
+  const anchors = policy.anchors;
+  const traceRules = policy.trace_rules || [];
+  const anchorTypes = anchors?.types || {};
+  const anchorTypeNames = new Set(Object.keys(anchorTypes));
+  const traceRuleIds = new Set();
+
+  if (!anchors && traceRules.length === 0) return errors;
+
+  if (traceRules.length > 0 && anchorTypeNames.size === 0) {
+    errors.push({ message: "trace_rules requires anchor types in anchors.types" });
+  }
+
+  for (const [anchorType, config] of Object.entries(anchorTypes)) {
+    for (const [index, source] of (config.sources || []).entries()) {
+      if (source.kind === "regex") {
+        try {
+          new RegExp(source.pattern);
+        } catch (e) {
+          errors.push({
+            anchor_type: anchorType,
+            source_index: index,
+            pattern: source.pattern,
+            message: `anchors.types["${anchorType}"].sources[${index}].pattern is invalid: ${e.message}`,
+          });
+        }
+      }
+    }
+  }
+
+  for (const [index, rule] of traceRules.entries()) {
+    if (traceRuleIds.has(rule.id)) {
+      errors.push({
+        trace_rule: rule.id,
+        message: `trace_rules[${index}].id duplicates trace rule "${rule.id}"`,
+      });
+    }
+    traceRuleIds.add(rule.id);
+
+    for (const field of ["from_anchor_type", "to_anchor_type"]) {
+      const anchorType = rule[field];
+      if (!anchorTypeNames.has(anchorType)) {
+        errors.push({
+          trace_rule: rule.id,
+          anchor_type: anchorType,
+          message: `trace_rules[${index}].${field} references unknown anchor type "${anchorType}"`,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
 export function warnReservedContractFields(contract) {
   const warnings = [];
   if (contract.overrides && contract.overrides.length > 0) {

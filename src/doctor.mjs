@@ -2,7 +2,7 @@ import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { compileForbidRegex } from "./policy-compiler.mjs";
+import { compileAnchorPolicy, compileForbidRegex } from "./policy-compiler.mjs";
 
 const PASS = "PASS";
 const WARN = "WARN";
@@ -95,6 +95,12 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
     if (regexErrors.length > 0) {
       const details = regexErrors.map(e => `[${e.rule_id}] /${e.pattern}/: ${e.message}`).join("; ");
       return { name: "repo-policy.json", status: FAIL, message: `Invalid forbid_regex: ${details}`, hint: "Fix the regular expressions in content_rules" };
+    }
+
+    const anchorErrors = compileAnchorPolicy(policy);
+    if (anchorErrors.length > 0) {
+      const details = anchorErrors.map(e => e.message).join("; ");
+      return { name: "repo-policy.json", status: FAIL, message: `Invalid anchor policy: ${details}`, hint: "Fix anchors and trace_rules references in repo-policy.json" };
     }
 
     return { name: "repo-policy.json", status: PASS, message: `Valid (${policy.repository_kind}, format ${policy.policy_format_version})` };

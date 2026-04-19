@@ -270,6 +270,45 @@
         }
       }
     },
+    "anchors": {
+      "type": "object",
+      "description": "Named anchor types and extractors used as shared trace vocabulary. Runtime extraction is reserved for future versions.",
+      "required": ["types"],
+      "additionalProperties": false,
+      "properties": {
+        "types": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "required": ["sources"],
+            "additionalProperties": false,
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/anchor_source" },
+                "minItems": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "trace_rules": {
+      "type": "array",
+      "description": "Trace/evidence rules between declared anchor types. Runtime enforcement is reserved for future versions.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "from_anchor_type", "to_anchor_type"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["must_resolve"] },
+          "from_anchor_type": { "type": "string", "minLength": 1 },
+          "to_anchor_type": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "content_rules": {
       "type": "array",
       "items": {
@@ -313,6 +352,30 @@
     }
   },
   "definitions": {
+    "anchor_source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "glob", "field"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "json_field" },
+            "glob": { "type": "string", "minLength": 1 },
+            "field": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "glob", "pattern"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "regex" },
+            "glob": { "type": "string", "minLength": 1 },
+            "pattern": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
     "registry_source": {
       "oneOf": [
         {
