@@ -14,6 +14,7 @@ import {
   checkNetAddedLinesBudget,
   checkSurfaceDebt,
   checkCochangeRules,
+  checkNewFileRules,
   checkSurfaceMatrix,
   checkContentRules,
   checkMustTouch,
@@ -21,6 +22,7 @@ import {
 } from "./diff-checker.mjs";
 import {
   compileForbidRegex,
+  compileNewFilePolicy,
   compileSurfacePolicy,
   warnReservedContractFields,
   warnReservedPolicyFields,
@@ -178,6 +180,17 @@ function runCheckDiff(roots, args) {
     }
   }
 
+  const newFileErrors = compileNewFilePolicy(policy);
+  if (newFileErrors.length > 0) {
+    ok = false;
+    if (!quiet) {
+      console.error("FAIL: new file policy compilation");
+      for (const e of newFileErrors) {
+        console.error(`  ${e.message}`);
+      }
+    }
+  }
+
   if (!quiet) {
     for (const w of warnReservedPolicyFields(policy)) {
       console.warn(`WARN: ${w}`);
@@ -242,8 +255,15 @@ function runCheckDiff(roots, args) {
   reporter.report("max-net-added-lines", checkNetAddedLinesBudget(files, maxNetAddedLines));
   reporter.report("surface-debt", checkSurfaceDebt(files, contract?.surface_debt));
 
+  const declaredChangeClass = cliChangeClass || contract?.change_class || null;
+  if (policy.new_file_rules) {
+    reporter.report(
+      "new-file-rules",
+      checkNewFileRules(files, policy.new_file_classes, policy.new_file_rules, declaredChangeClass)
+    );
+  }
+
   if (policy.surface_matrix) {
-    const declaredChangeClass = cliChangeClass || contract?.change_class || null;
     reporter.report(
       "surface-matrix",
       checkSurfaceMatrix(

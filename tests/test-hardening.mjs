@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   compileForbidRegex,
+  compileNewFilePolicy,
   compileSurfacePolicy,
   warnReservedContractFields,
   warnReservedPolicyFields,
@@ -104,6 +105,63 @@ describe("surface policy compilation", () => {
         release: {
           allow: ["docs"],
           forbid: [],
+        },
+      },
+    });
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("change_classes"));
+  });
+});
+
+describe("new file policy compilation", () => {
+  it("accepts rules that reference declared classes and change classes", () => {
+    const errors = compileNewFilePolicy({
+      new_file_classes: {
+        test: ["tests/**"],
+        changelog_fragment: ["changelog.d/*.md"],
+      },
+      change_classes: ["kernel-hardening"],
+      new_file_rules: {
+        "kernel-hardening": {
+          allow_classes: ["test", "changelog_fragment"],
+          max_per_class: {
+            test: 2,
+          },
+        },
+      },
+    });
+    assert.equal(errors.length, 0);
+  });
+
+  it("rejects rules that reference unknown classes", () => {
+    const errors = compileNewFilePolicy({
+      new_file_classes: {
+        test: ["tests/**"],
+      },
+      change_classes: ["kernel-hardening"],
+      new_file_rules: {
+        "kernel-hardening": {
+          allow_classes: ["test", "generated"],
+          max_per_class: {
+            changelog_fragment: 1,
+          },
+        },
+      },
+    });
+    assert.equal(errors.length, 2);
+    assert.ok(errors.some((e) => e.message.includes("generated")));
+    assert.ok(errors.some((e) => e.message.includes("changelog_fragment")));
+  });
+
+  it("rejects entries that are not declared change classes", () => {
+    const errors = compileNewFilePolicy({
+      new_file_classes: {
+        test: ["tests/**"],
+      },
+      change_classes: ["kernel-hardening"],
+      new_file_rules: {
+        "docs-cleanup": {
+          allow_classes: ["test"],
         },
       },
     });

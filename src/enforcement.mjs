@@ -83,6 +83,18 @@ function printCheckDetails(mode, check) {
   if (check.touched_surfaces) {
     write(`    touched_surfaces: ${formatList(check.touched_surfaces)}`);
   }
+  if (check.new_files) {
+    write(`    new_files: ${formatList(check.new_files)}`);
+  }
+  if (check.allowed_classes) {
+    write(`    allowed_classes: ${formatList(check.allowed_classes)}`);
+  }
+  if (check.touched_classes) {
+    write(`    touched_classes: ${formatList(check.touched_classes)}`);
+  }
+  if (check.violating_classes) {
+    write(`    violating_classes: ${formatList(check.violating_classes)}`);
+  }
   if (check.allowed_surfaces) {
     write(`    allowed_surfaces: ${formatList(check.allowed_surfaces)}`);
   }
@@ -94,6 +106,11 @@ function printCheckDetails(mode, check) {
   }
   if (check.unclassified_files && check.unclassified_files.length > 0) {
     write(`    unclassified_files: ${formatList(check.unclassified_files)}`);
+  }
+  if (check.class_budget_violations && check.class_budget_violations.length > 0) {
+    for (const v of check.class_budget_violations) {
+      write(`    class_budget: ${v.class} actual=${v.actual}, limit=${v.limit}, files=${formatList(v.files)}`);
+    }
   }
   if (check.details) {
     for (const detail of check.details) write(`    ${detail}`);
@@ -120,11 +137,20 @@ function detailFromCheck(check) {
   if (check.must_not_touch) details.push(`must_not_touch: ${check.must_not_touch.join(", ")}`);
   if (hasOwn(check, "change_class")) details.push(`change_class: ${check.change_class || "(missing)"}`);
   if (check.touched_surfaces) details.push(`touched_surfaces: ${formatList(check.touched_surfaces)}`);
+  if (check.new_files) details.push(`new_files: ${formatList(check.new_files)}`);
+  if (check.allowed_classes) details.push(`allowed_classes: ${formatList(check.allowed_classes)}`);
+  if (check.touched_classes) details.push(`touched_classes: ${formatList(check.touched_classes)}`);
+  if (check.violating_classes) details.push(`violating_classes: ${formatList(check.violating_classes)}`);
   if (check.allowed_surfaces) details.push(`allowed_surfaces: ${formatList(check.allowed_surfaces)}`);
   if (check.forbidden_surfaces) details.push(`forbidden_surfaces: ${formatList(check.forbidden_surfaces)}`);
   if (check.violating_surfaces) details.push(`violating_surfaces: ${formatList(check.violating_surfaces)}`);
   if (check.unclassified_files && check.unclassified_files.length > 0) {
     details.push(`unclassified_files: ${formatList(check.unclassified_files)}`);
+  }
+  if (check.class_budget_violations && check.class_budget_violations.length > 0) {
+    details.push(...check.class_budget_violations.map(
+      (v) => `class_budget: ${v.class} actual=${v.actual}, limit=${v.limit}, files=${formatList(v.files)}`
+    ));
   }
   if (check.details) details.push(...check.details);
   if (check.errors) details.push(...check.errors);
@@ -152,6 +178,12 @@ function violationFromCheck(name, check) {
   if (check.surface_debt) violation.surface_debt = check.surface_debt;
   if (hasOwn(check, "change_class")) violation.change_class = check.change_class;
   if (check.touched_surfaces) violation.touched_surfaces = check.touched_surfaces;
+  if (check.new_files) violation.new_files = check.new_files;
+  if (check.allowed_classes) violation.allowed_classes = check.allowed_classes;
+  if (check.touched_classes) violation.touched_classes = check.touched_classes;
+  if (check.violating_classes) violation.violating_classes = check.violating_classes;
+  if (check.class_budget_violations) violation.class_budget_violations = check.class_budget_violations;
+  if (check.files_by_class) violation.files_by_class = check.files_by_class;
   if (check.allowed_surfaces) violation.allowed_surfaces = check.allowed_surfaces;
   if (check.forbidden_surfaces) violation.forbidden_surfaces = check.forbidden_surfaces;
   if (check.violating_surfaces) violation.violating_surfaces = check.violating_surfaces;

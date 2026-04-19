@@ -5,6 +5,7 @@ import Ajv from "ajv";
 import { extractContract, extractLinkedIssueNumbers, resolveContract } from "./markdown-contract.mjs";
 import {
   compileForbidRegex,
+  compileNewFilePolicy,
   compileSurfacePolicy,
   warnReservedContractFields,
   warnReservedPolicyFields,
@@ -24,6 +25,7 @@ import {
   checkNetAddedLinesBudget,
   checkSurfaceDebt,
   checkCochangeRules,
+  checkNewFileRules,
   checkSurfaceMatrix,
   checkContentRules,
   checkMustTouch,
@@ -171,6 +173,15 @@ export function runCheckPR(roots, args = []) {
     }
   }
 
+  const newFileErrors = compileNewFilePolicy(policy);
+  if (newFileErrors.length > 0) {
+    ok = false;
+    console.error("FAIL: new file policy compilation");
+    for (const e of newFileErrors) {
+      console.error(`  ${e.message}`);
+    }
+  }
+
   for (const w of warnReservedPolicyFields(policy)) {
     console.warn(`WARN: ${w}`);
   }
@@ -250,6 +261,13 @@ export function runCheckPR(roots, args = []) {
   reporter.report("max-new-files", checkNewFilesBudget(files, maxNewFiles));
   reporter.report("max-net-added-lines", checkNetAddedLinesBudget(files, maxNetAddedLines));
   reporter.report("surface-debt", checkSurfaceDebt(files, contract?.surface_debt));
+
+  if (policy.new_file_rules) {
+    reporter.report(
+      "new-file-rules",
+      checkNewFileRules(files, policy.new_file_classes, policy.new_file_rules, contract?.change_class || null)
+    );
+  }
 
   if (policy.surface_matrix) {
     reporter.report(

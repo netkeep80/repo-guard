@@ -37,6 +37,34 @@
       "forbid": ["kernel", "docs", "tests"]
     }
   },
+  "new_file_classes": {
+    "test": ["tests/**"],
+    "canonical_doc": ["README.md", "docs/**"],
+    "generated": ["single_include/**"],
+    "changelog_fragment": ["changelog.d/*.md"]
+  },
+  "new_file_rules": {
+    "kernel-hardening": {
+      "allow_classes": ["test", "changelog_fragment"],
+      "max_per_class": {
+        "test": 2,
+        "changelog_fragment": 1
+      }
+    },
+    "docs-cleanup": {
+      "allow_classes": ["canonical_doc"],
+      "max_per_class": {
+        "canonical_doc": 1
+      }
+    },
+    "generated-refresh": {
+      "allow_classes": ["generated", "changelog_fragment"],
+      "max_per_class": {
+        "generated": 10,
+        "changelog_fragment": 1
+      }
+    }
+  },
   "content_rules": [
     {
       "id": "forbid_doxygen_tags_in_headers",

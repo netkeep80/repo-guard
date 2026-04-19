@@ -68,6 +68,54 @@ export function compileSurfacePolicy(policy) {
   return errors;
 }
 
+export function compileNewFilePolicy(policy) {
+  const errors = [];
+  const newFileClasses = policy.new_file_classes || {};
+  const classNames = new Set(Object.keys(newFileClasses));
+  const changeClasses = new Set(policy.change_classes || []);
+  const newFileRules = policy.new_file_rules || {};
+
+  if (!policy.new_file_rules) return errors;
+
+  if (classNames.size === 0) {
+    errors.push({ message: "new_file_rules requires at least one named class in new_file_classes" });
+  }
+  if (changeClasses.size === 0) {
+    errors.push({ message: "new_file_rules requires at least one named change class in change_classes" });
+  }
+
+  for (const [changeClass, rule] of Object.entries(newFileRules)) {
+    if (changeClasses.size > 0 && !changeClasses.has(changeClass)) {
+      errors.push({
+        change_class: changeClass,
+        message: `new_file_rules entry "${changeClass}" is not listed in change_classes`,
+      });
+    }
+
+    for (const fileClass of rule.allow_classes || []) {
+      if (!classNames.has(fileClass)) {
+        errors.push({
+          change_class: changeClass,
+          class: fileClass,
+          message: `new_file_rules["${changeClass}"].allow_classes references unknown class "${fileClass}"`,
+        });
+      }
+    }
+
+    for (const fileClass of Object.keys(rule.max_per_class || {})) {
+      if (!classNames.has(fileClass)) {
+        errors.push({
+          change_class: changeClass,
+          class: fileClass,
+          message: `new_file_rules["${changeClass}"].max_per_class references unknown class "${fileClass}"`,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
 export function warnReservedContractFields(contract) {
   const warnings = [];
   if (contract.overrides && contract.overrides.length > 0) {
