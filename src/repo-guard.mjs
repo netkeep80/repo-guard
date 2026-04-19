@@ -5,7 +5,15 @@ import { execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv from "ajv";
-import { compileForbidRegex, warnReservedContractFields, warnReservedPolicyFields } from "./policy-compiler.mjs";
+import {
+  compileAnchorPolicy,
+  compileChangeTypePolicy,
+  compileForbidRegex,
+  compileNewFilePolicy,
+  compileSurfacePolicy,
+  warnReservedContractFields,
+  warnReservedPolicyFields,
+} from "./policy-compiler.mjs";
 import {
   resolveEnforcementMode,
 } from "./enforcement.mjs";
@@ -169,12 +177,20 @@ function runValidate(roots, args) {
   let ok = true;
   ok = validate(ajv, policySchema, policy, "repo-policy.json") && ok;
 
-  const regexErrors = compileForbidRegex(policy.content_rules);
-  if (regexErrors.length > 0) {
+  const compileGroups = [
+    ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (e) => `[${e.rule_id}] invalid regex /${e.pattern}/: ${e.message}`],
+    ["surface policy compilation", compileSurfacePolicy(policy), (e) => e.message],
+    ["new file policy compilation", compileNewFilePolicy(policy), (e) => e.message],
+    ["change type policy compilation", compileChangeTypePolicy(policy), (e) => e.message],
+    ["anchor policy compilation", compileAnchorPolicy(policy), (e) => e.message],
+  ];
+
+  for (const [label, errors, format] of compileGroups) {
+    if (errors.length === 0) continue;
     ok = false;
-    console.error("FAIL: forbid_regex compilation");
-    for (const e of regexErrors) {
-      console.error(`  [${e.rule_id}] invalid regex /${e.pattern}/: ${e.message}`);
+    console.error(`FAIL: ${label}`);
+    for (const error of errors) {
+      console.error(`  ${format(error)}`);
     }
   }
 

@@ -41,6 +41,33 @@ expect("invalid-policy.json fails schema", validatePolicy(invalidPolicy), false)
 const repoPolicy = loadJSON(resolve(root, "repo-policy.json"));
 expect("repo-policy.json (self) passes schema", validatePolicy(repoPolicy), true);
 
+const policyWithAnchors = {
+  ...validPolicy,
+  anchors: {
+    types: {
+      requirement_id: {
+        sources: [
+          { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
+        ],
+      },
+      code_req_ref: {
+        sources: [
+          { kind: "regex", glob: "src/**", pattern: "@req\\s+((BR|SR|FR|NFR|CR|IR)-[0-9]{3})" },
+        ],
+      },
+    },
+  },
+  trace_rules: [
+    {
+      id: "code-refs-must-resolve",
+      kind: "must_resolve",
+      from_anchor_type: "code_req_ref",
+      to_anchor_type: "requirement_id",
+    },
+  ],
+};
+expect("policy with anchors and trace_rules passes schema", validatePolicy(policyWithAnchors), true);
+
 // Content rules normalization tests
 const oldFormPolicy = loadJSON(resolve(root, "tests/fixtures/invalid-content-rule-old-form.json"));
 expect("old-form content_rules (pattern/severity/message) fails schema", validatePolicy(oldFormPolicy), false);
@@ -48,6 +75,20 @@ expect("old-form content_rules (pattern/severity/message) fails schema", validat
 // Operational paths validation tests
 const invalidOpPaths = loadJSON(resolve(root, "tests/fixtures/invalid-operational-paths.json"));
 expect("invalid operational_paths (string instead of array) fails schema", validatePolicy(invalidOpPaths), false);
+
+const invalidAnchorPolicy = {
+  ...validPolicy,
+  anchors: {
+    types: {
+      requirement_id: {
+        sources: [
+          { kind: "json_field", glob: "requirements/**/*.json", pattern: "id" },
+        ],
+      },
+    },
+  },
+};
+expect("invalid json_field anchor source fails schema", validatePolicy(invalidAnchorPolicy), false);
 
 const missingAllowClassesPolicy = {
   change_classes: ["kernel-hardening"],
