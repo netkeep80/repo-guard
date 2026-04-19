@@ -20,6 +20,7 @@ import {
   checkMustTouch,
   checkMustNotTouch,
   checkChangeTypeRules,
+  checkRegistryRules,
 } from "./diff-checker.mjs";
 import {
   compileForbidRegex,
@@ -267,6 +268,7 @@ function runCheckDiff(roots, args) {
   reporter.report("max-new-files", checkNewFilesBudget(files, maxNewFiles));
   reporter.report("max-net-added-lines", checkNetAddedLinesBudget(files, maxNetAddedLines));
   reporter.report("surface-debt", checkSurfaceDebt(files, contract?.surface_debt));
+  reporter.report("registry-rules", checkRegistryRules(policy.registry_rules, { repoRoot: roots.repoRoot }));
 
   if (policy.change_type_rules) {
     reporter.report("change-type-rules", checkChangeTypeRules(files, policy, contract?.change_type));

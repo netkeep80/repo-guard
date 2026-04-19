@@ -15,6 +15,7 @@ import {
   classifyNewFiles,
   checkNewFileRules,
   checkChangeTypeRules,
+  checkRegistryRules,
 } from "../src/diff-checker.mjs";
 
 let failures = 0;
@@ -601,6 +602,126 @@ expect(
   checkChangeTypeRules(surfaceFiles, changeTypePolicy, "release").ok,
   false
 );
+
+// --- 13. registry rules ---
+
+const registryFiles = new Map([
+  [
+    "repo-policy.json",
+    JSON.stringify({
+      paths: {
+        canonical_docs: ["README.md", "docs/policy.md"],
+      },
+    }),
+  ],
+  [
+    "docs/index.md",
+    [
+      "# Documentation",
+      "",
+      "## Canonical Documents",
+      "",
+      "- [Readme](../README.md)",
+      "- [Policy](policy.md)",
+      "",
+      "## Other Documents",
+      "",
+      "- [Extra](extra.md)",
+    ].join("\n"),
+  ],
+]);
+
+const registryRules = [
+  {
+    id: "canonical-docs-sync",
+    kind: "set_equality",
+    left: {
+      type: "json_array",
+      file: "repo-policy.json",
+      json_pointer: "/paths/canonical_docs",
+    },
+    right: {
+      type: "markdown_section_links",
+      file: "docs/index.md",
+      section: "Canonical Documents",
+      prefix: "docs/",
+    },
+  },
+];
+
+const matchingRegistryResult = checkRegistryRules(registryRules, {
+  readFile: (path) => registryFiles.get(path),
+});
+expect("13. matching registry rule passes", matchingRegistryResult.ok, true);
+expect("13. matching registry rule count", matchingRegistryResult.results.length, 1);
+
+const mismatchedRegistryResult = checkRegistryRules(registryRules, {
+  readFile: (path) => {
+    if (path === "docs/index.md") {
+      return [
+        "# Documentation",
+        "",
+        "## Canonical Documents",
+        "",
+        "- [Readme](../README.md)",
+        "- [Architecture](architecture.md)",
+      ].join("\n");
+    }
+    return registryFiles.get(path);
+  },
+});
+expect("13. registry mismatch fails", mismatchedRegistryResult.ok, false);
+expect("13. failed rule id reported", mismatchedRegistryResult.results[0].rule_id, "canonical-docs-sync");
+expect("13. left entries reported", mismatchedRegistryResult.results[0].left_entries.includes("docs/policy.md"), true);
+expect("13. right entries reported", mismatchedRegistryResult.results[0].right_entries.includes("docs/architecture.md"), true);
+expect("13. missing entries reported", mismatchedRegistryResult.results[0].missing_from_right[0], "docs/policy.md");
+expect("13. extra entries reported", mismatchedRegistryResult.results[0].extra_in_right[0], "docs/architecture.md");
+
+const subsetRegistryResult = checkRegistryRules(
+  [
+    {
+      id: "canonical-docs-listed",
+      kind: "left_subset_of_right",
+      left: registryRules[0].left,
+      right: {
+        ...registryRules[0].right,
+        section: "All Documents",
+      },
+    },
+  ],
+  {
+    readFile: (path) => {
+      if (path === "docs/index.md") {
+        return [
+          "## All Documents",
+          "",
+          "- [Readme](../README.md)",
+          "- [Policy](policy.md)",
+          "- [Extra](extra.md)",
+        ].join("\n");
+      }
+      return registryFiles.get(path);
+    },
+  }
+);
+expect("13. left subset of right passes with extra right entries", subsetRegistryResult.ok, true);
+
+const missingSourceResult = checkRegistryRules(registryRules, {
+  readFile: () => undefined,
+});
+expect("13. missing source fails", missingSourceResult.ok, false);
+expect("13. missing source detail names file", missingSourceResult.results[0].details[0].includes("repo-policy.json"), true);
+
+const nonStringRegistryResult = checkRegistryRules(registryRules, {
+  readFile: (path) => {
+    if (path === "repo-policy.json") {
+      return JSON.stringify({ paths: { canonical_docs: ["README.md", 42] } });
+    }
+    return registryFiles.get(path);
+  },
+});
+expect("13. non-string JSON registry entries fail", nonStringRegistryResult.ok, false);
+expect("13. non-string JSON registry detail", nonStringRegistryResult.results[0].details[0].includes("only strings"), true);
 
 // --- Summary ---
 
