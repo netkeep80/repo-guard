@@ -21,8 +21,8 @@ export function runPolicyPipeline(input, options = {}) {
     console.log(`\nDiff analysis: ${facts.diff.files.all.length} file(s) changed${skipped ? ` (${skipped} operational skipped)` : ""}`);
   }
 
-  runPolicyChecks(facts, reporter);
   const anchorDiagnostics = buildAnchorDiagnostics(facts);
+  runPolicyChecks(facts, reporter, { anchorDiagnostics });
 
   return reporter.finish({
     repositoryRoot: facts.repositoryRoot,

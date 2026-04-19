@@ -338,11 +338,19 @@ repository files and changed files. `anchors.changed` is the subset located in
 checked diff files. `anchors.declaredByContract` mirrors contract
 `anchors.affects`, `anchors.implements`, and `anchors.verifies`, with `all` as a
 relation/value list for tooling that does not want to inspect each relation.
-`anchors.unresolved` is an aggregate of unresolved trace diagnostics. In this
-version trace diagnostics are report-only: they do not change `ok`, `result`, or
-`exitCode`.
+`anchors.unresolved` is an aggregate of unresolved trace diagnostics.
+`must_resolve` trace rules are enforced as policy checks: unresolved references
+make `ok: false` and `result: "failed"`. In `blocking` mode they exit `1`; in
+`advisory` mode they are reported as warnings and the command exits `0`.
+Structured violations include `unresolved_anchors` with the offending anchor
+value, source instances, and file/line/column locations. Their rule names use
+the `trace-rule: <id>` form, for example `trace-rule: code-refs-must-resolve`.
 
-Exit behavior is unchanged: in `blocking` mode violations exit `1`; in `advisory` mode violations are reported but the command exits `0`. Consumers should read both `ok` and `exitCode`: `ok` describes policy result, while `exitCode` describes command exit semantics for the active enforcement mode.
+Exit behavior follows the active enforcement mode: in `blocking` mode
+violations exit `1`; in `advisory` mode violations are reported but the command
+exits `0`. Consumers should read both `ok` and `exitCode`: `ok` describes
+policy result, while `exitCode` describes command exit semantics for the active
+enforcement mode.
 
 `--format summary` also includes one concise anchor line when anchors are
 enabled, for example `Anchors: 3 detected, 2 changed, 2 declared, 1 unresolved`.
@@ -652,10 +660,10 @@ Result: passed (mode: blocking; exit code 0)
 Anchor extraction работает по tracked repository files и по changed files из diff, чтобы global requirement IDs и новые references были доступны в одной facts model. Если JSON не парсится, field отсутствует или source file не читается, check `anchor-extraction` завершается `FAIL` с диагностикой вида `[requirement_id json_field source 0] requirements/fr-001.json: field "id" not found`.
 
 Если policy содержит `trace_rules.kind = "must_resolve"`, structured output
-добавляет diagnostic-only `traceRuleResults`: для каждого значения from-anchor
-проверяется наличие matching value среди to-anchor instances. Эти diagnostics
-видны в JSON и summary output, но enforcement для trace rules зарезервирован для
-следующего runtime шага.
+добавляет `traceRuleResults`: для каждого значения from-anchor проверяется
+наличие matching value среди to-anchor instances. Unresolved references также
+становятся policy violations вида `trace-rule: <id>` и наследуют обычную
+семантику `blocking`/`advisory`.
 
 ### 4. Пример failure
 
@@ -1108,8 +1116,8 @@ The self-hosted governance surface is declared in `repo-policy.json` under `path
 
 - `governance_paths` — информационное поле, не проверяется в runtime. Документирует, какие файлы управляют governance.
 - `public_api` — зарезервировано для будущего использования. Принимается схемой, но не применяется; непустые значения выводят предупреждение.
-- `anchors` (в change contract) — декларативный intent на уровне anchors. Принимается схемой и выводится в structured output как `anchors.declaredByContract`, но runtime trace enforcement для anchors зарезервирован для будущих версий.
-- `trace_rules.kind = "must_resolve"` — выводится в structured output как diagnostic-only `traceRuleResults`; unresolved diagnostics не меняют `ok`, `result` или `exitCode`.
+- `anchors` (в change contract) — декларативный intent на уровне anchors. Принимается схемой и выводится в structured output как `anchors.declaredByContract`; сами contract anchors не являются отдельным enforcement rule.
+- `trace_rules.kind = "must_resolve"` — enforced runtime rule: unresolved from-anchor values must resolve to at least one matching to-anchor value and are reported in `traceRuleResults`, `anchors.unresolved`, and structured violations.
 - `overrides` (в change contract) — зарезервировано для будущего использования. Принимается схемой, но не применяется; непустые значения выводят предупреждение.
 - `repo-guard` пока не публикует комментарии к PR.
 - Паттерны `forbid_regex` компилируются и проверяются до начала enforcement — ошибки в regex выявляются на этапе загрузки policy.

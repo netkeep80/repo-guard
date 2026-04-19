@@ -15,8 +15,9 @@ import {
   checkAdvisoryTextRules,
 } from "../diff-checker.mjs";
 import { checkAnchorExtraction } from "../extractors/anchors.mjs";
+import { checkTraceRuleResult } from "./trace-rules.mjs";
 
-export function runPolicyChecks(facts, reporter) {
+export function runPolicyChecks(facts, reporter, options = {}) {
   const policy = facts.policy;
   const files = facts.diff.files.checked;
   const contract = facts.contract;
@@ -52,6 +53,11 @@ export function runPolicyChecks(facts, reporter) {
   );
   if (policy.anchors) {
     reporter.report("anchor-extraction", checkAnchorExtraction(facts.anchors));
+  }
+  if (policy.trace_rules && policy.trace_rules.length > 0) {
+    for (const traceResult of options.anchorDiagnostics?.traceRuleResults || []) {
+      reporter.report(`trace-rule: ${traceResult.id}`, checkTraceRuleResult(traceResult));
+    }
   }
 
   if (policy.change_type_rules) {
