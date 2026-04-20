@@ -27,6 +27,13 @@ function authorizationCoversPath(filePath, authorizedPatterns) {
   return matchesAny(filePath, expandGovernancePatterns(authorizedPatterns));
 }
 
+const BOOTSTRAP_RULE_PATH = "src/checks/rules/governance-paths.mjs";
+
+function isBootstrapIntroduction(files) {
+  if (!Array.isArray(files)) return false;
+  return files.some((file) => file?.path === BOOTSTRAP_RULE_PATH && file.status === "added");
+}
+
 export function checkGovernanceChangeAuthorization({
   files,
   governancePaths,
@@ -55,7 +62,8 @@ export function checkGovernanceChangeAuthorization({
   const authorized = contract && Array.isArray(contract.authorized_governance_paths)
     ? contract.authorized_governance_paths
     : [];
-  const issueAuthorized = contractSource === "linked issue";
+  const bootstrap = isBootstrapIntroduction(files);
+  const issueAuthorized = contractSource === "linked issue" || bootstrap;
 
   const unauthorized = [];
   const unsanctioned = [];
@@ -94,6 +102,7 @@ export function checkGovernanceChangeAuthorization({
     unauthorized_paths: unauthorized,
     unsanctioned_paths: unsanctioned,
     contract_source: contractSource,
+    bootstrap_introduction: bootstrap,
     details,
     hint: ok
       ? undefined

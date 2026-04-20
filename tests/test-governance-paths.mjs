@@ -102,6 +102,36 @@ describe("governance-change authorization unit checks", () => {
     });
     assert.equal(result.ok, true);
   });
+
+  it("accepts PR-body authorization on the bootstrap PR that introduces the rule itself", () => {
+    const result = checkGovernanceChangeAuthorization({
+      files: [
+        file("src/checks/rules/governance-paths.mjs", { status: "added", addedLines: ["+"] }),
+        file("schemas/repo-policy.schema.json", { addedLines: ["+"] }),
+      ],
+      governancePaths: GOVERNANCE_PATHS,
+      contract: { authorized_governance_paths: ["schemas/**"] },
+      contractSource: "pr body",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.bootstrap_introduction, true);
+    assert.deepEqual(result.unsanctioned_paths, []);
+  });
+
+  it("does not treat a rule-source modification as bootstrap", () => {
+    const result = checkGovernanceChangeAuthorization({
+      files: [
+        file("src/checks/rules/governance-paths.mjs", { status: "modified", addedLines: ["+"] }),
+        file("repo-policy.json", { addedLines: ["+"] }),
+      ],
+      governancePaths: GOVERNANCE_PATHS,
+      contract: { authorized_governance_paths: ["repo-policy.json"] },
+      contractSource: "pr body",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.bootstrap_introduction, false);
+    assert.deepEqual(result.unsanctioned_paths, ["repo-policy.json"]);
+  });
 });
 
 describe("governance-change authorization integration via pipeline", () => {
