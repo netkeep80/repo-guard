@@ -688,10 +688,7 @@ export function runValidateIntegration(roots, args = []) {
     process.exit(1);
   }
 
-  const output = renderAnalysisReport(report, {
-    format: parsed.format,
-    summary: "integration",
-  });
+  const output = renderAnalysisReport(report, { format: parsed.format });
   if (output) console.log(output);
 
   process.exit(report.exitCode);

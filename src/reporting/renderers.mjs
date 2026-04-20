@@ -1,5 +1,3 @@
-import { detailFromCheck } from "../runtime/analysis-report.mjs";
-
 function writeViolation(mode, message) {
   if (mode === "advisory") {
     console.warn(message);
@@ -10,7 +8,7 @@ function writeViolation(mode, message) {
 
 function printCheckDetails(mode, check) {
   const write = (message) => writeViolation(mode, message);
-  for (const detail of detailFromCheck(check)) write(`    ${detail}`);
+  for (const detail of check.details || []) write(`    ${detail}`);
 }
 
 function renderMarkdownTableCell(value) {
@@ -39,20 +37,20 @@ export function renderDiffAnalysis(facts) {
 
 export function createAnalysisTextPresenter() {
   return {
-    check({ name, check, mode, outcome }) {
+    check({ check, mode, outcome }) {
       if (outcome === "pass") {
-        console.log(`  PASS: ${name}`);
+        console.log(`  PASS: ${check.rule}`);
         return;
       }
 
       if (outcome === "warning") {
-        writeViolation("advisory", `  WARN: ${name}`);
+        writeViolation("advisory", `  WARN: ${check.rule}`);
         printCheckDetails("advisory", check);
         return;
       }
 
       const label = mode === "advisory" ? "WARN" : "FAIL";
-      writeViolation(mode, `  ${label}: ${name}`);
+      writeViolation(mode, `  ${label}: ${check.rule}`);
       printCheckDetails(mode, check);
     },
 
@@ -67,92 +65,75 @@ export function createAnalysisTextPresenter() {
   };
 }
 
-export function renderCheckSummary(result) {
-  const lines = [
-    "## repo-guard summary",
-    "",
-    `- Result: ${result.result}`,
-    `- Mode: ${result.mode}`,
-    `- Repository root: \`${result.repositoryRoot}\``,
-    `- Checks: ${result.passed} passed, ${result.failed} failed${result.mode === "advisory" ? `, ${result.violationCount} advisory violation(s)` : ""}${result.warnings ? `, ${result.warnings} warning(s)` : ""}`,
-  ];
+function renderCountLine(report, label) {
+  return `- ${label}: ${report.passed} passed, ${report.failed} failed${report.mode === "advisory" ? `, ${report.violationCount} advisory violation(s)` : ""}${report.warnings ? `, ${report.warnings} warning(s)` : ""}`;
+}
 
-  if (result.diff) {
-    lines.push(`- Diff: ${result.diff.changedFiles} file(s) changed${result.diff.skippedOperationalFiles ? `, ${result.diff.skippedOperationalFiles} operational skipped` : ""}`);
+function renderCheckExtraLines(report) {
+  const lines = [];
+
+  if (report.diff) {
+    lines.push(`- Diff: ${report.diff.changedFiles} file(s) changed${report.diff.skippedOperationalFiles ? `, ${report.diff.skippedOperationalFiles} operational skipped` : ""}`);
   }
 
-  if (result.anchors) {
-    const stats = result.anchors.stats;
+  if (report.anchors) {
+    const stats = report.anchors.stats;
     lines.push(`- Anchors: ${stats.detected} detected, ${stats.changed} changed, ${stats.declaredByContract} declared, ${stats.unresolved} unresolved`);
 
-    if (result.anchors.unresolved.length > 0) {
+    if (report.anchors.unresolved.length > 0) {
       lines.push("", "| Trace rule | Anchor | Locations |", "|---|---|---|");
-      for (const unresolved of result.anchors.unresolved.slice(0, 10)) {
+      for (const unresolved of report.anchors.unresolved.slice(0, 10)) {
         const anchor = `${unresolved.fromAnchorType} -> ${unresolved.toAnchorType}: ${unresolved.value}`;
         const locations = unresolved.instances.map(formatAnchorLocation).join(", ");
         lines.push(`| ${renderMarkdownTableCell(unresolved.rule)} | ${renderMarkdownTableCell(anchor)} | ${renderMarkdownTableCell(locations)} |`);
       }
-      if (result.anchors.unresolved.length > 10) {
-        lines.push(`| ... | ... | ${result.anchors.unresolved.length - 10} more unresolved anchor(s) |`);
+      if (report.anchors.unresolved.length > 10) {
+        lines.push(`| ... | ... | ${report.anchors.unresolved.length - 10} more unresolved anchor(s) |`);
       }
     }
   }
 
-  if (result.violations.length > 0) {
-    lines.push("", "| Rule | Details |", "|---|---|");
-    for (const violation of result.violations) {
-      const details = detailFromCheck(violation).join("<br>") || "Violation reported";
-      lines.push(`| ${renderMarkdownTableCell(violation.rule)} | ${renderMarkdownTableCell(details)} |`);
-    }
-  }
-
-  if (result.advisoryWarnings && result.advisoryWarnings.length > 0) {
-    lines.push("", "| Advisory | Details |", "|---|---|");
-    for (const warning of result.advisoryWarnings) {
-      const details = detailFromCheck(warning).join("<br>") || "Warning reported";
-      lines.push(`| ${renderMarkdownTableCell(warning.rule)} | ${renderMarkdownTableCell(details)} |`);
-    }
-  }
-
-  if (result.hints.length > 0) {
-    lines.push("", "### Hints");
-    for (const hint of result.hints) {
-      lines.push(`- ${hint.rule}: ${hint.message}`);
-    }
-  }
-
-  return `${lines.join("\n")}\n`;
+  return lines;
 }
 
-export function renderIntegrationSummary(report) {
+function renderIntegrationExtraLines(report) {
   const declared = report.diagnostics.declared;
   const extracted = report.diagnostics.extracted;
+  return [
+    `- Declared: ${declared.workflows} workflow(s), ${declared.templates} template(s), ${declared.docs} doc(s), ${declared.profiles} profile(s)`,
+    `- Extracted: ${extracted.workflows} workflow(s), ${extracted.templates} template(s), ${extracted.docs} doc(s), ${extracted.profiles} profile(s), ${extracted.errors} artifact error(s)`,
+  ];
+}
+
+function renderResultTable(lines, heading, entries, fallback) {
+  if (!entries || entries.length === 0) return;
+
+  lines.push("", `| ${heading} | Details |`, "|---|---|");
+  for (const entry of entries) {
+    const details = (entry.details || []).join("<br>") || fallback;
+    lines.push(`| ${renderMarkdownTableCell(entry.rule)} | ${renderMarkdownTableCell(details)} |`);
+  }
+}
+
+function renderMarkdownSummary(report, {
+  title,
+  countLabel,
+  violationLabel,
+  violationFallback,
+  extraLines = () => [],
+}) {
   const lines = [
-    "## repo-guard integration summary",
+    `## ${title}`,
     "",
     `- Result: ${report.result}`,
     `- Mode: ${report.mode}`,
     `- Repository root: \`${report.repositoryRoot}\``,
-    `- Declared: ${declared.workflows} workflow(s), ${declared.templates} template(s), ${declared.docs} doc(s), ${declared.profiles} profile(s)`,
-    `- Extracted: ${extracted.workflows} workflow(s), ${extracted.templates} template(s), ${extracted.docs} doc(s), ${extracted.profiles} profile(s), ${extracted.errors} artifact error(s)`,
-    `- Diagnostics: ${report.passed} passed, ${report.failed} failed${report.mode === "advisory" ? `, ${report.violationCount} advisory violation(s)` : ""}, ${report.warnings} warning(s)`,
+    renderCountLine(report, countLabel),
+    ...extraLines(report),
   ];
 
-  if (report.violations.length > 0) {
-    lines.push("", "| Diagnostic | Details |", "|---|---|");
-    for (const violation of report.violations) {
-      const details = detailFromCheck(violation).join("<br>") || "Diagnostic reported";
-      lines.push(`| ${renderMarkdownTableCell(violation.rule)} | ${renderMarkdownTableCell(details)} |`);
-    }
-  }
-
-  if (report.advisoryWarnings.length > 0) {
-    lines.push("", "| Advisory | Details |", "|---|---|");
-    for (const warning of report.advisoryWarnings) {
-      const details = detailFromCheck(warning).join("<br>") || "Diagnostic reported";
-      lines.push(`| ${renderMarkdownTableCell(warning.rule)} | ${renderMarkdownTableCell(details)} |`);
-    }
-  }
+  renderResultTable(lines, violationLabel, report.violations, violationFallback);
+  renderResultTable(lines, "Advisory", report.advisoryWarnings, "Warning reported");
 
   if (report.hints.length > 0) {
     lines.push("", "### Hints");
@@ -164,12 +145,33 @@ export function renderIntegrationSummary(report) {
   return `${lines.join("\n")}\n`;
 }
 
-export function renderAnalysisReport(report, { format, summary = "check" }) {
+export function renderCheckSummary(report) {
+  return renderMarkdownSummary(report, {
+    title: "repo-guard summary",
+    countLabel: "Checks",
+    violationLabel: "Rule",
+    violationFallback: "Violation reported",
+    extraLines: renderCheckExtraLines,
+  });
+}
+
+export function renderIntegrationSummary(report) {
+  return renderMarkdownSummary(report, {
+    title: "repo-guard integration summary",
+    countLabel: "Diagnostics",
+    violationLabel: "Diagnostic",
+    violationFallback: "Diagnostic reported",
+    extraLines: renderIntegrationExtraLines,
+  });
+}
+
+export function renderAnalysisReport(report, { format, summary } = {}) {
   if (format === "json") {
     return JSON.stringify(report, null, 2);
   }
   if (format === "summary") {
-    return summary === "integration"
+    const summaryKind = summary || (report.command === "validate-integration" ? "integration" : "check");
+    return summaryKind === "integration"
       ? renderIntegrationSummary(report)
       : renderCheckSummary(report);
   }

@@ -561,10 +561,10 @@ console.log("\n--- check-diff --format json emits stable machine-readable result
   expect("violations array is stable", Array.isArray(parsed?.violations), true);
   expect("hints array is stable", Array.isArray(parsed?.hints), true);
   expect("forbidden violation is detailed",
-    parsed?.violations.some((v) => v.rule === "forbidden-paths" && v.files.includes("secrets/token.txt")),
+    parsed?.violations.some((v) => v.rule === "forbidden-paths" && v.data?.files?.includes("secrets/token.txt")),
     true);
   expect("cochange violation is detailed",
-    parsed?.violations.some((v) => v.rule.startsWith("cochange:") && v.must_touch.includes("tests/**")),
+    parsed?.violations.some((v) => v.rule.startsWith("cochange:") && v.data?.must_touch?.includes("tests/**")),
     true);
 
   rmSync(repo.dir, { recursive: true });
@@ -625,15 +625,15 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
   expect("violations include code trace rule",
     parsed?.violations.some((violation) =>
       violation.rule === "trace-rule: code-refs-must-resolve" &&
-      violation.unresolved_anchors[0]?.value === "FR-999" &&
-      violation.unresolved_anchors[0]?.locations[0] === "src/feature.mjs:4:9"
+      violation.data?.unresolved_anchors?.[0]?.value === "FR-999" &&
+      violation.data?.unresolved_anchors?.[0]?.locations[0] === "src/feature.mjs:4:9"
     ),
     true);
   expect("violations include doc trace rule",
     parsed?.violations.some((violation) =>
       violation.rule === "trace-rule: doc-refs-must-resolve" &&
-      violation.unresolved_anchors[0]?.value === "FR-404" &&
-      violation.unresolved_anchors[0]?.locations[0] === "docs/feature.md:1:22"
+      violation.data?.unresolved_anchors?.[0]?.value === "FR-404" &&
+      violation.data?.unresolved_anchors?.[0]?.locations[0] === "docs/feature.md:1:22"
     ),
     true);
 
@@ -678,11 +678,11 @@ console.log("\n--- check-diff --change-class enforces surface_matrix ---");
   expect("surface matrix violation is detailed",
     parsed?.violations.some((v) =>
       v.rule === "surface-matrix" &&
-      v.change_class === "docs-cleanup" &&
-      v.touched_surfaces.includes("docs") &&
-      v.touched_surfaces.includes("kernel") &&
-      v.violating_surfaces.includes("kernel") &&
-      v.unclassified_files.includes("scripts/tool.mjs")
+      v.data?.change_class === "docs-cleanup" &&
+      v.data?.touched_surfaces?.includes("docs") &&
+      v.data?.touched_surfaces?.includes("kernel") &&
+      v.data?.violating_surfaces?.includes("kernel") &&
+      v.data?.unclassified_files?.includes("scripts/tool.mjs")
     ),
     true);
 
@@ -795,10 +795,10 @@ console.log("\n--- check-diff reports anchor contract schema errors in JSON outp
   const contractViolation = parsed?.violations.find((v) => v.rule === "change-contract");
   expect("anchor contract violation is present", Boolean(contractViolation), true);
   expect("anchor contract error points to anchors",
-    contractViolation?.errors.some((error) => error.includes("/anchors/affects")),
+    contractViolation?.details.some((detail) => detail.includes("/anchors/affects")),
     true);
   expect("anchor contract error reports duplicate items",
-    contractViolation?.errors.some((error) => error.includes("duplicate")),
+    contractViolation?.details.some((detail) => detail.includes("duplicate")),
     true);
 
   rmSync(repo.dir, { recursive: true });
@@ -825,19 +825,19 @@ console.log("\n--- check-diff evaluates registry_rules in JSON output ---");
   }
   const registryViolation = parsed?.violations.find((v) => v.rule === "registry-rules");
   expect("registry violation is present", Boolean(registryViolation), true);
-  expect("registry failed rule id reported", registryViolation?.failed_rules[0], "canonical-docs-sync");
+  expect("registry failed rule id reported", registryViolation?.data?.failed_rules?.[0], "canonical-docs-sync");
   expect(
     "registry result includes left entries",
-    registryViolation?.results[0].left_entries.includes("docs/policy.md"),
+    registryViolation?.data?.results?.[0]?.left_entries?.includes("docs/policy.md"),
     true
   );
   expect(
     "registry result includes right entries",
-    registryViolation?.results[0].right_entries.includes("docs/architecture.md"),
+    registryViolation?.data?.results?.[0]?.right_entries?.includes("docs/architecture.md"),
     true
   );
-  expect("registry missing item is reported", registryViolation?.results[0].missing_from_right[0], "docs/policy.md");
-  expect("registry extra item is reported", registryViolation?.results[0].extra_in_right[0], "docs/architecture.md");
+  expect("registry missing item is reported", registryViolation?.data?.results?.[0]?.missing_from_right?.[0], "docs/policy.md");
+  expect("registry extra item is reported", registryViolation?.data?.results?.[0]?.extra_in_right?.[0], "docs/architecture.md");
 
   rmSync(repo.dir, { recursive: true });
 }
@@ -864,7 +864,7 @@ console.log("\n--- check-diff reports size_rules in JSON, text, and summary outp
   const violation = parsed?.violations.find((v) => v.rule === "size-rules");
   expect("size rules violation is present", Boolean(violation), true);
   expect("size rules structured file violation",
-    violation?.size_violations.some((v) =>
+    violation?.data?.size_violations?.some((v) =>
       v.ruleId === "max-src-lines" &&
       v.scope === "file" &&
       v.path === "src/big.mjs" &&
@@ -874,7 +874,7 @@ console.log("\n--- check-diff reports size_rules in JSON, text, and summary outp
     ),
     true);
   expect("size rules structured directory violation",
-    violation?.size_violations.some((v) =>
+    violation?.data?.size_violations?.some((v) =>
       v.ruleId === "max-src-bytes" &&
       v.scope === "directory" &&
       v.path === "src" &&
@@ -958,7 +958,7 @@ console.log("\n--- check-diff treats undeclared growth as non-blocking and enfor
   expect("declared debt exceeded exit code", exceeded.code, 1);
   const exceededParsed = JSON.parse(exceeded.stdout);
   expect("declared debt exceeded status",
-    exceededParsed.violations.find((v) => v.rule === "surface-debt")?.status,
+    exceededParsed.violations.find((v) => v.rule === "surface-debt")?.data?.status,
     "declared_debt_exceeded");
   rmSync(exceededRepo.dir, { recursive: true });
 }
@@ -980,8 +980,8 @@ console.log("\n--- advisory text rules warn without blocking in blocking mode --
   expect("advisory text warning count", parsed.warnings, 1);
   const warning = parsed.advisoryWarnings.find((item) => item.rule === "advisory-text-rules");
   expect("advisory text warning present", Boolean(warning), true);
-  expect("advisory text changed file in structured output", warning?.matches[0]?.changed_file, "docs/copy.md");
-  expect("advisory text canonical file in structured output", warning?.matches[0]?.canonical_file, "docs/canonical.md");
+  expect("advisory text changed file in structured output", warning?.data?.matches?.[0]?.changed_file, "docs/copy.md");
+  expect("advisory text canonical file in structured output", warning?.data?.matches?.[0]?.canonical_file, "docs/canonical.md");
   expect("advisory text has no enforced violations", parsed.violations.length, 0);
 
   rmSync(repo.dir, { recursive: true });

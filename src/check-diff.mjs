@@ -123,10 +123,7 @@ export function runCheckDiff(roots, args) {
     initialChecks,
   }, { quiet });
 
-  const output = renderAnalysisReport(report, {
-    format: parsed.format,
-    summary: "check",
-  });
+  const output = renderAnalysisReport(report, { format: parsed.format });
   if (output) console.log(output);
 
   process.exit(report.exitCode);

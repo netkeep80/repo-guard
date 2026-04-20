@@ -113,6 +113,12 @@ function expectCanonicalEnvelope(label, report, command) {
   expect(`${label} ruleResults array`, Array.isArray(report.ruleResults), true);
   expect(`${label} violations array`, Array.isArray(report.violations), true);
   expect(`${label} hints array`, Array.isArray(report.hints), true);
+  expect(`${label} canonical check result shape`, report.ruleResults.every((item) =>
+    typeof item.rule === "string" &&
+    typeof item.ok === "boolean" &&
+    ["pass", "warning", "failure"].includes(item.severity) &&
+    Array.isArray(item.details)
+  ), true);
 }
 
 function makeIntegrationKernelRepo() {
@@ -229,8 +235,8 @@ console.log("\n--- check-pr style pipeline evaluates size rules ---");
 
   const violation = sizeResult.violations.find((item) => item.rule === "size-rules");
   expect("check-pr pipeline reports size-rules violation", Boolean(violation), true);
-  expect("check-pr pipeline reports offending file", violation?.size_violations[0]?.path, "src/feature.mjs");
-  expect("check-pr pipeline reports measured lines", violation?.size_violations[0]?.actual, 1);
+  expect("check-pr pipeline reports offending file", violation?.data?.size_violations?.[0]?.path, "src/feature.mjs");
+  expect("check-pr pipeline reports measured lines", violation?.data?.size_violations?.[0]?.actual, 1);
 }
 
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
