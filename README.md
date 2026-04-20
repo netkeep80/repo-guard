@@ -440,6 +440,16 @@ JSON/summary как violations, но код выхода остается 0. JSO
 normalized `integration` facts, `ruleResults`, `violations`, `diagnostics` и
 итоговый `exitCode`.
 
+Для downstream-репозиториев, которые хотят удалить собственные validators,
+есть пошаговый migration guide:
+[`docs/removing-bespoke-validators.md`](docs/removing-bespoke-validators.md).
+Он показывает, как перенести проверки workflow, PR template, issue template,
+docs и `requirements-strict` traceability в `integration` policy. Готовые
+snippets лежат в
+[`examples/downstream-integration-policy.json`](examples/downstream-integration-policy.json)
+и
+[`examples/replace-custom-validator-workflow.yml`](examples/replace-custom-validator-workflow.yml).
+
 Пример:
 
 ```json
@@ -703,6 +713,7 @@ node src/repo-guard.mjs check-diff --format summary
 | `src/extractors/` | Извлекатели якорей и integration facts |
 | `schemas/` | JSON Schemas для политики и контракта |
 | `templates/` | Примеры политики, рабочего процесса и контрактов |
+| `examples/` | Downstream snippets для migration с custom validators |
 | `tests/` | Модульные и интеграционные тесты |
 
 ## Ограничения
