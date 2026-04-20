@@ -100,6 +100,11 @@ repo-guard doctor
 | `repo-guard doctor` | Диагностирует окружение, рабочий процесс, политику и авторизацию |
 | `repo-guard validate-integration` | Проверяет integration wiring через normalized facts |
 
+`check-diff`, `check-pr` и `validate-integration` используют общий analysis
+report: команды различаются источниками facts, но возвращают один envelope с
+`command`, `mode`, `result`, `ok`, `exitCode`, `ruleResults`, `violations`,
+`advisoryWarnings`, `hints` и `repositoryRoot`.
+
 Глобальные флаги можно ставить до или после команды:
 
 ```bash
@@ -146,9 +151,9 @@ repo-guard check-diff --format summary --base main --head feature
 | `json` | Стабильный структурированный результат; стандартный вывод содержит только JSON |
 | `summary` | Markdown в формате GitHub для `$GITHUB_STEP_SUMMARY` |
 
-В JSON-результате есть `mode`, `result`, `ok`, `exitCode`, `violations`,
-`advisoryWarnings`, `ruleResults`, `hints`, `repositoryRoot` и краткая статистика
-diff. Если включены якоря трассировки, добавляются `anchors` и
+В JSON-результате есть `command`, `mode`, `result`, `ok`, `exitCode`,
+`violations`, `advisoryWarnings`, `ruleResults`, `hints`, `repositoryRoot` и
+краткая статистика diff. Если включены якоря трассировки, добавляются `anchors` и
 `traceRuleResults`.
 
 ## `check-pr`
@@ -491,8 +496,8 @@ repo-guard doctor --integration --format json
 `validate-integration` читает только файлы репозитория, объявленные в
 `repo-policy.json`, и не требует `GITHUB_EVENT_PATH`. В blocking-режиме
 диагностические нарушения дают код выхода 1; в advisory-режиме они остаются в
-JSON/summary как violations, но код выхода остается 0. JSON-вывод содержит
-normalized `integration` facts, `ruleResults`, `violations`, `diagnostics` и
+JSON/summary как violations, но код выхода остается 0. JSON-вывод использует тот
+же analysis envelope и добавляет normalized `integration` facts, `diagnostics` и
 итоговый `exitCode`.
 
 Для downstream-репозиториев, которые хотят удалить собственные validators,

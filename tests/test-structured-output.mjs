@@ -534,6 +534,7 @@ console.log("\n--- check-diff --format json emits stable machine-readable result
     expect("stdout is valid json", e.message, "valid json");
   }
   expect("stderr is empty for json output", result.stderr, "");
+  expect("command is check-diff", parsed?.command, "check-diff");
   expect("mode is blocking", parsed?.mode, "blocking");
   expect("repositoryRoot is absolute", parsed?.repositoryRoot, repo.dir);
   expect("ok is false", parsed?.ok, false);
@@ -541,6 +542,7 @@ console.log("\n--- check-diff --format json emits stable machine-readable result
   expect("changed file count", parsed?.diff?.changedFiles, 2);
   expectTopLevelKeys("top-level json shape is stable", parsed, [
     "advisoryWarnings",
+    "command",
     "diff",
     "exitCode",
     "failed",
@@ -591,6 +593,7 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
   expectTopLevelKeys("anchor-aware json shape adds diagnostics without removing stable fields", parsed, [
     "advisoryWarnings",
     "anchors",
+    "command",
     "diff",
     "exitCode",
     "failed",
