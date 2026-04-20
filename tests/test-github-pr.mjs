@@ -148,6 +148,52 @@ Fixes #10
   expect("integration valid: linked issue", issues[0], 10);
 }
 
+// --- Integration: issue body carries privileged authorization alongside PR-body change contract ---
+
+{
+  const prBody = `
+## Description
+Edits governance files.
+
+\`\`\`repo-guard-yaml
+change_type: feature
+scope:
+  - schemas/
+budgets: {}
+must_touch: []
+must_not_touch: []
+expected_effects:
+  - edit governance
+\`\`\`
+
+Fixes #77
+`;
+  const issueBody = `
+\`\`\`repo-guard-yaml
+change_type: feature
+scope:
+  - schemas/
+budgets: {}
+must_touch: []
+must_not_touch: []
+expected_effects:
+  - edit governance
+authorized_governance_paths:
+  - schemas/**
+\`\`\`
+`;
+
+  const facts = resolvePRContractFacts({ prBody, issueBody });
+  expect("split-source: adapter ok", facts.ok, true);
+  expect("split-source: change contract from PR body", facts.contractSource, "pr body");
+  expect(
+    "split-source: issueAuthorization carries authorized_governance_paths",
+    Array.isArray(facts.issueAuthorization?.authorized_governance_paths) &&
+      facts.issueAuthorization.authorized_governance_paths[0] === "schemas/**",
+    true
+  );
+}
+
 // --- Integration: simulated PR with no contract, issue fallback ---
 
 {

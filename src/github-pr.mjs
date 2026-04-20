@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { getDiff } from "./git.mjs";
-import { extractContract, extractLinkedIssueNumbers, resolveContract } from "./markdown-contract.mjs";
+import { getDiff, readBaseGovernancePaths } from "./git.mjs";
+import {
+  extractContract,
+  extractIssueAuthorization,
+  extractLinkedIssueNumbers,
+  resolveContract,
+} from "./markdown-contract.mjs";
 import { warnReservedContractFields } from "./policy-compiler.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, validationCheck } from "./runtime/validation.mjs";
@@ -80,13 +85,17 @@ export function checkIssueFallbackPrerequisites() {
 }
 
 export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCount = null }) {
+  const linkedIssues = extractLinkedIssueNumbers(prBody);
+  const issueAuthorization = extractIssueAuthorization(issueBody);
+
   const prResult = extractContract(prBody);
   if (prResult.ok) {
     return {
       ok: true,
       contract: prResult.contract,
       contractSource: "pr body",
-      linkedIssues: extractLinkedIssueNumbers(prBody),
+      linkedIssues,
+      issueAuthorization,
     };
   }
 
@@ -96,11 +105,11 @@ export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCo
       error: prResult.error,
       message: prResult.message,
       contractSource: "pr body",
-      linkedIssues: extractLinkedIssueNumbers(prBody),
+      linkedIssues,
+      issueAuthorization,
     };
   }
 
-  const linkedIssues = extractLinkedIssueNumbers(prBody);
   const resolvedLinkedIssueCount = linkedIssueCount ?? linkedIssues.length;
   if (resolvedLinkedIssueCount > 1) {
     return {
@@ -109,6 +118,7 @@ export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCo
       message: `PR body references ${resolvedLinkedIssueCount} issues (${linkedIssues.map(n => `#${n}`).join(", ")}); expected exactly one`,
       contractSource: "none",
       linkedIssues,
+      issueAuthorization,
     };
   }
 
@@ -119,6 +129,7 @@ export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCo
       contract: issueResult.contract,
       contractSource: "linked issue",
       linkedIssues,
+      issueAuthorization,
     };
   }
 
@@ -128,6 +139,7 @@ export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCo
     message: issueResult.message,
     contractSource: "none",
     linkedIssues,
+    issueAuthorization,
   };
 }
 
@@ -209,6 +221,7 @@ export function runCheckPR(roots, args = []) {
   }
   let contract = null;
   let contractSource = contractResult.contractSource || "none";
+  const issueAuthorization = contractResult.issueAuthorization || null;
   const initialChecks = [];
   if (!contractResult.ok) {
     initialChecks.push({
@@ -237,12 +250,21 @@ export function runCheckPR(roots, args = []) {
     console.error(`ERROR: ${e.message}`);
     process.exit(1);
   }
+
+  const basePolicyRead = readBaseGovernancePaths(base, roots.repoRoot);
+  if (basePolicyRead.error) {
+    console.warn(`WARN: could not read base repo-policy.json governance_paths (${basePolicyRead.error}); falling back to head policy for governance boundary`);
+  }
+  const trustedGovernancePaths = basePolicyRead.governancePaths ?? policy.paths?.governance_paths ?? [];
+
   const summary = runPolicyPipeline({
     mode: "check-pr",
     repositoryRoot: roots.repoRoot,
     policy,
     contract,
     contractSource,
+    issueAuthorization,
+    trustedGovernancePaths,
     enforcement,
     diffText,
     initialChecks,
