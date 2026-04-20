@@ -114,4 +114,25 @@ describe("repo-guard self-hosting templates and docs", () => {
     assert.match(readme, /repo-policy\.json/);
     assert.match(readme, /templates\//);
   });
+
+  it("README links the downstream migration guide and examples", () => {
+    const readme = readProjectFile("README.md");
+
+    assert.match(readme, /docs\/removing-bespoke-validators\.md/);
+    assert.match(readme, /examples\/downstream-integration-policy\.json/);
+    assert.match(readme, /examples\/replace-custom-validator-workflow\.yml/);
+  });
+
+  it("migration guide maps custom validators to built-in integration policy", () => {
+    const guide = readProjectFile("docs/removing-bespoke-validators.md");
+
+    assert.match(guide, /## Migration Sequence/);
+    assert.match(guide, /Delete the custom validator/);
+    assert.match(guide, /integration\.workflows/);
+    assert.match(guide, /integration\.templates/);
+    assert.match(guide, /integration\.docs/);
+    assert.match(guide, /requirements-strict/);
+    assert.match(guide, /examples\/downstream-integration-policy\.json/);
+    assert.match(guide, /examples\/replace-custom-validator-workflow\.yml/);
+  });
 });

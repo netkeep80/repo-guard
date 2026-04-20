@@ -1,0 +1,24 @@
+name: Change contract
+description: Capture a repo-guard change contract for linked issues.
+title: "[change] "
+body:
+  - type: textarea
+    id: contract
+    attributes:
+      label: Change Contract
+      value: |
+        ```repo-guard-yaml
+        change_type: feature
+        scope:
+          - src/**
+        anchors:
+          affects:
+            - FR-014
+        must_touch:
+          - tests/**
+        must_not_touch: []
+        expected_effects:
+          - The linked issue carries the same contract fields as a PR.
+        ```
+    validations:
+      required: true

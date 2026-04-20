@@ -55,6 +55,9 @@ jobs:
       - name: Run integration diagnostics tests
         run: npm run test:integration-diagnostics
 
+      - name: Run integration fixture e2e tests
+        run: npm run test:integration-fixtures
+
       - name: Run trace evidence rule tests
         run: npm run test:trace-evidence
 

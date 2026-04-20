@@ -1,0 +1,20 @@
+name: custom policy validator
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  policy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run legacy repo-guard clone
+        continue-on-error: true
+        run: |
+          git clone https://github.com/netkeep80/repo-guard "$RUNNER_TEMP/repo-guard"
+          node "$RUNNER_TEMP/repo-guard/src/repo-guard.mjs" check-diff

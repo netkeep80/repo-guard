@@ -41,6 +41,9 @@ expect("invalid-policy.json fails schema", validatePolicy(invalidPolicy), false)
 const repoPolicy = loadJSON(resolve(root, "repo-policy.json"));
 expect("repo-policy.json (self) passes schema", validatePolicy(repoPolicy), true);
 
+const downstreamIntegrationExample = loadJSON(resolve(root, "examples/downstream-integration-policy.json"));
+expect("downstream integration example policy passes schema", validatePolicy(downstreamIntegrationExample), true);
+
 const policyWithProfile = {
   ...validPolicy,
   profile: "requirements-strict",
