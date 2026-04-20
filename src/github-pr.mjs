@@ -268,10 +268,21 @@ export function runCheckPR(roots, args = []) {
   }
 
   const basePolicyRead = readBaseGovernancePaths(base, roots.repoRoot);
+  let trustedGovernancePaths;
   if (basePolicyRead.error) {
-    console.warn(`WARN: could not read base repo-policy.json governance_paths (${basePolicyRead.error}); falling back to head policy for governance boundary`);
+    initialChecks.push({
+      name: "governance-trusted-boundary",
+      check: {
+        ok: false,
+        message: `cannot establish trusted governance boundary: ${basePolicyRead.error}`,
+        hint: "check-pr requires reading repo-policy.json at the PR base via `git show <base>:repo-policy.json` so a PR cannot narrow the governance perimeter in the same diff. The boundary is intentionally not falling back to the PR head policy. Ensure the base ref is fetched and repo-policy.json is valid JSON on the base branch.",
+        details: [`base_ref: ${base}`, `base_policy_read_error: ${basePolicyRead.error}`],
+      },
+    });
+    trustedGovernancePaths = [];
+  } else {
+    trustedGovernancePaths = basePolicyRead.governancePaths ?? [];
   }
-  const trustedGovernancePaths = basePolicyRead.governancePaths ?? policy.paths?.governance_paths ?? [];
 
   const summary = runPolicyPipeline({
     mode: "check-pr",

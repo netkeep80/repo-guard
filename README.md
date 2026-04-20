@@ -777,6 +777,13 @@ expected_effects:
 нужен только ради privileged authorization, и именно оттуда runtime его
 извлекает.
 
+Если `repo-policy.json` базовой ветки не удаётся прочитать или распарсить
+(`git show <base>:repo-policy.json` падает, JSON невалиден и т. п.),
+`check-pr` **намеренно завершается ошибкой** (`governance-trusted-boundary`)
+вместо отката на head policy текущего PR. Без доверенной границы
+governance-решение не принимается: лучше hard fail, чем доверять mutable
+PR state.
+
 CI также запускает:
 
 - `npx repo-guard` — валидацию политики;
