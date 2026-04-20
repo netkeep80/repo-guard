@@ -17,6 +17,8 @@ import {
   checkChangeTypeRules,
   checkRegistryRules,
   checkAdvisoryTextRules,
+  checkSizeRules,
+  countTextLines,
 } from "../src/diff-checker.mjs";
 
 let failures = 0;
@@ -798,6 +800,99 @@ const cappedAdvisoryResult = checkAdvisoryTextRules(
   }
 );
 expect("14. advisory caps reported matches", cappedAdvisoryResult.matches.length, 1);
+
+// --- 15. size rules ---
+
+expect("15. line count empty content", countTextLines(""), 0);
+expect("15. line count single blank line", countTextLines("\n"), 1);
+expect("15. line count trailing newline", countTextLines("a\n"), 1);
+expect("15. line count two blank lines", countTextLines("\n\n"), 2);
+
+const sizeRuleFiles = new Map([
+  ["src/small.mjs", "one\ntwo\n"],
+  ["src/large.mjs", "one\ntwo\nthree\n"],
+  ["src/bytes.bin", "abcdef"],
+  ["src/subtree/a.mjs", "a\nb\n"],
+  ["src/subtree/b.mjs", "c\n"],
+  ["docs/readme.md", "# Docs\n"],
+]);
+
+const sizeRuleOptions = {
+  trackedFiles: [...sizeRuleFiles.keys()],
+  readFile: (path) => sizeRuleFiles.get(path),
+};
+
+const passingFileSizeResult = checkSizeRules(
+  [],
+  [{ id: "max-small-lines", scope: "file", metric: "lines", glob: "src/small.mjs", max: 2 }],
+  sizeRuleOptions
+);
+expect("15. passing file line rule", passingFileSizeResult.ok, true);
+
+const failingFileSizeResult = checkSizeRules(
+  [],
+  [{ id: "max-large-lines", scope: "file", metric: "lines", glob: "src/large.mjs", max: 2 }],
+  sizeRuleOptions
+);
+expect("15. failing file line rule", failingFileSizeResult.ok, false);
+expect("15. file violation rule id", failingFileSizeResult.size_violations[0].ruleId, "max-large-lines");
+expect("15. file violation path", failingFileSizeResult.size_violations[0].path, "src/large.mjs");
+expect("15. file violation actual lines", failingFileSizeResult.size_violations[0].actual, 3);
+expect("15. file violation max", failingFileSizeResult.size_violations[0].max, 2);
+
+const passingDirectorySizeResult = checkSizeRules(
+  [],
+  [{ id: "max-subtree-lines", scope: "directory", metric: "lines", glob: "src/subtree/**", max: 3 }],
+  sizeRuleOptions
+);
+expect("15. passing directory line rule", passingDirectorySizeResult.ok, true);
+
+const failingDirectorySizeResult = checkSizeRules(
+  [],
+  [{ id: "max-subtree-bytes", scope: "directory", metric: "bytes", glob: "src/subtree/**", max: 5 }],
+  sizeRuleOptions
+);
+expect("15. failing directory byte rule", failingDirectorySizeResult.ok, false);
+expect("15. directory violation scope", failingDirectorySizeResult.size_violations[0].scope, "directory");
+expect("15. directory violation path", failingDirectorySizeResult.size_violations[0].path, "src/subtree");
+expect("15. directory violation metric", failingDirectorySizeResult.size_violations[0].metric, "bytes");
+
+const failingByteSizeResult = checkSizeRules(
+  [],
+  [{ id: "max-file-bytes", scope: "file", metric: "bytes", glob: "src/bytes.bin", max: 5 }],
+  sizeRuleOptions
+);
+expect("15. failing file byte rule", failingByteSizeResult.ok, false);
+expect("15. file byte violation actual", failingByteSizeResult.size_violations[0].actual, 6);
+
+const changedOnlySkippedResult = checkSizeRules(
+  [{ path: "docs/readme.md", addedLines: ["docs"], deletedLines: [], status: "modified" }],
+  [{ id: "changed-only-lines", scope: "file", metric: "lines", glob: "src/large.mjs", max: 2, count: "changed_only" }],
+  sizeRuleOptions
+);
+expect("15. changed_only skips unchanged file", changedOnlySkippedResult.ok, true);
+
+const changedOnlyFailingResult = checkSizeRules(
+  [{ path: "src/large.mjs", addedLines: ["three"], deletedLines: [], status: "modified" }],
+  [{ id: "changed-only-lines", scope: "file", metric: "lines", glob: "src/large.mjs", max: 2, count: "changed_only" }],
+  sizeRuleOptions
+);
+expect("15. changed_only evaluates changed file", changedOnlyFailingResult.ok, false);
+
+const ignoredSizeResult = checkSizeRules(
+  [],
+  [{ id: "ignore-generated", scope: "file", metric: "bytes", glob: "src/**", max: 10, ignore: ["src/bytes.bin", "src/large.mjs", "src/subtree/**"] }],
+  sizeRuleOptions
+);
+expect("15. ignore patterns exclude matching files", ignoredSizeResult.ok, true);
+
+const advisorySizeResult = checkSizeRules(
+  [],
+  [{ id: "advisory-large-lines", scope: "file", metric: "lines", glob: "src/large.mjs", max: 2, level: "advisory" }],
+  sizeRuleOptions
+);
+expect("15. advisory size rule does not fail blocking result", advisorySizeResult.ok, true);
+expect("15. advisory size rule is reported separately", advisorySizeResult.advisory_violations.length, 1);
 
 // --- Summary ---
 

@@ -1,0 +1,45 @@
+{
+  "policy_format_version": "0.3.0",
+  "repository_kind": "library",
+  "enforcement": {
+    "mode": "blocking"
+  },
+  "paths": {
+    "forbidden": [],
+    "canonical_docs": ["README.md"],
+    "governance_paths": ["repo-policy.json"],
+    "operational_paths": [".gitkeep"]
+  },
+  "diff_rules": {
+    "max_new_docs": 3,
+    "max_new_files": 20,
+    "max_net_added_lines": 1000
+  },
+  "size_rules": [
+    {
+      "id": "max-public-header-lines",
+      "scope": "file",
+      "metric": "lines",
+      "glob": "include/**/*.h",
+      "max": 1500
+    },
+    {
+      "id": "max-source-module-bytes",
+      "scope": "file",
+      "metric": "bytes",
+      "glob": "src/**/*.mjs",
+      "max": 65536,
+      "count": "changed_only"
+    },
+    {
+      "id": "max-core-subtree-lines",
+      "scope": "directory",
+      "metric": "lines",
+      "glob": "src/core/**",
+      "max": 120000,
+      "ignore": ["src/core/generated/**"]
+    }
+  ],
+  "content_rules": [],
+  "cochange_rules": []
+}

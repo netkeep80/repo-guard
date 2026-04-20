@@ -44,6 +44,9 @@ expect("repo-policy.json (self) passes schema", validatePolicy(repoPolicy), true
 const downstreamIntegrationExample = loadJSON(resolve(root, "examples/downstream-integration-policy.json"));
 expect("downstream integration example policy passes schema", validatePolicy(downstreamIntegrationExample), true);
 
+const sizeRulesExample = loadJSON(resolve(root, "examples/size-rules-policy.json"));
+expect("size rules example policy passes schema", validatePolicy(sizeRulesExample), true);
+
 const policyWithProfile = {
   ...validPolicy,
   profile: "requirements-strict",
@@ -170,6 +173,46 @@ const policyWithIntegration = {
   },
 };
 expect("policy with integration section passes schema", validatePolicy(policyWithIntegration), true);
+
+const policyWithSizeRules = {
+  ...validPolicy,
+  size_rules: [
+    {
+      id: "max-source-lines",
+      scope: "file",
+      metric: "lines",
+      glob: "src/**/*.mjs",
+      max: 500,
+    },
+    {
+      id: "max-source-subtree-bytes",
+      scope: "directory",
+      metric: "bytes",
+      glob: "src/**",
+      max: 65536,
+      count: "changed_only",
+      level: "advisory",
+      ignore: ["src/generated/**"],
+      applies_to_change_types: ["feature", "refactor"],
+      applies_to_change_classes: ["kernel-hardening"],
+    },
+  ],
+};
+expect("policy with size_rules passes schema", validatePolicy(policyWithSizeRules), true);
+
+const invalidSizeRulePolicy = {
+  ...validPolicy,
+  size_rules: [
+    {
+      id: "bad-size-rule",
+      scope: "file",
+      metric: "tokens",
+      glob: "src/**",
+      max: -1,
+    },
+  ],
+};
+expect("policy with malformed size rule fails schema", validatePolicy(invalidSizeRulePolicy), false);
 
 const invalidIntegrationExpectationPolicy = {
   ...validPolicy,

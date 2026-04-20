@@ -128,6 +128,11 @@ function printCheckDetails(mode, check) {
   if (check.failed_rules) {
     write(`    failed_rules: ${formatList(check.failed_rules)}`);
   }
+  if (check.size_violations && (!check.details || check.details.length === 0)) {
+    for (const v of check.size_violations) {
+      write(`    [${v.ruleId}] ${v.path} has ${v.actual} ${v.metric} (max ${v.max})`);
+    }
+  }
   if (check.matches) {
     for (const match of check.matches) {
       const sections = match.duplicate_section_titles && match.duplicate_section_titles.length > 0
@@ -184,6 +189,9 @@ function detailFromCheck(check) {
   if (check.forbidden_surfaces) details.push(`forbidden_surfaces: ${formatList(check.forbidden_surfaces)}`);
   if (check.violating_surfaces) details.push(`violating_surfaces: ${formatList(check.violating_surfaces)}`);
   if (check.failed_rules) details.push(`failed_rules: ${formatList(check.failed_rules)}`);
+  if (check.size_violations && (!check.details || check.details.length === 0)) {
+    details.push(...check.size_violations.map((v) => `[${v.ruleId}] ${v.path} has ${v.actual} ${v.metric} (max ${v.max})`));
+  }
   if (check.matches) {
     details.push(...check.matches.map((match) => {
       const sections = match.duplicate_section_titles && match.duplicate_section_titles.length > 0
@@ -244,6 +252,7 @@ function violationFromCheck(name, check) {
   if (check.violating_surfaces) violation.violating_surfaces = check.violating_surfaces;
   if (check.files_by_surface) violation.files_by_surface = check.files_by_surface;
   if (check.failed_rules) violation.failed_rules = check.failed_rules;
+  if (check.size_violations) violation.size_violations = check.size_violations;
   if (check.results) violation.results = check.results;
   if (check.matches) violation.matches = check.matches;
   if (check.trace_rule) violation.trace_rule = check.trace_rule;

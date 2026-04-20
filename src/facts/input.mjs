@@ -57,6 +57,7 @@ export function buildPolicyFacts({
     policy,
     contract,
     contractSource,
+    readFile,
     enforcementMode: enforcement.mode,
     enforcement,
     diff: {

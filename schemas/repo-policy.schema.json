@@ -123,6 +123,11 @@
         }
       }
     },
+    "size_rules": {
+      "type": "array",
+      "description": "Absolute size constraints for files or directory subtrees, measured in lines or bytes.",
+      "items": { "$ref": "#/definitions/size_rule" }
+    },
     "surfaces": {
       "type": "object",
       "description": "Named repository surfaces mapped to one or more path globs. A changed file can match multiple surfaces.",
@@ -428,6 +433,40 @@
           "$ref": "#/definitions/non_empty_string_array",
           "description": "Evidence surfaces required for anchors.verifies declarations."
         }
+      }
+    },
+    "size_rule": {
+      "type": "object",
+      "required": ["id", "scope", "metric", "glob", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/non_empty_string" },
+        "scope": {
+          "type": "string",
+          "enum": ["file", "directory"]
+        },
+        "metric": {
+          "type": "string",
+          "enum": ["lines", "bytes"]
+        },
+        "glob": { "$ref": "#/definitions/non_empty_string" },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count": {
+          "type": "string",
+          "enum": ["all_tracked", "changed_only"],
+          "default": "all_tracked"
+        },
+        "level": {
+          "type": "string",
+          "enum": ["blocking", "advisory"],
+          "default": "blocking"
+        },
+        "ignore": { "$ref": "#/definitions/non_empty_string_array" },
+        "applies_to_change_types": { "$ref": "#/definitions/non_empty_string_array" },
+        "applies_to_change_classes": { "$ref": "#/definitions/non_empty_string_array" }
       }
     },
     "integration_workflow": {
