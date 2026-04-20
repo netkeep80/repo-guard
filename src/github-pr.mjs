@@ -189,20 +189,36 @@ export function runCheckPR(roots, args = []) {
   }
 
   let issueBody = null;
+  const linkedIssues = extractLinkedIssueNumbers(prBody);
   const prResult = extractContract(prBody);
-  if (!prResult.ok && prResult.error === "contract_not_found") {
-    const linkedIssues = extractLinkedIssueNumbers(prBody);
-    if (linkedIssues.length > 1) {
-      // Handled by resolvePRContractFacts after preserving linked issue diagnostics.
-    } else if (linkedIssues.length === 1) {
+  const prBodyHasContract = prResult.ok;
+  const needsIssueFallback =
+    !prResult.ok && prResult.error === "contract_not_found" && linkedIssues.length === 1;
+  if (linkedIssues.length === 1 && (needsIssueFallback || prBodyHasContract)) {
+    if (needsIssueFallback) {
       console.log(`No contract in PR body; trying linked issue #${linkedIssues[0]}...`);
-      const fallbackPrereqs = checkIssueFallbackPrerequisites();
-      if (fallbackPrereqs.length > 0) {
+    } else {
+      console.log(`Fetching linked issue #${linkedIssues[0]} for privileged authorization...`);
+    }
+    const fallbackPrereqs = checkIssueFallbackPrerequisites();
+    if (fallbackPrereqs.length > 0) {
+      if (needsIssueFallback) {
         console.error("ERROR: linked issue fallback prerequisites not met:");
         for (const p of fallbackPrereqs) console.error(`  - ${p}`);
         process.exit(1);
+      } else {
+        console.warn(
+          "WARN: linked issue lookup prerequisites not met; privileged authorization from the issue body will be unavailable"
+        );
+        for (const p of fallbackPrereqs) console.warn(`  - ${p}`);
       }
+    } else {
       issueBody = fetchIssueBody(repoFullName, linkedIssues[0]);
+      if (issueBody === null && prBodyHasContract) {
+        console.warn(
+          `WARN: could not fetch linked issue #${linkedIssues[0]} body; privileged authorization from the issue body will be unavailable`
+        );
+      }
     }
   }
 
