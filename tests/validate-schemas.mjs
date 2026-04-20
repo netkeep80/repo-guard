@@ -87,6 +87,57 @@ const policyWithEvidenceRules = {
 };
 expect("policy with evidence trace_rules passes schema", validatePolicy(policyWithEvidenceRules), true);
 
+const policyWithIntegration = {
+  ...validPolicy,
+  integration: {
+    workflows: [
+      {
+        id: "pr-gate",
+        kind: "github_actions",
+        path: ".github/workflows/repo-guard.yml",
+        role: "repo_guard_pr_gate",
+      },
+    ],
+    templates: [
+      {
+        id: "pull-request-template",
+        kind: "markdown",
+        path: ".github/PULL_REQUEST_TEMPLATE.md",
+        requires_contract_block: true,
+      },
+    ],
+    docs: [
+      {
+        id: "readme",
+        path: "README.md",
+        must_mention: ["repo-guard", "anchors.affects"],
+      },
+    ],
+    profiles: [
+      {
+        id: "requirements-strict",
+        doc_path: "docs/requirements-strict-profile.md",
+      },
+    ],
+  },
+};
+expect("policy with integration section passes schema", validatePolicy(policyWithIntegration), true);
+
+const invalidIntegrationPolicy = {
+  ...validPolicy,
+  integration: {
+    workflows: [
+      {
+        id: "pr-gate",
+        kind: "cron",
+        path: ".github/workflows/repo-guard.yml",
+        role: "repo_guard_pr_gate",
+      },
+    ],
+  },
+};
+expect("policy with unknown integration workflow kind fails schema", validatePolicy(invalidIntegrationPolicy), false);
+
 // Content rules normalization tests
 const oldFormPolicy = loadJSON(resolve(root, "tests/fixtures/invalid-content-rule-old-form.json"));
 expect("old-form content_rules (pattern/severity/message) fails schema", validatePolicy(oldFormPolicy), false);

@@ -257,6 +257,35 @@ export function compileAnchorPolicy(policy) {
   return errors;
 }
 
+export function compileIntegrationPolicy(policy) {
+  const errors = [];
+  const integration = policy.integration;
+
+  if (!integration) return errors;
+
+  for (const section of ["workflows", "templates", "docs", "profiles"]) {
+    const seen = new Map();
+    const entries = Array.isArray(integration[section]) ? integration[section] : [];
+    for (const [index, entry] of entries.entries()) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!entry.id) continue;
+
+      if (seen.has(entry.id)) {
+        errors.push({
+          section,
+          id: entry.id,
+          index,
+          message: `integration.${section}[${index}].id duplicates integration.${section}[${seen.get(entry.id)}].id "${entry.id}"`,
+        });
+      } else {
+        seen.set(entry.id, index);
+      }
+    }
+  }
+
+  return errors;
+}
+
 export function warnReservedContractFields(contract) {
   const warnings = [];
   if (contract.overrides && contract.overrides.length > 0) {

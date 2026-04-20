@@ -9,6 +9,7 @@ import {
   compileAnchorPolicy,
   compileChangeTypePolicy,
   compileForbidRegex,
+  compileIntegrationPolicy,
   compileNewFilePolicy,
   compileSurfacePolicy,
   warnReservedContractFields,
@@ -183,6 +184,7 @@ function runValidate(roots, args) {
     ["new file policy compilation", compileNewFilePolicy(policy), (e) => e.message],
     ["change type policy compilation", compileChangeTypePolicy(policy), (e) => e.message],
     ["anchor policy compilation", compileAnchorPolicy(policy), (e) => e.message],
+    ["integration policy compilation", compileIntegrationPolicy(policy), (e) => e.message],
   ];
 
   for (const [label, errors, format] of compileGroups) {

@@ -73,6 +73,25 @@ describe("repo-guard self-hosting policy", () => {
 
     assert.equal(operational.some((path) => path.startsWith(".github/")), false);
   });
+
+  it("declares its own repo-guard integration surface", () => {
+    const policy = loadPolicy();
+    const integration = policy.integration;
+
+    assert.ok(integration, "self policy should declare integration metadata");
+    assert.equal(integration.workflows[0].path, ".github/workflows/ci.yml");
+    assert.equal(integration.workflows[0].role, "repo_guard_pr_gate");
+    assert.ok(
+      integration.templates.some((template) => template.path === ".github/PULL_REQUEST_TEMPLATE.md"),
+      "expected PR template to be declared",
+    );
+    assert.ok(
+      integration.templates.some((template) => template.path === ".github/ISSUE_TEMPLATE/change-contract.yml"),
+      "expected issue form to be declared",
+    );
+    assert.equal(integration.docs[0].path, "README.md");
+    assert.equal(integration.profiles[0].id, "self-hosting");
+  });
 });
 
 describe("repo-guard self-hosting templates and docs", () => {
