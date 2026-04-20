@@ -86,6 +86,60 @@ function makeRepo() {
   };
 }
 
+function makeSizeRulesRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-size-rules-"));
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+
+  const policy = {
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 5,
+      max_net_added_lines: 500,
+    },
+    size_rules: [
+      {
+        id: "max-src-lines",
+        scope: "file",
+        metric: "lines",
+        glob: "src/**/*.mjs",
+        max: 2,
+      },
+      {
+        id: "max-src-bytes",
+        scope: "directory",
+        metric: "bytes",
+        glob: "src/**",
+        max: 10,
+      },
+    ],
+    content_rules: [],
+    cochange_rules: [],
+  };
+
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
+  writeFileSync(join(dir, "README.md"), "# Test\n");
+  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+
+  execSync("mkdir -p src", { cwd: dir, stdio: "pipe" });
+  writeFileSync(join(dir, "src", "big.mjs"), "one\ntwo\nthree\n");
+  execSync("git add -A && git commit -m oversized-source", { cwd: dir, stdio: "pipe" });
+
+  return {
+    dir,
+    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
+    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
+  };
+}
+
 function makeSurfaceRepo() {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-surfaces-"));
   execSync("git init", { cwd: dir, stdio: "pipe" });
@@ -781,6 +835,72 @@ console.log("\n--- check-diff evaluates registry_rules in JSON output ---");
   );
   expect("registry missing item is reported", registryViolation?.results[0].missing_from_right[0], "docs/policy.md");
   expect("registry extra item is reported", registryViolation?.results[0].extra_in_right[0], "docs/architecture.md");
+
+  rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- check-diff reports size_rules in JSON, text, and summary output ---");
+{
+  const repo = makeSizeRulesRepo();
+  const jsonResult = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", repo.base,
+    "--head", repo.head,
+  ]);
+
+  expect("size rules json exit code follows blocking failure", jsonResult.code, 1);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(jsonResult.stdout);
+    expect("size rules stdout is valid json", true, true);
+  } catch (e) {
+    expect("size rules stdout is valid json", e.message, "valid json");
+  }
+  const violation = parsed?.violations.find((v) => v.rule === "size-rules");
+  expect("size rules violation is present", Boolean(violation), true);
+  expect("size rules structured file violation",
+    violation?.size_violations.some((v) =>
+      v.ruleId === "max-src-lines" &&
+      v.scope === "file" &&
+      v.path === "src/big.mjs" &&
+      v.metric === "lines" &&
+      v.actual === 3 &&
+      v.max === 2
+    ),
+    true);
+  expect("size rules structured directory violation",
+    violation?.size_violations.some((v) =>
+      v.ruleId === "max-src-bytes" &&
+      v.scope === "directory" &&
+      v.path === "src" &&
+      v.metric === "bytes" &&
+      v.actual === 14 &&
+      v.max === 10
+    ),
+    true);
+
+  const textResult = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--base", repo.base,
+    "--head", repo.head,
+  ]);
+  expect("size rules text exit code follows blocking failure", textResult.code, 1);
+  expectIncludes("text output names size-rules check", textResult.output, "FAIL: size-rules");
+  expectIncludes("text output includes size detail", textResult.output, "[max-src-lines] src/big.mjs has 3 lines (max 2)");
+
+  const summaryResult = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "summary",
+    "--base", repo.base,
+    "--head", repo.head,
+  ]);
+  expect("size rules summary exit code follows blocking failure", summaryResult.code, 1);
+  expectIncludes("summary output names size-rules check", summaryResult.output, "| size-rules |");
+  expectIncludes("summary output includes size detail", summaryResult.output, "[max-src-bytes] src has 14 bytes (max 10)");
 
   rmSync(repo.dir, { recursive: true });
 }

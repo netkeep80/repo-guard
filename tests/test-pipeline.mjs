@@ -138,5 +138,34 @@ console.log("\n--- equivalent command inputs share one result shape ---");
   );
 }
 
+console.log("\n--- check-pr style pipeline evaluates size rules ---");
+{
+  const sizeResult = runEquivalentInput({
+    mode: "check-pr",
+    policy: {
+      ...policy,
+      size_rules: [
+        {
+          id: "max-feature-lines",
+          scope: "file",
+          metric: "lines",
+          glob: "src/feature.mjs",
+          max: 0,
+          count: "changed_only",
+        },
+      ],
+    },
+    readFile: (path) => {
+      if (path === "src/feature.mjs") return "export const value = 1;\n";
+      return "";
+    },
+  });
+
+  const violation = sizeResult.violations.find((item) => item.rule === "size-rules");
+  expect("check-pr pipeline reports size-rules violation", Boolean(violation), true);
+  expect("check-pr pipeline reports offending file", violation?.size_violations[0]?.path, "src/feature.mjs");
+  expect("check-pr pipeline reports measured lines", violation?.size_violations[0]?.actual, 1);
+}
+
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);

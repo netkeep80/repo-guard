@@ -267,6 +267,7 @@ jobs:
 | `diff_rules.max_new_docs` | Ограничивает новые `.md` вне `canonical_docs` |
 | `diff_rules.max_new_files` | Ограничивает общее число новых файлов |
 | `diff_rules.max_net_added_lines` | Ограничивает чистое число добавленных строк |
+| `size_rules` | Ограничивает абсолютный размер файлов или subtree в строках/байтах |
 | `content_rules` | Ищет запрещенные регулярные выражения только в добавленных строках |
 | `cochange_rules` | Требует `must_change_any`, если сработал `if_changed` |
 | `surfaces` | Описывает именованные области репозитория по glob |
@@ -294,6 +295,52 @@ jobs:
 областям, файл без подходящей области по умолчанию считается нарушением. Для
 `surface_matrix` можно явно разрешить частичное покрытие через
 `allow_unclassified_files: true`.
+
+## Size Rules
+
+`size_rules` задает first-class лимиты на абсолютный размер файлов и каталогов.
+Правило может считать строки (`lines`) или байты (`bytes`), проверять каждый
+файл (`scope: "file"`) или aggregate subtree (`scope: "directory"`).
+
+```json
+{
+  "size_rules": [
+    {
+      "id": "max-source-file-lines",
+      "scope": "file",
+      "metric": "lines",
+      "glob": "src/**/*.mjs",
+      "max": 500
+    },
+    {
+      "id": "max-source-subtree-bytes",
+      "scope": "directory",
+      "metric": "bytes",
+      "glob": "src/**",
+      "max": 262144,
+      "count": "changed_only"
+    }
+  ]
+}
+```
+
+По умолчанию `count` равно `all_tracked`: правило проверяет все tracked files,
+которые подходят под `glob`. Для `count: "changed_only"` file-правило проверяет
+только измененные файлы, а directory-правило проверяет subtree только если в нем
+есть измененный файл. Размер directory считается по всем tracked files внутри
+subtree, чтобы лимит оставался ограничением абсолютной поверхности.
+
+Дополнительные поля:
+
+| Поле | Поведение |
+| --- | --- |
+| `ignore` | Исключает matching paths из конкретного size rule |
+| `level` | `blocking` по умолчанию; `advisory` сообщает warning без fail |
+| `applies_to_change_types` | Применяет правило только к указанным `change_type` |
+| `applies_to_change_classes` | Применяет правило только к указанным `change_class` |
+
+Нарушения включают rule id, scope, path, metric, measured size и max. В JSON
+результате они лежат в `violations[].size_violations`.
 
 ## Профили политики
 
@@ -609,6 +656,7 @@ expected_effects:
 | `max-new-files` | Лимит новых файлов |
 | `max-net-added-lines` | Лимит чистого числа добавленных строк |
 | `surface-debt` | Заявленный временный рост области |
+| `size-rules` | Лимиты абсолютного размера файлов и subtree |
 | `registry-rules` | Согласованность канонических реестров |
 | `advisory-text-rules` | Эвристические предупреждения о дублировании Markdown |
 | `anchor-extraction` | Ошибки regex/json-извлекателей якорей |

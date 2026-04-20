@@ -13,6 +13,7 @@ import {
   checkChangeTypeRules,
   checkRegistryRules,
   checkAdvisoryTextRules,
+  checkSizeRules,
 } from "../diff-checker.mjs";
 import { checkAnchorExtraction } from "../extractors/anchors.mjs";
 import { checkTraceRuleResult } from "./trace-rules.mjs";
@@ -43,6 +44,23 @@ export function runPolicyChecks(facts, reporter, options = {}) {
     budgets.max_net_added_lines ?? policy.diff_rules.max_net_added_lines
   ));
   reporter.report("surface-debt", checkSurfaceDebt(files, contract?.surface_debt));
+  const sizeRuleResult = checkSizeRules(files, policy.size_rules, {
+    repoRoot: facts.repositoryRoot,
+    trackedFiles: facts.trackedFiles,
+    readFile: facts.readFile,
+    ignorePatterns: policy.paths.operational_paths,
+    changeType: contract?.change_type,
+    changeClass: facts.declaredChangeClass,
+  });
+  reporter.report("size-rules", sizeRuleResult);
+  if (sizeRuleResult.advisory_violations.length > 0) {
+    reporter.report("size-rules-advisory", {
+      ok: false,
+      advisory: true,
+      size_violations: sizeRuleResult.advisory_violations,
+      details: sizeRuleResult.advisory_details,
+    });
+  }
   reporter.report("registry-rules", checkRegistryRules(policy.registry_rules, { repoRoot: facts.repositoryRoot }));
   reporter.report(
     "advisory-text-rules",
