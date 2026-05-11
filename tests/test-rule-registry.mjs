@@ -52,8 +52,32 @@ const content = new Map([
   ],
 ]);
 
+const policyForFixture = {
+  paths: {
+    forbidden: ["secrets/**"],
+    canonical_docs: ["docs/canonical.md"],
+    operational_paths: [".gitkeep"],
+    governance_paths: ["repo-policy.json"],
+  },
+  diff_rules: {
+    max_new_docs: 2,
+    max_new_files: 3,
+    max_net_added_lines: 20,
+  },
+  size_rules: [
+    { id: "max-feature-lines", scope: "file", metric: "lines", glob: "src/feature.mjs", max: 10, count: "changed_only" },
+  ],
+  surfaces: {
+    app: ["src/**"],
+    tests: ["tests/**"],
+    docs: ["docs/**"],
+  },
+};
+
 const facts = {
   repositoryRoot: process.cwd(),
+  basePolicy: policyForFixture,
+  headPolicy: policyForFixture,
   policy: {
     paths: {
       forbidden: ["secrets/**"],
