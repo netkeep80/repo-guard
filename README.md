@@ -793,6 +793,52 @@ expected_effects:
 вместо отката на head policy текущего PR. Без доверенной base policy runtime
 не принимает решение по PR: лучше hard fail, чем доверять mutable PR state.
 
+### Защита от самоослабления политики (`policy-delta`)
+
+Семейство правил `policy-delta` сравнивает trusted base policy с предложенной
+head policy и блокирует попытки PR ослабить ограничения. К ослаблениям
+относятся: увеличение `size_rules[*].max`, понижение `size_rules[*].level` с
+`blocking` на `advisory`, удаление записи в `size_rules`, перевод
+`size_rules[*].count` из `all_tracked` в `changed_only`, рост значений в
+`diff_rules` (`max_new_files`, `max_new_docs`, `max_net_added_lines`),
+удаление `paths.forbidden` / `paths.governance_paths`, удаление или
+ослабление `integration.workflows[*].expect.enforcement`, понижение
+`enforcement.mode` с `blocking` на `advisory`.
+
+Ослабление разрешается **только** как dedicated governance PR, который:
+
+- меняет исключительно governance-файлы (никаких изменений в `src/**`,
+  `tests/**`, `schemas/**` или других protected surfaces одновременно);
+- использует `change_type: governance` в change contract;
+- сопровождается trusted authorization. Принимается хотя бы один из
+  источников: автор связанного issue имеет права `write`, `maintain` или
+  `admin`; на issue/PR выставлен label `governance-approved` мейнтейнером;
+  CODEOWNER одобрил PR; или сработала проверенная команда (`trusted_team_approval`).
+  Authorization из тела PR игнорируется, чтобы ИИ-агент не мог сам себе
+  разрешить ослабление политики в том же PR.
+
+В теле связанного issue должны быть перечислены затронутые JSON-pointer-ы
+через привилегированное поле `allow_policy_relaxation`, например:
+
+```repo-guard-yaml
+change_type: governance
+scope:
+  - repo-policy.json
+budgets: {}
+authorized_governance_paths:
+  - repo-policy.json
+allow_policy_relaxation:
+  - /size_rules/kernel-subtree-max-bytes/max
+must_touch: []
+must_not_touch: []
+expected_effects:
+  - Raise kernel-subtree-max-bytes budget after independent governance review
+```
+
+Бот-авторские issue и authorization из тела PR не принимаются как доверенные
+источники: `repo-guard` фиксирует это в диагностике как
+`no_trusted_authorization_source` или `no_linked_issue_authorization`.
+
 CI также запускает:
 
 - `npx repo-guard` — валидацию политики;
