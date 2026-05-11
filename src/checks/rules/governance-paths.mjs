@@ -27,12 +27,23 @@ function authorizationCoversPath(filePath, authorizedPatterns) {
   return matchesAny(filePath, expandGovernancePatterns(authorizedPatterns));
 }
 
+function hasTrustedAuthorizerSource(trustedAuthorizer) {
+  if (!trustedAuthorizer || typeof trustedAuthorizer !== "object") return false;
+  return Boolean(
+    trustedAuthorizer.issue_author_permission_trusted ||
+      trustedAuthorizer.governance_approved_label ||
+      trustedAuthorizer.codeowner_approved ||
+      trustedAuthorizer.trusted_team_approval
+  );
+}
+
 export function checkGovernanceChangeAuthorization({
   files,
   governancePaths,
   issueAuthorization,
   contract,
   contractSource,
+  trustedAuthorizer,
 }) {
   if (!Array.isArray(governancePaths) || governancePaths.length === 0) {
     return { ok: true };
@@ -53,9 +64,14 @@ export function checkGovernanceChangeAuthorization({
     };
   }
 
-  const trustedAuthorization = issueAuthorization && Array.isArray(issueAuthorization.authorized_governance_paths)
-    ? issueAuthorization.authorized_governance_paths
-    : [];
+  const declaredIssueAuthorization =
+    issueAuthorization && Array.isArray(issueAuthorization.authorized_governance_paths)
+      ? issueAuthorization.authorized_governance_paths
+      : [];
+  const trustedSourcePresent = hasTrustedAuthorizerSource(trustedAuthorizer);
+  const trustedAuthorization = trustedSourcePresent ? declaredIssueAuthorization : [];
+  const untrustedIssueAuthorizationIgnored =
+    declaredIssueAuthorization.length > 0 && !trustedSourcePresent;
   const prBodyAuthorizationDeclared = contract && Array.isArray(contract.authorized_governance_paths)
     ? contract.authorized_governance_paths
     : [];
@@ -80,6 +96,11 @@ export function checkGovernanceChangeAuthorization({
       `authorized_governance_paths declared in contract source "${contractSource}" is ignored; governance authorization must originate from the linked issue body`
     );
   }
+  if (untrustedIssueAuthorizationIgnored) {
+    details.push(
+      "authorized_governance_paths declared in the linked issue body is ignored because no trusted authorizer was detected (issue author lacks write/maintain/admin permission, no governance-approved label, no CODEOWNERS approval, no trusted team approval)"
+    );
+  }
 
   const ok = unauthorized.length === 0;
   return {
@@ -91,11 +112,12 @@ export function checkGovernanceChangeAuthorization({
     trusted_authorized_governance_paths: trustedAuthorization,
     unauthorized_paths: unauthorized,
     untrusted_authorization_ignored: untrustedAuthorizationAttempted,
+    untrusted_issue_authorization_ignored: untrustedIssueAuthorizationIgnored,
     contract_source: contractSource,
     details,
     hint: ok
       ? undefined
-      : "Sanction governance changes from the linked issue: add a repo-guard contract block to the issue body with authorized_governance_paths listing the governance files this PR may modify. Authorization placed in the PR body is ignored so an AI agent cannot self-sanction policy changes.",
+      : "Sanction governance changes from the linked issue: add a repo-guard contract block to the issue body with authorized_governance_paths listing the governance files this PR may modify. The linked issue must be authored by a trusted maintainer (write/maintain/admin), carry the governance-approved label, or be backed by a CODEOWNERS / trusted-team approval. Authorization placed in the PR body is ignored so an AI agent cannot self-sanction policy changes.",
   };
 }
 
@@ -119,6 +141,7 @@ export const governancePathsRuleFamily = {
         issueAuthorization: facts.issueAuthorization,
         contract: facts.contract,
         contractSource: facts.contractSource,
+        trustedAuthorizer: facts.trustedAuthorizer,
       }),
     };
   },
