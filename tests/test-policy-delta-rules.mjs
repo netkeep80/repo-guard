@@ -168,6 +168,45 @@ describe("computePolicyDelta detects relaxations", () => {
     assert.equal(relaxations[0].kind, "enforcement_weakened");
   });
 
+  it("detects enforcement.mode removal (deleting the field is equivalent to relaxing it)", () => {
+    const head = withClone(BASE_POLICY, (p) => { delete p.enforcement; });
+    const { relaxations } = computePolicyDelta(BASE_POLICY, head);
+    assert.equal(relaxations.length, 1);
+    assert.equal(relaxations[0].kind, "enforcement_removed");
+    assert.equal(relaxations[0].pointer, "/enforcement/mode");
+    assert.equal(relaxations[0].before, "blocking");
+    assert.equal(relaxations[0].after, null);
+  });
+
+  it("detects diff_rules budget removal (deleting max_net_added_lines is equivalent to relaxing it)", () => {
+    const head = withClone(BASE_POLICY, (p) => { delete p.diff_rules.max_net_added_lines; });
+    const { relaxations } = computePolicyDelta(BASE_POLICY, head);
+    assert.equal(relaxations.length, 1);
+    assert.equal(relaxations[0].kind, "diff_rule_budget_removed");
+    assert.equal(relaxations[0].field, "max_net_added_lines");
+    assert.equal(relaxations[0].before, 50);
+    assert.equal(relaxations[0].after, null);
+  });
+
+  it("detects diff_rules budget removal for max_new_files", () => {
+    const head = withClone(BASE_POLICY, (p) => { delete p.diff_rules.max_new_files; });
+    const { relaxations } = computePolicyDelta(BASE_POLICY, head);
+    assert.equal(relaxations.length, 1);
+    assert.equal(relaxations[0].kind, "diff_rule_budget_removed");
+    assert.equal(relaxations[0].field, "max_new_files");
+  });
+
+  it("detects integration workflow expectation removal (deleting expect.enforcement)", () => {
+    const head = withClone(BASE_POLICY, (p) => {
+      delete p.integration.workflows[0].expect.enforcement;
+    });
+    const { relaxations } = computePolicyDelta(BASE_POLICY, head);
+    assert.equal(relaxations.length, 1);
+    assert.equal(relaxations[0].kind, "integration_workflow_expectation_removed");
+    assert.equal(relaxations[0].before, "blocking");
+    assert.equal(relaxations[0].after, null);
+  });
+
   it("reports zero relaxations when basePolicy or headPolicy is missing", () => {
     assert.deepEqual(computePolicyDelta(null, BASE_POLICY), { relaxations: [] });
     assert.deepEqual(computePolicyDelta(BASE_POLICY, null), { relaxations: [] });

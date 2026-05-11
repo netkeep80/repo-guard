@@ -7,11 +7,14 @@ const RELAXATION_KIND = {
   SIZE_RULE_COUNT_WEAKENED: "size_rule_count_weakened",
   SIZE_RULE_REMOVED: "size_rule_removed",
   DIFF_RULE_BUDGET_INCREASED: "diff_rule_budget_increased",
+  DIFF_RULE_BUDGET_REMOVED: "diff_rule_budget_removed",
   FORBIDDEN_PATH_REMOVED: "forbidden_path_removed",
   GOVERNANCE_PATH_REMOVED: "governance_path_removed",
   INTEGRATION_WORKFLOW_REMOVED: "integration_workflow_removed",
   INTEGRATION_WORKFLOW_EXPECTATION_WEAKENED: "integration_workflow_expectation_weakened",
+  INTEGRATION_WORKFLOW_EXPECTATION_REMOVED: "integration_workflow_expectation_removed",
   ENFORCEMENT_WEAKENED: "enforcement_weakened",
+  ENFORCEMENT_REMOVED: "enforcement_removed",
 };
 
 const SIZE_RULE_LEVEL_RANK = { advisory: 0, blocking: 1 };
@@ -115,7 +118,20 @@ function computeDiffRuleDeltas(basePolicy, headPolicy) {
   for (const field of fields) {
     const baseValue = baseRules[field];
     const headValue = headRules[field];
-    if (typeof baseValue !== "number" || typeof headValue !== "number") continue;
+    const baseHas = typeof baseValue === "number";
+    const headHas = typeof headValue === "number";
+    if (baseHas && !headHas) {
+      deltas.push({
+        kind: RELAXATION_KIND.DIFF_RULE_BUDGET_REMOVED,
+        field,
+        pointer: `/diff_rules/${field}`,
+        before: baseValue,
+        after: null,
+        message: `diff_rules.${field} removed (was ${baseValue})`,
+      });
+      continue;
+    }
+    if (!baseHas || !headHas) continue;
     if (headValue > baseValue) {
       deltas.push({
         kind: RELAXATION_KIND.DIFF_RULE_BUDGET_INCREASED,
@@ -171,6 +187,17 @@ function computeGovernancePathDeltas(basePolicy, headPolicy) {
 function computeEnforcementDelta(basePolicy, headPolicy) {
   const baseMode = basePolicy?.enforcement?.mode;
   const headMode = headPolicy?.enforcement?.mode;
+  if (baseMode && !headMode) {
+    return [
+      {
+        kind: RELAXATION_KIND.ENFORCEMENT_REMOVED,
+        pointer: `/enforcement/mode`,
+        before: baseMode,
+        after: null,
+        message: `enforcement.mode removed (was ${baseMode})`,
+      },
+    ];
+  }
   if (!baseMode || !headMode) return [];
   if (
     Object.hasOwn(ENFORCEMENT_RANK, baseMode) &&
@@ -214,7 +241,16 @@ function computeIntegrationWorkflowDeltas(basePolicy, headPolicy) {
     const headExpect = headWorkflow.expect || {};
     const baseEnforcement = baseExpect.enforcement;
     const headEnforcement = headExpect.enforcement;
-    if (
+    if (baseEnforcement && !headEnforcement) {
+      deltas.push({
+        kind: RELAXATION_KIND.INTEGRATION_WORKFLOW_EXPECTATION_REMOVED,
+        workflow_id: id,
+        pointer: `/integration/workflows/${id}/expect/enforcement`,
+        before: baseEnforcement,
+        after: null,
+        message: `integration.workflows[${id}].expect.enforcement removed (was ${baseEnforcement})`,
+      });
+    } else if (
       baseEnforcement &&
       headEnforcement &&
       Object.hasOwn(ENFORCEMENT_RANK, baseEnforcement) &&
