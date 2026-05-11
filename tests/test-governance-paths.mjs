@@ -17,6 +17,20 @@ const GOVERNANCE_PATHS = [
   "action.yml",
 ];
 
+const TRUSTED_AUTHORIZER = {
+  issue_author_permission_trusted: true,
+  governance_approved_label: false,
+  codeowner_approved: false,
+  trusted_team_approval: false,
+};
+
+const UNTRUSTED_AUTHORIZER = {
+  issue_author_permission_trusted: false,
+  governance_approved_label: false,
+  codeowner_approved: false,
+  trusted_team_approval: false,
+};
+
 function file(path, { status = "modified", addedLines = [], deletedLines = [] } = {}) {
   return { path, status, addedLines, deletedLines };
 }
@@ -61,26 +75,73 @@ describe("governance-change authorization unit checks", () => {
     assert.equal(result.untrusted_authorization_ignored, true);
   });
 
-  it("passes when the linked-issue authorization covers the exact governance path", () => {
+  it("passes when the linked-issue authorization covers the exact governance path and a trusted source is present", () => {
     const result = checkGovernanceChangeAuthorization({
       files: [file("repo-policy.json", { addedLines: ["  \"foo\": 1"] })],
       governancePaths: GOVERNANCE_PATHS,
       issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
       contract: null,
       contractSource: "none",
+      trustedAuthorizer: TRUSTED_AUTHORIZER,
     });
     assert.equal(result.ok, true);
     assert.deepEqual(result.unauthorized_paths, []);
     assert.equal(result.untrusted_authorization_ignored, false);
+    assert.equal(result.untrusted_issue_authorization_ignored, false);
   });
 
-  it("passes when split sources: PR-body change contract + linked-issue authorization", () => {
+  it("fails when the linked-issue authorization is declared but no trusted authorizer source is present", () => {
+    const result = checkGovernanceChangeAuthorization({
+      files: [file("repo-policy.json", { addedLines: ["+"] })],
+      governancePaths: GOVERNANCE_PATHS,
+      issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
+      contract: null,
+      contractSource: "none",
+      trustedAuthorizer: UNTRUSTED_AUTHORIZER,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unauthorized_paths, ["repo-policy.json"]);
+    assert.equal(result.untrusted_issue_authorization_ignored, true);
+  });
+
+  it("fails when the linked-issue authorization is declared but trustedAuthorizer is omitted entirely (production default for unsigned contexts)", () => {
+    const result = checkGovernanceChangeAuthorization({
+      files: [file("repo-policy.json", { addedLines: ["+"] })],
+      governancePaths: GOVERNANCE_PATHS,
+      issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
+      contract: null,
+      contractSource: "none",
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unauthorized_paths, ["repo-policy.json"]);
+    assert.equal(result.untrusted_issue_authorization_ignored, true);
+  });
+
+  it("passes when a governance-approved label is present even without write permission on the issue author", () => {
+    const result = checkGovernanceChangeAuthorization({
+      files: [file("repo-policy.json", { addedLines: ["+"] })],
+      governancePaths: GOVERNANCE_PATHS,
+      issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
+      contract: null,
+      contractSource: "none",
+      trustedAuthorizer: {
+        issue_author_permission_trusted: false,
+        governance_approved_label: true,
+        codeowner_approved: false,
+        trusted_team_approval: false,
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+
+  it("passes when split sources: PR-body change contract + linked-issue authorization with trusted authorizer", () => {
     const result = checkGovernanceChangeAuthorization({
       files: [file("schemas/repo-policy.schema.json", { addedLines: ["+"] })],
       governancePaths: GOVERNANCE_PATHS,
       issueAuthorization: { authorized_governance_paths: ["schemas/**"] },
       contract: { change_type: "feature", scope: ["schemas"] },
       contractSource: "pr body",
+      trustedAuthorizer: TRUSTED_AUTHORIZER,
     });
     assert.equal(result.ok, true);
   });
@@ -95,6 +156,7 @@ describe("governance-change authorization unit checks", () => {
       issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
       contract: null,
       contractSource: "linked issue",
+      trustedAuthorizer: TRUSTED_AUTHORIZER,
     });
     assert.equal(result.ok, false);
     assert.deepEqual(result.unauthorized_paths, ["schemas/change-contract.schema.json"]);
@@ -205,6 +267,7 @@ describe("governance-change authorization integration via pipeline", () => {
     contractSource,
     issueAuthorization = null,
     trustedGovernancePaths = basePolicy.paths.governance_paths,
+    trustedAuthorizer = null,
     policy = basePolicy,
     diffText = policyFileDiff,
   }) {
@@ -216,6 +279,7 @@ describe("governance-change authorization integration via pipeline", () => {
       contractSource,
       issueAuthorization,
       trustedGovernancePaths,
+      trustedAuthorizer,
       enforcement: { mode: "blocking" },
       diffText,
       trackedFiles: ["repo-policy.json", "README.md"],
@@ -244,7 +308,7 @@ describe("governance-change authorization integration via pipeline", () => {
     assert.equal(governance.ok, false);
   });
 
-  it("allows split-source authorization: PR-body change contract + linked-issue authorization", () => {
+  it("allows split-source authorization: PR-body change contract + linked-issue authorization with a trusted authorizer", () => {
     const report = runRegistry({
       contract: {
         change_type: "feature",
@@ -256,10 +320,30 @@ describe("governance-change authorization integration via pipeline", () => {
       },
       contractSource: "pr body",
       issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
+      trustedAuthorizer: TRUSTED_AUTHORIZER,
     });
     const governance = report.ruleResults.find((r) => r.rule === "governance-change-authorization");
     assert.ok(governance);
     assert.equal(governance.ok, true);
+  });
+
+  it("blocks split-source authorization when no trusted authorizer is present (AI-self-authorization via issue body)", () => {
+    const report = runRegistry({
+      contract: {
+        change_type: "feature",
+        scope: ["repo-policy.json"],
+        budgets: {},
+        must_touch: [],
+        must_not_touch: [],
+        expected_effects: ["x"],
+      },
+      contractSource: "pr body",
+      issueAuthorization: { authorized_governance_paths: ["repo-policy.json"] },
+      trustedAuthorizer: UNTRUSTED_AUTHORIZER,
+    });
+    const governance = report.violations.find((v) => v.rule === "governance-change-authorization");
+    assert.ok(governance, "expected governance-change-authorization violation when no trusted source");
+    assert.equal(governance.data?.untrusted_issue_authorization_ignored, true);
   });
 
   it("blocks governance change with no contract and no authorization", () => {

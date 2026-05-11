@@ -6,11 +6,13 @@ import {
   extractIssueAuthorization,
   extractLinkedIssueNumbers,
   resolveContract,
+  stripPrivilegedSchemaUnknownFields,
 } from "./markdown-contract.mjs";
 import { warnReservedContractFields } from "./policy-compiler.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
+import { resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 
 const GITHUB_REPO_FULL_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const ISSUE_NUMBER = /^[1-9][0-9]*$/;
@@ -199,9 +201,11 @@ export function runCheckPR(roots, args = []) {
       failureMessage: "Proposed policy compilation failed",
     }
   );
+  const headPolicy = headRuntime.policy;
   const initialChecks = [];
   const basePolicyRead = readBasePolicy(base, roots.repoRoot);
   let runtime = headRuntime;
+  let basePolicy = null;
   let trustedGovernancePaths = [];
   if (basePolicyRead.error) {
     initialChecks.push({
@@ -221,6 +225,7 @@ export function runCheckPR(roots, args = []) {
         failureMessage: "Base policy compilation failed",
       }
     );
+    basePolicy = runtime.policy;
     trustedGovernancePaths = runtime.policy.paths?.governance_paths ?? [];
   }
 
@@ -291,10 +296,11 @@ export function runCheckPR(roots, args = []) {
       },
     });
   } else {
-    const contractCheck = validationCheck(ajv, contractSchema, contractResult.contract, "change-contract (from markdown)");
+    const contractForValidation = stripPrivilegedSchemaUnknownFields(contractResult.contract);
+    const contractCheck = validationCheck(ajv, contractSchema, contractForValidation, "change-contract (from markdown)");
     initialChecks.push({ name: "change-contract", check: contractCheck });
     if (contractCheck.ok) {
-      contract = contractResult.contract;
+      contract = contractForValidation;
       contractSource = contractResult.contractSource;
       for (const w of warnReservedContractFields(contract)) {
         console.warn(`WARN: ${w}`);
@@ -310,14 +316,31 @@ export function runCheckPR(roots, args = []) {
     process.exit(1);
   }
 
+  let trustedAuthorizer = null;
+  if (basePolicy && repoFullName) {
+    const linkedIssueNumber = linkedIssues.length === 1 ? linkedIssues[0] : null;
+    try {
+      trustedAuthorizer = resolveTrustedAuthorizer({
+        repoFullName,
+        issueNumber: linkedIssueNumber,
+        prNumber,
+      });
+    } catch {
+      trustedAuthorizer = null;
+    }
+  }
+
   const summary = runPolicyPipeline({
     mode: "check-pr",
     repositoryRoot: roots.repoRoot,
     policy,
+    basePolicy,
+    headPolicy,
     contract,
     contractSource,
     issueAuthorization,
     trustedGovernancePaths,
+    trustedAuthorizer,
     enforcement,
     diffText,
     initialChecks,

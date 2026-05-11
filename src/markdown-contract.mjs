@@ -76,7 +76,14 @@ export function resolveContract(prBody, issueBody) {
   return issueResult;
 }
 
-const PRIVILEGED_AUTHORIZATION_FIELDS = ["authorized_governance_paths"];
+const PRIVILEGED_AUTHORIZATION_FIELDS = [
+  "authorized_governance_paths",
+  "allow_policy_relaxation",
+];
+
+const SCHEMA_UNKNOWN_PRIVILEGED_FIELDS = [
+  "allow_policy_relaxation",
+];
 
 export function extractIssueAuthorization(issueBody) {
   if (!issueBody) return null;
@@ -91,4 +98,16 @@ export function extractIssueAuthorization(issueBody) {
     }
   }
   return hasAny ? authorization : null;
+}
+
+export function stripPrivilegedSchemaUnknownFields(contract) {
+  if (!contract || typeof contract !== "object") return contract;
+  let copy = null;
+  for (const field of SCHEMA_UNKNOWN_PRIVILEGED_FIELDS) {
+    if (Object.hasOwn(contract, field)) {
+      if (copy === null) copy = { ...contract };
+      delete copy[field];
+    }
+  }
+  return copy === null ? contract : copy;
 }

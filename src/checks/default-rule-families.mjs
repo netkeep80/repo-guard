@@ -7,6 +7,7 @@ import { contentRuleFamily } from "./rules/content-rules.mjs";
 import { contractRuleFamily } from "./rules/contract-rules.mjs";
 import { governancePathsRuleFamily } from "./rules/governance-paths.mjs";
 import { forbiddenPathsRuleFamily } from "./rules/paths.mjs";
+import { policyRelaxationRuleFamily } from "./rules/policy-delta-rules.mjs";
 import { registryRuleFamily } from "./rules/registry-rules.mjs";
 import { sizeRuleFamily } from "./rules/size-rules.mjs";
 import { createRuleRegistry } from "./rule-registry.mjs";
@@ -14,6 +15,7 @@ import { createRuleRegistry } from "./rule-registry.mjs";
 export const defaultRuleFamilies = [
   forbiddenPathsRuleFamily,
   governancePathsRuleFamily,
+  policyRelaxationRuleFamily,
   budgetRuleFamily,
   sizeRuleFamily,
   registryRuleFamily,
