@@ -6,6 +6,7 @@ import {
   extractIssueAuthorization,
   extractLinkedIssueNumbers,
   resolveContract,
+  stripPrivilegedSchemaUnknownFields,
 } from "./markdown-contract.mjs";
 import { warnReservedContractFields } from "./policy-compiler.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
@@ -295,10 +296,11 @@ export function runCheckPR(roots, args = []) {
       },
     });
   } else {
-    const contractCheck = validationCheck(ajv, contractSchema, contractResult.contract, "change-contract (from markdown)");
+    const contractForValidation = stripPrivilegedSchemaUnknownFields(contractResult.contract);
+    const contractCheck = validationCheck(ajv, contractSchema, contractForValidation, "change-contract (from markdown)");
     initialChecks.push({ name: "change-contract", check: contractCheck });
     if (contractCheck.ok) {
-      contract = contractResult.contract;
+      contract = contractForValidation;
       contractSource = contractResult.contractSource;
       for (const w of warnReservedContractFields(contract)) {
         console.warn(`WARN: ${w}`);

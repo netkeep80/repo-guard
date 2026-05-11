@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { extractContract, extractLinkedIssueNumbers, resolveContract } from "../src/markdown-contract.mjs";
+import { extractContract, extractLinkedIssueNumbers, resolveContract, stripPrivilegedSchemaUnknownFields } from "../src/markdown-contract.mjs";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const projectRoot = resolve(__dirname, "..");
@@ -294,6 +294,33 @@ expected_effects:
   const result = resolveContract(badJsonPR, validIssueBody);
   expect("resolve: PR malformed, no fallback", result.ok, false);
   expect("resolve: PR malformed error", result.error, "contract_malformed_json");
+}
+
+// --- stripPrivilegedSchemaUnknownFields ---
+
+{
+  const result = stripPrivilegedSchemaUnknownFields(null);
+  expect("stripPrivilegedSchemaUnknownFields: null passes through", result, null);
+}
+
+{
+  const contract = { change_type: "feature", scope: ["src/"] };
+  const result = stripPrivilegedSchemaUnknownFields(contract);
+  expect("stripPrivilegedSchemaUnknownFields: unchanged when no privileged fields", result, contract);
+}
+
+{
+  const contract = {
+    change_type: "governance",
+    scope: ["repo-policy.json"],
+    authorized_governance_paths: ["repo-policy.json"],
+    allow_policy_relaxation: ["/size_rules/foo/max"],
+  };
+  const stripped = stripPrivilegedSchemaUnknownFields(contract);
+  expect("stripPrivilegedSchemaUnknownFields: removes allow_policy_relaxation", Object.hasOwn(stripped, "allow_policy_relaxation"), false);
+  expect("stripPrivilegedSchemaUnknownFields: keeps authorized_governance_paths (already in schema)", stripped.authorized_governance_paths.join(","), "repo-policy.json");
+  expect("stripPrivilegedSchemaUnknownFields: returns a new copy", stripped === contract, false);
+  expect("stripPrivilegedSchemaUnknownFields: original contract untouched", Object.hasOwn(contract, "allow_policy_relaxation"), true);
 }
 
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
