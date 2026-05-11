@@ -140,6 +140,9 @@ export function resolveTrustedAuthorizer({
     ? fetchUserRepoPermission(repoFullName, username)
     : null;
 
+  // codeowner_approved / trusted_team_approval are accepted as trust sources by
+  // the rule engine but are not yet auto-resolved from the GitHub API here.
+  // They flow in only through caller-provided options for tests / future work.
   return detectTrustedAuthorizerLocally({
     issueContext,
     prContext,
