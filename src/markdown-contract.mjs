@@ -76,7 +76,10 @@ export function resolveContract(prBody, issueBody) {
   return issueResult;
 }
 
-const PRIVILEGED_AUTHORIZATION_FIELDS = ["authorized_governance_paths"];
+const PRIVILEGED_AUTHORIZATION_FIELDS = [
+  "authorized_governance_paths",
+  "allow_policy_relaxation",
+];
 
 export function extractIssueAuthorization(issueBody) {
   if (!issueBody) return null;
