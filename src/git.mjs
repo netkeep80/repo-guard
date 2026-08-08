@@ -21,6 +21,18 @@ export function runGit(args, options = {}) {
   }
 }
 
+export function resolveRemoteBaseRef(baseRef, cwd, remote = "origin") {
+  if (typeof baseRef !== "string" || baseRef.length === 0) {
+    throw new Error("missing PR base ref");
+  }
+  const ref = `refs/remotes/${remote}/${baseRef}`;
+  const sha = runGit(["rev-parse", "--verify", `${ref}^{commit}`], { cwd }).trim();
+  if (!sha) {
+    throw new Error(`current base ref ${ref} resolved to an empty object id`);
+  }
+  return sha;
+}
+
 export function getDiff(base, head, cwd) {
   if (base && head) {
     return runGit(["diff", `${base}...${head}`], { cwd });
