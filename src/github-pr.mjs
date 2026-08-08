@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { getDiff, readBasePolicy } from "./git.mjs";
+import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
 import {
   extractContract,
   extractIssueAuthorization,
@@ -38,6 +38,7 @@ export function loadGitHubEvent() {
   return {
     ok: true,
     base: pr.base?.sha,
+    baseRef: pr.base?.ref,
     head: pr.head?.sha,
     prBody: pr.body || "",
     prNumber: pr.number,
@@ -187,12 +188,28 @@ export function runCheckPR(roots, args = []) {
     process.exit(1);
   }
 
-  const { base, head, prBody, prNumber, repoFullName } = eventInfo;
-  if (!base || !head) {
+  const { base: eventBase, baseRef, head, prBody, prNumber, repoFullName } = eventInfo;
+  if (!eventBase || !head) {
     console.error("ERROR: pull_request event missing base/head SHA");
     process.exit(1);
   }
-  console.log(`PR #${prNumber}: checking contract and diff (${base?.slice(0, 7)}..${head?.slice(0, 7)})`);
+
+  let base = eventBase;
+  if (baseRef) {
+    try {
+      base = resolveRemoteBaseRef(baseRef, roots.repoRoot);
+    } catch (e) {
+      console.error(`ERROR: cannot resolve current PR base ref ${baseRef}: ${e.message}`);
+      process.exit(1);
+    }
+    if (base !== eventBase) {
+      console.log(
+        `Base ref ${baseRef} advanced from event snapshot ${eventBase.slice(0, 7)} to ${base.slice(0, 7)}; using current base`
+      );
+    }
+  }
+
+  console.log(`PR #${prNumber}: checking contract and diff (${base.slice(0, 7)}..${head.slice(0, 7)})`);
 
   const headRuntime = loadPolicyRuntimeOrExit(
     () => loadPolicyRuntime(roots, { label: "repo-policy.json (PR head)" }),
@@ -213,7 +230,7 @@ export function runCheckPR(roots, args = []) {
       check: {
         ok: false,
         message: `cannot establish trusted governance boundary: ${basePolicyRead.error}`,
-        hint: "check-pr requires reading repo-policy.json at the PR base via `git show <base>:repo-policy.json` so a PR cannot change the policy that evaluates itself. The boundary is intentionally not falling back to the PR head policy. Ensure the base ref is fetched and repo-policy.json is valid JSON on the base branch.",
+        hint: "check-pr requires reading repo-policy.json at the current PR base ref so a PR cannot change the policy that evaluates itself. The boundary is intentionally not falling back to the PR head policy. Ensure the base ref is fetched and repo-policy.json is valid JSON on the base branch.",
         details: [`base_ref: ${base}`, `base_policy_read_error: ${basePolicyRead.error}`],
       },
     });
