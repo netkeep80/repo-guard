@@ -1,6 +1,6 @@
 import { classifyNewFiles, detectTouchedSurfaces } from "../../diff/classification.mjs";
 import { formatList, uniqueSorted } from "../../utils/collections.mjs";
-import { checkCanonicalDocsBudget, checkNetAddedLinesBudget, checkNewFilesBudget } from "./budgets.mjs";
+import { checkCanonicalDocsBudget, checkNetAddedLinesBudget, checkNewFilesBudget } from "./constraints.mjs";
 
 function checkProfileNewFiles(files, classes, rule, changeType, detected = null) {
   if (!rule) return { ok: true };
