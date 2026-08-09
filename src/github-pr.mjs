@@ -19,22 +19,15 @@ const ISSUE_NUMBER = /^[1-9][0-9]*$/;
 
 export function loadGitHubEvent() {
   const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    return { ok: false, error: "no_event", message: "GITHUB_EVENT_PATH not set; not running in GitHub Actions" };
-  }
-
+  if (!eventPath) return { ok: false, error: "no_event", message: "GITHUB_EVENT_PATH not set; not running in GitHub Actions" };
   let event;
   try {
     event = JSON.parse(readFileSync(eventPath, "utf-8"));
-  } catch (e) {
-    return { ok: false, error: "event_read_error", message: `Cannot read event file: ${e.message}` };
+  } catch (error) {
+    return { ok: false, error: "event_read_error", message: `Cannot read event file: ${error.message}` };
   }
-
   const pr = event.pull_request;
-  if (!pr) {
-    return { ok: false, error: "not_pr_event", message: "GitHub event does not contain pull_request data" };
-  }
-
+  if (!pr) return { ok: false, error: "not_pr_event", message: "GitHub event does not contain pull_request data" };
   return {
     ok: true,
     base: pr.base?.sha,
@@ -47,183 +40,155 @@ export function loadGitHubEvent() {
 }
 
 export function fetchIssueBody(repoFullName, issueNumber) {
-  const issueNumberText = String(issueNumber);
-  if (!GITHUB_REPO_FULL_NAME.test(repoFullName) || !ISSUE_NUMBER.test(issueNumberText)) {
-    return null;
-  }
-
+  const number = String(issueNumber);
+  if (!GITHUB_REPO_FULL_NAME.test(repoFullName) || !ISSUE_NUMBER.test(number)) return null;
   try {
-    const result = execFileSync(
-      "gh",
-      ["api", `repos/${repoFullName}/issues/${issueNumberText}`, "--jq", ".body"],
-      { encoding: "utf-8", timeout: 30000 }
-    );
-    return result.trim() || null;
+    return execFileSync("gh", ["api", `repos/${repoFullName}/issues/${number}`, "--jq", ".body"], {
+      encoding: "utf-8",
+      timeout: 30000,
+    }).trim() || null;
   } catch {
     return null;
+  }
+}
+
+function cliAvailable(command) {
+  try {
+    execFileSync(command, ["--version"], { encoding: "utf-8", stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
   }
 }
 
 export function checkPrerequisites() {
   const missing = [];
-  if (!process.env.GITHUB_EVENT_PATH) {
-    missing.push("GITHUB_EVENT_PATH env var (set automatically by GitHub Actions)");
-  }
-  try {
-    execFileSync("git", ["--version"], { encoding: "utf-8", stdio: "pipe" });
-  } catch {
-    missing.push("git CLI (required for diff analysis)");
-  }
+  if (!process.env.GITHUB_EVENT_PATH) missing.push("GITHUB_EVENT_PATH env var (set automatically by GitHub Actions)");
+  if (!cliAvailable("git")) missing.push("git CLI (required for diff analysis)");
   return missing;
 }
 
 export function checkIssueFallbackPrerequisites() {
-  const missing = [];
-  try {
-    execFileSync("gh", ["--version"], { encoding: "utf-8", stdio: "pipe" });
-  } catch {
-    missing.push("gh CLI (required for linked issue fallback)");
-  }
-  return missing;
+  return cliAvailable("gh") ? [] : ["gh CLI (required for linked issue fallback)"];
 }
 
 export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCount = null }) {
   const linkedIssues = extractLinkedIssueNumbers(prBody);
   const issueAuthorization = extractIssueAuthorization(issueBody);
-
   const prResult = extractContract(prBody);
-  if (prResult.ok) {
-    return {
-      ok: true,
-      contract: prResult.contract,
-      contractSource: "pr body",
-      linkedIssues,
-      issueAuthorization,
-    };
-  }
-
+  if (prResult.ok) return { ok: true, contract: prResult.contract, contractSource: "pr body", linkedIssues, issueAuthorization };
   if (prResult.error !== "contract_not_found") {
-    return {
-      ok: false,
-      error: prResult.error,
-      message: prResult.message,
-      contractSource: "pr body",
-      linkedIssues,
-      issueAuthorization,
-    };
+    return { ok: false, error: prResult.error, message: prResult.message, contractSource: "pr body", linkedIssues, issueAuthorization };
   }
-
-  const resolvedLinkedIssueCount = linkedIssueCount ?? linkedIssues.length;
-  if (resolvedLinkedIssueCount > 1) {
+  const count = linkedIssueCount ?? linkedIssues.length;
+  if (count > 1) {
     return {
       ok: false,
       error: "issue_link_ambiguous",
-      message: `PR body references ${resolvedLinkedIssueCount} issues (${linkedIssues.map(n => `#${n}`).join(", ")}); expected exactly one`,
+      message: `PR body references ${count} issues (${linkedIssues.map((n) => `#${n}`).join(", ")}); expected exactly one`,
       contractSource: "none",
       linkedIssues,
       issueAuthorization,
     };
   }
-
   const issueResult = resolveContract(prBody, issueBody);
-  if (issueResult.ok) {
-    return {
-      ok: true,
-      contract: issueResult.contract,
-      contractSource: "linked issue",
-      linkedIssues,
-      issueAuthorization,
-    };
-  }
-
-  return {
-    ok: false,
-    error: issueResult.error,
-    message: issueResult.message,
-    contractSource: "none",
-    linkedIssues,
-    issueAuthorization,
-  };
+  if (issueResult.ok) return { ok: true, contract: issueResult.contract, contractSource: "linked issue", linkedIssues, issueAuthorization };
+  return { ok: false, error: issueResult.error, message: issueResult.message, contractSource: "none", linkedIssues, issueAuthorization };
 }
 
-function loadPolicyRuntimeOrExit(loadRuntime, { label, failureMessage }) {
-  let runtime;
+function loadRuntime(load, { label, failureMessage }) {
   try {
-    runtime = loadRuntime();
-  } catch (e) {
-    console.error(`FAIL: ${label}`);
-    console.error(`  ${e.message}`);
-    console.error(`\n${failureMessage}`);
-    process.exit(1);
+    const runtime = load();
+    if (runtime.ok) return runtime;
+  } catch (error) {
+    console.error(`FAIL: ${label}\n  ${error.message}`);
+  }
+  console.error(`\n${failureMessage}`);
+  return null;
+}
+
+function printMissing(title, missing) {
+  console.error(title);
+  for (const item of missing) console.error(`  - ${item}`);
+}
+
+function fetchLinkedIssue({ prBody, repoFullName }) {
+  const linkedIssues = extractLinkedIssueNumbers(prBody);
+  const prResult = extractContract(prBody);
+  const hasPrContract = prResult.ok;
+  const needsFallback = !hasPrContract && prResult.error === "contract_not_found" && linkedIssues.length === 1;
+  if (linkedIssues.length !== 1 || (!needsFallback && !hasPrContract)) return { linkedIssues, issueBody: null, fatal: false };
+
+  console.log(needsFallback
+    ? `No contract in PR body; trying linked issue #${linkedIssues[0]}...`
+    : `Fetching linked issue #${linkedIssues[0]} for privileged authorization...`);
+  const missing = checkIssueFallbackPrerequisites();
+  if (missing.length > 0) {
+    if (needsFallback) {
+      printMissing("ERROR: linked issue fallback prerequisites not met:", missing);
+      return { linkedIssues, issueBody: null, fatal: true };
+    }
+    console.warn("WARN: linked issue lookup prerequisites not met; privileged authorization from the issue body will be unavailable");
+    for (const item of missing) console.warn(`  - ${item}`);
+    return { linkedIssues, issueBody: null, fatal: false };
   }
 
-  if (!runtime.ok) {
-    console.error(`\n${failureMessage}`);
-    process.exit(1);
+  const issueBody = fetchIssueBody(repoFullName, linkedIssues[0]);
+  if (issueBody === null && hasPrContract) {
+    console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]} body; privileged authorization from the issue body will be unavailable`);
   }
-  return runtime;
+  return { linkedIssues, issueBody, fatal: false };
 }
 
 export function runCheckPR(roots, args = []) {
-  for (const arg of args) {
-    if (arg.startsWith("-")) {
-      console.error(`Unknown option for check-pr: ${arg}`);
-      console.error("Usage: repo-guard check-pr [--enforcement <advisory|blocking>]");
-      process.exit(1);
-    }
+  const unknown = args.find((arg) => arg.startsWith("-"));
+  if (unknown) {
+    console.error(`Unknown option for check-pr: ${unknown}\nUsage: repo-guard check-pr [--enforcement <advisory|blocking>]`);
+    return 1;
   }
 
   const prereqs = checkPrerequisites();
   if (prereqs.length > 0) {
-    console.error("ERROR: check-pr prerequisites not met:");
-    for (const p of prereqs) console.error(`  - ${p}`);
-    console.error("\ncheck-pr expects to run inside a GitHub Actions pull_request workflow.");
-    console.error("Required: GITHUB_EVENT_PATH and git with sufficient fetch depth.");
-    process.exit(1);
+    printMissing("ERROR: check-pr prerequisites not met:", prereqs);
+    console.error("\ncheck-pr expects to run inside a GitHub Actions pull_request workflow.\nRequired: GITHUB_EVENT_PATH and git with sufficient fetch depth.");
+    return 1;
   }
 
-  const eventInfo = loadGitHubEvent();
-  if (!eventInfo.ok) {
-    console.error(`ERROR: ${eventInfo.message}`);
-    process.exit(1);
+  const event = loadGitHubEvent();
+  if (!event.ok) {
+    console.error(`ERROR: ${event.message}`);
+    return 1;
   }
-
-  const { base: eventBase, baseRef, head, prBody, prNumber, repoFullName } = eventInfo;
+  const { base: eventBase, baseRef, head, prBody, prNumber, repoFullName } = event;
   if (!eventBase || !head) {
     console.error("ERROR: pull_request event missing base/head SHA");
-    process.exit(1);
+    return 1;
   }
 
   let base = eventBase;
   if (baseRef) {
     try {
       base = resolveRemoteBaseRef(baseRef, roots.repoRoot);
-    } catch (e) {
-      console.error(`ERROR: cannot resolve current PR base ref ${baseRef}: ${e.message}`);
-      process.exit(1);
+    } catch (error) {
+      console.error(`ERROR: cannot resolve current PR base ref ${baseRef}: ${error.message}`);
+      return 1;
     }
-    if (base !== eventBase) {
-      console.log(
-        `Base ref ${baseRef} advanced from event snapshot ${eventBase.slice(0, 7)} to ${base.slice(0, 7)}; using current base`
-      );
-    }
+    if (base !== eventBase) console.log(`Base ref ${baseRef} advanced from event snapshot ${eventBase.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
   }
-
   console.log(`PR #${prNumber}: checking contract and diff (${base.slice(0, 7)}..${head.slice(0, 7)})`);
 
-  const headRuntime = loadPolicyRuntimeOrExit(
+  const headRuntime = loadRuntime(
     () => loadPolicyRuntime(roots, { label: "repo-policy.json (PR head)" }),
-    {
-      label: "repo-policy.json (PR head)",
-      failureMessage: "Proposed policy compilation failed",
-    }
+    { label: "repo-policy.json (PR head)", failureMessage: "Proposed policy compilation failed" },
   );
+  if (!headRuntime) return 1;
   const headPolicy = headRuntime.policy;
   const initialChecks = [];
   const basePolicyRead = readBasePolicy(base, roots.repoRoot);
   let runtime = headRuntime;
   let basePolicy = null;
   let trustedGovernancePaths = [];
+
   if (basePolicyRead.error) {
     initialChecks.push({
       name: "governance-trusted-boundary",
@@ -235,111 +200,60 @@ export function runCheckPR(roots, args = []) {
       },
     });
   } else {
-    runtime = loadPolicyRuntimeOrExit(
+    runtime = loadRuntime(
       () => loadPolicyRuntimeFromObject(roots, basePolicyRead.policy, { label: "repo-policy.json (base)" }),
-      {
-        label: "repo-policy.json (base)",
-        failureMessage: "Base policy compilation failed",
-      }
+      { label: "repo-policy.json (base)", failureMessage: "Base policy compilation failed" },
     );
+    if (!runtime) return 1;
     basePolicy = runtime.policy;
-    trustedGovernancePaths = runtime.policy.paths?.governance_paths ?? [];
+    trustedGovernancePaths = basePolicy.paths?.governance_paths ?? [];
   }
 
   const { ajv, policy, contractSchema } = runtime;
-
   const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy });
   if (!enforcement.ok) {
     console.error(`ERROR: ${enforcement.message}`);
-    process.exit(1);
+    return 1;
   }
 
-  let issueBody = null;
-  const linkedIssues = extractLinkedIssueNumbers(prBody);
-  const prResult = extractContract(prBody);
-  const prBodyHasContract = prResult.ok;
-  const needsIssueFallback =
-    !prResult.ok && prResult.error === "contract_not_found" && linkedIssues.length === 1;
-  if (linkedIssues.length === 1 && (needsIssueFallback || prBodyHasContract)) {
-    if (needsIssueFallback) {
-      console.log(`No contract in PR body; trying linked issue #${linkedIssues[0]}...`);
-    } else {
-      console.log(`Fetching linked issue #${linkedIssues[0]} for privileged authorization...`);
-    }
-    const fallbackPrereqs = checkIssueFallbackPrerequisites();
-    if (fallbackPrereqs.length > 0) {
-      if (needsIssueFallback) {
-        console.error("ERROR: linked issue fallback prerequisites not met:");
-        for (const p of fallbackPrereqs) console.error(`  - ${p}`);
-        process.exit(1);
-      } else {
-        console.warn(
-          "WARN: linked issue lookup prerequisites not met; privileged authorization from the issue body will be unavailable"
-        );
-        for (const p of fallbackPrereqs) console.warn(`  - ${p}`);
-      }
-    } else {
-      issueBody = fetchIssueBody(repoFullName, linkedIssues[0]);
-      if (issueBody === null && prBodyHasContract) {
-        console.warn(
-          `WARN: could not fetch linked issue #${linkedIssues[0]} body; privileged authorization from the issue body will be unavailable`
-        );
-      }
-    }
-  }
-
+  const linked = fetchLinkedIssue({ prBody, repoFullName });
+  if (linked.fatal) return 1;
+  const { linkedIssues, issueBody } = linked;
   let contractResult = resolvePRContractFacts({ prBody, issueBody });
-  if (
-    !contractResult.ok &&
-    contractResult.linkedIssues.length === 1 &&
-    issueBody === null &&
-    contractResult.error !== "issue_link_ambiguous"
-  ) {
-    contractResult = {
-      ...contractResult,
-      error: "issue_fetch_failed",
-      message: `Could not fetch issue #${contractResult.linkedIssues[0]} body`,
-    };
+  if (!contractResult.ok && contractResult.linkedIssues.length === 1 && issueBody === null && contractResult.error !== "issue_link_ambiguous") {
+    contractResult = { ...contractResult, error: "issue_fetch_failed", message: `Could not fetch issue #${contractResult.linkedIssues[0]} body` };
   }
+
   let contract = null;
   let contractSource = contractResult.contractSource || "none";
   const issueAuthorization = contractResult.issueAuthorization || null;
   if (!contractResult.ok) {
-    initialChecks.push({
-      name: "change-contract",
-      check: {
-        ok: false,
-        message: `[${contractResult.error}]: ${contractResult.message}`,
-      },
-    });
+    initialChecks.push({ name: "change-contract", check: { ok: false, message: `[${contractResult.error}]: ${contractResult.message}` } });
   } else {
-    const contractForValidation = stripPrivilegedSchemaUnknownFields(contractResult.contract);
-    const contractCheck = validationCheck(ajv, contractSchema, contractForValidation, "change-contract (from markdown)");
-    initialChecks.push({ name: "change-contract", check: contractCheck });
-    if (contractCheck.ok) {
-      contract = contractForValidation;
+    const candidate = stripPrivilegedSchemaUnknownFields(contractResult.contract);
+    const check = validationCheck(ajv, contractSchema, candidate, "change-contract (from markdown)");
+    initialChecks.push({ name: "change-contract", check });
+    if (check.ok) {
+      contract = candidate;
       contractSource = contractResult.contractSource;
-      for (const w of warnReservedContractFields(contract)) {
-        console.warn(`WARN: ${w}`);
-      }
+      for (const warning of warnReservedContractFields(contract)) console.warn(`WARN: ${warning}`);
     }
   }
 
   let diffText;
   try {
     diffText = getDiff(base, head, roots.repoRoot);
-  } catch (e) {
-    console.error(`ERROR: ${e.message}`);
-    process.exit(1);
+  } catch (error) {
+    console.error(`ERROR: ${error.message}`);
+    return 1;
   }
 
   let trustedAuthorizer = null;
   if (basePolicy && repoFullName) {
-    const linkedIssueNumber = linkedIssues.length === 1 ? linkedIssues[0] : null;
     try {
       trustedAuthorizer = resolveTrustedAuthorizer({
         repoFullName,
-        issueNumber: linkedIssueNumber,
+        issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null,
         prNumber,
       });
     } catch {
@@ -347,7 +261,7 @@ export function runCheckPR(roots, args = []) {
     }
   }
 
-  const summary = runPolicyPipeline({
+  return runPolicyPipeline({
     mode: "check-pr",
     repositoryRoot: roots.repoRoot,
     policy,
@@ -361,6 +275,5 @@ export function runCheckPR(roots, args = []) {
     enforcement,
     diffText,
     initialChecks,
-  });
-  process.exit(summary.exitCode);
+  }).exitCode;
 }
