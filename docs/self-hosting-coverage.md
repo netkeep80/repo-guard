@@ -1,17 +1,14 @@
-# Self-hosting coverage
+# Покрытие самопроверкой
 
-`repo-guard` treats dogfooding as a hard invariant: every surviving capability
-must be used by the repo itself, or explicitly marked `not_self_hosted` with a
-written rationale.
+`repo-guard` рассматривает самоприменение как проверяемый инвариант: каждая сохраняемая возможность должна либо реально использоваться самим репозиторием, либо иметь явное объяснение, почему такое использование здесь неуместно.
 
-The **single source of truth is
-[`docs/self-hosting-coverage.json`](self-hosting-coverage.json)**. That file
-carries the full capability → self-use map and is loaded by
-`tests/test-self-hosting.mjs`, which enforces the invariant in CI.
+Единственный источник истины — [`docs/self-hosting-coverage.json`](self-hosting-coverage.json). В нём хранится полная карта «возможность → собственное использование», которую загружает `tests/test-self-hosting.mjs`.
 
-This Markdown file intentionally stays short so the JSON is not duplicated in
-two places. To add, move, or retire a capability, edit the JSON: set `status`
-to `self_used` with a concrete `self_use` pointer, or to `not_self_hosted`
-with a non-empty `rationale`. The test run will fail if a declared self-use
-cannot be confirmed in `repo-policy.json` / CI, if a rationale is missing, or
-if a new top-level schema property appears without a matching entry.
+Этот файл `Markdown` намеренно остаётся коротким, чтобы не дублировать матрицу в двух местах. При добавлении, переносе или удалении возможности редактируйте файл `JSON`:
+
+- `status: self_used` требует конкретную ссылку `self_use`;
+- `status: not_self_hosted` требует непустое объяснение `rationale`.
+
+Тесты завершаются ошибкой, если заявленное собственное использование нельзя подтвердить в `repo-policy.json` или CI, если отсутствует объяснение, либо если в схеме появляется новая возможность без записи в матрице.
+
+Отдельно самопроверка применяет правило `markdown_language` из собственной политики ко всему текущему набору файлов `Markdown`, чтобы существующая документация не могла оставаться вне языкового инварианта.
