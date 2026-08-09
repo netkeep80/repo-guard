@@ -31,9 +31,12 @@ export function parseMarkdown(content) {
   for (const [offset, line] of lines.entries()) {
     const lineNumber = offset + 1;
     if (!fence) {
-      const opening = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
+      const opening = line.match(/^([ \t]*)(`{3,}|~{3,})(.*)$/);
       if (opening) {
-        fence = { marker: opening[1][0], length: opening[1].length, infoString: opening[2].trim(), startLine: lineNumber, contentLines: [] };
+        fence = {
+          indent: opening[1], marker: opening[2][0], length: opening[2].length,
+          infoString: opening[3].trim(), startLine: lineNumber, contentLines: [],
+        };
         continue;
       }
       const heading = line.match(/^[ \t]{0,3}(#{1,6})(?:[ \t]+|$)(.*)$/);
@@ -54,7 +57,7 @@ export function parseMarkdown(content) {
       codeBlocks.push({ language, infoString: fence.infoString, startLine: fence.startLine, endLine: lineNumber, content: fence.contentLines.join("\n") });
       fence = null;
     } else {
-      fence.contentLines.push(line.replace(/^[ \t]+/, (indent) => indent));
+      fence.contentLines.push(fence.indent && line.startsWith(fence.indent) ? line.slice(fence.indent.length) : line);
     }
   }
   if (fence) errors.push({ message: `unclosed Markdown fence starting at line ${fence.startLine}` });
@@ -66,8 +69,7 @@ export function markdownSection(markdown, section) {
   if (!heading) throw new Error(`markdown section "${section}" not found`);
   const end = markdown.headings.find((item) => item.line > heading.line && item.level <= heading.level)?.line || markdown.lines.length + 1;
   return {
-    startLine: heading.line + 1,
-    endLine: end - 1,
+    startLine: heading.line + 1, endLine: end - 1,
     lines: markdown.lines.slice(heading.line, end - 1),
     links: markdown.links.filter((link) => link.line > heading.line && link.line < end),
   };
