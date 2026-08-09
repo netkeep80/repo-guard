@@ -94,6 +94,20 @@ expect("file-count delta is one", fileGrowth.growth[0].delta, 1);
 expect("file-count before is reconstructed", fileGrowth.growth[0].before, 1);
 expect("file-count after is current count", fileGrowth.growth[0].after, 2);
 
+const byteGrowth = checkSizeRules(balancedDiff, [{
+  id: "docs-bytes",
+  scope: "directory",
+  metric: "bytes",
+  glob: "docs/**",
+  max: 1000,
+  max_growth: 0,
+}], {
+  trackedFiles: ["docs/a.md", "docs/b.md"],
+  readFile,
+});
+expect("byte max_growth fails closed until exact base-byte measurement exists", byteGrowth.ok, false);
+expect("byte max_growth reports a read/evaluation error", byteGrowth.errors.length, 1);
+
 const russianRule = {
   id: "russian-docs",
   glob: "README.md",
