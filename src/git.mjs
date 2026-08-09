@@ -33,13 +33,17 @@ export function resolveRemoteBaseRef(baseRef, cwd, remote = "origin") {
   return sha;
 }
 
+function diffArgs(...args) {
+  return ["-c", "core.quotepath=false", "diff", ...args];
+}
+
 export function getDiff(base, head, cwd) {
   if (base && head) {
-    return runGit(["diff", `${base}...${head}`], { cwd });
+    return runGit(diffArgs(`${base}...${head}`), { cwd });
   }
-  const staged = runGit(["diff", "--cached"], { cwd });
+  const staged = runGit(diffArgs("--cached"), { cwd });
   if (staged.trim()) return staged;
-  return runGit(["diff", "HEAD"], { cwd });
+  return runGit(diffArgs("HEAD"), { cwd });
 }
 
 export function readFileAtRef(ref, path, cwd) {
