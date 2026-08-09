@@ -162,6 +162,7 @@ console.log("\n--- workflow content ---");
   expectIncludes("workflow uses blocking enforcement", workflow, "enforcement: blocking");
   expectIncludes("workflow has fetch-depth 0", workflow, "fetch-depth: 0");
   expectIncludes("workflow has GH_TOKEN", workflow, "GH_TOKEN");
+  expectIncludes("workflow has Russian title", workflow, "Проверка политики repo-guard");
 }
 
 // --- PR template has contract block ---
@@ -173,6 +174,7 @@ console.log("\n--- PR template content ---");
   const tpl = readFileSync(join(dir, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8");
   expectIncludes("PR template has YAML contract block", tpl, "```repo-guard-yaml");
   expectIncludes("PR template has change_type", tpl, "change_type");
+  expectIncludes("PR template has Russian heading", tpl, "Краткое описание");
 }
 
 // --- issue template has contract block ---
@@ -184,7 +186,7 @@ console.log("\n--- issue template content ---");
   const tpl = readFileSync(join(dir, ".github/ISSUE_TEMPLATE/change-contract.yml"), "utf-8");
   expectIncludes("issue template has YAML contract block", tpl, "repo-guard-yaml");
   expectIncludes("issue template has change_type", tpl, "change_type");
-  expectIncludes("issue template has description field", tpl, "Description");
+  expectIncludes("issue template has Russian description field", tpl, "label: Описание");
 }
 
 // --- library preset includes cochange rule ---

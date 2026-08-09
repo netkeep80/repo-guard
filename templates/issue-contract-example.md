@@ -1,7 +1,7 @@
-# Issue Change Contract Example
+# Пример контракта изменения для задачи
 
-When opening an issue that proposes code changes, attach a change contract
-as a YAML code block so `repo-guard` can validate it:
+При создании задачи, которая предлагает изменение кода, добавьте контракт изменения
+в блоке YAML, чтобы `repo-guard` мог проверить заявленные границы:
 
 ```repo-guard-yaml
 change_type: feature
@@ -13,7 +13,7 @@ budgets:
   max_new_docs: 1
 surface_debt:
   kind: temporary_growth
-  reason: Add temporary adapter before deleting the old middleware path
+  reason: Временно добавить адаптер перед удалением старого пути middleware
   expected_delta:
     max_new_files: 1
     max_net_added_lines: 80
@@ -30,5 +30,5 @@ must_touch:
 must_not_touch:
   - migrations/
 expected_effects:
-  - New /login and /logout endpoints
+  - Добавлены новые точки /login и /logout
 ```

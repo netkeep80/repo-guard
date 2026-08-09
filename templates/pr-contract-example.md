@@ -1,7 +1,7 @@
-# Pull Request Change Contract Example
+# Пример контракта изменения для PR
 
-Include a YAML change contract in the PR description so `repo-guard` can
-validate the proposed changes against the repository policy:
+Добавьте контракт изменения YAML в описание PR, чтобы `repo-guard` мог
+проверить предлагаемые изменения относительно политики репозитория:
 
 ```repo-guard-yaml
 change_type: bugfix
@@ -12,7 +12,7 @@ budgets:
   max_new_docs: 0
 surface_debt:
   kind: temporary_growth
-  reason: Introduce extraction path before removing duplicated code
+  reason: Ввести путь извлечения перед удалением дублированного кода
   expected_delta:
     max_new_files: 1
     max_net_added_lines: 60
@@ -30,5 +30,5 @@ must_not_touch:
   - schemas/
   - repo-policy.json
 expected_effects:
-  - Pagination returns correct page count
+  - Пагинация возвращает правильное количество страниц
 ```

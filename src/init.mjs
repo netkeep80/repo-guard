@@ -74,7 +74,7 @@ function defaultActionRef(packageRoot) {
 }
 
 function buildWorkflow(enforcementMode, actionRef) {
-  return `name: repo-guard policy check
+  return `name: Проверка политики repo-guard
 
 on:
   pull_request:
@@ -89,7 +89,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Enforce repository policy
+      - name: Проверить политику репозитория
         uses: ${ACTION_USES_TARGET}@${actionRef}
         with:
           mode: check-pr
@@ -100,14 +100,14 @@ jobs:
 }
 
 function buildPRTemplate() {
-  return `## Summary
+  return `## Краткое описание
 
-<!-- Briefly describe the changes in this PR. -->
+<!-- Кратко опишите, что меняется в этом PR и зачем. -->
 
-## Change Contract
+## Контракт изменения
 
-<!-- Paste a YAML change contract block so repo-guard can validate this PR. -->
-<!-- See https://github.com/netkeep80/repo-guard for contract format. -->
+<!-- Вставьте блок YAML, чтобы repo-guard мог проверить заявленные границы PR. -->
+<!-- Формат контракта описан в https://github.com/netkeep80/repo-guard. -->
 
 \`\`\`repo-guard-yaml
 change_type: feature
@@ -124,32 +124,32 @@ anchors:
 must_touch: []
 must_not_touch: []
 expected_effects:
-  - Describe the expected effect
+  - Опишите ожидаемый эффект
 \`\`\`
 `;
 }
 
 function buildIssueTemplate() {
-  return `name: Change contract
-description: Propose a code change with a repo-guard change contract.
+  return `name: Контракт изменения
+description: Предложить изменение кода с контрактом repo-guard.
 title: "[change] "
 body:
   - type: markdown
     attributes:
       value: |
-        Describe the proposed change and include a YAML change contract block.
+        Опишите предлагаемое изменение и добавьте блок контракта YAML.
   - type: textarea
     id: description
     attributes:
-      label: Description
-      description: What does this change do and why?
+      label: Описание
+      description: Что меняется и зачем?
     validations:
       required: true
   - type: textarea
     id: contract
     attributes:
-      label: Change Contract
-      description: Paste a repo-guard YAML change contract block.
+      label: Контракт изменения
+      description: Вставьте блок контракта repo-guard в формате YAML.
       value: |
         \`\`\`repo-guard-yaml
         change_type: feature
@@ -166,7 +166,7 @@ body:
         must_touch: []
         must_not_touch: []
         expected_effects:
-          - Describe the expected effect
+          - Опишите ожидаемый эффект
         \`\`\`
     validations:
       required: true

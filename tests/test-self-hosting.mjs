@@ -133,8 +133,8 @@ describe("repo-guard self-hosting templates and docs", () => {
   it("migration guide maps custom validators to built-in integration policy", () => {
     const guide = readProjectFile("docs/removing-bespoke-validators.md");
 
-    assert.match(guide, /## Migration Sequence/);
-    assert.match(guide, /Delete the custom validator/);
+    assert.match(guide, /## Последовательность миграции/);
+    assert.match(guide, /Удалить собственный валидатор/);
     assert.match(guide, /integration\.workflows/);
     assert.match(guide, /integration\.templates/);
     assert.match(guide, /integration\.docs/);
@@ -316,6 +316,13 @@ describe("repo-guard self-hosting capability coverage matrix", () => {
       validator: () => {
         const contentRules = requirePolicyKey(["content_rules"]);
         assert.ok(Array.isArray(contentRules) && contentRules.length > 0);
+        assert.ok(
+          contentRules.some(
+            (rule) => rule.mode === "markdown_language" && rule.language === "ru",
+          ),
+          "self-hosted content rules must enforce Russian Markdown prose",
+        );
+        requireCiStep("Run documentation language test");
       },
     });
     requireSelfUse(rules["cochange-rules"], {

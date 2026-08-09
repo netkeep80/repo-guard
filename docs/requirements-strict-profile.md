@@ -1,57 +1,53 @@
-# requirements-strict Profile
+# Профиль requirements-strict
 
-`requirements-strict` is a built-in repo-guard policy profile for repositories
-where requirement JSON files are the canonical source of traceability.
+`requirements-strict` — встроенный профиль политики `repo-guard` для репозиториев, где файлы требований в `JSON` являются каноническим источником трассировки.
 
-The profile is enabled with top-level `profile: "requirements-strict"`.
-`repo-guard` validates the raw policy against the JSON Schema, expands the
-profile into `anchors` and `trace_rules`, then compiles and runs the effective
-policy. Repositories that already store expanded `anchors` or `trace_rules`
-remain compatible: explicit policy sections take precedence over generated
-profile sections.
+Профиль включается полем верхнего уровня `profile: "requirements-strict"`. Сначала `repo-guard` валидирует исходную политику по схеме, затем разворачивает профиль в `anchors` и `trace_rules`, после чего компилирует итоговую политику.
 
-## Generated Anchors
+Если репозиторий уже хранит явные `anchors` или `trace_rules`, они имеют приоритет над сгенерированными секциями.
 
-| Anchor type | Source |
+## Генерируемые якоря
+
+| Тип якоря | Источник |
 | --- | --- |
-| `requirement_id` | `id` fields in requirement JSON files |
-| `requirement_json_req_ref` | Requirement IDs referenced inside requirement JSON |
-| `code_req_ref` | `@req` and comma-separated requirement refs in code, tests, scripts, and examples |
-| `doc_req_ref` | Requirement refs in Markdown files |
-| `doc_heading_req_ref` | Bracketed requirement refs in strict heading docs |
-| `doc_heading_without_req_ref` | Headings in strict heading docs that are missing a bracketed requirement ref |
+| `requirement_id` | поля `id` в файлах требований |
+| `requirement_json_req_ref` | ссылки на требования внутри файлов требований |
+| `code_req_ref` | ссылки `@req` в коде, тестах, сценариях и примерах |
+| `doc_req_ref` | ссылки на требования в документации `Markdown` |
+| `doc_heading_req_ref` | ссылки на требования в заголовках строгих документов |
+| `doc_heading_without_req_ref` | заголовки строгих документов без требуемой ссылки |
 
-## Generated Trace Rules
+## Генерируемые правила трассировки
 
-| Rule | Behavior |
+| Правило | Поведение |
 | --- | --- |
-| `requirement-json-req-refs-must-resolve` | Requirement refs inside requirement JSON must resolve to canonical `requirement_id` anchors |
-| `code-req-refs-must-resolve` | Code/test/script/example refs must resolve |
-| `doc-req-refs-must-resolve` | Markdown refs must resolve |
-| `doc-heading-req-refs-must-resolve` | Bracketed heading refs must resolve |
-| `doc-headings-must-have-req-ref` | Strict heading docs must not contain headings without bracketed requirement refs |
-| `changed-requirements-need-evidence` | Changed requirement JSON files must be accompanied by an evidence surface |
-| `declared-affected-anchors-need-evidence` | `anchors.affects` declarations must be accompanied by evidence |
-| `declared-implemented-anchors-need-evidence` | `anchors.implements` declarations must be accompanied by implementation evidence |
-| `declared-verified-anchors-need-evidence` | `anchors.verifies` declarations must be accompanied by verification evidence |
+| `requirement-json-req-refs-must-resolve` | ссылки между требованиями должны разрешаться |
+| `code-req-refs-must-resolve` | ссылки из кода и тестов должны разрешаться |
+| `doc-req-refs-must-resolve` | ссылки из документации должны разрешаться |
+| `doc-heading-req-refs-must-resolve` | ссылки из строгих заголовков должны разрешаться |
+| `doc-headings-must-have-req-ref` | строгие заголовки обязаны содержать ссылку на требование |
+| `changed-requirements-need-evidence` | изменение требования требует подтверждающей поверхности |
+| `declared-affected-anchors-need-evidence` | `anchors.affects` требует подтверждения |
+| `declared-implemented-anchors-need-evidence` | `anchors.implements` требует реализации |
+| `declared-verified-anchors-need-evidence` | `anchors.verifies` требует проверки |
 
-## Overrides
+## Переопределения
 
-All override values are non-empty arrays of non-empty strings.
+Все переопределения задаются непустыми массивами непустых строк.
 
-| Override | Default |
+| Поле | Значение по умолчанию |
 | --- | --- |
-| `requirement_json_globs` | `requirements/business/*.json`, `requirements/stakeholder/*.json`, `requirements/functional/*.json`, `requirements/nonfunctional/*.json`, `requirements/constraints/*.json`, `requirements/interface/*.json` |
-| `code_reference_globs` | `scripts/**/*.js`, `include/**/*.{h,hpp,hh}`, `src/**/*.{h,hpp,hh,c,cc,cpp,cxx}`, `tests/**/*.{h,hpp,hh,c,cc,cpp,cxx,js,mjs}`, `examples/**/*.{h,hpp,hh,c,cc,cpp,cxx,js,mjs}` |
+| `requirement_json_globs` | набор `requirements/.../*.json` для канонических требований |
+| `code_reference_globs` | код, тесты, сценарии и примеры |
 | `doc_reference_globs` | `*.md`, `docs/**/*.md`, `requirements/**/*.md`, `.github/**/*.md` |
 | `strict_heading_docs` | `docs/**/*.md` |
 | `evidence_surfaces` | `src/**`, `tests/**`, `docs/**`, `README.md`, `requirements/README.md` |
-| `changed_requirement_evidence_surfaces` | Falls back to `evidence_surfaces` |
-| `affected_evidence_surfaces` | Falls back to `evidence_surfaces` |
+| `changed_requirement_evidence_surfaces` | по умолчанию `evidence_surfaces` |
+| `affected_evidence_surfaces` | по умолчанию `evidence_surfaces` |
 | `implementation_evidence_surfaces` | `include/**`, `src/**`, `scripts/**`, `.github/workflows/**` |
 | `verification_evidence_surfaces` | `tests/**`, `experiments/**`, `scripts/**`, `.github/workflows/**` |
 
-Example:
+Пример:
 
 ```json
 {

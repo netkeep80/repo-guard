@@ -1,205 +1,200 @@
-# Removing Custom Validators
+# Переход с собственных валидаторов
 
-This guide describes a migration path for downstream repositories that already
-carry custom workflow, PR-template, or documentation validators and want to move
-those responsibilities into repo-guard.
+Этот документ описывает миграцию репозитория, который уже использует собственные проверки рабочих процессов, шаблонов PR или документации и хочет передать эти обязанности `repo-guard`.
 
-The goal is not to delete a working validator first. Run repo-guard beside the
-existing script in advisory mode, encode the same checks in `repo-policy.json`,
-then remove the custom script after `validate-integration` and the PR gate agree.
+Не удаляйте работающий валидатор первым шагом. Сначала запустите `repo-guard` рядом с ним в режиме `advisory`, выразите те же инварианты в `repo-policy.json`, получите зелёное подтверждение `validate-integration`, и только затем удаляйте дублирующий код.
 
-## Migration Sequence
+## Последовательность миграции
 
-1. Inventory the custom validator.
+### 1. Провести инвентаризацию
 
-   Record each responsibility as a checkable statement:
+Зафиксируйте каждую обязанность существующего валидатора как проверяемое утверждение:
 
-   - which workflow must run on pull requests;
-   - which Action or command is allowed to run the gate;
-   - which permissions, token variables, and checkout depth are required;
-   - which PR or issue template must contain a change contract;
-   - which contract fields are mandatory;
-   - which docs must mention policy, profile, or traceability fields.
+- какой рабочий процесс должен запускаться для PR;
+- какой `Action` или команда выполняет проверку;
+- какие разрешения, переменные токена и глубина истории обязательны;
+- какой шаблон PR или задачи содержит контракт изменения;
+- какие поля контракта обязательны;
+- какие документы должны упоминать политику, профиль или трассировку.
 
-2. Add repo-guard in advisory mode.
+### 2. Подключить repo-guard в мягком режиме
 
-   Keep the existing custom validator active and add a repo-guard workflow based
-   on `examples/replace-custom-validator-workflow.yml`. Start with:
+Оставьте старый валидатор включённым и добавьте рабочий процесс на основе `examples/replace-custom-validator-workflow.yml`.
 
-   ```yaml
-   with:
-     mode: check-pr
-     enforcement: advisory
-   ```
+Начальный режим:
 
-   Run:
+```yaml
+with:
+  mode: check-pr
+  enforcement: advisory
+```
 
-   ```bash
-   repo-guard --enforcement advisory validate-integration --format summary
-   repo-guard doctor --integration --format summary
-   ```
+Проверьте подключение:
 
-3. Express workflow checks in `integration.workflows`.
+```bash
+repo-guard --enforcement advisory validate-integration --format summary
+repo-guard doctor --integration --format summary
+```
 
-   A validator that checked "the policy job must run on pull requests with full
-   history and a token" maps to:
+### 3. Перенести проверки рабочего процесса
 
-   ```json
-   {
-     "id": "repo-guard-pr-gate",
-     "kind": "github_actions",
-     "path": ".github/workflows/repo-guard.yml",
-     "role": "repo_guard_pr_gate",
-     "expect": {
-       "events": ["pull_request"],
-       "event_types": ["opened", "synchronize", "reopened", "ready_for_review"],
-       "action": {
-         "uses": "netkeep80/repo-guard",
-         "ref_pinning": "semver"
-       },
-       "mode": "check-pr",
-       "enforcement": "blocking",
-       "permissions": {
-         "contents": "read",
-         "pull-requests": "read",
-         "issues": "read"
-       },
-       "token_env": ["GH_TOKEN"],
-       "summary": true,
-       "disallow": ["continue_on_error", "manual_clone", "direct_temp_cli_execution"]
-     }
-   }
-   ```
+Ожидания рабочего процесса выражаются в `integration.workflows`.
 
-4. Express template checks in `integration.templates`.
+Пример:
 
-   A validator that parsed `.github/PULL_REQUEST_TEMPLATE.md` to require a
-   contract block maps to:
+```json
+{
+  "id": "repo-guard-pr-gate",
+  "kind": "github_actions",
+  "path": ".github/workflows/repo-guard.yml",
+  "role": "repo_guard_pr_gate",
+  "expect": {
+    "events": ["pull_request"],
+    "event_types": ["opened", "synchronize", "reopened", "ready_for_review"],
+    "action": {
+      "uses": "netkeep80/repo-guard",
+      "ref_pinning": "semver"
+    },
+    "mode": "check-pr",
+    "enforcement": "blocking",
+    "permissions": {
+      "contents": "read",
+      "pull-requests": "read",
+      "issues": "read"
+    },
+    "token_env": ["GH_TOKEN"],
+    "summary": true,
+    "disallow": ["continue_on_error", "manual_clone", "direct_temp_cli_execution"]
+  }
+}
+```
 
-   ```json
-   {
-     "id": "pull-request-template",
-     "kind": "markdown",
-     "path": ".github/PULL_REQUEST_TEMPLATE.md",
-     "requires_contract_block": true,
-     "required_block_kind": "repo-guard-yaml",
-     "required_contract_fields": ["change_type", "scope", "anchors.affects"]
-   }
-   ```
+### 4. Перенести проверки шаблонов
 
-   If linked issues may carry the fallback contract, declare the issue form as
-   optional so repositories without that fallback are not forced to add one:
+Шаблон PR описывается в `integration.templates`:
 
-   ```json
-   {
-     "id": "change-contract-issue-form",
-     "kind": "github_issue_form",
-     "path": ".github/ISSUE_TEMPLATE/change-contract.yml",
-     "requires_contract_block": true,
-     "optional": true,
-     "required_block_kind": "repo-guard-yaml",
-     "required_contract_fields": ["change_type", "scope", "anchors.affects"]
-   }
-   ```
+```json
+{
+  "id": "pull-request-template",
+  "kind": "markdown",
+  "path": ".github/PULL_REQUEST_TEMPLATE.md",
+  "requires_contract_block": true,
+  "required_block_kind": "repo-guard-yaml",
+  "required_contract_fields": ["change_type", "scope", "anchors.affects"]
+}
+```
 
-5. Express documentation checks in `integration.docs`.
+Если контракт может находиться в связанной задаче, форму задачи можно объявить необязательной:
 
-   A validator that searched README content for policy and traceability guidance
-   maps to:
+```json
+{
+  "id": "change-contract-issue-form",
+  "kind": "github_issue_form",
+  "path": ".github/ISSUE_TEMPLATE/change-contract.yml",
+  "requires_contract_block": true,
+  "optional": true,
+  "required_block_kind": "repo-guard-yaml",
+  "required_contract_fields": ["change_type", "scope", "anchors.affects"]
+}
+```
 
-   ```json
-   {
-     "id": "readme",
-     "kind": "markdown",
-     "path": "README.md",
-     "must_mention": ["repo-guard", "contract", "integration"],
-     "must_reference_files": [
-       "repo-policy.json",
-       ".github/PULL_REQUEST_TEMPLATE.md",
-       ".github/workflows/repo-guard.yml"
-     ],
-     "must_mention_profiles": ["requirements-strict"],
-     "must_mention_contract_fields": ["change_type", "scope", "anchors.affects"],
-     "profiles": ["requirements-strict"]
-   }
-   ```
+### 5. Перенести проверки документации
 
-6. Adopt the `requirements-strict` profile when requirement traceability is part
-   of the custom validator.
+Документы описываются в `integration.docs`.
 
-   Add the built-in profile and narrow the globs to the downstream repository:
+```json
+{
+  "id": "readme",
+  "kind": "markdown",
+  "path": "README.md",
+  "must_mention": ["repo-guard", "contract", "integration"],
+  "must_reference_files": [
+    "repo-policy.json",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/repo-guard.yml"
+  ],
+  "must_mention_profiles": ["requirements-strict"],
+  "must_mention_contract_fields": ["change_type", "scope", "anchors.affects"],
+  "profiles": ["requirements-strict"]
+}
+```
 
-   ```json
-   {
-     "profile": "requirements-strict",
-     "profile_overrides": {
-       "strict_heading_docs": ["docs/architecture.md", "docs/requirements.md"],
-       "evidence_surfaces": ["src/**", "tests/**", "docs/**", ".github/workflows/**"]
-     }
-   }
-   ```
+### 6. Подключить профиль requirements-strict при необходимости
 
-   Then require contributors to include the relevant anchors in the PR contract:
+Если прежний валидатор контролировал трассировку требований, используйте встроенный профиль `requirements-strict` и сузьте его пути под конкретный репозиторий.
 
-   ```yaml
-   anchors:
-     affects:
-       - FR-014
-     implements:
-       - FR-014
-     verifies:
-       - FR-014
-   ```
+```json
+{
+  "profile": "requirements-strict",
+  "profile_overrides": {
+    "strict_heading_docs": ["docs/architecture.md", "docs/requirements.md"],
+    "evidence_surfaces": ["src/**", "tests/**", "docs/**", ".github/workflows/**"]
+  }
+}
+```
 
-7. Switch repo-guard to blocking.
+Контракт PR должен указывать относящиеся к изменению якоря:
 
-   After advisory runs are clean, update the workflow input and policy default:
+```yaml
+anchors:
+  affects:
+    - FR-014
+  implements:
+    - FR-014
+  verifies:
+    - FR-014
+```
 
-   ```yaml
-   with:
-     mode: check-pr
-     enforcement: blocking
-   ```
+### 7. Перевести repo-guard в блокирующий режим
 
-   ```json
-   {
-     "enforcement": {
-       "mode": "blocking"
-     }
-   }
-   ```
+После чистых прогонов в мягком режиме измените рабочий процесс и политику:
 
-8. Delete the custom validator.
+```yaml
+with:
+  mode: check-pr
+  enforcement: blocking
+```
 
-   Remove the old script, its package entry, and its workflow step in the same
-   PR that keeps `repo-guard validate-integration --format summary` passing.
-   The replacement is complete when:
+```json
+{
+  "enforcement": {
+    "mode": "blocking"
+  }
+}
+```
 
-   - `repo-guard` validates `repo-policy.json`;
-   - `repo-guard validate-integration --format summary` passes;
-   - `repo-guard doctor --integration --format summary` passes;
-   - the PR workflow runs repo-guard in blocking mode.
+### 8. Удалить собственный валидатор
 
-## Responsibility Map
+Удалите старый сценарий, его запись в пакетном менеджере и соответствующий шаг рабочего процесса в том же PR, в котором `repo-guard validate-integration --format summary` остаётся зелёным.
 
-| Custom validator responsibility | repo-guard replacement |
+Замена считается завершённой, когда:
+
+- `repo-guard` валидирует `repo-policy.json`;
+- `repo-guard validate-integration --format summary` проходит;
+- `repo-guard doctor --integration --format summary` проходит;
+- рабочий процесс PR запускает `repo-guard` в режиме `blocking`;
+- старый валидатор и его временный слой совместимости удалены.
+
+## Карта обязанностей
+
+| Обязанность старого валидатора | Замена в repo-guard |
 | --- | --- |
-| Enforce the PR workflow trigger | `integration.workflows[].expect.events` and `event_types` |
-| Require full checkout history | `repo_guard_pr_gate` workflow diagnostics for `fetch-depth: 0` |
-| Require pinned repo-guard Action | `integration.workflows[].expect.action` with `ref_pinning` |
-| Require least-privilege permissions | `integration.workflows[].expect.permissions` |
-| Require a token for linked issue fallback | `integration.workflows[].expect.token_env` |
-| Ban best-effort policy gates | `integration.workflows[].expect.disallow` with `continue_on_error` |
-| Ban cloning validator code at runtime | `manual_clone` and `direct_temp_cli_execution` disallowed patterns |
-| Require a PR contract block | `integration.templates[].requires_contract_block` |
-| Require specific contract fields | `integration.templates[].required_contract_fields` |
-| Require policy/profile documentation | `integration.docs[].must_mention` and `must_mention_profiles` |
-| Require references to policy files | `integration.docs[].must_reference_files` |
-| Enforce requirement traceability | top-level `profile: "requirements-strict"` plus `profile_overrides` |
+| проверять запуск рабочего процесса для PR | `integration.workflows[].expect.events` и `event_types` |
+| требовать полную историю | диагностика роли `repo_guard_pr_gate` для `fetch-depth: 0` |
+| требовать закреплённый Action | `integration.workflows[].expect.action` и `ref_pinning` |
+| требовать минимальные разрешения | `integration.workflows[].expect.permissions` |
+| требовать токен для связанной задачи | `integration.workflows[].expect.token_env` |
+| запрещать необязательный проход политики | `integration.workflows[].expect.disallow` |
+| запрещать загрузку валидатора во время запуска | `manual_clone` и `direct_temp_cli_execution` |
+| требовать контракт в шаблоне PR | `integration.templates[].requires_contract_block` |
+| требовать конкретные поля контракта | `integration.templates[].required_contract_fields` |
+| требовать документацию политики | `integration.docs[].must_mention` и `must_mention_profiles` |
+| требовать ссылки на файлы политики | `integration.docs[].must_reference_files` |
+| проверять трассировку требований | `profile: "requirements-strict"` и `profile_overrides` |
 
-## Complete Snippets
+## Полные примеры
 
-- `examples/downstream-integration-policy.json` shows a complete downstream
-  policy with integration checks and `requirements-strict`.
-- `examples/replace-custom-validator-workflow.yml` shows the workflow that can
-  replace a custom validation step.
+- `examples/downstream-integration-policy.json` показывает политику потребителя с `integration` и `requirements-strict`;
+- `examples/replace-custom-validator-workflow.yml` показывает рабочий процесс, который заменяет собственный валидатор.
+
+Главный критерий миграции: после доказанной эквивалентности старый валидатор удаляется, а не остаётся вторым источником правил.
