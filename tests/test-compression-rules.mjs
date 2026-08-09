@@ -1,5 +1,6 @@
 import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
 import { compileConstraintIR, evaluateConstraintIR } from "../src/checks/rules/constraints.mjs";
+import { comparePolicyStrictness } from "../src/checks/rules/policy-delta-rules.mjs";
 import { checkSizeRules } from "../src/checks/rules/size-rules.mjs";
 import { parseMarkdown } from "../src/document-facts.mjs";
 import { classifyPathSets, selectPaths } from "../src/diff/classification.mjs";
@@ -41,6 +42,17 @@ const constraintFacts = {
 const constraintIR = compileConstraintIR(constraintFacts);
 expect("policy frontends compile into primitive constraints", constraintIR.constraints.some((c) => c.kind === "implies_nonempty"), true);
 expect("constraint kernel preserves familiar result names", evaluateConstraintIR(constraintFacts).some((r) => r.name === "must-touch" && r.check.ok), true);
+
+const strictnessBase = {
+  enforcement: { mode: "blocking" }, paths: { forbidden: ["secret/**"], governance_paths: ["repo-policy.json"] },
+  diff_rules: { max_new_files: 5 }, size_rules: [{ id: "src", glob: "src/**", max: 100, level: "blocking", count: "all_tracked" }],
+};
+const weakerPolicy = structuredClone(strictnessBase);
+weakerPolicy.diff_rules.max_new_files = 10;
+expect("strictness IR detects monotonic weakening", comparePolicyStrictness(strictnessBase, weakerPolicy).relation, "weaker");
+const stricterPolicy = structuredClone(strictnessBase);
+stricterPolicy.diff_rules.max_new_files = 3;
+expect("strictness IR detects monotonic tightening", comparePolicyStrictness(strictnessBase, stricterPolicy).relation, "stricter");
 
 const currentFiles = new Map([
   ["docs/a.md", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"],
