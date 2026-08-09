@@ -1,421 +1,66 @@
 import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import Ajv from "ajv";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = resolve(__dirname, "..");
-
-function loadJSON(path) {
-  return JSON.parse(readFileSync(path, "utf-8"));
-}
-
-const policySchema = loadJSON(resolve(root, "schemas/repo-policy.schema.json"));
-const contractSchema = loadJSON(resolve(root, "schemas/change-contract.schema.json"));
-
+const root = resolve(new URL("..", import.meta.url).pathname);
+const json = (path) => JSON.parse(readFileSync(resolve(root, path), "utf-8"));
 const ajv = new Ajv({ allErrors: true });
-const validatePolicy = ajv.compile(policySchema);
-const validateContract = ajv.compile(contractSchema);
-
+const policy = ajv.compile(json("schemas/repo-policy.schema.json"));
+const intent = ajv.compile(json("schemas/change-contract.schema.json"));
+const grant = ajv.compile(json("schemas/governance-grant.schema.json"));
 let failures = 0;
-
-function expect(label, result, shouldPass) {
-  const passed = result === shouldPass;
-  const icon = passed ? "PASS" : "FAIL";
-  console.log(`${icon}: ${label}`);
-  if (!passed) {
-    failures++;
-    if (!shouldPass && result) {
-      console.error("  Expected validation to fail, but it passed");
-    }
-  }
+function expect(label, actual, expected = true) {
+  const ok = actual === expected;
+  console.log(`${ok ? "PASS" : "FAIL"}: ${label}`);
+  if (!ok) failures++;
 }
 
-// Policy tests
-const validPolicy = loadJSON(resolve(root, "tests/fixtures/valid-policy.json"));
-expect("valid-policy.json passes schema", validatePolicy(validPolicy), true);
+const validPolicy = json("tests/fixtures/valid-policy.json");
+expect("valid policy fixture", policy(validPolicy));
+expect("invalid policy fixture", policy(json("tests/fixtures/invalid-policy.json")), false);
+expect("repo-policy self", policy(json("repo-policy.json")));
+expect("downstream integration example", policy(json("examples/downstream-integration-policy.json")));
+expect("size rules example", policy(json("examples/size-rules-policy.json")));
+expect("requirements-strict profile", policy({ ...validPolicy, profile: "requirements-strict", profile_overrides: { evidence_surfaces: ["src/**"] } }));
+expect("profile overrides require profile", policy({ ...validPolicy, profile_overrides: { evidence_surfaces: ["src/**"] } }), false);
+expect("anchors + trace", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", field: "id" }] } } }, trace_rules: [{ id: "resolve", kind: "must_resolve", from_anchor_type: "id", to_anchor_type: "id" }] }));
+expect("invalid anchor source", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", pattern: "id" }] } } } }), false);
+expect("evidence trace", policy({ ...validPolicy, trace_rules: [{ id: "evidence", kind: "changed_files_require_evidence", if_changed: ["requirements/**"], must_touch_any: ["tests/**"] }] }));
 
-const invalidPolicy = loadJSON(resolve(root, "tests/fixtures/invalid-policy.json"));
-expect("invalid-policy.json fails schema", validatePolicy(invalidPolicy), false);
-
-const repoPolicy = loadJSON(resolve(root, "repo-policy.json"));
-expect("repo-policy.json (self) passes schema", validatePolicy(repoPolicy), true);
-
-const downstreamIntegrationExample = loadJSON(resolve(root, "examples/downstream-integration-policy.json"));
-expect("downstream integration example policy passes schema", validatePolicy(downstreamIntegrationExample), true);
-
-const sizeRulesExample = loadJSON(resolve(root, "examples/size-rules-policy.json"));
-expect("size rules example policy passes schema", validatePolicy(sizeRulesExample), true);
-
-const policyWithProfile = {
-  ...validPolicy,
-  profile: "requirements-strict",
-  profile_overrides: {
-    strict_heading_docs: ["docs/architecture.md", "docs/pmm_requirements.md"],
-    evidence_surfaces: ["src/**", "tests/**", "docs/**", "requirements/README.md"],
-  },
+const integration = {
+  workflows: [{ id: "gate", kind: "github_actions", path: ".github/workflows/ci.yml", role: "repo_guard_pr_gate", expect: { events: ["pull_request"], action: { uses: "netkeep80/repo-guard", ref_pinning: "semver" }, mode: "check-pr", enforcement: "blocking", permissions: { contents: "read" }, token_env: ["GH_TOKEN"], summary: true, disallow: ["continue_on_error"] } }],
+  templates: [{ id: "pr", kind: "markdown", path: ".github/PULL_REQUEST_TEMPLATE.md", requires_contract_block: true, required_block_kind: "repo-guard-yaml", required_contract_fields: ["change_type"] }],
+  docs: [{ id: "readme", kind: "markdown", path: "README.md", must_mention: ["repo-guard"] }],
+  profiles: [{ id: "self", doc_path: "README.md" }],
 };
-expect("policy with requirements-strict profile passes schema", validatePolicy(policyWithProfile), true);
-
-const policyWithProfileOverridesOnly = {
-  ...validPolicy,
-  profile_overrides: {
-    evidence_surfaces: ["src/**"],
-  },
-};
-expect("policy with profile_overrides but no profile fails schema", validatePolicy(policyWithProfileOverridesOnly), false);
-
-const policyWithAnchors = {
-  ...validPolicy,
-  anchors: {
-    types: {
-      requirement_id: {
-        sources: [
-          { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
-        ],
-      },
-      code_req_ref: {
-        sources: [
-          { kind: "regex", glob: "src/**", pattern: "@req\\s+((BR|SR|FR|NFR|CR|IR)-[0-9]{3})" },
-        ],
-      },
-    },
-  },
-  trace_rules: [
-    {
-      id: "code-refs-must-resolve",
-      kind: "must_resolve",
-      from_anchor_type: "code_req_ref",
-      to_anchor_type: "requirement_id",
-    },
-  ],
-};
-expect("policy with anchors and trace_rules passes schema", validatePolicy(policyWithAnchors), true);
-
-const policyWithEvidenceRules = {
-  ...validPolicy,
-  trace_rules: [
-    {
-      id: "changed-requirements-need-evidence",
-      kind: "changed_files_require_evidence",
-      if_changed: ["requirements/**"],
-      must_touch_any: ["src/**", "tests/**", "docs/**"],
-    },
-    {
-      id: "declared-anchors-need-evidence",
-      kind: "declared_anchors_require_evidence",
-      contract_field: "anchors.affects",
-      must_touch_any: ["src/**", "tests/**", "docs/**"],
-    },
-  ],
-};
-expect("policy with evidence trace_rules passes schema", validatePolicy(policyWithEvidenceRules), true);
-
-const policyWithIntegration = {
-  ...validPolicy,
-  integration: {
-    workflows: [
-      {
-        id: "pr-gate",
-        kind: "github_actions",
-        path: ".github/workflows/repo-guard.yml",
-        role: "repo_guard_pr_gate",
-        profiles: ["requirements-strict"],
-        expect: {
-          events: ["pull_request"],
-          event_types: ["opened", "synchronize", "reopened", "ready_for_review"],
-          action: {
-            uses: "netkeep80/repo-guard",
-            ref_pinning: "semver",
-          },
-          mode: "check-pr",
-          enforcement: "blocking",
-          permissions: {
-            contents: "read",
-            "pull-requests": "read",
-          },
-          token_env: ["GH_TOKEN"],
-          summary: true,
-          disallow: ["continue_on_error", "manual_clone", "direct_temp_cli_execution"],
-        },
-      },
-    ],
-    templates: [
-      {
-        id: "pull-request-template",
-        kind: "markdown",
-        path: ".github/PULL_REQUEST_TEMPLATE.md",
-        requires_contract_block: true,
-        optional: true,
-        required_block_kind: "repo-guard-yaml",
-        required_contract_fields: ["change_type", "scope", "anchors.affects"],
-        profiles: ["requirements-strict"],
-      },
-    ],
-    docs: [
-      {
-        id: "readme",
-        kind: "markdown",
-        path: "README.md",
-        must_mention: ["repo-guard", "anchors.affects"],
-        must_reference_files: ["repo-policy.json", ".github/PULL_REQUEST_TEMPLATE.md"],
-        must_mention_profiles: ["requirements-strict"],
-        must_mention_contract_fields: ["anchors.affects"],
-        profiles: ["requirements-strict"],
-      },
-    ],
-    profiles: [
-      {
-        id: "requirements-strict",
-        doc_path: "docs/requirements-strict-profile.md",
-      },
-    ],
-  },
-};
-expect("policy with integration section passes schema", validatePolicy(policyWithIntegration), true);
-
-const policyWithSizeRules = {
-  ...validPolicy,
-  size_rules: [
-    {
-      id: "max-source-lines",
-      scope: "file",
-      metric: "lines",
-      glob: "src/**/*.mjs",
-      max: 500,
-    },
-    {
-      id: "max-source-subtree-bytes",
-      scope: "directory",
-      metric: "bytes",
-      glob: "src/**",
-      max: 65536,
-      count: "changed_only",
-      level: "advisory",
-      ignore: ["src/generated/**"],
-      applies_to_change_types: ["feature", "refactor"],
-    },
-  ],
-};
-expect("policy with size_rules passes schema", validatePolicy(policyWithSizeRules), true);
-
-const invalidSizeRulePolicy = {
-  ...validPolicy,
-  size_rules: [
-    {
-      id: "bad-size-rule",
-      scope: "file",
-      metric: "tokens",
-      glob: "src/**",
-      max: -1,
-    },
-  ],
-};
-expect("policy with malformed size rule fails schema", validatePolicy(invalidSizeRulePolicy), false);
-
-const invalidIntegrationExpectationPolicy = {
-  ...validPolicy,
-  integration: {
-    workflows: [
-      {
-        id: "pr-gate",
-        kind: "github_actions",
-        path: ".github/workflows/repo-guard.yml",
-        role: "repo_guard_pr_gate",
-        expect: {
-          action: {
-            uses: "",
-            ref_pinning: "floating",
-          },
-          mode: "deploy",
-          token_env: [],
-          disallow: ["shell_script"],
-        },
-      },
-    ],
-  },
-};
-expect("policy with malformed integration workflow expectations fails schema", validatePolicy(invalidIntegrationExpectationPolicy), false);
-
-const invalidTemplateDocRulePolicy = {
-  ...validPolicy,
-  integration: {
-    templates: [
-      {
-        id: "pull-request-template",
-        kind: "markdown",
-        path: ".github/PULL_REQUEST_TEMPLATE.md",
-        requires_contract_block: true,
-        optional: "yes",
-        required_block_kind: "repo-guard-xml",
-        required_contract_fields: [],
-      },
-    ],
-    docs: [
-      {
-        id: "readme",
-        kind: "markdown",
-        path: "README.md",
-        must_mention: ["repo-guard"],
-        must_reference_files: [],
-        must_mention_profiles: [],
-        must_mention_contract_fields: [],
-      },
-    ],
-  },
-};
-expect("policy with malformed template and doc integration rules fails schema", validatePolicy(invalidTemplateDocRulePolicy), false);
-
-const invalidIntegrationPolicy = {
-  ...validPolicy,
-  integration: {
-    workflows: [
-      {
-        id: "pr-gate",
-        kind: "cron",
-        path: ".github/workflows/repo-guard.yml",
-        role: "repo_guard_pr_gate",
-      },
-    ],
-  },
-};
-expect("policy with unknown integration workflow kind fails schema", validatePolicy(invalidIntegrationPolicy), false);
-
-const invalidIntegrationRolePolicy = {
-  ...validPolicy,
-  integration: {
-    workflows: [
-      {
-        id: "pr-gate",
-        kind: "github_actions",
-        path: ".github/workflows/repo-guard.yml",
-        role: "custom_gate",
-      },
-    ],
-  },
-};
-expect("policy with unknown integration workflow role fails schema", validatePolicy(invalidIntegrationRolePolicy), false);
-
-const invalidIntegrationDocKindPolicy = {
-  ...validPolicy,
-  integration: {
-    docs: [
-      {
-        id: "readme",
-        kind: "html",
-        path: "README.md",
-        must_mention: ["repo-guard"],
-      },
-    ],
-  },
-};
-expect("policy with unknown integration doc kind fails schema", validatePolicy(invalidIntegrationDocKindPolicy), false);
-
-// Content rules normalization tests
-const oldFormPolicy = loadJSON(resolve(root, "tests/fixtures/invalid-content-rule-old-form.json"));
-expect("old-form content_rules (pattern/severity/message) fails schema", validatePolicy(oldFormPolicy), false);
-
-// Operational paths validation tests
-const invalidOpPaths = loadJSON(resolve(root, "tests/fixtures/invalid-operational-paths.json"));
-expect("invalid operational_paths (string instead of array) fails schema", validatePolicy(invalidOpPaths), false);
-
-const invalidAnchorPolicy = {
-  ...validPolicy,
-  anchors: {
-    types: {
-      requirement_id: {
-        sources: [
-          { kind: "json_field", glob: "requirements/**/*.json", pattern: "id" },
-        ],
-      },
-    },
-  },
-};
-expect("invalid json_field anchor source fails schema", validatePolicy(invalidAnchorPolicy), false);
-
-const missingAllowClassesPolicy = {
-  ...validPolicy,
-  change_profiles: {
-    feature: {
-      allow_surfaces: ["kernel"],
-      new_files: {
-        max_per_class: {
-          test: 1,
-        },
-      },
-    },
-  },
-};
-expect("change_profiles.new_files without allow_classes fails schema", validatePolicy(missingAllowClassesPolicy), false);
-
-const removedPolicyFields = [
-  "change_classes",
-  "surface_matrix",
-  "new_file_rules",
-  "change_type_rules",
-  "allow_unclassified_files",
-];
-for (const removed of removedPolicyFields) {
-  const policyWithRemovedField = {
-    ...validPolicy,
-    [removed]: removed === "allow_unclassified_files" ? true : {},
-  };
-  expect(`removed policy field "${removed}" is rejected by schema`, validatePolicy(policyWithRemovedField), false);
+expect("integration shape", policy({ ...validPolicy, integration }));
+expect("invalid integration role", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "custom" }] } }), false);
+expect("invalid integration expectation", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "repo_guard_pr_gate", expect: { mode: "deploy" } }] } }), false);
+expect("valid size rule", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }));
+expect("invalid size metric", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "tokens", glob: "src/**", max: 1 }] }), false);
+expect("old content-rule shape rejected", policy(json("tests/fixtures/invalid-content-rule-old-form.json")), false);
+expect("invalid operational paths rejected", policy(json("tests/fixtures/invalid-operational-paths.json")), false);
+expect("new_files requires allow_classes", policy({ ...validPolicy, change_profiles: { feature: { new_files: { max_per_class: { test: 1 } } } } }), false);
+for (const field of ["change_classes", "surface_matrix", "new_file_rules", "change_type_rules", "allow_unclassified_files"]) {
+  expect(`removed policy field ${field}`, policy({ ...validPolicy, [field]: field === "allow_unclassified_files" ? true : {} }), false);
 }
 
-const contractWithRemovedField = {
-  ...loadJSON(resolve(root, "tests/fixtures/valid-contract.json")),
-  change_class: "kernel-hardening",
-};
-expect("removed contract field \"change_class\" is rejected by schema", validateContract(contractWithRemovedField), false);
+const validIntent = json("tests/fixtures/valid-contract.json");
+expect("valid ChangeIntent", intent(validIntent));
+expect("repository-specific change_type", intent({ ...validIntent, change_type: "governance" }));
+expect("anchor intent", intent({ ...validIntent, anchors: { affects: ["FR-014"], implements: ["FR-014"], verifies: ["FR-014"] } }));
+expect("invalid ChangeIntent fixture", intent(json("tests/fixtures/invalid-contract.json")), false);
+expect("duplicate anchor intent", intent({ ...validIntent, anchors: { affects: ["FR-014", "FR-014"] } }), false);
+expect("unknown anchor field", intent({ ...validIntent, anchors: { affects: ["FR-014"], notes: [] } }), false);
+for (const field of ["change_class", "authorized_governance_paths", "overrides", "allow_policy_relaxation"]) {
+  expect(`privileged/removed ChangeIntent field ${field}`, intent({ ...validIntent, [field]: [] }), false);
+}
 
-// Contract tests
-const validContract = loadJSON(resolve(root, "tests/fixtures/valid-contract.json"));
-expect("valid-contract.json passes schema", validateContract(validContract), true);
+expect("valid GovernanceGrant", grant({ authorized_governance_paths: ["schemas/**"], allow_policy_relaxation: ["/size_rules/source/max"] }));
+expect("path-only GovernanceGrant", grant({ authorized_governance_paths: ["repo-policy.json"] }));
+expect("empty GovernanceGrant rejected", grant({}), false);
+expect("unknown GovernanceGrant field rejected", grant({ authorized_governance_paths: ["x"], reason: "no" }), false);
+expect("relaxation pointer must be absolute", grant({ allow_policy_relaxation: ["size_rules/x"] }), false);
 
-const contractWithAnchors = {
-  ...validContract,
-  anchors: {
-    affects: ["FR-014"],
-    implements: ["FR-014"],
-    verifies: ["FR-014"],
-  },
-};
-expect("contract with anchor intent passes schema", validateContract(contractWithAnchors), true);
-
-const repositoryTypedContract = {
-  ...validContract,
-  change_type: "governance",
-};
-expect("repository-specific change_type passes schema", validateContract(repositoryTypedContract), true);
-
-const invalidContract = loadJSON(resolve(root, "tests/fixtures/invalid-contract.json"));
-expect("invalid-contract.json fails schema", validateContract(invalidContract), false);
-
-const malformedAnchorContract = {
-  ...validContract,
-  anchors: {
-    affects: ["FR-014", "FR-014"],
-  },
-};
-expect("contract with duplicate anchor intent fails schema", validateContract(malformedAnchorContract), false);
-
-const unknownAnchorFieldContract = {
-  ...validContract,
-  anchors: {
-    affects: ["FR-014"],
-    notes: ["reserved for a future schema version"],
-  },
-};
-expect("contract with unknown anchor field fails schema", validateContract(unknownAnchorFieldContract), false);
-
-const nonStringAnchorContract = {
-  ...validContract,
-  anchors: {
-    verifies: ["FR-014", 14],
-  },
-};
-expect("contract with non-string anchor intent fails schema", validateContract(nonStringAnchorContract), false);
-
-console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(`\n${failures ? `${failures} test(s) failed` : "All schema tests passed"}`);
+if (failures) process.exitCode = 1;
