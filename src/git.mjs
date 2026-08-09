@@ -8,6 +8,17 @@ function childProcessMessage(error) {
   return error?.message || "command failed";
 }
 
+function gitSubcommand(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "-c") {
+      i++;
+      continue;
+    }
+    if (!args[i].startsWith("-")) return args[i];
+  }
+  return "";
+}
+
 export function runGit(args, options = {}) {
   try {
     return execFileSync("git", args, {
@@ -16,7 +27,8 @@ export function runGit(args, options = {}) {
       stdio: options.stdio || "pipe",
     });
   } catch (error) {
-    const subcommand = args[0] ? ` ${args[0]}` : "";
+    const command = gitSubcommand(args);
+    const subcommand = command ? ` ${command}` : "";
     throw new Error(`git${subcommand} failed: ${childProcessMessage(error)}`);
   }
 }
@@ -33,13 +45,17 @@ export function resolveRemoteBaseRef(baseRef, cwd, remote = "origin") {
   return sha;
 }
 
+function diffArgs(...args) {
+  return ["-c", "core.quotepath=false", "diff", ...args];
+}
+
 export function getDiff(base, head, cwd) {
   if (base && head) {
-    return runGit(["diff", `${base}...${head}`], { cwd });
+    return runGit(diffArgs(`${base}...${head}`), { cwd });
   }
-  const staged = runGit(["diff", "--cached"], { cwd });
+  const staged = runGit(diffArgs("--cached"), { cwd });
   if (staged.trim()) return staged;
-  return runGit(["diff", "HEAD"], { cwd });
+  return runGit(diffArgs("HEAD"), { cwd });
 }
 
 export function readFileAtRef(ref, path, cwd) {
