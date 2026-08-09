@@ -61,6 +61,26 @@ function contractBody() {
   ].join("\n");
 }
 
+function unicodeContractBody() {
+  return [
+    "```repo-guard-yaml",
+    "change_type: docs",
+    "scope:",
+    "  - docs/**",
+    "budgets:",
+    "  max_new_files: 5",
+    "  max_new_docs: 5",
+    "  max_net_added_lines: 500",
+    "must_touch:",
+    "  - docs/theory/Основания МТС.md",
+    "must_not_touch:",
+    "  - governance.txt",
+    "expected_effects:",
+    "  - UTF-8 path is preserved",
+    "```",
+  ].join("\n");
+}
+
 function setupRepo() {
   const root = mkdtempSync(join(tmpdir(), "repo-guard-current-base-"));
   git(root, "init", "-b", "main");
@@ -144,6 +164,26 @@ function runCheck(root, event) {
   const output = `${result.stdout || ""}${result.stderr || ""}`;
   expect("missing current base ref: check-pr fails closed", result.status === 1);
   expect("missing current base ref: diagnostic is explicit", output.includes("cannot resolve current PR base ref missing-base"));
+  rmSync(root, { recursive: true, force: true });
+}
+
+{
+  const { root, oldBase } = setupRepo();
+  mkdirSync(join(root, "docs/theory"), { recursive: true });
+  writeFileSync(join(root, "docs/theory/Основания МТС.md"), "# Основания МТС\n");
+  const head = commit(root, "add Cyrillic documentation path");
+  const result = runCheck(root, {
+    pull_request: {
+      number: 103,
+      base: { sha: oldBase, ref: "main" },
+      head: { sha: head },
+      body: unicodeContractBody(),
+    },
+    repository: { full_name: "owner/repo" },
+  });
+  const output = `${result.stdout || ""}${result.stderr || ""}`;
+  expect("UTF-8 diff path: check-pr passes", result.status === 0);
+  expect("UTF-8 diff path: must-touch does not lose Cyrillic filename", !output.includes("FAIL: must-touch"));
   rmSync(root, { recursive: true, force: true });
 }
 
