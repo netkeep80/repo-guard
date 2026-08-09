@@ -1,159 +1,159 @@
 {
-  "$comment": "Machine-checkable map from surviving repo-guard capabilities to the place where repo-guard uses them on itself. Loaded by tests/test-self-hosting.mjs. Every surviving capability must appear here with status 'self_used' and a concrete self_use reference, or with status 'not_self_hosted' and a written rationale. See docs/self-hosting-coverage.md for the human-readable version.",
+  "$comment": "Машиночитаемая карта возможностей repo-guard и мест, где репозиторий применяет их к самому себе. Файл загружается tests/test-self-hosting.mjs. Каждая сохраняемая возможность должна иметь status 'self_used' и конкретную ссылку self_use либо status 'not_self_hosted' и письменное объяснение rationale. Краткое человекочитаемое описание находится в docs/self-hosting-coverage.md.",
   "schema_version": "1.0.0",
   "capabilities": {
     "top_level_commands": {
       "validate": {
         "status": "self_used",
         "self_use": ".github/workflows/ci.yml:Validate repo-policy.json",
-        "notes": "CI runs 'npx repo-guard' (default validate) before other checks."
+        "notes": "CI запускает npx repo-guard в режиме обычной валидации до остальных проверок."
       },
       "check-pr": {
         "status": "self_used",
         "self_use": ".github/workflows/ci.yml:Run PR policy check",
-        "notes": "CI runs repo-guard against every non-draft PR via uses: ./ in blocking mode."
+        "notes": "CI проверяет каждый готовый PR локальным Action uses: ./ в блокирующем режиме."
       },
       "check-diff": {
         "status": "self_used",
         "self_use": ".github/workflows/ci.yml:Exercise advisory policy mode",
-        "notes": "Advisory fixture exercises check-diff end to end with --enforcement advisory."
+        "notes": "Специальный сценарий CI прогоняет check-diff в режиме advisory от начала до конца."
       },
       "init": {
         "status": "self_used",
         "self_use": "tests/test-init.mjs",
-        "notes": "init scaffolding is exercised by its own integration test; it is not run against this repo because the repo already has hand-authored governance files."
+        "notes": "Генерация init покрыта интеграционным тестом; на самом репозитории команда не запускается, потому что управляющие файлы здесь поддерживаются вручную."
       },
       "doctor": {
         "status": "self_used",
         "self_use": ".github/workflows/ci.yml:Run doctor diagnostics on self",
-        "notes": "CI runs 'npx repo-guard doctor' against this repo so doctor drift surfaces in the same place as policy drift."
+        "notes": "CI запускает npx repo-guard doctor на самом репозитории, поэтому дрейф диагностики обнаруживается вместе с дрейфом политики."
       },
       "validate-integration": {
         "status": "self_used",
         "self_use": ".github/workflows/ci.yml:Run validate-integration on self",
-        "notes": "CI runs 'npx repo-guard validate-integration' against this repo to ensure declared integration wiring stays valid."
+        "notes": "CI запускает npx repo-guard validate-integration и проверяет актуальность объявленного подключения."
       }
     },
     "enforcement_modes": {
       "blocking": {
         "status": "self_used",
         "self_use": "repo-policy.json:enforcement.mode",
-        "notes": "Repo-policy declares blocking; CI PR gate also passes enforcement: blocking explicitly."
+        "notes": "Собственная политика использует blocking; проверка PR в CI также передаёт enforcement: blocking явно."
       },
       "advisory": {
         "status": "self_used",
         "self_use": ".github/workflows/ci.yml:Exercise advisory policy mode",
-        "notes": "CI exercises advisory mode end to end, asserting WARN output and exit code 0."
+        "notes": "CI отдельно проверяет advisory и подтверждает предупреждение без ненулевого кода выхода."
       }
     },
     "contract_extraction": {
       "repo-guard-yaml_in_pr_body": {
         "status": "self_used",
         "self_use": ".github/PULL_REQUEST_TEMPLATE.md",
-        "notes": "PR template carries a repo-guard-yaml fenced block; check-pr parses it from the PR body."
+        "notes": "Шаблон PR содержит блок repo-guard-yaml, который check-pr извлекает из тела PR."
       },
       "repo-guard-yaml_in_linked_issue": {
         "status": "self_used",
         "self_use": ".github/ISSUE_TEMPLATE/change-contract.yml",
-        "notes": "Issue form carries a fenced repo-guard-yaml block so PRs that 'Fixes #N' can inherit a contract."
+        "notes": "Форма задачи содержит блок repo-guard-yaml, поэтому связанная задача может служить источником контракта и привилегированной авторизации."
       },
       "repo-guard-json_in_pr_body": {
         "status": "not_self_hosted",
-        "rationale": "YAML is the canonical form we advertise; JSON remains supported for external users and is covered by tests/test-markdown-contract.mjs. Keeping a second fenced block in our own template would be fake coverage."
+        "rationale": "YAML является рекомендуемой формой контракта. JSON сохраняется для внешних потребителей и покрыт tests/test-markdown-contract.mjs; второй блок в собственном шаблоне был бы искусственным покрытием."
       }
     },
     "integration_checks": {
       "integration.workflows": {
         "status": "self_used",
         "self_use": "repo-policy.json:integration.workflows[0]",
-        "notes": "Declares ci-pr-policy-check as repo_guard_pr_gate with a full expect block."
+        "notes": "Политика объявляет ci-pr-policy-check с ролью repo_guard_pr_gate и полным набором ожиданий expect."
       },
       "integration.templates[markdown]": {
         "status": "self_used",
         "self_use": "repo-policy.json:integration.templates[pull-request-template]",
-        "notes": "PR template is declared and validated; required_block_kind and required_contract_fields are exercised."
+        "notes": "Шаблон PR объявлен и проверяется вместе с required_block_kind и required_contract_fields."
       },
       "integration.templates[github_issue_form]": {
         "status": "self_used",
         "self_use": "repo-policy.json:integration.templates[change-contract-issue-form]",
-        "notes": "Issue form is declared as optional template with required_block_kind and required_contract_fields."
+        "notes": "Форма задачи объявлена как необязательный шаблон и проверяется по required_block_kind и required_contract_fields."
       },
       "integration.docs": {
         "status": "self_used",
         "self_use": "repo-policy.json:integration.docs[readme]",
-        "notes": "README is declared with must_mention, must_reference_files, must_mention_profiles, and must_mention_contract_fields."
+        "notes": "README проверяется по must_mention, must_reference_files, must_mention_profiles и must_mention_contract_fields."
       },
       "integration.profiles": {
         "status": "self_used",
         "self_use": "repo-policy.json:integration.profiles[self-hosting]",
-        "notes": "self-hosting profile is declared and referenced from README."
+        "notes": "Профиль self-hosting объявлен в политике и описан в README."
       }
     },
     "rule_families": {
       "forbidden-paths": {
         "status": "self_used",
         "self_use": "repo-policy.json:paths.forbidden",
-        "notes": "Forbids docs/phase-*, docs/history-*, and *.bak."
+        "notes": "Политика запрещает docs/phase-*, docs/history-* и *.bak."
       },
       "governance-paths": {
         "status": "self_used",
         "self_use": "repo-policy.json:paths.governance_paths",
-        "notes": "Blocks changes to the policy, schemas, workflow, and templates governance files unless the change contract carried by the linked issue explicitly declares authorized_governance_paths."
+        "notes": "Изменение политики, схем, рабочих процессов и шаблонов блокируется без authorized_governance_paths из связанной задачи."
       },
       "diff_rules_budgets": {
         "status": "self_used",
         "self_use": "repo-policy.json:diff_rules",
-        "notes": "max_new_docs, max_new_files, and max_net_added_lines are set."
+        "notes": "Заданы max_new_docs, max_new_files и max_net_added_lines."
       },
       "content-rules": {
         "status": "self_used",
-        "self_use": "repo-policy.json:content_rules[no-todo-without-issue]",
-        "notes": "Forbids bare to-do markers without an issue reference on added lines."
+        "self_use": "repo-policy.json:content_rules",
+        "notes": "Собственная политика запрещает голые TODO без ссылки на задачу и требует русскую обычную прозу во всех изменяемых Markdown-файлах. tests/test-documentation-language.mjs дополнительно проверяет весь текущий набор Markdown."
       },
       "cochange-rules": {
         "status": "self_used",
         "self_use": "repo-policy.json:cochange_rules[0]",
-        "notes": "Requires tests/** whenever src/** changes."
+        "notes": "Изменение src/** требует сопутствующего изменения tests/**."
       },
       "surfaces": {
         "status": "self_used",
         "self_use": "repo-policy.json:surfaces",
-        "notes": "Declares named surfaces for src, tests, schemas, docs, examples, templates, governance, and workflows."
+        "notes": "Политика объявляет именованные поверхности исходников, тестов, схем, документации, примеров, шаблонов, управления и рабочих процессов."
       },
       "new_file_classes": {
         "status": "self_used",
         "self_use": "repo-policy.json:new_file_classes",
-        "notes": "Declares source, test, doc, example, template, schema, governance, and workflow new-file classes."
+        "notes": "Политика классифицирует новые исходники, тесты, документы, примеры, шаблоны, схемы, сценарии, управляющие файлы и рабочие процессы."
       },
       "change_profiles": {
         "status": "self_used",
         "self_use": "repo-policy.json:change_profiles",
-        "notes": "Declares profiles for feature, bugfix, refactor, docs, and test change_types."
+        "notes": "Определены профили feature, bugfix, refactor, docs и test по полю change_type."
       },
       "size_rules": {
         "status": "self_used",
         "self_use": "repo-policy.json:size_rules[max-source-file-lines]",
-        "notes": "Advisory drift detector for src/**/*.mjs so growth in a single module surfaces in CI before it blocks."
+        "notes": "Неблокирующее правило для src/**/*.mjs показывает рост отдельного модуля до того, как он станет критическим."
       },
       "registry_rules": {
         "status": "not_self_hosted",
-        "rationale": "repo-guard does not maintain a canonical list that cross-checks JSON against Markdown in its own source tree. Every realistic self-use we considered would be fake coverage; the capability is covered by tests/test-rule-registry.mjs and downstream examples."
+        "rationale": "В repo-guard нет собственного канонического списка, который естественно требовал бы сверки JSON с Markdown. Искусственный реестр дал бы фиктивное покрытие; возможность проверяется tests/test-rule-registry.mjs и примерами потребителей."
       },
       "advisory_text_rules": {
         "status": "not_self_hosted",
-        "rationale": "We intentionally keep README as the single canonical doc; synthetic duplicate markdown would be fake coverage. The rule family is covered by its own tests."
+        "rationale": "README намеренно остаётся основным обзорным документом; создание синтетического дубликата Markdown ради самопроверки противоречило бы цели правила. Семейство покрыто отдельными тестами."
       },
       "anchors": {
         "status": "not_self_hosted",
-        "rationale": "This repo does not carry requirement JSON files or @req-style anchors in source, so declaring anchor types would only extract empty sets. Anchors are exercised by tests/test-anchor-extractors.mjs and documented for downstream use."
+        "rationale": "Этот репозиторий не хранит собственные файлы требований JSON и якоря вида @req в исходниках. Пустое объявление якорей было бы фиктивным покрытием; механизм проверяется tests/test-anchor-extractors.mjs."
       },
       "trace_rules": {
         "status": "not_self_hosted",
-        "rationale": "Trace rules depend on anchor declarations; see 'anchors'. Exercised by tests/test-trace-evidence-rules.mjs and examples/downstream-integration-policy.json."
+        "rationale": "Правила трассировки зависят от реальных якорей требований, которых здесь нет. Механизм проверяется tests/test-trace-evidence-rules.mjs и examples/downstream-integration-policy.json."
       },
       "profile_requirements-strict": {
         "status": "not_self_hosted",
-        "rationale": "The built-in profile requires requirements/*.json canonical files which this tooling repo does not have. Adding a fake requirements/ directory would be the exact fake coverage this dogfooding effort rejects. Covered by docs/requirements-strict-profile.md and tests/test-policy-profiles.mjs."
+        "rationale": "Встроенный профиль требует канонические requirements/*.json, которых в инструментальном репозитории нет. Добавлять фиктивный каталог требований ради самопроверки нельзя; профиль покрыт docs/requirements-strict-profile.md и tests/test-policy-profiles.mjs."
       }
     }
   }
