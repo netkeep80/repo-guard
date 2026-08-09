@@ -2,6 +2,10 @@ import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { selectPaths } from "../../diff/classification.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
+import { checkTraceRuleResult } from "../trace-rules.mjs";
+import { checkChangeProfile } from "./change-profiles.mjs";
+import { checkRegistryRules } from "./registry-rules.mjs";
+import { checkSizeRules } from "./size-rules.mjs";
 
 function budget(selected, max) {
   if (max === undefined) return { ok: true };
@@ -42,7 +46,6 @@ export function checkMustNotTouch(files, patterns) {
 }
 export const checkCochangeRules = (files, rules = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
 
-/** Compatibility name for tests/consumers; the compiler itself is now canonical. */
 export function compileConstraintIR(facts) {
   return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.contract)) };
 }
@@ -53,7 +56,7 @@ function evaluateMetric(files, constraint, policy) {
   return checkNetAddedLinesBudget(files, constraint.max);
 }
 
-export function evaluateConstraintIR(facts) {
+export function evaluateConstraintIR(facts, context = {}) {
   const { files, constraints } = compileConstraintIR(facts), results = [], cochange = [];
   for (const constraint of constraints) {
     let check;
@@ -67,11 +70,31 @@ export function evaluateConstraintIR(facts) {
     } else if (constraint.kind === "implies_nonempty") {
       if (selectPaths(files, constraint.if_changed).length && !selectPaths(files, constraint.must_change_any).length) cochange.push(constraint);
       continue;
-    }
+    } else if (constraint.kind === "size_rules") {
+      const result = checkSizeRules(files, constraint.rules, {
+        repoRoot: facts.repositoryRoot, trackedFiles: facts.trackedFiles, readFile: facts.readFile,
+        ignorePatterns: facts.policy.paths.operational_paths, changeType: facts.contract?.change_type,
+      });
+      results.push({ name: constraint.name, check: result });
+      if (result.advisory_violations.length) results.push({
+        name: "size-rules-advisory",
+        check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth },
+      });
+      continue;
+    } else if (constraint.kind === "registry_rules") {
+      check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
+    } else if (constraint.kind === "change_profile") {
+      check = checkChangeProfile(files, facts.policy, facts.contract?.change_type, facts.derived);
+    } else if (constraint.kind === "trace_rules") {
+      for (const trace of context.anchorDiagnostics?.traceRuleResults || []) {
+        results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
+      }
+      continue;
+    } else continue;
     results.push({ name: constraint.name, check });
   }
   results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed.join(",")} -> ${item.must_change_any.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));
   return results;
 }
 
-export const constraintRuleFamily = { id: "constraints", evaluate: evaluateConstraintIR };
+export const constraintRuleFamily = { id: "constraints", evaluate: (facts, context) => evaluateConstraintIR(facts, context) };
