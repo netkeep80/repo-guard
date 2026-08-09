@@ -199,7 +199,7 @@
     },
     {
       "id": "russian-markdown-prose",
-      "glob": "**/*.md",
+      "glob": "{README.md,RELEASING.md,PORTFOLIO.md,docs/**/*.md,templates/**/*.md,examples/**/*.md,.github/**/*.md}",
       "mode": "markdown_language",
       "language": "ru",
       "allow_words": ["repo-guard"],
