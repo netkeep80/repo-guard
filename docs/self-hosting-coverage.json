@@ -2,10 +2,8 @@
   "$comment": "Нормальный список возможностей выводится tests/test-self-hosting.mjs из command/rule/profile registries. Здесь хранятся только реальные исключения, которые нельзя честно применить к самому repo-guard.",
   "schema_version": "2.0.0",
   "exceptions": {
-    "rule:registry-rules": "В repo-guard нет естественной пары канонических реестров JSON/Markdown; искусственный реестр был бы фиктивным покрытием.",
     "rule:advisory-text-rules": "Репозиторий намеренно не хранит дублирующий Markdown ради проверки эвристики похожих документов.",
     "rule:anchor-extraction": "В repo-guard нет собственных requirement anchors; механизм покрывается специализированными тестами.",
-    "rule:trace-rules": "Trace rules требуют реальных anchor declarations, которых в этом инструментальном репозитории нет.",
     "profile:requirements-strict": "Встроенный профиль требует канонические requirements/*.json; добавлять фиктивные требования ради dogfooding нельзя.",
     "contract-format:repo-guard-json": "YAML является канонической собственной формой; второй JSON-блок в шаблоне был бы искусственным покрытием, формат проверяется тестами parser-а."
   }
