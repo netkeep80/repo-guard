@@ -31,14 +31,14 @@ export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
 
   const profile = resolvePolicyProfile(rawPolicy);
   const policy = profile.policy;
-  const groups = [
+  const semanticGroups = [
     ["profile compilation", profile.errors, (error) => error.message],
     ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (error) => `[${error.rule_id}] invalid regex /${error.pattern}/: ${error.message}`],
     ["change_profiles compilation", compileChangeProfiles(policy), (error) => error.message],
     ["anchor policy compilation", compileAnchorPolicy(policy), (error) => error.message],
     ["integration policy compilation", compileIntegrationPolicy(policy), (error) => error.message],
   ];
-  for (const [group, errors, format] of groups) if (errors.length) {
+  for (const [group, errors, format] of semanticGroups) if (errors.length) {
     ok = false;
     if (!quiet) { console.error(`FAIL: ${group}`); for (const error of errors) console.error(`  ${format(error)}`); }
   }
