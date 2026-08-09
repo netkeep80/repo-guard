@@ -123,7 +123,7 @@ console.log("\n--- malformed JSON in repo-policy.json ---");
 {
   const dir = makeTmpDir();
   initGitRepo(dir);
-  writeFileSync(resolve(dir, "repo-policy.json"), "{ not valid json }}}");
+  writeFileSync(resolve(dir, "repo-policy.json"), "{ not valid json }}");
 
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 1 for malformed json", code, 1);
@@ -278,11 +278,18 @@ console.log("\n--- output distinguishes pass / warn / fail ---");
 console.log("\n--- event context adapts to environment ---");
 {
   const { stdout } = runDoctor("doctor");
-  if (process.env.GITHUB_EVENT_PATH) {
-    expectIncludes("event-context PASS in CI", stdout, "PASS: event-context");
-  } else {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
     expectIncludes("event-context WARN outside CI", stdout, "WARN: event-context");
     expectIncludes("mentions not in GitHub Actions", stdout, "not in GitHub Actions");
+  } else {
+    const event = JSON.parse(readFileSync(eventPath, "utf-8"));
+    if (event.pull_request) {
+      expectIncludes("event-context PASS for pull_request event", stdout, "PASS: event-context");
+    } else {
+      expectIncludes("event-context WARN for non-PR GitHub event", stdout, "WARN: event-context");
+      expectIncludes("non-PR event is explained", stdout, "not a pull_request event");
+    }
   }
 }
 
