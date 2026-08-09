@@ -2,277 +2,121 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, relative, dirname } from "node:path";
 import { normalizeEnforcementMode } from "./enforcement.mjs";
 
-const ACTION_USES_TARGET = "netkeep80/repo-guard";
-
+const ACTION = "netkeep80/repo-guard";
 const PRESETS = {
-  application: {
-    repository_kind: "application",
-    paths: {
-      forbidden: ["*.bak", "*.log"],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 3, max_new_files: 20, max_net_added_lines: 1500 },
-    content_rules: [],
-    cochange_rules: [],
-  },
-  library: {
-    repository_kind: "library",
-    paths: {
-      forbidden: ["*.bak"],
-      canonical_docs: ["README.md", "CHANGELOG.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 2, max_new_files: 15, max_net_added_lines: 1000 },
-    content_rules: [],
-    cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
-  },
-  tooling: {
-    repository_kind: "tooling",
-    paths: {
-      forbidden: ["*.bak"],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 2, max_new_files: 15, max_net_added_lines: 2000 },
-    content_rules: [],
-    cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
-  },
-  documentation: {
-    repository_kind: "documentation",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 10, max_new_files: 20 },
-    content_rules: [],
-    cochange_rules: [],
-  },
+  application: ["application", ["*.bak", "*.log"], ["README.md"], { max_new_docs: 3, max_new_files: 20, max_net_added_lines: 1500 }, []],
+  library: ["library", ["*.bak"], ["README.md", "CHANGELOG.md"], { max_new_docs: 2, max_new_files: 15, max_net_added_lines: 1000 }, [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }]],
+  tooling: ["tooling", ["*.bak"], ["README.md"], { max_new_docs: 2, max_new_files: 15, max_net_added_lines: 2000 }, [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }]],
+  documentation: ["documentation", [], ["README.md"], { max_new_docs: 10, max_new_files: 20 }, []],
 };
-
-function buildPolicy(preset, enforcementMode) {
-  const base = JSON.parse(JSON.stringify(PRESETS[preset]));
-  return {
-    policy_format_version: "0.3.0",
-    repository_kind: base.repository_kind,
-    enforcement: { mode: enforcementMode },
-    paths: base.paths,
-    diff_rules: base.diff_rules,
-    content_rules: base.content_rules,
-    cochange_rules: base.cochange_rules,
-  };
+function buildPolicy(name, mode) {
+  const [repository_kind, forbidden, canonical_docs, diff_rules, cochange_rules] = PRESETS[name];
+  return { policy_format_version: "0.3.0", repository_kind, enforcement: { mode }, paths: { forbidden, canonical_docs, governance_paths: ["repo-policy.json"] }, diff_rules, content_rules: [], cochange_rules };
 }
-
-function defaultActionRef(packageRoot) {
-  const packagePath = resolve(packageRoot, "package.json");
-  const packageJson = JSON.parse(readFileSync(packagePath, "utf-8"));
-  if (!packageJson.version) {
-    throw new Error(`Cannot determine repo-guard package version from ${packagePath}`);
-  }
-  return `v${packageJson.version}`;
+function actionRef(packageRoot) {
+  const version = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf-8")).version;
+  if (!version) throw new Error("Cannot determine repo-guard package version");
+  return `v${version}`;
 }
-
-function buildWorkflow(enforcementMode, actionRef) {
-  return `name: Проверка политики repo-guard
-
+const workflow = (mode, ref) => `name: Проверка политики repo-guard
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
-
 jobs:
   policy-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+        with: { fetch-depth: 0 }
       - name: Проверить политику репозитория
-        uses: ${ACTION_USES_TARGET}@${actionRef}
-        with:
-          mode: check-pr
-          enforcement: ${enforcementMode}
+        uses: ${ACTION}@${ref}
+        with: { mode: check-pr, enforcement: ${mode} }
         env:
           GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `;
-}
+const prTemplate = () => `## Краткое описание
 
-function buildPRTemplate() {
-  return `## Краткое описание
-
-<!-- Кратко опишите, что меняется в этом PR и зачем. -->
-
-## Контракт изменения
-
-<!-- Вставьте блок YAML, чтобы repo-guard мог проверить заявленные границы PR. -->
-<!-- Формат контракта описан в https://github.com/netkeep80/repo-guard. -->
+## ChangeIntent
 
 \`\`\`repo-guard-yaml
 change_type: feature
 scope:
-  - src/
+  - src/**
 budgets: {}
 anchors:
-  affects:
-    - FR-014
-  implements:
-    - FR-014
-  verifies:
-    - FR-014
+  affects: []
+  implements: []
+  verifies: []
 must_touch: []
 must_not_touch: []
 expected_effects:
   - Опишите ожидаемый эффект
 \`\`\`
 `;
-}
-
-function buildIssueTemplate() {
-  return `name: Контракт изменения
-description: Предложить изменение кода с контрактом repo-guard.
+const issueTemplate = () => `name: Контракт изменения
+description: Предложить изменение с ChangeIntent и, при необходимости, GovernanceGrant.
 title: "[change] "
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Опишите предлагаемое изменение и добавьте блок контракта YAML.
   - type: textarea
     id: description
-    attributes:
-      label: Описание
-      description: Что меняется и зачем?
-    validations:
-      required: true
+    attributes: { label: Описание, description: Что меняется и зачем? }
+    validations: { required: true }
   - type: textarea
     id: contract
     attributes:
-      label: Контракт изменения
-      description: Вставьте блок контракта repo-guard в формате YAML.
+      label: ChangeIntent
+      description: Обычное намерение изменения; не даёт управляющих разрешений.
       value: |
         \`\`\`repo-guard-yaml
         change_type: feature
-        scope:
-          - src/
+        scope: ["src/**"]
         budgets: {}
-        anchors:
-          affects:
-            - FR-014
-          implements:
-            - FR-014
-          verifies:
-            - FR-014
+        anchors: { affects: [], implements: [], verifies: [] }
         must_touch: []
         must_not_touch: []
-        expected_effects:
-          - Опишите ожидаемый эффект
+        expected_effects: ["Опишите ожидаемый эффект"]
         \`\`\`
-    validations:
-      required: true
+    validations: { required: true }
+  - type: textarea
+    id: governance_grant
+    attributes:
+      label: GovernanceGrant (только для управляющих изменений)
+      description: Оставьте пустым для обычной задачи. Grant доверяется только из связанной задачи.
+      value: |
+        \`\`\`repo-guard-grant
+        authorized_governance_paths:
+          - repo-policy.json
+        allow_policy_relaxation: []
+        \`\`\`
+    validations: { required: false }
 `;
+function writeIfAbsent(path, content, created, skipped) {
+  if (existsSync(path)) return skipped.push(path);
+  mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content, "utf-8"); created.push(path);
 }
+const usage = `Usage: repo-guard init [--preset <preset>] [--mode <mode>]\nPresets: application, library, tooling, documentation`;
 
-function writeIfAbsent(filePath, content, created, skipped) {
-  if (existsSync(filePath)) {
-    skipped.push(filePath);
-    return;
-  }
-  mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, content, "utf-8");
-  created.push(filePath);
-}
-
-export function runInit(roots, args) {
-  let preset = "application";
-  let mode = roots.enforcementMode || "enforce";
-
+export function runInit(roots, args = []) {
+  let preset = "application", mode = roots.enforcementMode || "enforce";
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--preset" && args[i + 1]) {
-      preset = args[++i];
-    } else if (args[i] === "--mode" && args[i + 1]) {
-      mode = args[++i];
-    } else if (args[i] === "--enforcement" && args[i + 1]) {
-      mode = args[++i];
-    } else if (args[i] === "--help") {
-      printUsage();
-      process.exit(0);
-    } else {
-      console.error(`Unknown option for init: ${args[i]}`);
-      printUsage();
-      process.exit(1);
-    }
+    if (["--preset", "--mode", "--enforcement"].includes(args[i]) && args[i + 1]) {
+      const value = args[++i]; if (args[i - 1] === "--preset") preset = value; else mode = value;
+    } else if (args[i] === "--help") { console.log(usage); return 0; }
+    else { console.error(`Unknown option for init: ${args[i]}\n${usage}`); return 1; }
   }
-
-  if (!PRESETS[preset]) {
-    console.error(`Unknown preset: ${preset}`);
-    console.error(`Available presets: ${Object.keys(PRESETS).join(", ")}`);
-    process.exit(1);
-  }
-
+  if (!PRESETS[preset]) { console.error(`Unknown preset: ${preset}\n${usage}`); return 1; }
   const enforcement = normalizeEnforcementMode(mode, "mode");
-  if (!enforcement.ok) {
-    console.error(enforcement.message);
-    process.exit(1);
-  }
-  const enforcementMode = enforcement.mode;
+  if (!enforcement.ok) { console.error(enforcement.message); return 1; }
 
-  const repoRoot = roots.repoRoot;
-  const created = [];
-  const skipped = [];
+  const created = [], skipped = [], root = roots.repoRoot;
+  writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset, enforcement.mode), null, 2)}\n`, created, skipped);
+  writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), workflow(enforcement.mode, actionRef(roots.packageRoot)), created, skipped);
+  writeIfAbsent(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), prTemplate(), created, skipped);
+  writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-contract.yml"), issueTemplate(), created, skipped);
 
-  const policyPath = resolve(repoRoot, "repo-policy.json");
-  const policyContent = JSON.stringify(buildPolicy(preset, enforcementMode), null, 2) + "\n";
-  writeIfAbsent(policyPath, policyContent, created, skipped);
-
-  const workflowPath = resolve(repoRoot, ".github/workflows/repo-guard.yml");
-  const actionRef = defaultActionRef(roots.packageRoot);
-  writeIfAbsent(workflowPath, buildWorkflow(enforcementMode, actionRef), created, skipped);
-
-  const prTemplatePath = resolve(repoRoot, ".github/PULL_REQUEST_TEMPLATE.md");
-  writeIfAbsent(prTemplatePath, buildPRTemplate(), created, skipped);
-
-  const issueTemplatePath = resolve(repoRoot, ".github/ISSUE_TEMPLATE/change-contract.yml");
-  writeIfAbsent(issueTemplatePath, buildIssueTemplate(), created, skipped);
-
-  console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcementMode})\n`);
-
-  if (created.length > 0) {
-    console.log("Created:");
-    for (const f of created) console.log(`  ${relative(repoRoot, f)}`);
-  }
-
-  if (skipped.length > 0) {
-    console.log("Skipped (already exist):");
-    for (const f of skipped) console.log(`  ${relative(repoRoot, f)}`);
-  }
-
-  if (created.length === 0 && skipped.length > 0) {
-    console.log("\nAll files already exist. Nothing to do.");
-  } else if (created.length > 0) {
-    console.log("\nNext steps:");
-    console.log("  1. Review the generated files and adjust to your needs.");
-    console.log("  2. Commit and push the changes.");
-  }
-}
-
-function printUsage() {
-  console.log(`Usage: repo-guard init [--preset <preset>] [--mode <mode>]
-
-Scaffold a repo-guard setup in the current repository.
-
-Options:
-  --preset <preset>  Repository preset (default: application)
-                     Presets: application, library, tooling, documentation
-  --mode <mode>      Default enforcement behavior (default: enforce)
-                     Modes: advisory/warn (non-blocking), enforce/blocking (blocking)
-  --enforcement <mode>
-                     Alias for --mode
-  --help             Show this help message
-
-Files created:
-  repo-policy.json                         Repository policy
-  .github/workflows/repo-guard.yml         GitHub Actions workflow
-  .github/PULL_REQUEST_TEMPLATE.md         PR template with contract block
-  .github/ISSUE_TEMPLATE/change-contract.yml  Issue template for contracts`);
+  console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcement.mode})`);
+  if (created.length) console.log(`Created:\n${created.map((path) => `  ${relative(root, path)}`).join("\n")}`);
+  if (skipped.length) console.log(`Skipped (already exist):\n${skipped.map((path) => `  ${relative(root, path)}`).join("\n")}`);
+  return 0;
 }
