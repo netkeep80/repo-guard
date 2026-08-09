@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createDocumentReader } from "../document-facts.mjs";
 import { classifyNewFiles, detectTouchedSurfaces } from "../diff/classification.mjs";
 import { filterOperationalPaths } from "../diff/filters.mjs";
 import { parseDiff } from "../diff/parser.mjs";
@@ -25,14 +26,18 @@ export function buildPolicyFacts(input) {
     if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile }));
     return cache.get(path);
   };
-  const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile };
+  const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
+  const options = {
+    repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles,
+    readFile: cachedReadFile, documents,
+  };
   const touchedSurfaces = policy.surfaces ? detectTouchedSurfaces(checkedFiles, policy.surfaces) : null;
   const newFileClasses = policy.new_file_classes ? classifyNewFiles(checkedFiles, policy.new_file_classes) : null;
 
   return {
     mode, repositoryRoot, policy, basePolicy, headPolicy, contract, contractSource,
     issueAuthorization, trustedGovernancePaths, trustedAuthorizer,
-    readFile: cachedReadFile, enforcementMode: enforcement.mode, enforcement,
+    readFile: cachedReadFile, documents, enforcementMode: enforcement.mode, enforcement,
     diff: {
       files: {
         all: allFiles,
@@ -48,9 +53,6 @@ export function buildPolicyFacts(input) {
       touchedSurfaces,
       newFileClasses,
     },
-    diagnostics: {
-      ...diagnostics,
-      skippedOperationalFiles: allFiles.length - checkedFiles.length,
-    },
+    diagnostics: { ...diagnostics, skippedOperationalFiles: allFiles.length - checkedFiles.length },
   };
 }
