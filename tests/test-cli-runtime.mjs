@@ -5,17 +5,21 @@ const originalError = console.error;
 const errors = [];
 console.error = (...args) => errors.push(args.join(" "));
 
-try {
-  const unknown = await runCli(["--definitely-unknown"]);
-  assert.equal(unknown, 1);
-  assert.match(errors.join("\n"), /Unknown option/);
-
+async function fails(args, pattern) {
   errors.length = 0;
-  const missingRoot = await runCli(["--repo-root"]);
-  assert.equal(missingRoot, 1);
-  assert.match(errors.join("\n"), /--repo-root requires a path argument/);
+  assert.equal(await runCli(args), 1);
+  assert.match(errors.join("\n"), pattern);
+}
+
+try {
+  await fails(["--definitely-unknown"], /Unknown option/);
+  await fails(["--repo-root"], /--repo-root requires a path argument/);
+  await fails(["check-diff", "--base"], /--base requires a value/);
+  await fails(["check-pr", "extra"], /Unexpected argument for check-pr/);
+  await fails(["validate", "one.json", "two.json"], /Unexpected argument for validate/);
+  await fails(["init", "--bogus"], /Unknown option for init/);
 } finally {
   console.error = originalError;
 }
 
-console.log("CLI runtime returns exit codes without terminating imported callers.");
+console.log("Declarative CLI grammar returns errors without terminating imported callers.");
