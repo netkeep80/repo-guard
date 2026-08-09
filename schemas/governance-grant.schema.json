@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/netkeep80/repo-guard/schemas/governance-grant.schema.json",
+  "title": "Governance Grant",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "authorized_governance_paths": {
+      "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "minItems": 1
+    },
+    "allow_policy_relaxation": {
+      "type": "array", "items": { "type": "string", "pattern": "^/" }, "uniqueItems": true
+    }
+  }
+}
