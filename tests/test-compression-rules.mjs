@@ -1,9 +1,9 @@
 import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
+import { compileConstraintIR, evaluateConstraintIR } from "../src/checks/rules/constraints.mjs";
 import { checkSizeRules } from "../src/checks/rules/size-rules.mjs";
 import { classifyPathSets, selectPaths } from "../src/diff/classification.mjs";
 
 let failures = 0;
-
 function expect(label, actual, expected) {
   const passed = actual === expected;
   console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
@@ -14,14 +14,27 @@ function expect(label, actual, expected) {
 }
 
 const selectorFiles = [
-  { path: "src/a.mjs", status: "modified" },
-  { path: "tests/a.test.mjs", status: "added" },
-  { path: "docs/old.md", status: "deleted" },
+  { path: "src/a.mjs", status: "modified", addedLines: ["x"], deletedLines: [] },
+  { path: "tests/a.test.mjs", status: "added", addedLines: ["t"], deletedLines: [] },
+  { path: "docs/old.md", status: "deleted", addedLines: [], deletedLines: ["old"] },
 ];
 const selected = classifyPathSets(selectorFiles, { source: ["src/**"], tests: ["tests/**"] });
 expect("named selectors expose touched sets", selected.touched_selectors.join(","), "source,tests");
 expect("named selectors expose unclassified files", selected.unclassified_files.join(","), "docs/old.md");
 expect("selector status view isolates additions", selectPaths(selectorFiles, ["**"], { statuses: ["added"] }).join(","), "tests/a.test.mjs");
+
+const constraintFacts = {
+  diff: { files: { checked: selectorFiles } },
+  policy: {
+    paths: { forbidden: ["*.bak"], canonical_docs: [] },
+    diff_rules: { max_new_docs: 0, max_new_files: 2, max_net_added_lines: 5 },
+    cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
+  },
+  contract: { must_touch: ["src/**"], must_not_touch: ["schemas/**"], budgets: {} },
+};
+const constraintIR = compileConstraintIR(constraintFacts);
+expect("policy frontends compile into primitive constraints", constraintIR.constraints.some((c) => c.kind === "implies_nonempty"), true);
+expect("constraint kernel preserves familiar result names", evaluateConstraintIR(constraintFacts).some((r) => r.name === "must-touch" && r.check.ok), true);
 
 const currentFiles = new Map([
   ["docs/a.md", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"],
@@ -45,7 +58,6 @@ const growingResult = checkSizeRules(growingDiff, [lineRule], { trackedFiles: ["
 expect("line surface blocks positive growth", growingResult.ok, false);
 expect("line surface growth violation kind", growingResult.size_violations[0].kind, "growth");
 expect("line surface positive delta", growingResult.growth[0].delta, 1);
-
 const shrinkRequired = checkSizeRules(balancedDiff, [{ ...lineRule, max_growth: -1 }], { trackedFiles: ["docs/a.md", "docs/b.md"], readFile });
 expect("negative max_growth can require shrinkage", shrinkRequired.ok, false);
 
@@ -58,9 +70,9 @@ expect("file-count delta is one", fileGrowth.growth[0].delta, 1);
 expect("file-count before is reconstructed", fileGrowth.growth[0].before, 1);
 expect("file-count after is current count", fileGrowth.growth[0].after, 2);
 
-const byteGrowth = checkSizeRules(balancedDiff, [{
-  id: "docs-bytes", scope: "directory", metric: "bytes", glob: "docs/**", max: 1000, max_growth: 0,
-}], { trackedFiles: ["docs/a.md", "docs/b.md"], readFile });
+const byteGrowth = checkSizeRules(balancedDiff, [{ id: "docs-bytes", scope: "directory", metric: "bytes", glob: "docs/**", max: 1000, max_growth: 0 }], {
+  trackedFiles: ["docs/a.md", "docs/b.md"], readFile,
+});
 expect("byte max_growth fails closed until exact base-byte measurement exists", byteGrowth.ok, false);
 expect("byte max_growth reports a read/evaluation error", byteGrowth.errors.length, 1);
 
