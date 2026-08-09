@@ -130,6 +130,11 @@ describe("self-hosted integration and documentation", () => {
     assert.equal(policy.integration.profiles[0].id, "self-hosting");
   });
 
+  it("routes integration facts through the Constraint Program", () => {
+    assert.match(read("src/checks/constraint-program.mjs"), /kind: "integration"/);
+    assert.doesNotMatch(read("src/integration-validator.mjs"), /validateRepoGuardPrGate/);
+  });
+
   it("uses YAML contracts itself and documents the exception model", () => {
     assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /```repo-guard-yaml/);
     assert.match(read(".github/ISSUE_TEMPLATE/change-contract.yml"), /repo-guard-yaml/);
