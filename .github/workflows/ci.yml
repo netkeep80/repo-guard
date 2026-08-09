@@ -49,6 +49,9 @@ jobs:
       - name: Run diff-rule tests
         run: npm run test:diff
 
+      - name: Run documentation language test
+        run: npm run test:documentation-language
+
       - name: Run contract extraction tests
         run: npm run test:contract
 
