@@ -1,0 +1,128 @@
+import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
+import { checkSizeRules } from "../src/checks/rules/size-rules.mjs";
+
+let failures = 0;
+
+function expect(label, actual, expected) {
+  const passed = actual === expected;
+  console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
+  if (!passed) {
+    failures++;
+    console.error(`  expected: ${expected}, got: ${actual}`);
+  }
+}
+
+const currentFiles = new Map([
+  ["docs/a.md", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"],
+  ["docs/b.md", "a\nb\nc\n"],
+  ["README.md", "# Русский документ\n\nОбычный русский текст с `SomeClass` и API.\n\n```text\nCurrent production contract\n```\n"],
+]);
+
+const readFile = (path) => currentFiles.get(path) ?? null;
+
+const balancedDiff = [
+  {
+    path: "docs/a.md",
+    status: "modified",
+    addedLines: ["n1", "n2"],
+    deletedLines: ["o1", "o2", "o3", "o4", "o5"],
+  },
+  {
+    path: "docs/b.md",
+    status: "added",
+    addedLines: ["a", "b", "c"],
+    deletedLines: [],
+  },
+];
+
+const lineRule = {
+  id: "docs-lines",
+  scope: "directory",
+  metric: "lines",
+  glob: "docs/**",
+  max: 20,
+  max_growth: 0,
+};
+
+const lineResult = checkSizeRules(balancedDiff, [lineRule], {
+  trackedFiles: ["docs/a.md", "docs/b.md"],
+  readFile,
+});
+expect("line surface passes when net growth is zero", lineResult.ok, true);
+expect("line surface reports before", lineResult.growth[0].before, 13);
+expect("line surface reports after", lineResult.growth[0].after, 13);
+expect("line surface reports delta", lineResult.growth[0].delta, 0);
+
+const growingDiff = [
+  {
+    path: "docs/a.md",
+    status: "modified",
+    addedLines: ["n1", "n2"],
+    deletedLines: ["o1"],
+  },
+];
+const growingResult = checkSizeRules(growingDiff, [lineRule], {
+  trackedFiles: ["docs/a.md", "docs/b.md"],
+  readFile,
+});
+expect("line surface blocks positive growth", growingResult.ok, false);
+expect("line surface growth violation kind", growingResult.size_violations[0].kind, "growth");
+expect("line surface positive delta", growingResult.growth[0].delta, 1);
+
+const shrinkRequired = checkSizeRules(balancedDiff, [{ ...lineRule, max_growth: -1 }], {
+  trackedFiles: ["docs/a.md", "docs/b.md"],
+  readFile,
+});
+expect("negative max_growth can require shrinkage", shrinkRequired.ok, false);
+
+const fileRule = {
+  id: "contract-files",
+  scope: "directory",
+  metric: "files",
+  glob: "contracts/**",
+  max: 10,
+  max_growth: 0,
+};
+const fileGrowth = checkSizeRules([
+  { path: "contracts/new.json", status: "added", addedLines: ["{}"], deletedLines: [] },
+], [fileRule], {
+  trackedFiles: ["contracts/old.json", "contracts/new.json"],
+  readFile,
+});
+expect("file-count surface blocks a new file", fileGrowth.ok, false);
+expect("file-count delta is one", fileGrowth.growth[0].delta, 1);
+expect("file-count before is reconstructed", fileGrowth.growth[0].before, 1);
+expect("file-count after is current count", fileGrowth.growth[0].after, 2);
+
+const russianRule = {
+  id: "russian-docs",
+  glob: "README.md",
+  mode: "markdown_language",
+  language: "ru",
+  allow_words: ["API"],
+  max_unapproved_latin_words_per_line: 1,
+};
+const readmeChange = [{ path: "README.md", status: "modified", addedLines: ["изменение"], deletedLines: [] }];
+const russianResult = checkContentRules(readmeChange, [russianRule], { readFile });
+expect("Russian Markdown ignores inline/fenced code", russianResult.length, 0);
+
+currentFiles.set("README.md", "# Документ\n\nCurrent production contract.\n");
+const englishResult = checkContentRules(readmeChange, [russianRule], { readFile });
+expect("English prose is rejected", englishResult.length, 1);
+expect("language violation kind", englishResult[0].kind, "language");
+expect("language violation line", englishResult[0].line_number, 3);
+
+currentFiles.set("README.md", "# Документ\n\nИспользуется semantic contract.\n");
+const mixedResult = checkContentRules(readmeChange, [russianRule], { readFile });
+expect("multiple mixed Latin terms are rejected", mixedResult.length, 1);
+
+currentFiles.set("README.md", "# Документ\n\nИспользуется API.\n");
+const allowedResult = checkContentRules(readmeChange, [russianRule], { readFile });
+expect("allow-listed technical term passes", allowedResult.length, 0);
+
+if (failures > 0) {
+  console.error(`\n${failures} compression-rule test(s) failed`);
+  process.exit(1);
+}
+
+console.log("\nAll compression-rule tests passed");
