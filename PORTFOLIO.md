@@ -1,20 +1,24 @@
-# Portfolio roadmap
+# Место repo-guard в портфеле
 
-`repo-guard` является частью portfolio [`netkeep80`](https://github.com/netkeep80).
+`repo-guard` является частью портфеля [`netkeep80`](https://github.com/netkeep80).
 
-Portfolio-level направление, приоритет, lifecycle, cross-repo dependencies и следующий gate **намеренно не дублируются здесь**. Authoritative sources:
+Общее направление, приоритеты, жизненный цикл репозиториев, межрепозиторные зависимости и следующие контрольные точки намеренно не дублируются здесь. Канонические источники находятся в центральном репозитории [`netkeep80/roadmap`](https://github.com/netkeep80/roadmap):
 
-- [netkeep80/roadmap](https://github.com/netkeep80/roadmap) — главный portfolio control plane;
-- [Current status](https://github.com/netkeep80/roadmap/blob/main/STATUS.md) — live GitHub state;
-- [Execution order](https://github.com/netkeep80/roadmap/blob/main/EXECUTION.md) — cross-repo gates;
-- [Architecture](https://github.com/netkeep80/roadmap/blob/main/ARCHITECTURE.md) — canonical ownership/dependencies.
+- [текущее состояние](https://github.com/netkeep80/roadmap/blob/main/STATUS.md) — наблюдаемые факты по задачам и PR;
+- [порядок выполнения](https://github.com/netkeep80/roadmap/blob/main/EXECUTION.md) — зависимости и контрольные точки;
+- [архитектура](https://github.com/netkeep80/roadmap/blob/main/ARCHITECTURE.md) — владение слоями и зависимости;
+- [модель работы](https://github.com/netkeep80/roadmap/blob/main/OPERATING_MODEL.md) — правила актуализации управляющего контура.
 
-repo-guard issues, policy engine code, tests и consumer-specific rollout details остаются local implementation source of truth.
+Этот репозиторий остаётся каноническим владельцем реализации движка исполняемой политики: исходного кода, локальных задач, тестов, схем и поведения `repo-guard`.
 
 ```text
-roadmap decides portfolio direction;
-this repository owns the governance engine implementation;
-GitHub facts feed the central live status.
+roadmap определяет направление портфеля
+        ↓
+локальная задача repo-guard определяет реализацию
+        ↓
+код, тесты и CI дают проверяемое свидетельство
+        ↓
+GitHub-факты возвращаются в центральное состояние
 ```
 
-Consumer-driven portfolio priority меняется только в central roadmap.
+Изменение приоритета на уровне портфеля оформляется в `roadmap`, а не скрытым редактированием локальной документации.
