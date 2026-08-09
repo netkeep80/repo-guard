@@ -1,12 +1,11 @@
-## Summary
+## Краткое описание
 
-<!-- Briefly describe the changes in this PR. -->
+<!-- Кратко опишите, что меняется в этом PR и зачем. -->
 
-## Change Contract
+## Контракт изменения
 
-<!-- Keep this YAML block updated so repo-guard validates the intended change. -->
-<!-- Changes to files listed in policy.paths.governance_paths must be sanctioned
-     from the LINKED ISSUE body (not this PR body) via authorized_governance_paths. -->
+<!-- Поддерживайте блок ниже в соответствии с фактическим изменением. -->
+<!-- Изменения управляющих файлов должны быть санкционированы в теле СВЯЗАННОЙ задачи через authorized_governance_paths. -->
 
 ```repo-guard-yaml
 change_type: feature
@@ -23,5 +22,5 @@ anchors:
 must_touch: []
 must_not_touch: []
 expected_effects:
-  - Describe the expected effect
+  - Опишите ожидаемый эффект
 ```
