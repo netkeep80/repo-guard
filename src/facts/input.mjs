@@ -7,51 +7,34 @@ import { extractAnchors } from "../extractors/anchors.mjs";
 import { extractIntegration } from "../extractors/integration.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
 
-export function listTrackedFiles(repoRoot) {
-  return execFileSync("git", ["ls-files"], { encoding: "utf-8", cwd: repoRoot }).split(/\r?\n/).filter(Boolean);
-}
+export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files"], { encoding: "utf-8", cwd: repoRoot }).split(/\r?\n/).filter(Boolean);
 
 export function buildPolicyFacts(input) {
   const {
     mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null,
-    contract = null, contractSource = "none", issueAuthorization = null,
+    contract = null, contractSource = "none", governanceGrant = null,
     trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText,
     trackedFiles = null, diagnostics = {}, readFile = null,
   } = input;
   const allFiles = parseDiff(diffText);
   const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths);
-  const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot);
-  const cache = new Map();
+  const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map();
   const cachedReadFile = (path) => {
     if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile }));
     return cache.get(path);
   };
   const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
-  const options = {
-    repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles,
-    readFile: cachedReadFile, documents,
-  };
-  const touchedSurfaces = policy.surfaces ? detectTouchedSurfaces(checkedFiles, policy.surfaces) : null;
-  const newFileClasses = policy.new_file_classes ? classifyNewFiles(checkedFiles, policy.new_file_classes) : null;
-
+  const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
   return {
-    mode, repositoryRoot, policy, basePolicy, headPolicy, contract, contractSource,
-    issueAuthorization, trustedGovernancePaths, trustedAuthorizer,
-    readFile: cachedReadFile, documents, enforcementMode: enforcement.mode, enforcement,
-    diff: {
-      files: {
-        all: allFiles,
-        checked: checkedFiles,
-        skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)),
-      },
-    },
-    anchors: extractAnchors(policy, options),
-    integration: extractIntegration(policy, options),
-    trackedFiles: resolvedTrackedFiles,
+    mode, repositoryRoot, policy, basePolicy, headPolicy, contract, contractSource, governanceGrant,
+    trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, documents,
+    enforcementMode: enforcement.mode, enforcement,
+    diff: { files: { all: allFiles, checked: checkedFiles, skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)) } },
+    anchors: extractAnchors(policy, options), integration: extractIntegration(policy, options), trackedFiles: resolvedTrackedFiles,
     derived: {
       changedPaths: checkedFiles.map((file) => file.path),
-      touchedSurfaces,
-      newFileClasses,
+      touchedSurfaces: policy.surfaces ? detectTouchedSurfaces(checkedFiles, policy.surfaces) : null,
+      newFileClasses: policy.new_file_classes ? classifyNewFiles(checkedFiles, policy.new_file_classes) : null,
     },
     diagnostics: { ...diagnostics, skippedOperationalFiles: allFiles.length - checkedFiles.length },
   };
