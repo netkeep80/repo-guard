@@ -31,7 +31,7 @@ export function parseMarkdown(content) {
   for (const [offset, line] of lines.entries()) {
     const lineNumber = offset + 1;
     if (!fence) {
-      const opening = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+      const opening = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
       if (opening) {
         fence = { marker: opening[1][0], length: opening[1].length, infoString: opening[2].trim(), startLine: lineNumber, contentLines: [] };
         continue;
@@ -48,13 +48,13 @@ export function parseMarkdown(content) {
       continue;
     }
 
-    const closing = line.match(/^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/);
+    const closing = line.match(/^[ \t]*(`{3,}|~{3,})[ \t]*$/);
     if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) {
       const language = fence.infoString.split(/\s+/).filter(Boolean)[0] || "";
       codeBlocks.push({ language, infoString: fence.infoString, startLine: fence.startLine, endLine: lineNumber, content: fence.contentLines.join("\n") });
       fence = null;
     } else {
-      fence.contentLines.push(line);
+      fence.contentLines.push(line.replace(/^[ \t]+/, (indent) => indent));
     }
   }
   if (fence) errors.push({ message: `unclosed Markdown fence starting at line ${fence.startLine}` });
