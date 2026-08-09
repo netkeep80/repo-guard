@@ -14,8 +14,6 @@ permissions:
 
 jobs:
   validate:
-    # repo-guard's own CI is intentionally blocking: this job protects the
-    # package, schemas, and reusable Action behavior before changes can merge.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,73 +33,19 @@ jobs:
         run: npx repo-guard
 
       - name: Run validate-integration on self
-        # Self-host the integration diagnostic so drift in declared workflows,
-        # templates, docs, or profiles fails the same CI that protects the rules.
         run: npx repo-guard validate-integration
 
       - name: Run doctor diagnostics on self
-        # Self-host the doctor diagnostic so repo-level drift (missing token,
-        # shallow fetch, malformed policy) surfaces before downstream users hit it.
         run: npx repo-guard doctor
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run schema tests
-        run: npm run test:schemas
-
-      - name: Run diff-rule tests
-        run: npm run test:diff
-
-      - name: Run documentation language test
-        run: npm run test:documentation-language
-
-      - name: Run self-hosting tests
-        run: npm run test:self-hosting
-
-      - name: Run contract extraction tests
-        run: npm run test:contract
-
-      - name: Run GitHub PR integration tests
-        run: npm run test:github-pr
-
-      - name: Run hardening tests
-        run: npm run test:hardening
-
-      - name: Run anchor extraction tests
-        run: npm run test:anchors
-
-      - name: Run integration extraction tests
-        run: npm run test:integration
-
-      - name: Run integration diagnostics tests
-        run: npm run test:integration-diagnostics
-
-      - name: Run integration fixture e2e tests
-        run: npm run test:integration-fixtures
-
-      - name: Run trace evidence rule tests
-        run: npm run test:trace-evidence
-
-      - name: Run policy profile tests
-        run: npm run test:profiles
-
-      - name: Run repo-root separation tests
-        run: npm run test:repo-root
-
-      - name: Run init scaffolding tests
-        run: npm run test:init
-
-      - name: Run release ref verifier tests
-        run: npm run test:release-ref
-
-      - name: Run doctor diagnostics tests
-        run: npm run test:doctor
+      - name: Run discovered test suite
+        run: npm test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run PR policy check
-        # Self-host repo-guard in blocking mode once a PR is ready for review.
-        # Draft PRs stay unblocked so work-in-progress branches can iterate.
         if: github.event_name == 'pull_request' && !github.event.pull_request.draft
         uses: ./
         with:
@@ -128,14 +72,11 @@ jobs:
           printf '%s\n' "$OUTPUT"
 
           test "$STATUS" -eq 0
-
           echo "$OUTPUT" | grep -q "WARN: content-rules"
           echo "$OUTPUT" | grep -q "Result: failed"
           echo "$OUTPUT" | grep -q "mode: advisory"
 
   smoke-pack:
-    # Packaging smoke tests are blocking because downstream users pin released
-    # artifacts and need the installable tarball to match the source tree.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,12 +89,9 @@ jobs:
 
       - name: Smoke-test packaged artifact
         run: |
-          # Pack the package and capture the tarball filename
           npm pack 2>/dev/null
           TARBALL=$(ls repo-guard-*.tgz)
           REPODIR="$PWD"
           TMPDIR=$(mktemp -d)
-          # Install from tarball into a fresh temp directory (simulates downstream consumer)
           npm install --prefix "$TMPDIR" "$REPODIR/$TARBALL"
-          # Run repo-guard from the installed package against this repo's policy
           "$TMPDIR/node_modules/.bin/repo-guard" --repo-root "$REPODIR"

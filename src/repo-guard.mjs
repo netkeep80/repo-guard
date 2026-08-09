@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(__dirname, "..");
-const MODES = new Set(["check-diff", "check-pr", "init", "doctor", "validate-integration"]);
+export const COMMANDS = Object.freeze(["validate", "check-diff", "check-pr", "init", "doctor", "validate-integration"]);
+const MODES = new Set(COMMANDS.slice(1));
 const USAGE = "Usage: repo-guard [--repo-root <path>] [--enforcement <advisory|blocking>] [check-diff|check-pr|init|doctor|validate-integration] [options]";
 
 export function resolveRoots(args) {
@@ -41,32 +42,13 @@ function sameEntrypointPath(left, right) {
 
 async function dispatch(roots) {
   const command = roots.args.shift();
-  if (command?.startsWith("-") && !MODES.has(command)) {
-    throw new Error(`Unknown option: ${command}\n${USAGE}`);
-  }
-
-  if (command === "check-diff") {
-    const { runCheckDiff } = await import("./check-diff.mjs");
-    return runCheckDiff(roots, roots.args);
-  }
-  if (command === "check-pr") {
-    const { runCheckPR } = await import("./github-pr.mjs");
-    return runCheckPR(roots, roots.args);
-  }
-  if (command === "init") {
-    const { runInit } = await import("./init.mjs");
-    return runInit(roots, roots.args);
-  }
-  if (command === "doctor" && !roots.args.includes("--integration")) {
-    const { runDoctor } = await import("./doctor.mjs");
-    return runDoctor(roots).fails > 0 ? 1 : 0;
-  }
-  if (command === "doctor" || command === "validate-integration") {
-    const { runValidateIntegration } = await import("./integration-validator.mjs");
-    return runValidateIntegration(roots, roots.args);
-  }
-  const { runValidate } = await import("./validate.mjs");
-  return runValidate(roots, command ? [command, ...roots.args] : roots.args);
+  if (command?.startsWith("-") && !MODES.has(command)) throw new Error(`Unknown option: ${command}\n${USAGE}`);
+  if (command === "check-diff") return (await import("./check-diff.mjs")).runCheckDiff(roots, roots.args);
+  if (command === "check-pr") return (await import("./github-pr.mjs")).runCheckPR(roots, roots.args);
+  if (command === "init") return (await import("./init.mjs")).runInit(roots, roots.args);
+  if (command === "doctor" && !roots.args.includes("--integration")) return (await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0;
+  if (command === "doctor" || command === "validate-integration") return (await import("./integration-validator.mjs")).runValidateIntegration(roots, roots.args);
+  return (await import("./validate.mjs")).runValidate(roots, command ? [command, ...roots.args] : roots.args);
 }
 
 export async function runCli(args = process.argv.slice(2)) {
