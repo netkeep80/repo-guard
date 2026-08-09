@@ -52,13 +52,13 @@ const strictnessBase = {
 };
 const weakerPolicy = structuredClone(strictnessBase);
 weakerPolicy.diff_rules.max_new_files = 10;
-expect("strictness IR detects monotonic weakening", comparePolicyStrictness(strictnessBase, weakerPolicy).relation, "weaker");
+expect("Constraint Program detects monotonic weakening", comparePolicyStrictness(strictnessBase, weakerPolicy).relation, "weaker");
 const stricterPolicy = structuredClone(strictnessBase);
 stricterPolicy.diff_rules.max_new_files = 3;
-expect("strictness IR detects monotonic tightening", comparePolicyStrictness(strictnessBase, stricterPolicy).relation, "stricter");
+expect("Constraint Program detects monotonic tightening", comparePolicyStrictness(strictnessBase, stricterPolicy).relation, "stricter");
 const growthWeakened = structuredClone(strictnessBase);
 growthWeakened.size_rules[0].max_growth = 1;
-expect("strictness IR protects compression max_growth", comparePolicyStrictness(strictnessBase, growthWeakened).relation, "weaker");
+expect("Constraint Program protects compression max_growth", comparePolicyStrictness(strictnessBase, growthWeakened).relation, "weaker");
 const unknownChange = structuredClone(strictnessBase);
 unknownChange.content_rules.push({ id: "x", glob: "**", mode: "added_lines", forbid_regex: ["x"] });
 expect("unknown policy semantics fail closed as incomparable", comparePolicyStrictness(strictnessBase, unknownChange).relation, "incomparable");
