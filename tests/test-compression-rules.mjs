@@ -1,3 +1,4 @@
+import { defaultRuleFamilies } from "../src/checks/default-rule-families.mjs";
 import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
 import { compileConstraintIR, evaluateConstraintIR } from "../src/checks/rules/constraints.mjs";
 import { comparePolicyStrictness } from "../src/checks/rules/policy-delta-rules.mjs";
@@ -14,6 +15,7 @@ function expect(label, actual, expected) {
     console.error(`  expected: ${expected}, got: ${actual}`);
   }
 }
+expect("relation-like runtime rules collapse into six default families", defaultRuleFamilies.length, 6);
 
 const markdown = parseMarkdown("# Заголовок\nТекст [ссылка](docs/a.md)\n```js\ncode()\n```\nПосле\n");
 expect("document facts parse headings once", markdown.headings[0].text, "Заголовок");
@@ -33,7 +35,7 @@ expect("selector status view isolates additions", selectPaths(selectorFiles, ["*
 const constraintFacts = {
   diff: { files: { checked: selectorFiles } },
   policy: {
-    paths: { forbidden: ["*.bak"], canonical_docs: [] },
+    paths: { forbidden: ["*.bak"], canonical_docs: [], operational_paths: [] },
     diff_rules: { max_new_docs: 0, max_new_files: 2, max_net_added_lines: 5 },
     cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
   },
