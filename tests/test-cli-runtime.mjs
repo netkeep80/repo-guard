@@ -13,7 +13,7 @@ try {
   errors.length = 0;
   const missingRoot = await runCli(["--repo-root"]);
   assert.equal(missingRoot, 1);
-  assert.match(errors.join("\n"), /requires an argument/);
+  assert.match(errors.join("\n"), /--repo-root requires a path argument/);
 } finally {
   console.error = originalError;
 }
