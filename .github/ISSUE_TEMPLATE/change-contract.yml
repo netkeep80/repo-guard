@@ -1,23 +1,23 @@
-name: Change contract
-description: Propose a code change with a repo-guard change contract.
+name: Контракт изменения
+description: Предложить изменение кода с контрактом repo-guard.
 title: "[change] "
 body:
   - type: markdown
     attributes:
       value: |
-        Describe the proposed change and include a YAML change contract block.
+        Опишите предлагаемое изменение и добавьте блок контракта YAML.
   - type: textarea
     id: description
     attributes:
-      label: Description
-      description: What does this change do and why?
+      label: Описание
+      description: Что меняется и зачем?
     validations:
       required: true
   - type: textarea
     id: contract
     attributes:
-      label: Change Contract
-      description: Paste a repo-guard YAML change contract block.
+      label: Контракт изменения
+      description: Вставьте блок контракта repo-guard в формате YAML.
       value: |
         ```repo-guard-yaml
         change_type: feature
@@ -31,14 +31,14 @@ body:
             - FR-014
           verifies:
             - FR-014
-        # Uncomment and list governance files this issue sanctions changing.
-        # Only the contract in THIS issue body can unlock policy.paths.governance_paths.
+        # Раскомментируйте и перечислите управляющие файлы, изменение которых санкционирует эта задача.
+        # Только контракт в теле ЭТОЙ задачи может разрешить изменение policy.paths.governance_paths.
         # authorized_governance_paths:
         #   - repo-policy.json
         must_touch: []
         must_not_touch: []
         expected_effects:
-          - Describe the expected effect
+          - Опишите ожидаемый эффект
         ```
     validations:
       required: true
