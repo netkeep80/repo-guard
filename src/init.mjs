@@ -37,7 +37,7 @@ jobs:
 `;
 const prTemplate = () => `## Краткое описание
 
-## ChangeIntent
+## Намерение изменения
 
 \`\`\`repo-guard-yaml
 change_type: feature
