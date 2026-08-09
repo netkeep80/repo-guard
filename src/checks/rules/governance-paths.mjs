@@ -1,148 +1,47 @@
 import { matchesAny } from "../../utils/path-patterns.mjs";
 
-function expandGovernancePattern(pattern) {
-  if (typeof pattern !== "string" || pattern.length === 0) return [];
-  if (pattern.endsWith("/")) {
-    return [`${pattern}**`];
-  }
-  return [pattern];
-}
-
+const expand = (pattern) => typeof pattern !== "string" || !pattern ? [] : [pattern.endsWith("/") ? `${pattern}**` : pattern];
 export function expandGovernancePatterns(patterns = []) {
-  const expanded = [];
-  for (const pattern of patterns) {
-    for (const value of expandGovernancePattern(pattern)) {
-      if (!expanded.includes(value)) expanded.push(value);
-    }
-  }
-  return expanded;
+  return [...new Set(patterns.flatMap(expand))];
 }
+const trusted = (authorizer) => Boolean(authorizer && (
+  authorizer.issue_author_permission_trusted || authorizer.governance_approved_label || authorizer.codeowner_approved || authorizer.trusted_team_approval
+));
 
-function matchingPatterns(filePath, patterns) {
-  return (patterns || []).filter((pattern) => matchesAny(filePath, expandGovernancePattern(pattern)));
-}
+export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer }) {
+  if (!governancePaths?.length) return { ok: true };
+  const touched = files.filter((file) => governancePaths.some((pattern) => matchesAny(file.path, expand(pattern)))).map((file) => file.path);
+  if (!touched.length) return { ok: true, touched_governance_paths: [] };
 
-function authorizationCoversPath(filePath, authorizedPatterns) {
-  if (!Array.isArray(authorizedPatterns) || authorizedPatterns.length === 0) return false;
-  return matchesAny(filePath, expandGovernancePatterns(authorizedPatterns));
-}
-
-function hasTrustedAuthorizerSource(trustedAuthorizer) {
-  if (!trustedAuthorizer || typeof trustedAuthorizer !== "object") return false;
-  return Boolean(
-    trustedAuthorizer.issue_author_permission_trusted ||
-      trustedAuthorizer.governance_approved_label ||
-      trustedAuthorizer.codeowner_approved ||
-      trustedAuthorizer.trusted_team_approval
-  );
-}
-
-export function checkGovernanceChangeAuthorization({
-  files,
-  governancePaths,
-  issueAuthorization,
-  contract,
-  contractSource,
-  trustedAuthorizer,
-}) {
-  if (!Array.isArray(governancePaths) || governancePaths.length === 0) {
-    return { ok: true };
-  }
-
-  const touchedGovernance = [];
-  for (const file of files) {
-    const matched = matchingPatterns(file.path, governancePaths);
-    if (matched.length > 0) {
-      touchedGovernance.push({ path: file.path, matched });
-    }
-  }
-
-  if (touchedGovernance.length === 0) {
-    return {
-      ok: true,
-      touched_governance_paths: [],
-    };
-  }
-
-  const declaredIssueAuthorization =
-    issueAuthorization && Array.isArray(issueAuthorization.authorized_governance_paths)
-      ? issueAuthorization.authorized_governance_paths
-      : [];
-  const trustedSourcePresent = hasTrustedAuthorizerSource(trustedAuthorizer);
-  const trustedAuthorization = trustedSourcePresent ? declaredIssueAuthorization : [];
-  const untrustedIssueAuthorizationIgnored =
-    declaredIssueAuthorization.length > 0 && !trustedSourcePresent;
-  const prBodyAuthorizationDeclared = contract && Array.isArray(contract.authorized_governance_paths)
-    ? contract.authorized_governance_paths
-    : [];
-  const untrustedAuthorizationAttempted =
-    contractSource !== "linked issue" && prBodyAuthorizationDeclared.length > 0;
-
-  const unauthorized = [];
-  for (const entry of touchedGovernance) {
-    if (!authorizationCoversPath(entry.path, trustedAuthorization)) {
-      unauthorized.push(entry.path);
-    }
-  }
-
-  const details = [];
-  for (const path of unauthorized) {
-    details.push(
-      `governance path ${path} changed without matching authorized_governance_paths entry in the linked issue body`
-    );
-  }
-  if (untrustedAuthorizationAttempted) {
-    details.push(
-      `authorized_governance_paths declared in contract source "${contractSource}" is ignored; governance authorization must originate from the linked issue body`
-    );
-  }
-  if (untrustedIssueAuthorizationIgnored) {
-    details.push(
-      "authorized_governance_paths declared in the linked issue body is ignored because no trusted authorizer was detected (issue author lacks write/maintain/admin permission, no governance-approved label, no CODEOWNERS approval, no trusted team approval)"
-    );
-  }
-
-  const ok = unauthorized.length === 0;
+  const declared = Array.isArray(governanceGrant?.authorized_governance_paths) ? governanceGrant.authorized_governance_paths : [];
+  const sourceTrusted = trusted(trustedAuthorizer);
+  const authorized = sourceTrusted ? declared : [];
+  const unauthorized = touched.filter((path) => !matchesAny(path, expandGovernancePatterns(authorized)));
+  const details = unauthorized.map((path) => `governance path ${path} changed without matching GovernanceGrant authorization`);
+  if (declared.length && !sourceTrusted) details.push("GovernanceGrant is ignored because no trusted authorizer was detected");
+  const ok = !unauthorized.length;
   return {
     ok,
-    message: ok
-      ? undefined
-      : "governance_paths changed without issue-sanctioned authorization",
-    touched_governance_paths: touchedGovernance.map((entry) => entry.path),
-    trusted_authorized_governance_paths: trustedAuthorization,
+    message: ok ? undefined : "governance paths changed without trusted GovernanceGrant",
+    touched_governance_paths: touched,
+    trusted_authorized_governance_paths: authorized,
     unauthorized_paths: unauthorized,
-    untrusted_authorization_ignored: untrustedAuthorizationAttempted,
-    untrusted_issue_authorization_ignored: untrustedIssueAuthorizationIgnored,
-    contract_source: contractSource,
+    untrusted_governance_grant_ignored: declared.length > 0 && !sourceTrusted,
     details,
-    hint: ok
-      ? undefined
-      : "Sanction governance changes from the linked issue: add a repo-guard contract block to the issue body with authorized_governance_paths listing the governance files this PR may modify. The linked issue must be authored by a trusted maintainer (write/maintain/admin), carry the governance-approved label, or be backed by a CODEOWNERS / trusted-team approval. Authorization placed in the PR body is ignored so an AI agent cannot self-sanction policy changes.",
+    hint: ok ? undefined : "Add a repo-guard-grant block to the linked issue and have that issue sanctioned by a trusted maintainer or governance approval source.",
   };
 }
 
 export const governancePathsRuleFamily = {
   id: "governance-paths",
   applies(facts) {
-    const trusted = Array.isArray(facts.trustedGovernancePaths)
-      ? facts.trustedGovernancePaths
-      : facts.policy.paths?.governance_paths;
-    return Array.isArray(trusted) && trusted.length > 0;
+    const paths = Array.isArray(facts.trustedGovernancePaths) ? facts.trustedGovernancePaths : facts.policy.paths?.governance_paths;
+    return Boolean(paths?.length);
   },
   evaluate(facts) {
-    const trusted = Array.isArray(facts.trustedGovernancePaths)
-      ? facts.trustedGovernancePaths
-      : facts.policy.paths?.governance_paths;
-    return {
-      name: "governance-change-authorization",
-      check: checkGovernanceChangeAuthorization({
-        files: facts.diff.files.checked,
-        governancePaths: trusted,
-        issueAuthorization: facts.issueAuthorization,
-        contract: facts.contract,
-        contractSource: facts.contractSource,
-        trustedAuthorizer: facts.trustedAuthorizer,
-      }),
-    };
+    const governancePaths = Array.isArray(facts.trustedGovernancePaths) ? facts.trustedGovernancePaths : facts.policy.paths?.governance_paths;
+    return { name: "governance-change-authorization", check: checkGovernanceChangeAuthorization({
+      files: facts.diff.files.checked, governancePaths, governanceGrant: facts.governanceGrant, trustedAuthorizer: facts.trustedAuthorizer,
+    }) };
   },
 };
