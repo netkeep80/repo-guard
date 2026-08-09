@@ -2,6 +2,7 @@ import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { selectPaths } from "../../diff/classification.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
+import { integrationConstraintEntries } from "../integration-constraints.mjs";
 import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
@@ -45,11 +46,9 @@ export function checkMustNotTouch(files, patterns) {
   return { ok: !touched.length, touched, must_not_touch: patterns };
 }
 export const checkCochangeRules = (files, rules = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
-
 export function compileConstraintIR(facts) {
   return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.contract)) };
 }
-
 function evaluateMetric(files, constraint, policy) {
   if (constraint.metric === "new_docs") return checkCanonicalDocsBudget(files, policy.paths.canonical_docs, constraint.max);
   if (constraint.metric === "new_files") return checkNewFilesBudget(files, constraint.max);
@@ -76,19 +75,15 @@ export function evaluateConstraintIR(facts, context = {}) {
         ignorePatterns: facts.policy.paths.operational_paths, changeType: facts.contract?.change_type,
       });
       results.push({ name: constraint.name, check: result });
-      if (result.advisory_violations.length) results.push({
-        name: "size-rules-advisory",
-        check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth },
-      });
+      if (result.advisory_violations.length) results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
       continue;
-    } else if (constraint.kind === "registry_rules") {
-      check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
-    } else if (constraint.kind === "change_profile") {
-      check = checkChangeProfile(files, facts.policy, facts.contract?.change_type, facts.derived);
-    } else if (constraint.kind === "trace_rules") {
-      for (const trace of context.anchorDiagnostics?.traceRuleResults || []) {
-        results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
-      }
+    } else if (constraint.kind === "registry_rules") check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
+    else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy, facts.contract?.change_type, facts.derived);
+    else if (constraint.kind === "trace_rules") {
+      for (const trace of context.anchorDiagnostics?.traceRuleResults || []) results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
+      continue;
+    } else if (constraint.kind === "integration") {
+      results.push(...integrationConstraintEntries(facts.integration));
       continue;
     } else continue;
     results.push({ name: constraint.name, check });
