@@ -1,96 +1,51 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import {
-  checkRemovedPolicyFields,
-  compileAnchorPolicy,
-  compileChangeProfiles,
-  compileForbidRegex,
-  compileIntegrationPolicy,
-  warnReservedPolicyFields,
-} from "../policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../policy-compiler.mjs";
 import { resolvePolicyProfile } from "../policy-profiles.mjs";
 
-export function loadJSON(path) {
-  return JSON.parse(readFileSync(path, "utf-8"));
-}
+export const loadJSON = (path) => JSON.parse(readFileSync(path, "utf-8"));
+export const createAjv = () => new Ajv({ allErrors: true });
+export const ajvErrors = (errors) => (errors || []).map((error) => `${error.instancePath || "/"} ${error.message}`);
 
-export function createAjv() {
-  return new Ajv({ allErrors: true });
-}
-
-export function ajvErrors(errors) {
-  return (errors || []).map((err) => `${err.instancePath || "/"} ${err.message}`);
-}
-
-export function validate(ajv, schema, data, label, options = {}) {
+export function validate(ajv, schema, data, label, { quiet = false } = {}) {
   const valid = ajv.validate(schema, data);
-  if (!valid) {
-    if (!options.quiet) {
-      console.error(`FAIL: ${label}`);
-      for (const err of ajv.errors) {
-        console.error(`  ${err.instancePath || "/"} ${err.message}`);
-      }
-    }
-    return false;
+  if (!quiet) {
+    console[valid ? "log" : "error"](`${valid ? "OK" : "FAIL"}: ${label}`);
+    if (!valid) for (const error of ajv.errors) console.error(`  ${error.instancePath || "/"} ${error.message}`);
   }
-  if (!options.quiet) console.log(`OK: ${label}`);
-  return true;
+  return valid;
 }
 
 export function validationCheck(ajv, schema, data, label) {
-  const valid = ajv.validate(schema, data);
-  if (valid) return { ok: true };
-  return {
-    ok: false,
-    message: `${label} failed schema validation`,
-    errors: ajvErrors(ajv.errors),
+  return ajv.validate(schema, data) ? { ok: true } : {
+    ok: false, message: `${label} failed schema validation`, errors: ajvErrors(ajv.errors),
   };
 }
 
 export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
   const policySchema = loadJSON(resolve(roots.packageRoot, "schemas/repo-policy.schema.json"));
   const contractSchema = loadJSON(resolve(roots.packageRoot, "schemas/change-contract.schema.json"));
-  const ajv = createAjv();
-  const quiet = options.quiet || false;
-  const label = options.label || "repo-policy.json";
+  const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
+  let ok = validate(ajv, policySchema, rawPolicy, label, { quiet });
 
-  let ok = true;
-  ok = validate(ajv, policySchema, rawPolicy, label, { quiet }) && ok;
-
-  const profileResult = resolvePolicyProfile(rawPolicy);
-  const policy = profileResult.policy;
-
-  const compileGroups = [
-    ["removed policy fields", checkRemovedPolicyFields(rawPolicy), (e) => e.message],
-    ["profile compilation", profileResult.errors, (e) => e.message],
-    ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (e) => `[${e.rule_id}] invalid regex /${e.pattern}/: ${e.message}`],
-    ["change_profiles compilation", compileChangeProfiles(policy), (e) => e.message],
-    ["anchor policy compilation", compileAnchorPolicy(policy), (e) => e.message],
-    ["integration policy compilation", compileIntegrationPolicy(policy), (e) => e.message],
+  const profile = resolvePolicyProfile(rawPolicy);
+  const policy = profile.policy;
+  const semanticGroups = [
+    ["profile compilation", profile.errors, (error) => error.message],
+    ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (error) => `[${error.rule_id}] invalid regex /${error.pattern}/: ${error.message}`],
+    ["change_profiles compilation", compileChangeProfiles(policy), (error) => error.message],
+    ["anchor policy compilation", compileAnchorPolicy(policy), (error) => error.message],
+    ["integration policy compilation", compileIntegrationPolicy(policy), (error) => error.message],
   ];
-
-  for (const [label, errors, format] of compileGroups) {
-    if (errors.length === 0) continue;
+  for (const [group, errors, format] of semanticGroups) if (errors.length) {
     ok = false;
-    if (!quiet) {
-      console.error(`FAIL: ${label}`);
-      for (const error of errors) {
-        console.error(`  ${format(error)}`);
-      }
-    }
+    if (!quiet) { console.error(`FAIL: ${group}`); for (const error of errors) console.error(`  ${format(error)}`); }
   }
-
-  if (!quiet) {
-    for (const warning of warnReservedPolicyFields(policy)) {
-      console.warn(`WARN: ${warning}`);
-    }
-  }
-
+  if (!quiet) for (const warning of warnReservedPolicyFields(policy)) console.warn(`WARN: ${warning}`);
   return { ok, ajv, policy, contractSchema };
 }
 
 export function loadPolicyRuntime(roots, options = {}) {
-  const rawPolicy = loadJSON(resolve(roots.repoRoot, "repo-policy.json"));
-  return loadPolicyRuntimeFromObject(roots, rawPolicy, options);
+  return loadPolicyRuntimeFromObject(roots, loadJSON(resolve(roots.repoRoot, "repo-policy.json")), options);
 }
