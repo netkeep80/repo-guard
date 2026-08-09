@@ -29,7 +29,7 @@
     "test:profiles": "node tests/test-policy-profiles.mjs",
     "test:repo-root": "node tests/test-repo-root.mjs",
     "test:schemas": "node tests/validate-schemas.mjs",
-    "test:diff": "node tests/test-diff-rules.mjs",
+    "test:diff": "node tests/test-diff-rules.mjs && node tests/test-compression-rules.mjs && node tests/test-policy-delta-rules.mjs",
     "test:compression": "node tests/test-compression-rules.mjs",
     "test:documentation-language": "node tests/test-documentation-language.mjs",
     "test:registry": "node tests/test-rule-registry.mjs",
