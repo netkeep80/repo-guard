@@ -9,33 +9,21 @@ const set = (relation, value, metadata) => compare(relation, array(value), metad
 const exact = (value, metadata) => compare("equal_or_incomparable", value, metadata);
 const entity = (metadata) => compare("required_entity", true, metadata);
 
-/** Canonical semantic program. Front-end policy/contract constructs compile here once;
- * runtime and self-relaxation consume different projections of the same entries. */
 export function compileConstraintProgram(policy = {}, contract = null) {
-  const program = [];
-  const diff = policy.diff_rules || {}, budgets = contract?.budgets || {};
+  const program = [], diff = policy.diff_rules || {}, budgets = contract?.budgets || {};
   const add = (key, runtime = null, strictness = null) => program.push({ key, runtime, strictness });
 
-  add("paths:forbidden",
-    { kind: "forbid_paths", name: "forbidden-paths", patterns: policy.paths?.forbidden || [] },
-    set("superset_stricter", policy.paths?.forbidden, {
-      pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern",
-      message: (item) => `paths.forbidden removed: ${item}`,
-    }));
+  add("paths:forbidden", { kind: "forbid_paths", name: "forbidden-paths", patterns: policy.paths?.forbidden || [] },
+    set("superset_stricter", policy.paths?.forbidden, { pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern", message: (item) => `paths.forbidden removed: ${item}` }));
 
   for (const [field, metric, name] of [
-    ["max_new_docs", "new_docs", "canonical-docs-budget"],
-    ["max_new_files", "new_files", "max-new-files"],
-    ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
+    ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
   ]) {
     const value = diff[field];
-    add(`diff:${field}`,
-      { kind: "max_metric", name, metric, max: budgets[field] ?? value },
-      typeof value === "number" ? scalar("lower_stricter", value, {
-        pointer: `/diff_rules/${field}`, weakenKind: "diff_rule_budget_increased", removeKind: "diff_rule_budget_removed", field,
-        message: (before, after) => `diff_rules.${field}: ${before} -> ${after}`,
-        removeMessage: `diff_rules.${field} removed (was ${value})`,
-      }) : null);
+    add(`diff:${field}`, { kind: "max_metric", name, metric, max: budgets[field] ?? value }, typeof value === "number" ? scalar("lower_stricter", value, {
+      pointer: `/diff_rules/${field}`, weakenKind: "diff_rule_budget_increased", removeKind: "diff_rule_budget_removed", field,
+      message: (before, after) => `diff_rules.${field}: ${before} -> ${after}`, removeMessage: `diff_rules.${field} removed (was ${value})`,
+    }) : null);
   }
 
   for (const [key, field, relation, kind, message] of [
@@ -53,10 +41,8 @@ export function compileConstraintProgram(policy = {}, contract = null) {
   for (const rule of array(policy.size_rules)) {
     const owner = `size:${rule.id}`, pointer = `/size_rules/${rule.id}`;
     add(owner, null, entity({ owner, pointer, removeKind: "size_rule_removed", rule_id: rule.id,
-      removeBefore: { present: true, glob: rule.glob, max: rule.max }, removeAfter: { present: false },
-      removeMessage: `size_rules entry "${rule.id}" removed (glob: ${rule.glob ?? "?"}, max: ${rule.max ?? "?"})` }));
-    add(`${owner}:shape`, null, exact({ scope: rule.scope, metric: rule.metric, glob: rule.glob, applies_to_change_types: rule.applies_to_change_types },
-      { owner, pointer, incomparableMessage: `size_rules[${rule.id}] changed selector/scope semantics` }));
+      removeBefore: { present: true, glob: rule.glob, max: rule.max }, removeAfter: { present: false }, removeMessage: `size_rules entry "${rule.id}" removed (glob: ${rule.glob ?? "?"}, max: ${rule.max ?? "?"})` }));
+    add(`${owner}:shape`, null, exact({ scope: rule.scope, metric: rule.metric, glob: rule.glob, applies_to_change_types: rule.applies_to_change_types }, { owner, pointer, incomparableMessage: `size_rules[${rule.id}] changed selector/scope semantics` }));
     add(`${owner}:max`, null, scalar("lower_stricter", rule.max, { owner, pointer: `${pointer}/max`, weakenKind: "size_rule_max_increased", rule_id: rule.id, message: (a, b) => `size_rules[${rule.id}].max: ${a} -> ${b}` }));
     add(`${owner}:level`, null, scalar("higher_stricter", RANKS.enforcement[rule.level || "blocking"], { owner, raw: rule.level || "blocking", pointer: `${pointer}/level`, weakenKind: "size_rule_level_weakened", rule_id: rule.id, message: (a, b) => `size_rules[${rule.id}].level: ${a} -> ${b}` }));
     add(`${owner}:count`, null, scalar("higher_stricter", RANKS.count[rule.count || "all_tracked"], { owner, raw: rule.count || "all_tracked", pointer: `${pointer}/count`, weakenKind: "size_rule_count_weakened", rule_id: rule.id, message: (a, b) => `size_rules[${rule.id}].count: ${a} -> ${b}` }));
@@ -72,14 +58,17 @@ export function compileConstraintProgram(policy = {}, contract = null) {
     add(owner, null, entity({ owner, pointer, removeKind: "integration_workflow_removed", workflow_id: workflow.id,
       removeBefore: { present: true, role: workflow.role, path: workflow.path }, removeAfter: { present: false }, removeMessage: `integration.workflows entry "${workflow.id}" removed` }));
     const { enforcement, ...otherExpect } = workflow.expect || {};
-    add(`${owner}:shape`, null, exact({ kind: workflow.kind, path: workflow.path, role: workflow.role, profiles: workflow.profiles, expect: otherExpect },
-      { owner, pointer, incomparableMessage: `integration.workflows[${workflow.id}] changed non-monotonic wiring semantics` }));
+    add(`${owner}:shape`, null, exact({ kind: workflow.kind, path: workflow.path, role: workflow.role, profiles: workflow.profiles, expect: otherExpect }, { owner, pointer, incomparableMessage: `integration.workflows[${workflow.id}] changed non-monotonic wiring semantics` }));
     if (enforcement) add(`${owner}:enforcement`, null, scalar("higher_stricter", RANKS.enforcement[enforcement], {
       owner, raw: enforcement, pointer: `${pointer}/expect/enforcement`, weakenKind: "integration_workflow_expectation_weakened", removeKind: "integration_workflow_expectation_removed", workflow_id: workflow.id,
       message: (a, b) => `integration.workflows[${workflow.id}].expect.enforcement: ${a} -> ${b}`, removeMessage: `integration.workflows[${workflow.id}].expect.enforcement removed (was ${enforcement})`,
     }));
   }
 
+  if (array(policy.size_rules).length) add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
+  if (array(policy.registry_rules).length) add("runtime:registry-rules", { kind: "registry_rules", name: "registry-rules", rules: policy.registry_rules });
+  if (array(policy.trace_rules).length) add("runtime:trace-rules", { kind: "trace_rules", name: "trace-rules" });
+  if (policy.change_profiles) add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
   add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: contract?.surface_debt });
   array(policy.cochange_rules).forEach((rule, index) => add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }));
   if (contract) {
@@ -92,54 +81,35 @@ export function compileConstraintProgram(policy = {}, contract = null) {
 
 export const runtimeConstraints = (program) => program.flatMap((entry) => entry.runtime ? [{ key: entry.key, ...entry.runtime }] : []);
 const comparisonConstraints = (policy) => compileConstraintProgram(policy).flatMap((entry) => entry.strictness ? [{ key: entry.key, ...entry.strictness }] : []);
-
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
-  return value;
-}
+function canonical(value) { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])); return value; }
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
-
 function unknownProjection(policy = {}) {
-  const copy = clone(policy) || {};
-  delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules;
-  if (copy.paths) {
-    for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field];
-    if (!Object.keys(copy.paths).length) delete copy.paths;
-  }
+  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules;
+  if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field]; if (!Object.keys(copy.paths).length) delete copy.paths; }
   if (copy.integration) { delete copy.integration.workflows; if (!Object.keys(copy.integration).length) delete copy.integration; }
   return copy;
 }
-
 const relaxation = (entry, before, after = null, kind = entry.weakenKind, message = null, extra = {}) => ({
-  kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}),
-  ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), pointer: entry.pointer, before, after,
+  kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), pointer: entry.pointer, before, after,
   message: message || entry.message?.(before, after) || entry.removeMessage, ...extra,
 });
-const incomparable = (entry, before, after) => ({ kind: "policy_incomparable", pointer: entry.pointer, before, after,
-  message: entry.incomparableMessage || `policy constraint ${entry.key} changed with no proven monotonic ordering` });
+const incomparable = (entry, before, after) => ({ kind: "policy_incomparable", pointer: entry.pointer, before, after, message: entry.incomparableMessage || `policy constraint ${entry.key} changed with no proven monotonic ordering` });
 
 export function compareConstraintPrograms(basePolicy, headPolicy) {
   if (!basePolicy || !headPolicy) return { relation: "equal", relaxations: [], incomparable: [] };
   const base = comparisonConstraints(basePolicy), head = new Map(comparisonConstraints(headPolicy).map((item) => [item.key, item]));
-  const relaxations = [], incomparableChanges = [], removedOwners = new Set();
-  let tightened = false, changed = false;
+  const relaxations = [], incomparableChanges = [], removedOwners = new Set(); let tightened = false, changed = false;
   for (const entry of base) {
     if (entry.owner && removedOwners.has(entry.owner)) continue;
     const next = head.get(entry.key);
-    if (!next) {
-      if (entry.removeKind) { relaxations.push(relaxation(entry, entry.removeBefore ?? entry.raw ?? entry.value, entry.removeAfter ?? null, entry.removeKind, entry.removeMessage)); changed = true; if (entry.relation === "required_entity") removedOwners.add(entry.key); }
-      continue;
-    }
+    if (!next) { if (entry.removeKind) { relaxations.push(relaxation(entry, entry.removeBefore ?? entry.raw ?? entry.value, entry.removeAfter ?? null, entry.removeKind, entry.removeMessage)); changed = true; if (entry.relation === "required_entity") removedOwners.add(entry.key); } continue; }
     if (entry.relation === "lower_stricter" || entry.relation === "higher_stricter") {
       const weaker = entry.relation === "lower_stricter" ? next.value > entry.value : next.value < entry.value;
       const stricter = entry.relation === "lower_stricter" ? next.value < entry.value : next.value > entry.value;
-      if (weaker) relaxations.push(relaxation(entry, entry.raw ?? entry.value, next.raw ?? next.value));
-      tightened ||= stricter; changed ||= next.value !== entry.value;
+      if (weaker) relaxations.push(relaxation(entry, entry.raw ?? entry.value, next.raw ?? next.value)); tightened ||= stricter; changed ||= next.value !== entry.value;
     } else if (["superset_stricter", "subset_stricter"].includes(entry.relation)) {
-      const before = new Set(entry.value), after = new Set(next.value);
-      const removed = entry.value.filter((item) => !after.has(item)), added = next.value.filter((item) => !before.has(item));
+      const before = new Set(entry.value), after = new Set(next.value), removed = entry.value.filter((item) => !after.has(item)), added = next.value.filter((item) => !before.has(item));
       const weaker = entry.relation === "superset_stricter" ? removed : added;
       for (const item of weaker) relaxations.push(relaxation(entry, item, null, entry.weakenKind, entry.message(item), { [entry.itemField]: item }));
       tightened ||= (entry.relation === "superset_stricter" ? added : removed).length > 0; changed ||= removed.length > 0 || added.length > 0;
