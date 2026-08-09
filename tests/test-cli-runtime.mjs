@@ -1,21 +1,16 @@
 import assert from "node:assert/strict";
 import { runCli } from "../src/repo-guard.mjs";
 
-const originalError = console.error;
-const errors = [];
+const originalError = console.error, errors = [];
 console.error = (...args) => errors.push(args.join(" "));
-
+const cases = [
+  [["--definitely-unknown"], /Unknown option/], [["--repo-root"], /--repo-root requires a path argument/],
+  [["check-diff", "--base"], /--base requires a value/], [["check-pr", "extra"], /Unexpected argument for check-pr/],
+  [["validate", "one.json", "two.json"], /Unexpected argument for validate/], [["init", "--bogus"], /Unknown option for init/],
+];
 try {
-  const unknown = await runCli(["--definitely-unknown"]);
-  assert.equal(unknown, 1);
-  assert.match(errors.join("\n"), /Unknown option/);
-
-  errors.length = 0;
-  const missingRoot = await runCli(["--repo-root"]);
-  assert.equal(missingRoot, 1);
-  assert.match(errors.join("\n"), /--repo-root requires a path argument/);
-} finally {
-  console.error = originalError;
-}
-
-console.log("CLI runtime returns exit codes without terminating imported callers.");
+  for (const [args, pattern] of cases) {
+    errors.length = 0; assert.equal(await runCli(args), 1); assert.match(errors.join("\n"), pattern);
+  }
+} finally { console.error = originalError; }
+console.log("Declarative CLI grammar returns errors without terminating imported callers.");
