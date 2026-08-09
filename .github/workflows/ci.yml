@@ -27,7 +27,7 @@ jobs:
       - run: npm ci
 
       - name: Report architecture compression metrics
-        run: npm run compression:metrics
+        run: npm run compression:metrics -- --compare e50d3ce76167f6af4701cdb8abe3718f9f22ae3b
 
       - name: Validate repo-policy.json
         run: npx repo-guard
