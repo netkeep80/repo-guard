@@ -71,8 +71,6 @@ function runDoctor(args = "", opts = {}) {
   return runRepoGuard(args, opts);
 }
 
-// --- self-hosting: doctor runs on this repo ---
-
 console.log("\n--- self-hosting: doctor on repo-guard itself ---");
 {
   const { stdout, code } = runDoctor("doctor");
@@ -87,16 +85,12 @@ console.log("\n--- self-hosting: doctor on repo-guard itself ---");
   expectNotIncludes("no failures in summary", stdout, "1 failed");
 }
 
-// --- self-hosting: doctor catches broken fixture ---
-
 console.log("\n--- self-hosting: doctor catches broken-policy fixture ---");
 {
   const dir = makeTmpDir();
   initGitRepo(dir);
   const brokenPolicy = resolve(projectRoot, "tests/fixtures/broken-policy.json");
-  const dest = resolve(dir, "repo-policy.json");
-  writeFileSync(dest, readFileSync(brokenPolicy, "utf-8"));
-
+  writeFileSync(resolve(dir, "repo-policy.json"), readFileSync(brokenPolicy, "utf-8"));
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 1 for broken policy", code, 1);
   expectIncludes("detects invalid forbid_regex", stdout, "FAIL: repo-policy.json");
@@ -104,106 +98,71 @@ console.log("\n--- self-hosting: doctor catches broken-policy fixture ---");
   expectIncludes("summary shows failure", stdout, "1 failed");
 }
 
-// --- missing repo-policy.json ---
-
 console.log("\n--- missing repo-policy.json ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
-
+  const dir = makeTmpDir(); initGitRepo(dir);
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 1 for missing policy", code, 1);
   expectIncludes("policy FAIL", stdout, "FAIL: repo-policy.json");
   expectIncludes("hint mentions init", stdout, "repo-guard init");
 }
 
-// --- invalid JSON in repo-policy.json ---
-
 console.log("\n--- malformed JSON in repo-policy.json ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
+  const dir = makeTmpDir(); initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), "{ not valid json }}");
-
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 1 for malformed json", code, 1);
   expectIncludes("policy FAIL with parse error", stdout, "FAIL: repo-policy.json");
   expectIncludes("mentions parse error", stdout, "Parse error");
 }
 
-// --- schema-invalid policy ---
-
 console.log("\n--- schema-invalid repo-policy.json ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
+  const dir = makeTmpDir(); initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), JSON.stringify({
-    policy_format_version: "0.3.0",
-    repository_kind: "unknown_kind",
-    paths: {},
-    diff_rules: {}
+    policy_format_version: "0.3.0", repository_kind: "unknown_kind", paths: {}, diff_rules: {}
   }));
-
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 1 for invalid schema", code, 1);
   expectIncludes("policy FAIL with schema error", stdout, "FAIL: repo-policy.json");
   expectIncludes("mentions schema validation", stdout, "Schema validation failed");
 }
 
-// --- integration compile diagnostics surface through validate and doctor ---
-
 console.log("\n--- integration compile diagnostics surface through validate and doctor ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
+  const dir = makeTmpDir(); initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), JSON.stringify({
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
+    policy_format_version: "0.3.0", repository_kind: "tooling",
     integration: {
-      workflows: [
-        {
-          id: "pr-gate",
-          kind: "github_actions",
-          path: ".github/workflows/repo-guard.yml",
-          role: "custom_gate",
-          profiles: ["missing-profile"],
-        },
-      ],
+      workflows: [{ id: "pr-gate", kind: "github_actions", path: ".github/workflows/repo-guard.yml", role: "custom_gate", profiles: ["missing-profile"] }],
       profiles: [],
     },
     paths: { forbidden: [], canonical_docs: ["README.md"], governance_paths: ["repo-policy.json"] },
-    diff_rules: { max_new_docs: 2, max_new_files: 15 },
-    content_rules: [],
-    cochange_rules: [],
+    diff_rules: { max_new_docs: 2, max_new_files: 15 }, content_rules: [], cochange_rules: [],
   }));
 
   const validate = runRepoGuard(`--repo-root ${dir}`);
   expect("validate exit code 1 for invalid integration", validate.code, 1);
   expectIncludes("validate reports integration compilation", validate.stderr, "FAIL: integration policy compilation");
-  expectIncludes("validate reports unknown workflow role", validate.stderr, "role must be one of");
+  expectIncludes("validate reports workflow role through schema", validate.stderr, "/integration/workflows/0/role must be equal to one of the allowed values");
   expectIncludes("validate reports missing profile reference", validate.stderr, "missing-profile");
 
   const doctor = runDoctor(`--repo-root ${dir} doctor`);
   expect("doctor exit code 1 for invalid integration", doctor.code, 1);
   expectIncludes("doctor reports invalid integration policy", doctor.stdout, "Invalid integration policy");
-  expectIncludes("doctor reports unknown workflow role", doctor.stdout, "role must be one of");
+  expectIncludes("doctor reports workflow role through schema", doctor.stdout, "/integration/workflows/0/role must be equal to one of the allowed values");
   expectIncludes("doctor reports missing profile reference", doctor.stdout, "missing-profile");
 }
 
-// --- not a git repo ---
-
 console.log("\n--- not a git repository ---");
 {
-  const dir = makeTmpDir();
-  writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
-
+  const dir = makeTmpDir(); writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 0 (warns, no fails)", code, 0);
   expectIncludes("git WARN for non-repo", stdout, "WARN: git-available");
   expectIncludes("hint mentions git init", stdout, "git init");
 }
-
-// --- non-existent repo root ---
 
 console.log("\n--- non-existent repo root ---");
 {
@@ -212,68 +171,45 @@ console.log("\n--- non-existent repo root ---");
   expectIncludes("root FAIL", stdout, "FAIL: repository-root");
 }
 
-// --- no workflow directory ---
-
 console.log("\n--- no workflow directory ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
-  writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
-
+  const dir = makeTmpDir(); initGitRepo(dir); writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 0 (warns, no fails)", code, 0);
   expectIncludes("workflow WARN for missing dir", stdout, "WARN: workflow-config");
   expectIncludes("hint mentions init", stdout, "repo-guard init");
 }
 
-// --- workflow without repo-guard reference ---
-
 console.log("\n--- workflow without repo-guard reference ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
-  writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
+  const dir = makeTmpDir(); initGitRepo(dir); writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
   mkdirSync(resolve(dir, ".github/workflows"), { recursive: true });
   writeFileSync(resolve(dir, ".github/workflows/ci.yml"), "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hello\n");
-
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 0 (warns, no fails)", code, 0);
   expectIncludes("workflow WARN for no repo-guard ref", stdout, "WARN: workflow-config");
   expectIncludes("mentions no workflow references", stdout, "No workflow references repo-guard");
 }
 
-// --- workflow missing fetch-depth: 0 ---
-
 console.log("\n--- workflow missing fetch-depth ---");
 {
-  const dir = makeTmpDir();
-  initGitRepo(dir);
-  writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
+  const dir = makeTmpDir(); initGitRepo(dir); writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
   mkdirSync(resolve(dir, ".github/workflows"), { recursive: true });
   writeFileSync(resolve(dir, ".github/workflows/ci.yml"), "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npx repo-guard check-pr\n");
-
   const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
   expect("exit code 0 (warns)", code, 0);
   expectIncludes("workflow WARN for missing config", stdout, "WARN: workflow-config");
   expectIncludes("mentions fetch-depth", stdout, "fetch-depth");
 }
 
-// --- pass/warn/fail distinction ---
-
 console.log("\n--- output distinguishes pass / warn / fail ---");
 {
   const { stdout } = runDoctor("doctor");
   expectIncludes("contains PASS", stdout, "PASS:");
-  if (process.env.GITHUB_EVENT_PATH) {
-    // In CI with GH_TOKEN, all checks may PASS — WARN is not guaranteed
-    console.log("PASS: skipping WARN check (CI with full context may have no warnings)");
-  } else {
-    expectIncludes("contains WARN", stdout, "WARN:");
-  }
+  if (process.env.GITHUB_EVENT_PATH) console.log("PASS: skipping WARN check (CI with full context may have no warnings)");
+  else expectIncludes("contains WARN", stdout, "WARN:");
   expectIncludes("contains Summary", stdout, "Summary:");
 }
-
-// --- event context adapts to environment ---
 
 console.log("\n--- event context adapts to environment ---");
 {
@@ -284,16 +220,13 @@ console.log("\n--- event context adapts to environment ---");
     expectIncludes("mentions not in GitHub Actions", stdout, "not in GitHub Actions");
   } else {
     const event = JSON.parse(readFileSync(eventPath, "utf-8"));
-    if (event.pull_request) {
-      expectIncludes("event-context PASS for pull_request event", stdout, "PASS: event-context");
-    } else {
+    if (event.pull_request) expectIncludes("event-context PASS for pull_request event", stdout, "PASS: event-context");
+    else {
       expectIncludes("event-context WARN for non-PR GitHub event", stdout, "WARN: event-context");
       expectIncludes("non-PR event is explained", stdout, "not a pull_request event");
     }
   }
 }
-
-// --- gh/auth are optional unless linked-issue fallback is used ---
 
 console.log("\n--- gh/auth are optional unless linked-issue fallback is used ---");
 {
@@ -302,8 +235,6 @@ console.log("\n--- gh/auth are optional unless linked-issue fallback is used ---
   expectNotIncludes("auth-token is never FAIL (auth only needed for linked-issue fallback)", stdout, "FAIL: auth-token");
 }
 
-// --- --repo-root works with doctor ---
-
 console.log("\n--- --repo-root flag works with doctor ---");
 {
   const { stdout, code } = runDoctor(`--repo-root ${projectRoot} doctor`);
@@ -311,12 +242,6 @@ console.log("\n--- --repo-root flag works with doctor ---");
   expectIncludes("shows repo root path", stdout, projectRoot);
 }
 
-// --- summary ---
-
 console.log("\n=========================");
-if (failures > 0) {
-  console.error(`${failures} test(s) FAILED`);
-  process.exit(1);
-} else {
-  console.log("All doctor tests passed");
-}
+if (failures > 0) { console.error(`${failures} test(s) FAILED`); process.exit(1); }
+else console.log("All doctor tests passed");
