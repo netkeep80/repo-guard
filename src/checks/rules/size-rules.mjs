@@ -30,13 +30,13 @@ function ignoredBySizeRule(path, rule, options = {}) {
   return ignored.length > 0 && matchesAny(path, ignored);
 }
 
-function matchingSizeRulePaths(paths, rule, options = {}) {
+function matchesSizeRule(path, rule, options = {}) {
   const glob = rule.glob || "**";
-  return normalizePathList(paths).filter(
-    (path) =>
-      matchesAny(path, [glob]) &&
-      !ignoredBySizeRule(path, rule, options)
-  );
+  return matchesAny(path, [glob]) && !ignoredBySizeRule(path, rule, options);
+}
+
+function matchingSizeRulePaths(paths, rule, options = {}) {
+  return normalizePathList(paths).filter((path) => matchesSizeRule(path, rule, options));
 }
 
 function sizeRuleApplies(rule, options = {}) {
@@ -61,10 +61,21 @@ export function countTextLines(content) {
 }
 
 function measureSizeRuleFile(path, metric, options = {}) {
+  if (metric === "files") return { skipped: false, actual: 1 };
   const content = readRepositoryBufferFile(path, options);
   if (content === null) return { skipped: true, actual: 0 };
   if (metric === "bytes") return { skipped: false, actual: content.length };
   return { skipped: false, actual: countTextLines(content.toString("utf-8")) };
+}
+
+function measureDirectory(paths, rule, options = {}) {
+  if (rule.metric === "files") return paths.length;
+  let actual = 0;
+  for (const path of paths) {
+    const measured = measureSizeRuleFile(path, rule.metric, options);
+    if (!measured.skipped) actual += measured.actual;
+  }
+  return actual;
 }
 
 function directoryPathFromGlob(glob) {
@@ -78,9 +89,33 @@ function directoryPathFromGlob(glob) {
   return stableParts.length > 0 ? stableParts.join("/") : (normalized || ".");
 }
 
+function calculateGrowth(files, rule, options = {}) {
+  if (rule.max_growth === undefined) return null;
+  if (rule.scope !== "directory") {
+    throw new Error("max_growth is supported only for directory size rules");
+  }
+  if (rule.metric === "bytes") {
+    throw new Error("max_growth for bytes is not supported; use an absolute byte max together with line/file growth");
+  }
+
+  let delta = 0;
+  for (const file of files || []) {
+    if (!matchesSizeRule(file.path, rule, options)) continue;
+    if (rule.metric === "files") {
+      if (file.status === "added") delta += 1;
+      else if (file.status === "deleted") delta -= 1;
+      continue;
+    }
+    delta += (file.addedLines?.length || 0) - (file.deletedLines?.length || 0);
+  }
+  return delta;
+}
+
 function formatSizeViolation(violation) {
-  const unit = violation.metric;
-  return `[${violation.ruleId}] ${violation.path} has ${violation.actual} ${unit} (max ${violation.max})`;
+  if (violation.kind === "growth") {
+    return `[${violation.ruleId}] ${violation.path} changed ${violation.metric}: ${violation.before} -> ${violation.after} (delta ${violation.delta}, max growth ${violation.maxGrowth})`;
+  }
+  return `[${violation.ruleId}] ${violation.path} has ${violation.actual} ${violation.metric} (max ${violation.max})`;
 }
 
 export function checkSizeRules(files, rules = [], options = {}) {
@@ -91,12 +126,14 @@ export function checkSizeRules(files, rules = [], options = {}) {
       advisory_violations: [],
       failed_rules: [],
       details: [],
+      growth: [],
     };
   }
 
   const blockingViolations = [];
   const advisoryViolations = [];
   const errors = [];
+  const growthReports = [];
   const allPaths = allKnownPaths(files, options);
   const changedNonDeletedPaths = changedPaths(files);
   const changedIncludingDeletedPaths = changedPaths(files, { includeDeleted: true });
@@ -113,6 +150,9 @@ export function checkSizeRules(files, rules = [], options = {}) {
 
     try {
       if (rule.scope === "file") {
+        if (rule.metric === "files") {
+          throw new Error("metric=files is supported only for directory size rules");
+        }
         const sourcePaths = count === "changed_only" ? changedNonDeletedPaths : allPaths;
         const paths = matchingSizeRulePaths(sourcePaths, rule, options);
         for (const path of paths) {
@@ -121,6 +161,7 @@ export function checkSizeRules(files, rules = [], options = {}) {
           addViolation({
             ruleId: rule.id,
             rule_id: rule.id,
+            kind: "absolute",
             scope: "file",
             path,
             metric: rule.metric,
@@ -131,23 +172,16 @@ export function checkSizeRules(files, rules = [], options = {}) {
           });
         }
       } else if (rule.scope === "directory") {
-        if (
-          count === "changed_only" &&
-          matchingSizeRulePaths(changedIncludingDeletedPaths, rule, options).length === 0
-        ) {
-          continue;
-        }
+        const changedMatches = matchingSizeRulePaths(changedIncludingDeletedPaths, rule, options);
+        if (count === "changed_only" && changedMatches.length === 0) continue;
 
         const paths = matchingSizeRulePaths(allPaths, rule, options);
-        let actual = 0;
-        for (const path of paths) {
-          const measured = measureSizeRuleFile(path, rule.metric, options);
-          if (!measured.skipped) actual += measured.actual;
-        }
+        const actual = measureDirectory(paths, rule, options);
         if (actual > rule.max) {
           addViolation({
             ruleId: rule.id,
             rule_id: rule.id,
+            kind: "absolute",
             scope: "directory",
             path: directoryPathFromGlob(rule.glob),
             metric: rule.metric,
@@ -157,6 +191,27 @@ export function checkSizeRules(files, rules = [], options = {}) {
             level,
             files: paths,
           });
+        }
+
+        const delta = calculateGrowth(files, rule, options);
+        if (delta !== null) {
+          const report = {
+            ruleId: rule.id,
+            rule_id: rule.id,
+            scope: "directory",
+            path: directoryPathFromGlob(rule.glob),
+            metric: rule.metric,
+            before: actual - delta,
+            after: actual,
+            delta,
+            maxGrowth: rule.max_growth,
+            max_growth: rule.max_growth,
+            level,
+          };
+          growthReports.push(report);
+          if (delta > rule.max_growth) {
+            addViolation({ ...report, kind: "growth" });
+          }
         }
       }
     } catch (error) {
@@ -177,6 +232,7 @@ export function checkSizeRules(files, rules = [], options = {}) {
     details: blockingViolations.map(formatSizeViolation),
     advisory_details: advisoryViolations.map(formatSizeViolation),
     errors,
+    growth: growthReports,
   };
 }
 
@@ -205,6 +261,7 @@ export const sizeRuleFamily = {
           advisory: true,
           size_violations: result.advisory_violations,
           details: result.advisory_details,
+          growth: result.growth,
         },
       });
     }
