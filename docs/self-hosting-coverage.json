@@ -108,7 +108,7 @@
       "content-rules": {
         "status": "self_used",
         "self_use": "repo-policy.json:content_rules",
-        "notes": "Собственная политика запрещает голые TODO без ссылки на задачу и требует русскую обычную прозу во всех изменяемых Markdown-файлах. tests/test-documentation-language.mjs дополнительно проверяет весь текущий набор Markdown."
+        "notes": "Собственная политика запрещает незакреплённые маркеры задач без ссылки на issue и требует русскую обычную прозу на документных Markdown-поверхностях. tests/test-documentation-language.mjs дополнительно проверяет весь текущий набор документации."
       },
       "cochange-rules": {
         "status": "self_used",
