@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedContractFields, warnReservedPolicyFields } from "../src/policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../src/policy-compiler.mjs";
 import { checkMustTouch } from "../src/checks/rules/constraints.mjs";
 import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../src/github-pr.mjs";
 
@@ -31,7 +31,6 @@ describe("semantic compiler hardening", () => {
     const errors = compileForbidRegex([{ id: "bad", forbid_regex: ["[invalid(", "ok"] }]);
     assert.equal(errors.length, 1); assert.equal(errors[0].rule_id, "bad");
   });
-
   it("rejects contradictory and unknown change-profile references", () => {
     const errors = compileChangeProfiles({
       surfaces: { source: ["src/**"] }, new_file_classes: { test: ["tests/**"] },
@@ -39,7 +38,6 @@ describe("semantic compiler hardening", () => {
     });
     assert.ok(errors.some((e) => e.message.includes("missing"))); assert.ok(errors.some((e) => e.message.includes("both allow_surfaces"))); assert.ok(errors.some((e) => e.message.includes("generated")));
   });
-
   it("validates anchor cross-references, duplicate ids and regexes", () => {
     const anchors = { types: { requirement_id: { sources: [{ kind: "json_field", glob: "requirements/**", field: "id" }] } } };
     assert.equal(compileAnchorPolicy({ anchors, trace_rules: [{ id: "resolve", kind: "must_resolve", from_anchor_type: "missing", to_anchor_type: "requirement_id" }] }).length, 1);
@@ -49,7 +47,6 @@ describe("semantic compiler hardening", () => {
     ] }).some((e) => e.message.includes("duplicates")));
     assert.equal(compileAnchorPolicy({ anchors: { types: { ref: { sources: [{ kind: "regex", glob: "src/**", pattern: "[bad" }] } } } }).length, 1);
   });
-
   it("keeps integration compiler focused on ids and cross-references", () => {
     assert.deepEqual(compileIntegrationPolicy({ integration: {
       workflows: [{ id: "gate", kind: "github_actions", path: "ci.yml", role: "repo_guard_pr_gate", profiles: ["strict"] }],
@@ -58,12 +55,7 @@ describe("semantic compiler hardening", () => {
     const invalid = compileIntegrationPolicy({ integration: { workflows: [{ id: "dup" }, { id: "dup", profiles: ["missing"] }] } });
     assert.ok(invalid.some((e) => e.message.includes("duplicates"))); assert.ok(invalid.some((e) => e.message.includes("missing")));
   });
-
-  it("keeps reserved fields visibly non-enforcing", () => {
-    assert.equal(warnReservedContractFields({ overrides: [{ rule_id: "x", reason: "test" }] }).length, 1);
-    assert.equal(warnReservedPolicyFields({ paths: { public_api: ["src/api/**"] } }).length, 1);
-    assert.deepEqual(warnReservedContractFields({ overrides: [] }), []);
-  });
+  it("keeps only the remaining policy reservation visible", () => assert.equal(warnReservedPolicyFields({ paths: { public_api: ["src/api/**"] } }).length, 1));
 });
 
 describe("runtime hardening", () => {
@@ -72,7 +64,6 @@ describe("runtime hardening", () => {
     assert.equal(checkMustTouch(files, ["docs/**", "tests/**"]).ok, true);
     const failed = checkMustTouch(files, ["docs/**"]); assert.equal(failed.ok, false); assert.match(failed.hint, /any-of/);
   });
-
   it("separates mandatory git prerequisites from optional linked-issue gh lookup", () => {
     const originalEvent = process.env.GITHUB_EVENT_PATH; delete process.env.GITHUB_EVENT_PATH;
     try { assert.ok(checkPrerequisites().some((item) => item.includes("GITHUB_EVENT_PATH"))); }
@@ -83,7 +74,6 @@ describe("runtime hardening", () => {
     try { assert.equal(checkPrerequisites().some((item) => item.includes("gh CLI")), false); assert.equal(checkIssueFallbackPrerequisites().some((item) => item.includes("gh CLI")), true); }
     finally { process.env.PATH = originalPath; if (originalEvent !== undefined) process.env.GITHUB_EVENT_PATH = originalEvent; else delete process.env.GITHUB_EVENT_PATH; rmSync(root, { recursive: true, force: true }); }
   });
-
   it("passes shell-looking refs to git without shell execution", () => {
     const root = initTinyRepo("rg-ref-injection-");
     try {
