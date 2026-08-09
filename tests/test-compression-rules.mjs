@@ -1,6 +1,7 @@
 import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
 import { compileConstraintIR, evaluateConstraintIR } from "../src/checks/rules/constraints.mjs";
 import { checkSizeRules } from "../src/checks/rules/size-rules.mjs";
+import { parseMarkdown } from "../src/document-facts.mjs";
 import { classifyPathSets, selectPaths } from "../src/diff/classification.mjs";
 
 let failures = 0;
@@ -12,6 +13,11 @@ function expect(label, actual, expected) {
     console.error(`  expected: ${expected}, got: ${actual}`);
   }
 }
+
+const markdown = parseMarkdown("# Заголовок\nТекст [ссылка](docs/a.md)\n```js\ncode()\n```\nПосле\n");
+expect("document facts parse headings once", markdown.headings[0].text, "Заголовок");
+expect("document facts expose links", markdown.links[0].target, "docs/a.md");
+expect("document facts exclude fenced code from prose", markdown.proseLines.some((line) => line.text.includes("code()")), false);
 
 const selectorFiles = [
   { path: "src/a.mjs", status: "modified", addedLines: ["x"], deletedLines: [] },
