@@ -125,7 +125,7 @@
     },
     "size_rules": {
       "type": "array",
-      "description": "Absolute size constraints for files or directory subtrees, measured in lines or bytes.",
+      "description": "Absolute size and optional growth constraints for files or directory subtrees.",
       "items": { "$ref": "#/definitions/size_rule" }
     },
     "surfaces": {
@@ -294,22 +294,44 @@
     "content_rules": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": ["id", "glob", "mode", "forbid_regex"],
-        "additionalProperties": false,
-        "properties": {
-          "id": { "type": "string" },
-          "glob": { "type": "string" },
-          "mode": {
-            "type": "string",
-            "enum": ["added_lines"]
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["id", "glob", "mode", "forbid_regex"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "glob": { "type": "string" },
+              "mode": { "const": "added_lines" },
+              "forbid_regex": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 1
+              }
+            }
           },
-          "forbid_regex": {
-            "type": "array",
-            "items": { "type": "string" },
-            "minItems": 1
+          {
+            "type": "object",
+            "required": ["id", "glob", "mode", "language"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "glob": { "type": "string" },
+              "mode": { "const": "markdown_language" },
+              "language": { "type": "string", "enum": ["ru"] },
+              "allow_words": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              },
+              "max_unapproved_latin_words_per_line": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 1
+              }
+            }
           }
-        }
+        ]
       }
     },
     "cochange_rules": {
@@ -397,12 +419,16 @@
         },
         "metric": {
           "type": "string",
-          "enum": ["lines", "bytes"]
+          "enum": ["lines", "bytes", "files"]
         },
         "glob": { "$ref": "#/definitions/non_empty_string" },
         "max": {
           "type": "integer",
           "minimum": 0
+        },
+        "max_growth": {
+          "type": "integer",
+          "description": "Maximum allowed base-to-head growth for directory rules. Zero forbids growth; a negative value requires shrinkage. Supported for lines and files."
         },
         "count": {
           "type": "string",
