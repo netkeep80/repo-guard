@@ -69,6 +69,7 @@ export function compileConstraintProgram(policy = {}, contract = null) {
   if (array(policy.registry_rules).length) add("runtime:registry-rules", { kind: "registry_rules", name: "registry-rules", rules: policy.registry_rules });
   if (array(policy.trace_rules).length) add("runtime:trace-rules", { kind: "trace_rules", name: "trace-rules" });
   if (policy.change_profiles) add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
+  if (policy.integration) add("runtime:integration", { kind: "integration", name: "integration" });
   add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: contract?.surface_debt });
   array(policy.cochange_rules).forEach((rule, index) => add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }));
   if (contract) {
