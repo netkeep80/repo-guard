@@ -18,7 +18,8 @@ export function resolveRoots(args) {
       const option = args[i];
       const next = args[i + 1];
       if (!next || next.startsWith("-")) {
-        throw new Error(`${option} requires an argument\n${USAGE}`);
+        const subject = option === "--repo-root" ? "a path" : "a mode";
+        throw new Error(`${option} requires ${subject} argument\n${USAGE}`);
       }
       if (option === "--repo-root") repoRoot = resolve(next);
       else enforcementMode = next;
