@@ -1,11 +1,7 @@
 name: Контракт изменения
-description: Предложить изменение кода с контрактом repo-guard.
+description: Предложить изменение с ChangeIntent и, при необходимости, отдельным GovernanceGrant.
 title: "[change] "
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Опишите предлагаемое изменение и добавьте блок контракта YAML.
   - type: textarea
     id: description
     attributes:
@@ -16,25 +12,18 @@ body:
   - type: textarea
     id: contract
     attributes:
-      label: Контракт изменения
-      description: Вставьте блок контракта repo-guard в формате YAML.
+      label: ChangeIntent
+      description: Обычное намерение изменения. Этот блок сам по себе не даёт управляющих разрешений.
       value: |
         ```repo-guard-yaml
         change_type: feature
         scope:
-          - src/
+          - src/**
         budgets: {}
         anchors:
-          affects:
-            - FR-014
-          implements:
-            - FR-014
-          verifies:
-            - FR-014
-        # Раскомментируйте и перечислите управляющие файлы, изменение которых санкционирует эта задача.
-        # Только контракт в теле ЭТОЙ задачи может разрешить изменение policy.paths.governance_paths.
-        # authorized_governance_paths:
-        #   - repo-policy.json
+          affects: []
+          implements: []
+          verifies: []
         must_touch: []
         must_not_touch: []
         expected_effects:
@@ -42,3 +31,16 @@ body:
         ```
     validations:
       required: true
+  - type: textarea
+    id: governance_grant
+    attributes:
+      label: GovernanceGrant (только для управляющих изменений)
+      description: Оставьте пустым для обычной задачи. Grant доверяется только из связанной задачи, никогда из PR.
+      value: |
+        ```repo-guard-grant
+        authorized_governance_paths:
+          - repo-policy.json
+        allow_policy_relaxation: []
+        ```
+    validations:
+      required: false
