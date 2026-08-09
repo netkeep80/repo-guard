@@ -158,6 +158,10 @@
       "allow_unclassified_surfaces": true,
       "new_files": {
         "allow_classes": ["source", "test", "doc", "script"]
+      },
+      "budgets": {
+        "max_new_docs": 0,
+        "max_net_added_lines": 0
       }
     },
     "docs": {
@@ -183,6 +187,28 @@
       "max": 900,
       "count": "all_tracked",
       "level": "advisory"
+    },
+    {
+      "id": "refactor-source-no-growth",
+      "scope": "directory",
+      "metric": "lines",
+      "glob": "src/**",
+      "max": 50000,
+      "max_growth": 0,
+      "count": "all_tracked",
+      "level": "blocking",
+      "applies_to_change_types": ["refactor"]
+    },
+    {
+      "id": "refactor-schema-no-growth",
+      "scope": "directory",
+      "metric": "lines",
+      "glob": "schemas/**",
+      "max": 20000,
+      "max_growth": 0,
+      "count": "all_tracked",
+      "level": "blocking",
+      "applies_to_change_types": ["refactor"]
     }
   ],
   "diff_rules": {
