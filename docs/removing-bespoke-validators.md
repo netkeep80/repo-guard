@@ -1,27 +1,28 @@
 # Переход с собственных валидаторов
 
-Этот документ описывает миграцию репозитория, который уже использует собственные проверки рабочих процессов, шаблонов PR или документации и хочет передать эти обязанности `repo-guard`.
+Этот документ описывает миграцию репозитория, который уже проверяет workflow, шаблоны PR, документацию или трассировку собственным кодом и хочет передать эти обязанности `repo-guard`.
 
-Не удаляйте работающий валидатор первым шагом. Сначала запустите `repo-guard` рядом с ним в режиме `advisory`, выразите те же инварианты в `repo-policy.json`, получите зелёное подтверждение `validate-integration`, и только затем удаляйте дублирующий код.
+Не удаляйте работающий валидатор первым шагом. Сначала выразите те же инварианты в `repo-policy.json`, запустите `repo-guard` рядом со старым механизмом в режиме `advisory`, сравните результаты и только после доказанной эквивалентности удалите дублирующий код.
+
+После Architecture Compression 2.0 интеграционная проверка не является отдельным rule engine: extractor строит нормализованные facts из workflow, шаблонов и Markdown, а ожидания исполняются через общий `Constraint Program`. Поэтому миграция должна добавлять данные политики, а не новый специальный validator.
 
 ## Последовательность миграции
 
-### 1. Провести инвентаризацию
+### 1. Инвентаризация
 
-Зафиксируйте каждую обязанность существующего валидатора как проверяемое утверждение:
+Для каждой обязанности старого валидатора сформулируйте проверяемое утверждение:
 
-- какой рабочий процесс должен запускаться для PR;
-- какой `Action` или команда выполняет проверку;
-- какие разрешения, переменные токена и глубина истории обязательны;
-- какой шаблон PR или задачи содержит контракт изменения;
+- какой workflow должен запускаться для PR;
+- какой Action или команда выполняется;
+- какие permissions, токены и глубина истории обязательны;
+- какой шаблон содержит ChangeIntent;
 - какие поля контракта обязательны;
-- какие документы должны упоминать политику, профиль или трассировку.
+- какие документы и policy packs должны быть описаны;
+- нужны ли управляющие разрешения и кто может их выдавать.
 
-### 2. Подключить repo-guard в мягком режиме
+### 2. Мягкое подключение
 
-Оставьте старый валидатор включённым и добавьте рабочий процесс на основе `examples/replace-custom-validator-workflow.yml`.
-
-Начальный режим:
+Добавьте рабочий процесс на основе `examples/replace-custom-validator-workflow.yml` и начните с:
 
 ```yaml
 with:
@@ -36,11 +37,9 @@ repo-guard --enforcement advisory validate-integration --format summary
 repo-guard doctor --integration --format summary
 ```
 
-### 3. Перенести проверки рабочего процесса
+### 3. Workflow как факты и ограничения
 
-Ожидания рабочего процесса выражаются в `integration.workflows`.
-
-Пример:
+Ожидания задаются в `integration.workflows`:
 
 ```json
 {
@@ -51,17 +50,10 @@ repo-guard doctor --integration --format summary
   "expect": {
     "events": ["pull_request"],
     "event_types": ["opened", "synchronize", "reopened", "ready_for_review"],
-    "action": {
-      "uses": "netkeep80/repo-guard",
-      "ref_pinning": "semver"
-    },
+    "action": { "uses": "netkeep80/repo-guard", "ref_pinning": "semver" },
     "mode": "check-pr",
     "enforcement": "blocking",
-    "permissions": {
-      "contents": "read",
-      "pull-requests": "read",
-      "issues": "read"
-    },
+    "permissions": { "contents": "read", "pull-requests": "read", "issues": "read" },
     "token_env": ["GH_TOKEN"],
     "summary": true,
     "disallow": ["continue_on_error", "manual_clone", "direct_temp_cli_execution"]
@@ -69,7 +61,9 @@ repo-guard doctor --integration --format summary
 }
 ```
 
-### 4. Перенести проверки шаблонов
+`validate-integration` лишь показывает отдельную проекцию этих общих diagnostics; собственной второй семантики у команды нет.
+
+### 4. Шаблоны и ChangeIntent
 
 Шаблон PR описывается в `integration.templates`:
 
@@ -84,23 +78,13 @@ repo-guard doctor --integration --format summary
 }
 ```
 
-Если контракт может находиться в связанной задаче, форму задачи можно объявить необязательной:
+`scope` после Compression 2.0 является blocking boundary: каждый changed path обязан входить в заявленную область.
 
-```json
-{
-  "id": "change-contract-issue-form",
-  "kind": "github_issue_form",
-  "path": ".github/ISSUE_TEMPLATE/change-contract.yml",
-  "requires_contract_block": true,
-  "optional": true,
-  "required_block_kind": "repo-guard-yaml",
-  "required_contract_fields": ["change_type", "scope", "anchors.affects"]
-}
-```
+Привилегированные поля не входят в ChangeIntent. Если изменение затрагивает `paths.governance_paths`, доверенная связанная issue должна содержать отдельный `repo-guard-grant`. Такой блок в PR не даёт разрешений.
 
-### 5. Перенести проверки документации
+### 5. Документация
 
-Документы описываются в `integration.docs`.
+Документы описываются в `integration.docs`:
 
 ```json
 {
@@ -108,93 +92,59 @@ repo-guard doctor --integration --format summary
   "kind": "markdown",
   "path": "README.md",
   "must_mention": ["repo-guard", "contract", "integration"],
-  "must_reference_files": [
-    "repo-policy.json",
-    ".github/PULL_REQUEST_TEMPLATE.md",
-    ".github/workflows/repo-guard.yml"
-  ],
+  "must_reference_files": ["repo-policy.json", ".github/PULL_REQUEST_TEMPLATE.md"],
   "must_mention_profiles": ["requirements-strict"],
   "must_mention_contract_fields": ["change_type", "scope", "anchors.affects"],
   "profiles": ["requirements-strict"]
 }
 ```
 
-### 6. Подключить профиль requirements-strict при необходимости
+### 6. Policy pack requirements-strict
 
-Если прежний валидатор контролировал трассировку требований, используйте встроенный профиль `requirements-strict` и сузьте его пути под конкретный репозиторий.
+Если прежний валидатор контролировал requirement traceability, используйте data-driven pack:
 
 ```json
 {
   "profile": "requirements-strict",
   "profile_overrides": {
     "strict_heading_docs": ["docs/architecture.md", "docs/requirements.md"],
-    "evidence_surfaces": ["src/**", "tests/**", "docs/**", ".github/workflows/**"]
+    "evidence_surfaces": ["src/**", "tests/**", "docs/**"]
   }
 }
 ```
 
-Контракт PR должен указывать относящиеся к изменению якоря:
+Pack разворачивается в обычные `anchors` и `trace_rules` и не создаёт отдельного runtime engine.
 
-```yaml
-anchors:
-  affects:
-    - FR-014
-  implements:
-    - FR-014
-  verifies:
-    - FR-014
-```
+### 7. Сравнение результатов
 
-### 7. Перевести repo-guard в блокирующий режим
+До cutover прогоните старый и новый механизмы на одинаковых положительных и отрицательных fixtures. Несоответствие исправляется в политике, extractor или общем primitive, но не временным постоянным compatibility layer.
 
-После чистых прогонов в мягком режиме измените рабочий процесс и политику:
+### 8. Blocking и удаление старого кода
 
-```yaml
-with:
-  mode: check-pr
-  enforcement: blocking
-```
+После эквивалентных прогонов переключите `repo-guard` в `blocking` и в том же PR удалите старый валидатор, его package script и workflow step.
 
-```json
-{
-  "enforcement": {
-    "mode": "blocking"
-  }
-}
-```
+Миграция завершена, когда:
 
-### 8. Удалить собственный валидатор
-
-Удалите старый сценарий, его запись в пакетном менеджере и соответствующий шаг рабочего процесса в том же PR, в котором `repo-guard validate-integration --format summary` остаётся зелёным.
-
-Замена считается завершённой, когда:
-
-- `repo-guard` валидирует `repo-policy.json`;
-- `repo-guard validate-integration --format summary` проходит;
-- `repo-guard doctor --integration --format summary` проходит;
-- рабочий процесс PR запускает `repo-guard` в режиме `blocking`;
-- старый валидатор и его временный слой совместимости удалены.
+- `repo-policy.json` валиден;
+- `validate-integration` и `doctor --integration` зелёные;
+- PR gate работает в `blocking`;
+- ChangeIntent и, при необходимости, GovernanceGrant имеют правильные источники доверия;
+- старый validator и временная совместимость удалены.
 
 ## Карта обязанностей
 
-| Обязанность старого валидатора | Замена в repo-guard |
+| Прежняя обязанность | Представление в repo-guard |
 | --- | --- |
-| проверять запуск рабочего процесса для PR | `integration.workflows[].expect.events` и `event_types` |
-| требовать полную историю | диагностика роли `repo_guard_pr_gate` для `fetch-depth: 0` |
-| требовать закреплённый Action | `integration.workflows[].expect.action` и `ref_pinning` |
-| требовать минимальные разрешения | `integration.workflows[].expect.permissions` |
-| требовать токен для связанной задачи | `integration.workflows[].expect.token_env` |
-| запрещать необязательный проход политики | `integration.workflows[].expect.disallow` |
-| запрещать загрузку валидатора во время запуска | `manual_clone` и `direct_temp_cli_execution` |
-| требовать контракт в шаблоне PR | `integration.templates[].requires_contract_block` |
-| требовать конкретные поля контракта | `integration.templates[].required_contract_fields` |
-| требовать документацию политики | `integration.docs[].must_mention` и `must_mention_profiles` |
-| требовать ссылки на файлы политики | `integration.docs[].must_reference_files` |
-| проверять трассировку требований | `profile: "requirements-strict"` и `profile_overrides` |
+| событие и тип PR workflow | `integration.workflows[].expect.events` и `event_types` |
+| полная история | ожидание `fetch-depth: 0` для PR gate |
+| закреплённый Action | `expect.action` и `ref_pinning` |
+| permissions и токен | `expect.permissions`, `token_env`, `required_env` |
+| запрещённые обходы | `expect.disallow` |
+| ChangeIntent в шаблоне | `integration.templates` |
+| документация политики | `integration.docs` |
+| requirement traceability | policy pack `requirements-strict` |
+| управляющее разрешение | отдельный `repo-guard-grant` в доверенной issue |
 
-## Полные примеры
+Полные snippets находятся в `examples/downstream-integration-policy.json` и `examples/replace-custom-validator-workflow.yml`.
 
-- `examples/downstream-integration-policy.json` показывает политику потребителя с `integration` и `requirements-strict`;
-- `examples/replace-custom-validator-workflow.yml` показывает рабочий процесс, который заменяет собственный валидатор.
-
-Главный критерий миграции: после доказанной эквивалентности старый валидатор удаляется, а не остаётся вторым источником правил.
+Главный критерий: после доказанной эквивалентности остаётся один источник семантики — политика, скомпилированная в общий `Constraint Program`.
