@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { describe, it } from "node:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
