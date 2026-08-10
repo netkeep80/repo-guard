@@ -1,43 +1,51 @@
-# Профиль requirements-strict
+# Пакет политики requirements-strict
 
-`requirements-strict` — встроенный профиль политики `repo-guard` для репозиториев, где файлы требований в `JSON` являются каноническим источником трассировки.
+`requirements-strict` — встроенный пакет данных `repo-guard` для репозиториев, где требования в `JSON` являются каноническим источником трассировки.
 
-Профиль включается полем верхнего уровня `profile: "requirements-strict"`. Сначала `repo-guard` валидирует исходную политику по схеме, затем разворачивает профиль в `anchors` и `trace_rules`, после чего компилирует итоговую политику.
+Публичный интерфейс сохраняется: пакет включается через `profile: "requirements-strict"`, а настройки передаются в `profile_overrides`. После проверки по схеме чистый макрокомпилятор разворачивает данные пакета в обычные `anchors` и `trace_rules`; отдельного семейства исполнения или отдельного движка у профиля нет.
 
-Если репозиторий уже хранит явные `anchors` или `trace_rules`, они имеют приоритет над сгенерированными секциями.
+Если политика явно задаёт `anchors` или `trace_rules`, явная секция имеет приоритет над сгенерированной.
+
+## Почему это пакет
+
+Предметные знания — шаблон идентификатора требования, маски путей и набор правил трассировки — хранятся как данные. Общий компилятор подставляет переопределения и материализует стандартную политику. Пакет не получает сетевого доступа, собственного файлового интерфейса или отдельной логики сравнения строгости.
+
+Это соответствует заморозке ядра: новый профиль предпочтительно добавляется как данные и макрос поверх существующих примитивов, а новый примитив ядра требует отдельного реального случая потребителя.
 
 ## Генерируемые якоря
 
-| Тип якоря | Источник |
+| Тип | Источник |
 | --- | --- |
-| `requirement_id` | поля `id` в файлах требований |
-| `requirement_json_req_ref` | ссылки на требования внутри файлов требований |
+| `requirement_id` | поле `id` файлов требований |
+| `requirement_json_req_ref` | ссылки на требования внутри JSON требований |
 | `code_req_ref` | ссылки `@req` в коде, тестах, сценариях и примерах |
-| `doc_req_ref` | ссылки на требования в документации `Markdown` |
-| `doc_heading_req_ref` | ссылки на требования в заголовках строгих документов |
-| `doc_heading_without_req_ref` | заголовки строгих документов без требуемой ссылки |
+| `doc_req_ref` | ссылки на требования в Markdown |
+| `doc_heading_req_ref` | ссылки в заголовках строгих документов |
+| `doc_heading_without_req_ref` | строгие заголовки без обязательной ссылки |
 
-## Генерируемые правила трассировки
+## Генерируемые правила
 
 | Правило | Поведение |
 | --- | --- |
-| `requirement-json-req-refs-must-resolve` | ссылки между требованиями должны разрешаться |
-| `code-req-refs-must-resolve` | ссылки из кода и тестов должны разрешаться |
-| `doc-req-refs-must-resolve` | ссылки из документации должны разрешаться |
-| `doc-heading-req-refs-must-resolve` | ссылки из строгих заголовков должны разрешаться |
-| `doc-headings-must-have-req-ref` | строгие заголовки обязаны содержать ссылку на требование |
+| `requirement-json-req-refs-must-resolve` | ссылки между требованиями разрешаются |
+| `code-req-refs-must-resolve` | ссылки из кода и тестов разрешаются |
+| `doc-req-refs-must-resolve` | ссылки из документации разрешаются |
+| `doc-heading-req-refs-must-resolve` | ссылки из строгих заголовков разрешаются |
+| `doc-headings-must-have-req-ref` | строгий заголовок содержит ссылку на требование |
 | `changed-requirements-need-evidence` | изменение требования требует подтверждающей поверхности |
 | `declared-affected-anchors-need-evidence` | `anchors.affects` требует подтверждения |
 | `declared-implemented-anchors-need-evidence` | `anchors.implements` требует реализации |
 | `declared-verified-anchors-need-evidence` | `anchors.verifies` требует проверки |
 
+Эти правила исполняются общим `Constraint Program` и механизмом трассировки, а не специальным валидатором профиля.
+
 ## Переопределения
 
-Все переопределения задаются непустыми массивами непустых строк.
+Все переопределения — непустые массивы непустых строк.
 
 | Поле | Значение по умолчанию |
 | --- | --- |
-| `requirement_json_globs` | набор `requirements/.../*.json` для канонических требований |
+| `requirement_json_globs` | `requirements/.../*.json` для канонических требований |
 | `code_reference_globs` | код, тесты, сценарии и примеры |
 | `doc_reference_globs` | `*.md`, `docs/**/*.md`, `requirements/**/*.md`, `.github/**/*.md` |
 | `strict_heading_docs` | `docs/**/*.md` |
@@ -53,27 +61,9 @@
 {
   "profile": "requirements-strict",
   "profile_overrides": {
-    "strict_heading_docs": [
-      "docs/architecture.md",
-      "docs/pmm_requirements.md"
-    ],
-    "evidence_surfaces": [
-      "include/**",
-      "src/**",
-      "tests/**",
-      "examples/**",
-      "docs/**",
-      "README.md",
-      "requirements/README.md",
-      "scripts/**",
-      ".github/workflows/**"
-    ],
-    "verification_evidence_surfaces": [
-      "tests/**",
-      "experiments/**",
-      "scripts/**",
-      ".github/workflows/**"
-    ]
+    "strict_heading_docs": ["docs/architecture.md", "docs/pmm_requirements.md"],
+    "evidence_surfaces": ["include/**", "src/**", "tests/**", "docs/**"],
+    "verification_evidence_surfaces": ["tests/**", "scripts/**"]
   }
 }
 ```

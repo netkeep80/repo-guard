@@ -4,7 +4,7 @@
   "exceptions": {
     "rule:advisory-text-rules": "Репозиторий намеренно не хранит дублирующий Markdown ради проверки эвристики похожих документов.",
     "rule:anchor-extraction": "В repo-guard нет собственных requirement anchors; механизм покрывается специализированными тестами.",
-    "profile:requirements-strict": "Встроенный профиль требует канонические requirements/*.json; добавлять фиктивные требования ради dogfooding нельзя.",
+    "profile:requirements-strict": "Data-driven policy pack требует канонические requirements/*.json; добавлять фиктивные требования ради dogfooding нельзя.",
     "contract-format:repo-guard-json": "YAML является канонической собственной формой; второй JSON-блок в шаблоне был бы искусственным покрытием, формат проверяется тестами parser-а."
   }
 }

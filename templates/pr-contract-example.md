@@ -1,7 +1,6 @@
-# Пример контракта изменения для PR
+# Пример ChangeIntent для PR
 
-Добавьте контракт изменения YAML в описание PR, чтобы `repo-guard` мог
-проверить предлагаемые изменения относительно политики репозитория:
+PR объявляет только намерение изменения. `scope` — исполняемая граница, а управляющие разрешения из PR никогда не считаются доверенными.
 
 ```repo-guard-yaml
 change_type: bugfix
@@ -18,17 +17,16 @@ surface_debt:
     max_net_added_lines: 60
   repayment_issue: 123
 anchors:
-  affects:
-    - FR-014
-  implements:
-    - FR-014
-  verifies:
-    - FR-014
+  affects: [FR-014]
+  implements: [FR-014]
+  verifies: [FR-014]
 must_touch:
   - src/pagination.mjs
 must_not_touch:
-  - schemas/
+  - schemas/**
   - repo-policy.json
 expected_effects:
   - Пагинация возвращает правильное количество страниц
 ```
+
+Если PR меняет `paths.governance_paths`, отдельный `repo-guard-grant` должен находиться в доверенной связанной задаче. Добавлять управляющую санкцию в PR бессмысленно: движок не использует её как источник разрешения.
