@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
