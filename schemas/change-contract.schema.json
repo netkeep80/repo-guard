@@ -1,135 +1,49 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/netkeep80/repo-guard/schemas/change-contract.schema.json",
-  "title": "Change Contract",
+  "title": "Change Intent",
   "type": "object",
-  "required": [
-    "change_type",
-    "scope",
-    "budgets",
-    "must_touch",
-    "must_not_touch",
-    "expected_effects"
-  ],
+  "required": ["change_type", "scope", "budgets", "must_touch", "must_not_touch", "expected_effects"],
   "additionalProperties": false,
   "properties": {
-    "change_type": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Declared issue or change type. Policies attach constraints to this value via change_profiles."
-    },
-    "scope": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "minItems": 1
-    },
+    "change_type": { "type": "string", "minLength": 1 },
+    "scope": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
     "budgets": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "max_new_files": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "max_new_docs": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "max_net_added_lines": {
-          "type": "integer",
-          "minimum": 0
-        }
+        "max_new_files": { "type": "integer", "minimum": 0 },
+        "max_new_docs": { "type": "integer", "minimum": 0 },
+        "max_net_added_lines": { "type": "integer", "minimum": 0 }
       }
     },
     "surface_debt": {
-      "type": "object",
-      "description": "Explicit temporary repository surface growth declaration.",
-      "required": ["kind", "reason", "expected_delta", "repayment_issue"],
-      "additionalProperties": false,
+      "type": "object", "required": ["kind", "reason", "expected_delta", "repayment_issue"], "additionalProperties": false,
       "properties": {
-        "kind": {
-          "type": "string",
-          "enum": ["temporary_growth"]
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1
-        },
+        "kind": { "const": "temporary_growth" },
+        "reason": { "type": "string", "minLength": 1 },
         "expected_delta": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": false,
+          "type": "object", "minProperties": 1, "additionalProperties": false,
           "properties": {
-            "max_new_files": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "max_net_added_lines": {
-              "type": "integer",
-              "minimum": 0
-            }
+            "max_new_files": { "type": "integer", "minimum": 0 },
+            "max_net_added_lines": { "type": "integer", "minimum": 0 }
           }
         },
-        "repayment_issue": {
-          "type": "integer",
-          "minimum": 1
-        }
+        "repayment_issue": { "type": "integer", "minimum": 1 }
       }
     },
     "anchors": {
-      "type": "object",
-      "description": "Optional declared anchor intent for the change. Accepted as contract metadata; runtime enforcement is reserved for future versions.",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "affects": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "uniqueItems": true
-        },
-        "implements": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "uniqueItems": true
-        },
-        "verifies": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "uniqueItems": true
-        }
+        "affects": { "$ref": "#/definitions/string_set" },
+        "implements": { "$ref": "#/definitions/string_set" },
+        "verifies": { "$ref": "#/definitions/string_set" }
       }
     },
-    "authorized_governance_paths": {
-      "type": "array",
-      "description": "Glob patterns listing governance files the change is sanctioned to modify. This is a privileged field: it unlocks changes to policy.paths.governance_paths only when present in the repo-guard contract carried by the linked issue body. Declared in the PR body it is accepted by the schema but ignored as an authorization source at runtime, so an AI agent cannot self-authorize policy changes in the same PR that edits them.",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
-    },
-    "must_touch": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Glob patterns; at least one must match a changed file (any-of semantics)"
-    },
-    "must_not_touch": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Glob patterns; none may match any changed file (all-blocking semantics)"
-    },
-    "expected_effects": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
-    "overrides": {
-      "type": "array",
-      "description": "Reserved for future use. Accepted by schema but not enforced at runtime. Non-empty values will produce a diagnostic warning.",
-      "items": {
-        "type": "object",
-        "required": ["rule_id", "reason"],
-        "additionalProperties": false,
-        "properties": {
-          "rule_id": { "type": "string" },
-          "reason": { "type": "string" }
-        }
-      }
-    }
+    "must_touch": { "type": "array", "items": { "type": "string" } },
+    "must_not_touch": { "type": "array", "items": { "type": "string" } },
+    "expected_effects": { "type": "array", "items": { "type": "string" } }
+  },
+  "definitions": {
+    "string_set": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
   }
 }

@@ -19,9 +19,7 @@ export function compileChangeProfiles(policy = {}) {
     for (const field of ["allow_surfaces", "forbid_surfaces", "require_surfaces"]) for (const surface of list(p[field])) {
       if (!surfaces.has(surface)) errors.push({ change_type: changeType, surface, message: `change_profiles["${changeType}"].${field} references unknown surface "${surface}"` });
     }
-    for (const surface of list(p.forbid_surfaces)) if (allowed.has(surface)) {
-      errors.push({ change_type: changeType, surface, message: `change_profiles["${changeType}"] lists surface "${surface}" in both allow_surfaces and forbid_surfaces` });
-    }
+    for (const surface of list(p.forbid_surfaces)) if (allowed.has(surface)) errors.push({ change_type: changeType, surface, message: `change_profiles["${changeType}"] lists surface "${surface}" in both allow_surfaces and forbid_surfaces` });
     const newFiles = object(p.new_files);
     for (const fileClass of [...list(newFiles.allow_classes), ...Object.keys(object(newFiles.max_per_class))]) if (!classes.has(fileClass)) {
       errors.push({ change_type: changeType, class: fileClass, message: `change_profiles["${changeType}"].new_files references unknown class "${fileClass}"` });
@@ -51,17 +49,13 @@ export function compileAnchorPolicy(policy = {}) {
 }
 
 function semanticIntegrationEntries(integration) {
-  return ["workflows", "templates", "docs", "profiles"].flatMap((section) =>
-    list(integration?.[section]).map((entry, index) => ({ section, index, entry: object(entry) })));
+  return ["workflows", "templates", "docs", "profiles"].flatMap((section) => list(integration?.[section]).map((entry, index) => ({ section, index, entry: object(entry) })));
 }
-
 export function compileIntegrationPolicy(policy = {}) {
   const integration = object(policy.integration);
-  if (!policy.integration || Object.keys(integration).length === 0) return [];
+  if (!policy.integration || !Object.keys(integration).length) return [];
   const errors = [], seen = new Map(), profileIds = new Set(), references = [];
-  const entries = semanticIntegrationEntries(integration);
-
-  for (const { section, index, entry } of entries) {
+  for (const { section, index, entry } of semanticIntegrationEntries(integration)) {
     const id = entry.id;
     if (typeof id === "string" && id) {
       if (seen.has(id)) {
@@ -73,21 +67,10 @@ export function compileIntegrationPolicy(policy = {}) {
     for (const profileId of list(entry.profiles)) references.push({ section, index, field: "profiles", profileId });
     if (section === "docs") for (const profileId of list(entry.must_mention_profiles)) references.push({ section, index, field: "must_mention_profiles", profileId });
   }
-
-  for (const ref of references) if (!profileIds.has(ref.profileId)) {
-    errors.push({ section: ref.section, index: ref.index, field: ref.field, profile_id: ref.profileId, message: `integration.${ref.section}[${ref.index}].${ref.field} references unknown integration.profiles id "${ref.profileId}"` });
-  }
+  for (const ref of references) if (!profileIds.has(ref.profileId)) errors.push({ section: ref.section, index: ref.index, field: ref.field, profile_id: ref.profileId, message: `integration.${ref.section}[${ref.index}].${ref.field} references unknown integration.profiles id "${ref.profileId}"` });
   return errors;
 }
 
-export function warnReservedContractFields(contract = {}) {
-  return list(contract.overrides).length
-    ? [`overrides: contains ${contract.overrides.length} entry/entries but is reserved and not enforced at runtime`]
-    : [];
-}
-
 export function warnReservedPolicyFields(policy = {}) {
-  return list(policy.paths?.public_api).length
-    ? ["paths.public_api: defined but reserved for future use; not enforced at runtime"]
-    : [];
+  return list(policy.paths?.public_api).length ? ["paths.public_api: defined but reserved for future use; not enforced at runtime"] : [];
 }
