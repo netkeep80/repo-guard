@@ -45,13 +45,13 @@ function makePolicy(traceRules) {
   };
 }
 
-function runTracePolicy({ traceRules, diffText, contract = null }) {
+function runTracePolicy({ traceRules, diffText, changeIntent = null }) {
   return runPolicyPipeline({
     mode: "check-diff",
     repositoryRoot: "/tmp/repo",
     policy: makePolicy(traceRules),
-    contract,
-    contractSource: contract ? "test" : "none",
+    changeIntent,
+    changeIntentSource: changeIntent ? "test" : "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
     diffText,
     trackedFiles: [],
@@ -122,7 +122,7 @@ console.log("\n--- evidence surfaces satisfy changed requirement rule ---");
     ["tests/fr-001.test.mjs"]);
 }
 
-console.log("\n--- declared contract anchors require evidence ---");
+console.log("\n--- declared ChangeIntent anchors require evidence ---");
 {
   const traceRules = [
     {
@@ -132,7 +132,7 @@ console.log("\n--- declared contract anchors require evidence ---");
       must_touch_any: evidenceSurfaces,
     },
   ];
-  const contract = {
+  const changeIntent = {
     change_type: "feature",
     scope: ["requirements/**"],
     budgets: {},
@@ -150,13 +150,13 @@ console.log("\n--- declared contract anchors require evidence ---");
     "-{\"id\":\"FR-001\",\"title\":\"Old\"}",
     "+{\"id\":\"FR-001\",\"title\":\"New\"}",
   ].join("\n");
-  const result = runTracePolicy({ traceRules, diffText: missingEvidenceDiff, contract });
+  const result = runTracePolicy({ traceRules, diffText: missingEvidenceDiff, changeIntent });
 
   expect("declared affects without evidence fails", result.ok, false);
   const violation = result.violations.find((item) => item.data?.trace_rule === "declared-anchors-need-evidence");
   expect("declared anchor evidence violation is reported", Boolean(violation), true);
   expect("declared anchor evidence violation has distinct kind", violation?.data?.trace_kind, "declared_anchors_require_evidence");
-  expect("declared anchor evidence violation keeps contract field", violation?.data?.contract_field, "anchors.affects");
+  expect("declared anchor evidence keeps staged contract_field DSL", violation?.data?.contract_field, "anchors.affects");
   expect("declared anchor evidence violation keeps declared anchors", violation?.data?.declared_anchors, ["FR-001"]);
   expectIncludes("declared anchor evidence message is distinct", violation?.message, "missing evidence");
 }
@@ -171,7 +171,7 @@ console.log("\n--- evidence surfaces satisfy declared anchor rule ---");
       must_touch_any: evidenceSurfaces,
     },
   ];
-  const contract = {
+  const changeIntent = {
     change_type: "feature",
     scope: ["requirements/**", "docs/**"],
     budgets: {},
@@ -194,7 +194,7 @@ console.log("\n--- evidence surfaces satisfy declared anchor rule ---");
     "+++ b/docs/fr-001.md",
     "+# FR-001",
   ].join("\n");
-  const result = runTracePolicy({ traceRules, diffText, contract });
+  const result = runTracePolicy({ traceRules, diffText, changeIntent });
 
   expect("declared affects with docs evidence passes", result.ok, true);
   expect("declared anchor trace result records declared anchors",
