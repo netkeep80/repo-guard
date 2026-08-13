@@ -12,7 +12,7 @@ export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files"], 
 export function buildPolicyFacts(input) {
   const {
     mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null,
-    contract = null, contractSource = "none", governanceGrant = null,
+    changeIntent = null, changeIntentSource = "none", governanceGrant = null,
     trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText,
     trackedFiles = null, diagnostics = {}, readFile = null,
   } = input;
@@ -26,7 +26,7 @@ export function buildPolicyFacts(input) {
   const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
   const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
   return {
-    mode, repositoryRoot, policy, basePolicy, headPolicy, contract, contractSource, governanceGrant,
+    mode, repositoryRoot, policy, basePolicy, headPolicy, changeIntent, changeIntentSource, governanceGrant,
     trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, documents,
     enforcementMode: enforcement.mode, enforcement,
     diff: { files: { all: allFiles, checked: checkedFiles, skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)) } },
