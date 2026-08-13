@@ -262,7 +262,7 @@ function makeAdvisoryTextRepo() {
   };
 }
 
-function makeSurfaceDebtRepo(contract) {
+function makeSurfaceDebtRepo(changeIntent) {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-debt-"));
   execSync("git init", { cwd: dir, stdio: "pipe" });
   execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
@@ -286,7 +286,7 @@ function makeSurfaceDebtRepo(contract) {
   };
 
   writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  if (contract) writeFileSync(join(dir, "contract.json"), JSON.stringify(contract, null, 2));
+  if (changeIntent) writeFileSync(join(dir, "change-intent.json"), JSON.stringify(changeIntent, null, 2));
   writeFileSync(join(dir, "README.md"), "# Test\n");
   execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
 
@@ -296,7 +296,7 @@ function makeSurfaceDebtRepo(contract) {
 
   return {
     dir,
-    contractPath: contract ? "contract.json" : null,
+    changeIntentPath: changeIntent ? "change-intent.json" : null,
     base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
     head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
   };
@@ -471,7 +471,7 @@ function makeAnchorAwareRepo() {
     cochange_rules: [],
   };
 
-  const contract = {
+  const changeIntent = {
     change_type: "feature",
     scope: ["src/**"],
     budgets: {},
@@ -486,7 +486,7 @@ function makeAnchorAwareRepo() {
   };
 
   writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "contract.json"), JSON.stringify(contract, null, 2));
+  writeFileSync(join(dir, "change-intent.json"), JSON.stringify(changeIntent, null, 2));
   writeFileSync(join(dir, "README.md"), "# Test\n");
   execSync("mkdir -p requirements", { cwd: dir, stdio: "pipe" });
   writeFileSync(join(dir, "requirements", "fr-001.json"), JSON.stringify({ id: "FR-001", title: "Login" }));
@@ -506,7 +506,7 @@ function makeAnchorAwareRepo() {
 
   return {
     dir,
-    contractPath: "contract.json",
+    changeIntentPath: "change-intent.json",
     base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
     head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
   };
@@ -577,7 +577,7 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
     "--format", "json",
     "--base", repo.base,
     "--head", repo.head,
-    "--contract", repo.contractPath,
+    "--change-intent", repo.changeIntentPath,
   ]);
 
   expect("unresolved trace diagnostics fail in blocking mode", result.code, 1);
@@ -609,9 +609,9 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
   ]);
   expect("anchor diagnostics count detected anchors", parsed?.anchors?.stats?.detected, 6);
   expect("anchor diagnostics count changed anchors", parsed?.anchors?.stats?.changed, 4);
-  expect("anchor diagnostics count declared contract anchors", parsed?.anchors?.stats?.declaredByContract, 3);
+  expect("anchor diagnostics count declared ChangeIntent anchors", parsed?.anchors?.stats?.declaredByChangeIntent, 3);
   expect("anchor diagnostics count unresolved anchors", parsed?.anchors?.stats?.unresolved, 2);
-  expect("anchor diagnostics expose declared contract affects", parsed?.anchors?.declaredByContract?.affects[0], "FR-001");
+  expect("anchor diagnostics expose declared ChangeIntent affects", parsed?.anchors?.declaredByChangeIntent?.affects[0], "FR-001");
   expect("anchor diagnostics expose changed anchor file",
     JSON.stringify(parsed?.anchors?.changed.map((anchor) => anchor.file).sort()),
     JSON.stringify(["docs/feature.md", "docs/feature.md", "src/feature.mjs", "src/feature.mjs"]));
@@ -641,7 +641,7 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
     "--format", "summary",
     "--base", repo.base,
     "--head", repo.head,
-    "--contract", repo.contractPath,
+    "--change-intent", repo.changeIntentPath,
   ]);
   expect("anchor summary exit semantics", summary.code, 1);
   expectIncludes("summary reports anchor totals", summary.output, "- Anchors: 6 detected, 4 changed, 3 declared, 2 unresolved");
@@ -656,7 +656,7 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
 console.log("\n--- check-diff with docs change_profile flags forbidden surfaces ---");
 {
   const repo = makeSurfaceRepo();
-  writeFileSync(join(repo.dir, "contract.json"), JSON.stringify({
+  writeFileSync(join(repo.dir, "change-intent.json"), JSON.stringify({
     change_type: "docs",
     scope: ["docs/**"],
     budgets: {},
@@ -671,7 +671,7 @@ console.log("\n--- check-diff with docs change_profile flags forbidden surfaces 
     "--format", "json",
     "--base", repo.base,
     "--head", repo.head,
-    "--contract", "contract.json",
+    "--change-intent", "change-intent.json",
   ]);
 
   expect("change_profiles exit code follows blocking failure", result.code, 1);
@@ -699,7 +699,7 @@ console.log("\n--- check-diff with docs change_profile flags forbidden surfaces 
 console.log("\n--- check-diff honors allow_unclassified_surfaces profile switch ---");
 {
   const repo = makeUnclassifiedOnlySurfaceRepo();
-  writeFileSync(join(repo.dir, "contract.json"), JSON.stringify({
+  writeFileSync(join(repo.dir, "change-intent.json"), JSON.stringify({
     change_type: "docs",
     scope: ["scripts/**"],
     budgets: {},
@@ -714,7 +714,7 @@ console.log("\n--- check-diff honors allow_unclassified_surfaces profile switch 
     "--format", "json",
     "--base", repo.base,
     "--head", repo.head,
-    "--contract", "contract.json",
+    "--change-intent", "change-intent.json",
   ]);
 
   expect("allow_unclassified_surfaces keeps unclassified-only diff passing", result.code, 0);
@@ -733,7 +733,7 @@ console.log("\n--- check-diff honors allow_unclassified_surfaces profile switch 
 
 console.log("\n--- check-diff reports surface debt status in JSON output ---");
 {
-  const contract = {
+  const changeIntent = {
     change_type: "feature",
     scope: ["src/**"],
     budgets: {},
@@ -750,14 +750,14 @@ console.log("\n--- check-diff reports surface debt status in JSON output ---");
     must_not_touch: [],
     expected_effects: ["Temporary growth is explicit and repayable"],
   };
-  const repo = makeSurfaceDebtRepo(contract);
+  const repo = makeSurfaceDebtRepo(changeIntent);
   const result = runGuard([
     "--repo-root", repo.dir,
     "check-diff",
     "--format", "json",
     "--base", repo.base,
     "--head", repo.head,
-    "--contract", repo.contractPath,
+    "--change-intent", repo.changeIntentPath,
   ]);
 
   expect("declared surface debt exit code", result.code, 0);
@@ -777,9 +777,9 @@ console.log("\n--- check-diff reports surface debt status in JSON output ---");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff reports anchor contract schema errors in JSON output ---");
+console.log("\n--- check-diff reports malformed ChangeIntent anchor schema errors in JSON output ---");
 {
-  const contract = {
+  const changeIntent = {
     change_type: "feature",
     scope: ["src/**"],
     budgets: {},
@@ -790,31 +790,31 @@ console.log("\n--- check-diff reports anchor contract schema errors in JSON outp
     must_not_touch: [],
     expected_effects: ["Anchor intent should be unique"],
   };
-  const repo = makeSurfaceDebtRepo(contract);
+  const repo = makeSurfaceDebtRepo(changeIntent);
   const result = runGuard([
     "--repo-root", repo.dir,
     "check-diff",
     "--format", "json",
     "--base", repo.base,
     "--head", repo.head,
-    "--contract", repo.contractPath,
+    "--change-intent", repo.changeIntentPath,
   ]);
 
-  expect("malformed anchor contract exit code", result.code, 1);
+  expect("malformed ChangeIntent anchor exit code", result.code, 1);
   let parsed = null;
   try {
     parsed = JSON.parse(result.stdout);
-    expect("malformed anchor contract stdout is valid json", true, true);
+    expect("malformed ChangeIntent anchor stdout is valid json", true, true);
   } catch (e) {
-    expect("malformed anchor contract stdout is valid json", e.message, "valid json");
+    expect("malformed ChangeIntent anchor stdout is valid json", e.message, "valid json");
   }
-  const contractViolation = parsed?.violations.find((v) => v.rule === "change-contract");
-  expect("anchor contract violation is present", Boolean(contractViolation), true);
-  expect("anchor contract error points to anchors",
-    contractViolation?.details.some((detail) => detail.includes("/anchors/affects")),
+  const changeIntentViolation = parsed?.violations.find((v) => v.rule === "change-contract");
+  expect("ChangeIntent anchor violation is present", Boolean(changeIntentViolation), true);
+  expect("ChangeIntent anchor error points to anchors",
+    changeIntentViolation?.details.some((detail) => detail.includes("/anchors/affects")),
     true);
-  expect("anchor contract error reports duplicate items",
-    contractViolation?.details.some((detail) => detail.includes("duplicate")),
+  expect("ChangeIntent anchor error reports duplicate items",
+    changeIntentViolation?.details.some((detail) => detail.includes("duplicate")),
     true);
 
   rmSync(repo.dir, { recursive: true });
@@ -945,7 +945,7 @@ console.log("\n--- check-diff treats undeclared growth as non-blocking and enfor
     false);
   rmSync(undeclaredRepo.dir, { recursive: true });
 
-  const exceededContract = {
+  const exceededChangeIntent = {
     change_type: "feature",
     scope: ["src/**"],
     budgets: {},
@@ -962,14 +962,14 @@ console.log("\n--- check-diff treats undeclared growth as non-blocking and enfor
     must_not_touch: [],
     expected_effects: ["Temporary growth is explicit and repayable"],
   };
-  const exceededRepo = makeSurfaceDebtRepo(exceededContract);
+  const exceededRepo = makeSurfaceDebtRepo(exceededChangeIntent);
   const exceeded = runGuard([
     "--repo-root", exceededRepo.dir,
     "check-diff",
     "--format", "json",
     "--base", exceededRepo.base,
     "--head", exceededRepo.head,
-    "--contract", exceededRepo.contractPath,
+    "--change-intent", exceededRepo.changeIntentPath,
   ]);
   expect("declared debt exceeded exit code", exceeded.code, 1);
   const exceededParsed = JSON.parse(exceeded.stdout);
