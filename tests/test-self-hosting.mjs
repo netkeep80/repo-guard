@@ -26,7 +26,7 @@ function selfFacts() {
     policy,
     basePolicy: policy,
     headPolicy: policy,
-    contract: { change_type: "refactor" },
+    changeIntent: { change_type: "refactor" },
     trustedGovernancePaths: policy.paths.governance_paths,
     diff: { files: { checked: [] } },
   };
@@ -117,7 +117,7 @@ describe("derived capability inventory", () => {
       assert.ok(id.includes(":"));
       assert.ok(rationale.trim().length > 20, `${id} rationale is too weak`);
     }
-    assert.ok(hasException("contract-format:repo-guard-json"));
+    assert.ok(hasException("change-intent-format:repo-guard-json"));
   });
 });
 
@@ -135,9 +135,10 @@ describe("self-hosted integration and documentation", () => {
     assert.doesNotMatch(read("src/integration-validator.mjs"), /validateRepoGuardPrGate/);
   });
 
-  it("uses YAML contracts itself and documents the exception model", () => {
+  it("uses YAML ChangeIntent blocks itself and documents the exception model", () => {
     assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /```repo-guard-yaml/);
-    assert.match(read(".github/ISSUE_TEMPLATE/change-contract.yml"), /repo-guard-yaml/);
+    const issueTemplatePath = policy.integration.templates.find((entry) => entry.kind === "github_issue_form").path;
+    assert.match(read(issueTemplatePath), /repo-guard-yaml/);
     const doc = read("docs/self-hosting-coverage.md");
     assert.match(doc, /вывод/);
     assert.match(doc, /исключен/);
