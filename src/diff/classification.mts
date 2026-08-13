@@ -1,11 +1,19 @@
+import type { DiffFileStatus, ParsedDiffFile } from "./parser.mjs";
 import { uniqueSorted } from "../utils/collections.mjs";
 import { matchesAny } from "../utils/path-patterns.mjs";
 
-function statusAllowed(file, statuses) {
+type PathSelectorMap = Readonly<Record<string, readonly string[]>>;
+
+interface PathSelectionOptions {
+  statuses?: readonly DiffFileStatus[] | null;
+  excludeStatuses?: readonly DiffFileStatus[];
+}
+
+function statusAllowed(file: ParsedDiffFile, statuses: readonly DiffFileStatus[] | null | undefined): boolean {
   return !statuses || statuses.includes(file.status);
 }
 
-export function selectPaths(files, patterns = [], options = {}) {
+export function selectPaths(files: readonly ParsedDiffFile[], patterns: readonly string[] | null = [], options: PathSelectionOptions = {}): string[] {
   const { statuses = null, excludeStatuses = [] } = options;
   return uniqueSorted(files
     .filter((file) => statusAllowed(file, statuses) && !excludeStatuses.includes(file.status))
@@ -13,12 +21,12 @@ export function selectPaths(files, patterns = [], options = {}) {
     .map((file) => file.path));
 }
 
-export function classifyPathSets(files, selectors = {}, options = {}) {
+export function classifyPathSets(files: readonly ParsedDiffFile[], selectors: PathSelectorMap | null = {}, options: PathSelectionOptions = {}) {
   const candidates = files.filter((file) =>
     statusAllowed(file, options.statuses || null) && !(options.excludeStatuses || []).includes(file.status));
   const selectedPaths = uniqueSorted(candidates.map((file) => file.path));
-  const filesBySelector = {};
-  const selectorsByFile = {};
+  const filesBySelector: Record<string, string[]> = {};
+  const selectorsByFile: Record<string, string[]> = {};
 
   for (const [name, patterns] of Object.entries(selectors || {})) {
     const matched = selectPaths(candidates, patterns);
@@ -37,7 +45,7 @@ export function classifyPathSets(files, selectors = {}, options = {}) {
   };
 }
 
-export function detectTouchedSurfaces(files, surfaces = {}) {
+export function detectTouchedSurfaces(files: readonly ParsedDiffFile[], surfaces: PathSelectorMap | null = {}) {
   const selected = classifyPathSets(files, surfaces);
   return {
     touched_surfaces: selected.touched_selectors,
@@ -46,7 +54,7 @@ export function detectTouchedSurfaces(files, surfaces = {}) {
   };
 }
 
-export function classifyNewFiles(files, classes = {}) {
+export function classifyNewFiles(files: readonly ParsedDiffFile[], classes: PathSelectorMap | null = {}) {
   const selected = classifyPathSets(files, classes, { statuses: ["added"] });
   return {
     new_files: selected.selected_paths,
