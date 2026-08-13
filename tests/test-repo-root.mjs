@@ -213,7 +213,7 @@ function expect(label, actual, expected) {
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
 
-  mkdirSync(join(tmp, "contracts"));
+  mkdirSync(join(tmp, "change-intents"));
   const changeIntent = {
     change_type: "feature",
     scope: ["src/**"],
@@ -222,15 +222,15 @@ function expect(label, actual, expected) {
     must_not_touch: [],
     expected_effects: ["test"],
   };
-  writeFileSync(join(tmp, "contracts", "change.json"), JSON.stringify(changeIntent));
+  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify(changeIntent));
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp} contracts/change.json`,
+      `node src/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("validate resolves ChangeIntent relative to repoRoot", output.includes("OK: repo-policy.json"), true);
-    expect("validate ChangeIntent passes schema check", output.includes("OK: contracts/change.json"), true);
+    expect("validate ChangeIntent passes schema check", output.includes("OK: change-intents/change.json"), true);
   } catch (e) {
     const stderr = e.stderr || e.message || "";
     expect("validate resolves ChangeIntent relative to repoRoot (no ENOENT)", !stderr.includes("ENOENT"), true);
@@ -261,7 +261,7 @@ function expect(label, actual, expected) {
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
 
-  mkdirSync(join(tmp, "contracts"));
+  mkdirSync(join(tmp, "change-intents"));
   const changeIntent = {
     change_type: "feature",
     scope: ["**"],
@@ -270,7 +270,7 @@ function expect(label, actual, expected) {
     must_not_touch: [],
     expected_effects: ["test"],
   };
-  writeFileSync(join(tmp, "contracts", "change.json"), JSON.stringify(changeIntent));
+  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify(changeIntent));
 
   writeFileSync(join(tmp, "hello.txt"), "hello");
   execSync("git add -A && git commit -m init", { cwd: tmp });
@@ -280,7 +280,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD --change-intent contracts/change.json`,
+      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD --change-intent change-intents/change.json`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("check-diff resolves --change-intent relative to repoRoot", output.includes("1 file(s) changed"), true);
@@ -394,7 +394,7 @@ function expect(label, actual, expected) {
   };
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
 
-  mkdirSync(join(tmp, "contracts"));
+  mkdirSync(join(tmp, "change-intents"));
   const changeIntent = {
     change_type: "feature",
     scope: ["src/**"],
@@ -403,15 +403,15 @@ function expect(label, actual, expected) {
     must_not_touch: [],
     expected_effects: ["test"],
   };
-  writeFileSync(join(tmp, "contracts", "change.json"), JSON.stringify(changeIntent));
+  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify(changeIntent));
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp} contracts/change.json`,
+      `node src/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("pre-command --repo-root validate with ChangeIntent works", output.includes("OK: repo-policy.json"), true);
-    expect("pre-command --repo-root validate ChangeIntent passes", output.includes("OK: contracts/change.json"), true);
+    expect("pre-command --repo-root validate ChangeIntent passes", output.includes("OK: change-intents/change.json"), true);
   } catch (e) {
     const stderr = e.stderr || e.message || "";
     expect("pre-command --repo-root validate with ChangeIntent (no ENOENT)", !stderr.includes("ENOENT"), true);
