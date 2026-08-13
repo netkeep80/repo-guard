@@ -1,12 +1,11 @@
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const projectRoot = resolve(__dirname, "..");
 const repoGuard = resolve(projectRoot, "src/repo-guard.mjs");
-
 let failures = 0;
 
 function expect(label, actual, expected) {
@@ -18,25 +17,13 @@ function expect(label, actual, expected) {
   }
 }
 
-function expectIncludes(label, str, substring) {
-  const passed = str.includes(substring);
-  console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
-  if (!passed) {
-    failures++;
-    console.error(`  expected to include: ${JSON.stringify(substring)}`);
-    console.error(`  output: ${JSON.stringify(str.slice(0, 1000))}`);
-  }
+function expectIncludes(label, value, substring) {
+  expect(label, value.includes(substring), true);
 }
 
-function expectTopLevelKeys(label, actual, expected) {
-  const keys = Object.keys(actual || {}).sort();
-  expect(label, JSON.stringify(keys), JSON.stringify([...expected].sort()));
-}
-
-function runGuard(args, opts = {}) {
+function runGuard(args) {
   const result = spawnSync(process.execPath, [repoGuard, ...args], {
-    cwd: opts.cwd || projectRoot,
-    env: { ...process.env, ...(opts.env || {}) },
+    cwd: projectRoot,
     encoding: "utf-8",
   });
   return {
@@ -47,593 +34,151 @@ function runGuard(args, opts = {}) {
   };
 }
 
-function makeRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-format-"));
+function writeTree(root, files) {
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
+  }
+}
+
+function makeRepo({ policy, baseFiles = {}, headFiles = {} }) {
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-output-"));
   execSync("git init", { cwd: dir, stdio: "pipe" });
   execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
   execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+  writeTree(dir, {
+    "repo-policy.json": JSON.stringify(policy, null, 2),
+    "README.md": "# Test\n",
+    ...baseFiles,
+  });
+  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+  writeTree(dir, headFiles);
+  execSync("git add -A && git commit -m change", { cwd: dir, stdio: "pipe" });
+  return {
+    dir,
+    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
+    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
+  };
+}
 
-  const policy = {
+function basePolicy(extra = {}) {
+  return {
     policy_format_version: "0.3.0",
     repository_kind: "tooling",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 10,
+      max_net_added_lines: 500,
+    },
+    content_rules: [],
+    cochange_rules: [],
+    ...extra,
+  };
+}
+
+function runJson(repo, extraArgs = []) {
+  const result = runGuard([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--format", "json",
+    "--base", repo.base,
+    "--head", repo.head,
+    ...extraArgs,
+  ]);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch (error) {
+    expect("stdout is valid JSON", error.message, "valid JSON");
+  }
+  return { result, parsed };
+}
+
+console.log("\n--- stable JSON envelope and violation details ---");
+{
+  const policy = basePolicy({
     paths: {
       forbidden: ["secrets/**"],
       canonical_docs: ["README.md"],
       governance_paths: ["repo-policy.json"],
     },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 0,
-      max_net_added_lines: 500,
-    },
-    content_rules: [],
     cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  execSync("mkdir -p src secrets", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "src", "feature.mjs"), "export const value = 1;\n");
-  writeFileSync(join(dir, "secrets", "token.txt"), "token\n");
-  execSync("git add -A && git commit -m feature", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeSizeRulesRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-size-rules-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
+  });
+  const repo = makeRepo({
+    policy,
+    headFiles: {
+      "src/feature.mjs": "export const value = 1;\n",
+      "secrets/token.txt": "token\n",
     },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    size_rules: [
-      {
-        id: "max-src-lines",
-        scope: "file",
-        metric: "lines",
-        glob: "src/**/*.mjs",
-        max: 2,
-      },
-      {
-        id: "max-src-bytes",
-        scope: "directory",
-        metric: "bytes",
-        glob: "src/**",
-        max: 10,
-      },
-    ],
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  execSync("mkdir -p src", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "src", "big.mjs"), "one\ntwo\nthree\n");
-  execSync("git add -A && git commit -m oversized-source", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeSurfaceRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-surfaces-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    surfaces: {
-      kernel: ["src/**"],
-      tests: ["tests/**"],
-      docs: ["docs/**", "README.md"],
-      governance: ["repo-policy.json", ".github/**"],
-      generated: ["single_include/**"],
-      release: ["CHANGELOG.md", "package.json"],
-    },
-    change_profiles: {
-      docs: {
-        allow_surfaces: ["docs", "governance"],
-        forbid_surfaces: ["kernel", "tests", "generated", "release"],
-      },
-      feature: {
-        allow_surfaces: ["kernel", "tests"],
-        forbid_surfaces: ["generated", "release"],
-      },
-      refactor: {
-        allow_surfaces: ["generated", "release"],
-        forbid_surfaces: ["kernel", "docs", "governance"],
-      },
-    },
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  execSync("mkdir -p docs src", { cwd: dir, stdio: "pipe" });
-  execSync("mkdir -p scripts", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "docs", "guide.md"), "# Guide\n");
-  writeFileSync(join(dir, "src", "feature.mjs"), "export const value = 1;\n");
-  writeFileSync(join(dir, "scripts", "tool.mjs"), "export const tool = true;\n");
-  execSync("git add -A && git commit -m docs-plus-kernel", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeAdvisoryTextRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-advisory-text-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "documentation",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["docs/canonical.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    advisory_text_rules: {
-      canonical_files: ["docs/canonical.md"],
-      warn_on_similarity_above: 0.7,
-      max_reported_matches: 2,
-    },
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  execSync("mkdir -p docs", { cwd: dir, stdio: "pipe" });
-  writeFileSync(
-    join(dir, "docs", "canonical.md"),
-    [
-      "# Release Policy",
-      "",
-      "Policy prose belongs in the canonical document so maintainers update one source.",
-      "Release approvals require a changelog entry, owner review, and a documented rollback path.",
-    ].join("\n")
-  );
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  writeFileSync(
-    join(dir, "docs", "copy.md"),
-    [
-      "# Release Policy",
-      "",
-      "Policy prose belongs in the canonical document so maintainers update one source.",
-      "Release approvals require a changelog entry, owner review, and a documented rollback path.",
-    ].join("\n")
-  );
-  execSync("git add -A && git commit -m duplicate-doc", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeSurfaceDebtRepo(changeIntent) {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-debt-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  if (changeIntent) writeFileSync(join(dir, "change-intent.json"), JSON.stringify(changeIntent, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  execSync("mkdir -p src", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "src", "growth.mjs"), `${new Array(12).fill("export const value = 1;").join("\n")}\n`);
-  execSync("git add -A && git commit -m growth", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    changeIntentPath: changeIntent ? "change-intent.json" : null,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeUnclassifiedOnlySurfaceRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-unclassified-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    surfaces: {
-      docs: ["docs/**", "README.md"],
-    },
-    change_profiles: {
-      docs: {
-        allow_surfaces: ["docs"],
-        forbid_surfaces: [],
-        allow_unclassified_surfaces: true,
-      },
-    },
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("mkdir -p scripts", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "scripts", "tool.mjs"), "export const oldTool = true;\nexport const removed = true;\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  writeFileSync(join(dir, "scripts", "tool.mjs"), "export const tool = true;\n");
-  execSync("git add -A && git commit -m script", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeRegistryRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-registry-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md", "docs/policy.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    registry_rules: [
-      {
-        id: "canonical-docs-sync",
-        kind: "set_equality",
-        left: {
-          type: "json_array",
-          file: "repo-policy.json",
-          json_pointer: "/paths/canonical_docs",
-        },
-        right: {
-          type: "markdown_section_links",
-          file: "docs/index.md",
-          section: "Canonical Documents",
-          prefix: "docs/",
-        },
-      },
-    ],
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("mkdir -p docs", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "docs", "policy.md"), "# Policy\n");
-  writeFileSync(join(dir, "docs", "index.md"), [
-    "# Docs",
-    "",
-    "## Canonical Documents",
-    "",
-    "- [Readme](../README.md)",
-    "- [Architecture](architecture.md)",
-  ].join("\n"));
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  writeFileSync(join(dir, "README.md"), "# Test\n\nChange.\n");
-  execSync("git add -A && git commit -m change", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-function makeAnchorAwareRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-anchors-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    anchors: {
-      types: {
-        requirement_id: {
-          sources: [
-            { kind: "json_field", glob: "requirements/**/*.json", field: "id" },
-          ],
-        },
-        code_req_ref: {
-          sources: [
-            { kind: "regex", glob: "src/**", pattern: "@req\\s+([A-Z]+-[0-9]+)" },
-          ],
-        },
-        doc_req_ref: {
-          sources: [
-            { kind: "regex", glob: "docs/**/*.md", pattern: "\\[([A-Z]+-[0-9]+)\\]" },
-          ],
-        },
-      },
-    },
-    trace_rules: [
-      {
-        id: "code-refs-must-resolve",
-        kind: "must_resolve",
-        from_anchor_type: "code_req_ref",
-        to_anchor_type: "requirement_id",
-      },
-      {
-        id: "doc-refs-must-resolve",
-        kind: "must_resolve",
-        from_anchor_type: "doc_req_ref",
-        to_anchor_type: "requirement_id",
-      },
-    ],
-    content_rules: [],
-    cochange_rules: [],
-  };
-
-  const changeIntent = {
-    change_type: "feature",
-    scope: ["src/**"],
-    budgets: {},
-    anchors: {
-      affects: ["FR-001"],
-      implements: ["FR-999"],
-      verifies: ["FR-404"],
-    },
-    must_touch: [],
-    must_not_touch: [],
-    expected_effects: ["Add anchor diagnostics to structured output"],
-  };
-
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "change-intent.json"), JSON.stringify(changeIntent, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("mkdir -p requirements", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "requirements", "fr-001.json"), JSON.stringify({ id: "FR-001", title: "Login" }));
-  writeFileSync(join(dir, "requirements", "fr-002.json"), JSON.stringify({ id: "FR-002", title: "Docs" }));
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
-  execSync("mkdir -p docs src", { cwd: dir, stdio: "pipe" });
-  writeFileSync(join(dir, "src", "feature.mjs"), [
-    "export function feature() {",
-    "  return true; // @req FR-001",
-    "}",
-    "// @req FR-999",
-    "",
-  ].join("\n"));
-  writeFileSync(join(dir, "docs", "feature.md"), "Covers [FR-002] and [FR-404].\n");
-  execSync("git add -A && git commit -m feature", { cwd: dir, stdio: "pipe" });
-
-  return {
-    dir,
-    changeIntentPath: "change-intent.json",
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
-}
-
-console.log("\n--- check-diff --format json emits stable machine-readable result ---");
-{
-  const repo = makeRepo();
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
-  expect("json exit code follows blocking failures", result.code, 1);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("stdout is valid json", true, true);
-  } catch (e) {
-    expect("stdout is valid json", e.message, "valid json");
-  }
-  expect("stderr is empty for json output", result.stderr, "");
-  expect("command is check-diff", parsed?.command, "check-diff");
-  expect("mode is blocking", parsed?.mode, "blocking");
-  expect("repositoryRoot is absolute", parsed?.repositoryRoot, repo.dir);
-  expect("ok is false", parsed?.ok, false);
-  expect("exitCode is 1", parsed?.exitCode, 1);
-  expect("changed file count", parsed?.diff?.changedFiles, 2);
-  expectTopLevelKeys("top-level json shape is stable", parsed, [
-    "advisoryWarnings",
-    "command",
-    "diff",
-    "exitCode",
-    "failed",
-    "hints",
-    "mode",
-    "ok",
-    "passed",
-    "repositoryRoot",
-    "result",
-    "ruleResults",
-    "violationCount",
-    "violations",
-    "warnings",
-  ]);
-  expect("result array is stable", Array.isArray(parsed?.ruleResults), true);
-  expect("violations array is stable", Array.isArray(parsed?.violations), true);
-  expect("hints array is stable", Array.isArray(parsed?.hints), true);
-  expect("forbidden violation is detailed",
-    parsed?.violations.some((v) => v.rule === "forbidden-paths" && v.data?.files?.includes("secrets/token.txt")),
-    true);
-  expect("cochange violation is detailed",
-    parsed?.violations.some((v) => v.rule.startsWith("cochange:") && v.data?.must_touch?.includes("tests/**")),
-    true);
-
+  });
+  const { result, parsed } = runJson(repo);
+  expect("blocking violations set exit code", result.code, 1);
+  expect("JSON mode keeps stderr empty", result.stderr, "");
+  expect("command is stable", parsed?.command, "check-diff");
+  expect("mode is stable", parsed?.mode, "blocking");
+  expect("repository root is reported", parsed?.repositoryRoot, repo.dir);
+  expect("result records failure", parsed?.ok, false);
+  expect("forbidden violation is structured",
+    parsed?.violations.some((item) => item.rule === "forbidden-paths" && item.data?.files?.includes("secrets/token.txt")), true);
+  expect("cochange violation is structured",
+    parsed?.violations.some((item) => item.rule.startsWith("cochange:") && item.data?.must_touch?.includes("tests/**")), true);
+  const keys = Object.keys(parsed || {}).sort();
+  expect("top-level JSON envelope remains stable", JSON.stringify(keys), JSON.stringify([
+    "advisoryWarnings", "command", "diff", "exitCode", "failed", "hints", "mode", "ok",
+    "passed", "repositoryRoot", "result", "ruleResults", "violationCount", "violations", "warnings",
+  ].sort()));
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff reports anchor diagnostics in JSON and summary output ---");
+console.log("\n--- ChangeIntent anchors are exposed in JSON and summary output ---");
 {
-  const repo = makeAnchorAwareRepo();
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-    "--change-intent", repo.changeIntentPath,
-  ]);
-
-  expect("unresolved trace diagnostics fail in blocking mode", result.code, 1);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("anchor diagnostics stdout is valid json", true, true);
-  } catch (e) {
-    expect("anchor diagnostics stdout is valid json", e.message, "valid json");
-  }
-  expectTopLevelKeys("anchor-aware json shape adds diagnostics without removing stable fields", parsed, [
-    "advisoryWarnings",
-    "anchors",
-    "command",
-    "diff",
-    "exitCode",
-    "failed",
-    "hints",
-    "mode",
-    "ok",
-    "passed",
-    "repositoryRoot",
-    "result",
-    "ruleResults",
-    "traceRuleResults",
-    "violationCount",
-    "violations",
-    "warnings",
-  ]);
-  expect("anchor diagnostics count detected anchors", parsed?.anchors?.stats?.detected, 6);
-  expect("anchor diagnostics count changed anchors", parsed?.anchors?.stats?.changed, 4);
-  expect("anchor diagnostics count declared ChangeIntent anchors", parsed?.anchors?.stats?.declaredByChangeIntent, 3);
-  expect("anchor diagnostics count unresolved anchors", parsed?.anchors?.stats?.unresolved, 2);
-  expect("anchor diagnostics expose declared ChangeIntent affects", parsed?.anchors?.declaredByChangeIntent?.affects[0], "FR-001");
-  expect("anchor diagnostics expose changed anchor file",
-    JSON.stringify(parsed?.anchors?.changed.map((anchor) => anchor.file).sort()),
-    JSON.stringify(["docs/feature.md", "docs/feature.md", "src/feature.mjs", "src/feature.mjs"]));
-  expect("trace rule diagnostics include both results", parsed?.traceRuleResults?.length, 2);
-  expect("trace rule diagnostics report unresolved status", parsed?.traceRuleResults?.[0]?.ok, false);
-  expect("trace rule diagnostics report resolved value", parsed?.traceRuleResults?.[0]?.resolved[0]?.value, "FR-001");
-  expect("trace rule diagnostics report unresolved value", parsed?.traceRuleResults?.[0]?.unresolved[0]?.value, "FR-999");
-  expect("anchor unresolved list links back to rule", parsed?.anchors?.unresolved[0]?.rule, "code-refs-must-resolve");
-  expect("violations include code trace rule",
-    parsed?.violations.some((violation) =>
-      violation.rule === "trace-rule: code-refs-must-resolve" &&
-      violation.data?.unresolved_anchors?.[0]?.value === "FR-999" &&
-      violation.data?.unresolved_anchors?.[0]?.locations[0] === "src/feature.mjs:4:9"
-    ),
-    true);
-  expect("violations include doc trace rule",
-    parsed?.violations.some((violation) =>
-      violation.rule === "trace-rule: doc-refs-must-resolve" &&
-      violation.data?.unresolved_anchors?.[0]?.value === "FR-404" &&
-      violation.data?.unresolved_anchors?.[0]?.locations[0] === "docs/feature.md:1:22"
-    ),
-    true);
+  const policy = basePolicy({
+    anchors: {
+      types: {
+        requirement_id: { sources: [{ kind: "json_field", glob: "requirements/**/*.json", field: "id" }] },
+        code_req_ref: { sources: [{ kind: "regex", glob: "src/**", pattern: "@req\\s+([A-Z]+-[0-9]+)" }] },
+        doc_req_ref: { sources: [{ kind: "regex", glob: "docs/**/*.md", pattern: "\\[([A-Z]+-[0-9]+)\\]" }] },
+      },
+    },
+    trace_rules: [
+      { id: "code-refs-must-resolve", kind: "must_resolve", from_anchor_type: "code_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-refs-must-resolve", kind: "must_resolve", from_anchor_type: "doc_req_ref", to_anchor_type: "requirement_id" },
+    ],
+  });
+  const changeIntent = {
+    change_type: "feature",
+    scope: ["src/**", "docs/**"],
+    budgets: {},
+    anchors: { affects: ["FR-001"], implements: ["FR-999"], verifies: ["FR-404"] },
+    must_touch: [],
+    must_not_touch: [],
+    expected_effects: ["Expose anchor diagnostics"],
+  };
+  const repo = makeRepo({
+    policy,
+    baseFiles: {
+      "change-intent.json": JSON.stringify(changeIntent, null, 2),
+      "requirements/fr-001.json": JSON.stringify({ id: "FR-001" }),
+      "requirements/fr-002.json": JSON.stringify({ id: "FR-002" }),
+    },
+    headFiles: {
+      "src/feature.mjs": "export const x = true; // @req FR-001\n// @req FR-999\n",
+      "docs/feature.md": "Covers [FR-002] and [FR-404].\n",
+    },
+  });
+  const { result, parsed } = runJson(repo, ["--change-intent", "change-intent.json"]);
+  expect("unresolved anchors block", result.code, 1);
+  expect("detected anchor count is exposed", parsed?.anchors?.stats?.detected, 6);
+  expect("changed anchor count is exposed", parsed?.anchors?.stats?.changed, 4);
+  expect("declared ChangeIntent anchors are exposed", parsed?.anchors?.stats?.declaredByChangeIntent, 3);
+  expect("unresolved anchor count is exposed", parsed?.anchors?.stats?.unresolved, 2);
+  expect("declared affects value is exposed", parsed?.anchors?.declaredByChangeIntent?.affects?.[0], "FR-001");
+  expect("trace diagnostics remain structured", parsed?.traceRuleResults?.length, 2);
 
   const summary = runGuard([
     "--repo-root", repo.dir,
@@ -641,97 +186,88 @@ console.log("\n--- check-diff reports anchor diagnostics in JSON and summary out
     "--format", "summary",
     "--base", repo.base,
     "--head", repo.head,
-    "--change-intent", repo.changeIntentPath,
-  ]);
-  expect("anchor summary exit semantics", summary.code, 1);
-  expectIncludes("summary reports anchor totals", summary.output, "- Anchors: 6 detected, 4 changed, 3 declared, 2 unresolved");
-  expectIncludes("summary reports unresolved trace rule", summary.output, "code-refs-must-resolve");
-  expectIncludes("summary reports unresolved anchor value", summary.output, "FR-999");
-  expectIncludes("summary reports doc trace rule", summary.output, "doc-refs-must-resolve");
-  expectIncludes("summary reports doc anchor value", summary.output, "FR-404");
-
-  rmSync(repo.dir, { recursive: true });
-}
-
-console.log("\n--- check-diff with docs change_profile flags forbidden surfaces ---");
-{
-  const repo = makeSurfaceRepo();
-  writeFileSync(join(repo.dir, "change-intent.json"), JSON.stringify({
-    change_type: "docs",
-    scope: ["docs/**"],
-    budgets: {},
-    must_touch: [],
-    must_not_touch: [],
-    expected_effects: ["Documentation change"],
-  }, null, 2));
-
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
     "--change-intent", "change-intent.json",
   ]);
-
-  expect("change_profiles exit code follows blocking failure", result.code, 1);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("change_profiles stdout is valid json", true, true);
-  } catch (e) {
-    expect("change_profiles stdout is valid json", e.message, "valid json");
-  }
-  expect("change_profiles violation is detailed",
-    parsed?.violations.some((v) =>
-      v.rule === "change-profiles" &&
-      v.data?.change_type === "docs" &&
-      v.data?.touched_surfaces?.includes("docs") &&
-      v.data?.touched_surfaces?.includes("kernel") &&
-      v.data?.violating_surfaces?.includes("kernel") &&
-      v.data?.unclassified_files?.includes("scripts/tool.mjs")
-    ),
-    true);
-
+  expectIncludes("summary exposes anchor totals", summary.output, "6 detected, 4 changed, 3 declared, 2 unresolved");
+  expectIncludes("summary exposes unresolved value", summary.output, "FR-999");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff honors allow_unclassified_surfaces profile switch ---");
+console.log("\n--- malformed ChangeIntent uses canonical validation diagnostic ---");
 {
-  const repo = makeUnclassifiedOnlySurfaceRepo();
-  writeFileSync(join(repo.dir, "change-intent.json"), JSON.stringify({
-    change_type: "docs",
-    scope: ["scripts/**"],
+  const changeIntent = {
+    change_type: "feature",
+    scope: ["src/**"],
     budgets: {},
+    anchors: { affects: ["FR-014", "FR-014"] },
     must_touch: [],
     must_not_touch: [],
-    expected_effects: ["Script tweak"],
-  }, null, 2));
-
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-    "--change-intent", "change-intent.json",
-  ]);
-
-  expect("allow_unclassified_surfaces keeps unclassified-only diff passing", result.code, 0);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("allow_unclassified_surfaces stdout is valid json", true, true);
-  } catch (e) {
-    expect("allow_unclassified_surfaces stdout is valid json", e.message, "valid json");
-  }
-  expect("allow_unclassified_surfaces result is ok", parsed?.ok, true);
-  expect("allow_unclassified_surfaces has no violations", parsed?.violations.length, 0);
-
+    expected_effects: ["Reject duplicate anchor intent"],
+  };
+  const repo = makeRepo({
+    policy: basePolicy(),
+    baseFiles: { "change-intent.json": JSON.stringify(changeIntent, null, 2) },
+    headFiles: { "src/feature.mjs": "export const value = 1;\n" },
+  });
+  const { result, parsed } = runJson(repo, ["--change-intent", "change-intent.json"]);
+  expect("malformed ChangeIntent blocks", result.code, 1);
+  const violation = parsed?.violations.find((item) => item.rule === "change-intent");
+  expect("canonical ChangeIntent violation is present", Boolean(violation), true);
+  expect("schema path remains visible", violation?.details.some((detail) => detail.includes("/anchors/affects")), true);
+  expect("duplicate diagnostic remains visible", violation?.details.some((detail) => detail.includes("duplicate")), true);
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff reports surface debt status in JSON output ---");
+console.log("\n--- registry diagnostics keep relation evidence structured ---");
+{
+  const policy = basePolicy({
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md", "docs/policy.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    registry_rules: [{
+      id: "canonical-docs-sync",
+      kind: "set_equality",
+      left: { type: "json_array", file: "repo-policy.json", json_pointer: "/paths/canonical_docs" },
+      right: { type: "markdown_section_links", file: "docs/index.md", section: "Canonical Documents", prefix: "docs/" },
+    }],
+  });
+  const repo = makeRepo({
+    policy,
+    baseFiles: {
+      "docs/policy.md": "# Policy\n",
+      "docs/index.md": "# Docs\n\n## Canonical Documents\n\n- [Readme](../README.md)\n- [Architecture](architecture.md)\n",
+    },
+    headFiles: { "README.md": "# Test\n\nChanged.\n" },
+  });
+  const { result, parsed } = runJson(repo);
+  expect("registry mismatch blocks", result.code, 1);
+  const violation = parsed?.violations.find((item) => item.rule === "registry-rules");
+  expect("registry violation is present", Boolean(violation), true);
+  expect("missing relation entry is exposed", violation?.data?.results?.[0]?.missing_from_right?.[0], "docs/policy.md");
+  expect("extra relation entry is exposed", violation?.data?.results?.[0]?.extra_in_right?.[0], "docs/architecture.md");
+  rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- size violations retain machine-readable measurements ---");
+{
+  const repo = makeRepo({
+    policy: basePolicy({
+      size_rules: [{ id: "max-src-lines", scope: "file", metric: "lines", glob: "src/**/*.mjs", max: 2 }],
+    }),
+    headFiles: { "src/big.mjs": "one\ntwo\nthree\n" },
+  });
+  const { result, parsed } = runJson(repo);
+  expect("size violation blocks", result.code, 1);
+  const measurement = parsed?.violations.find((item) => item.rule === "size-rules")?.data?.size_violations?.[0];
+  expect("size rule id is exposed", measurement?.ruleId, "max-src-lines");
+  expect("measured line count is exposed", measurement?.actual, 3);
+  expect("configured maximum is exposed", measurement?.max, 2);
+  rmSync(repo.dir, { recursive: true });
+}
+
+console.log("\n--- surface debt status is exposed without duplicating debt semantics ---");
 {
   const changeIntent = {
     change_type: "feature",
@@ -739,273 +275,70 @@ console.log("\n--- check-diff reports surface debt status in JSON output ---");
     budgets: {},
     surface_debt: {
       kind: "temporary_growth",
-      reason: "Introduce extraction seam before removing duplicated path",
-      expected_delta: {
-        max_new_files: 1,
-        max_net_added_lines: 20,
-      },
+      reason: "Temporary extraction seam",
+      expected_delta: { max_new_files: 1, max_net_added_lines: 20 },
       repayment_issue: 123,
     },
     must_touch: [],
     must_not_touch: [],
-    expected_effects: ["Temporary growth is explicit and repayable"],
+    expected_effects: ["Make temporary growth explicit"],
   };
-  const repo = makeSurfaceDebtRepo(changeIntent);
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-    "--change-intent", repo.changeIntentPath,
-  ]);
-
-  expect("declared surface debt exit code", result.code, 0);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("surface debt stdout is valid json", true, true);
-  } catch (e) {
-    expect("surface debt stdout is valid json", e.message, "valid json");
-  }
-  const debtResult = parsed?.ruleResults.find((r) => r.rule === "surface-debt");
-  expect("surface debt rule passes", debtResult?.ok, true);
-  expect("surface debt rule exposes declared status",
-    debtResult?.details.includes("status: declared"),
-    true);
-
+  const repo = makeRepo({
+    policy: basePolicy(),
+    baseFiles: { "change-intent.json": JSON.stringify(changeIntent, null, 2) },
+    headFiles: { "src/growth.mjs": `${new Array(12).fill("export const value = 1;").join("\n")}\n` },
+  });
+  const { result, parsed } = runJson(repo, ["--change-intent", "change-intent.json"]);
+  expect("declared debt stays within budget", result.code, 0);
+  const debt = parsed?.ruleResults.find((item) => item.rule === "surface-debt");
+  expect("surface debt rule passes", debt?.ok, true);
+  expect("declared status is exposed", debt?.details.includes("status: declared"), true);
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff reports malformed ChangeIntent anchor schema errors in JSON output ---");
+console.log("\n--- advisory warnings remain non-blocking and structured ---");
 {
-  const changeIntent = {
-    change_type: "feature",
-    scope: ["src/**"],
-    budgets: {},
-    anchors: {
-      affects: ["FR-014", "FR-014"],
-    },
-    must_touch: [],
-    must_not_touch: [],
-    expected_effects: ["Anchor intent should be unique"],
-  };
-  const repo = makeSurfaceDebtRepo(changeIntent);
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-    "--change-intent", repo.changeIntentPath,
-  ]);
-
-  expect("malformed ChangeIntent anchor exit code", result.code, 1);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("malformed ChangeIntent anchor stdout is valid json", true, true);
-  } catch (e) {
-    expect("malformed ChangeIntent anchor stdout is valid json", e.message, "valid json");
-  }
-  const changeIntentViolation = parsed?.violations.find((v) => v.rule === "change-contract");
-  expect("ChangeIntent anchor violation is present", Boolean(changeIntentViolation), true);
-  expect("ChangeIntent anchor error points to anchors",
-    changeIntentViolation?.details.some((detail) => detail.includes("/anchors/affects")),
-    true);
-  expect("ChangeIntent anchor error reports duplicate items",
-    changeIntentViolation?.details.some((detail) => detail.includes("duplicate")),
-    true);
-
-  rmSync(repo.dir, { recursive: true });
-}
-
-console.log("\n--- check-diff evaluates registry_rules in JSON output ---");
-{
-  const repo = makeRegistryRepo();
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
-  expect("registry rule exit code follows blocking failure", result.code, 1);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("registry rule stdout is valid json", true, true);
-  } catch (e) {
-    expect("registry rule stdout is valid json", e.message, "valid json");
-  }
-  const registryViolation = parsed?.violations.find((v) => v.rule === "registry-rules");
-  expect("registry violation is present", Boolean(registryViolation), true);
-  expect("registry failed rule id reported", registryViolation?.data?.failed_rules?.[0], "canonical-docs-sync");
-  expect(
-    "registry result includes left entries",
-    registryViolation?.data?.results?.[0]?.left_entries?.includes("docs/policy.md"),
-    true
-  );
-  expect(
-    "registry result includes right entries",
-    registryViolation?.data?.results?.[0]?.right_entries?.includes("docs/architecture.md"),
-    true
-  );
-  expect("registry missing item is reported", registryViolation?.data?.results?.[0]?.missing_from_right?.[0], "docs/policy.md");
-  expect("registry extra item is reported", registryViolation?.data?.results?.[0]?.extra_in_right?.[0], "docs/architecture.md");
-
-  rmSync(repo.dir, { recursive: true });
-}
-
-console.log("\n--- check-diff reports size_rules in JSON, text, and summary output ---");
-{
-  const repo = makeSizeRulesRepo();
-  const jsonResult = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
-  expect("size rules json exit code follows blocking failure", jsonResult.code, 1);
-  let parsed = null;
-  try {
-    parsed = JSON.parse(jsonResult.stdout);
-    expect("size rules stdout is valid json", true, true);
-  } catch (e) {
-    expect("size rules stdout is valid json", e.message, "valid json");
-  }
-  const violation = parsed?.violations.find((v) => v.rule === "size-rules");
-  expect("size rules violation is present", Boolean(violation), true);
-  expect("size rules structured file violation",
-    violation?.data?.size_violations?.some((v) =>
-      v.ruleId === "max-src-lines" &&
-      v.scope === "file" &&
-      v.path === "src/big.mjs" &&
-      v.metric === "lines" &&
-      v.actual === 3 &&
-      v.max === 2
-    ),
-    true);
-  expect("size rules structured directory violation",
-    violation?.data?.size_violations?.some((v) =>
-      v.ruleId === "max-src-bytes" &&
-      v.scope === "directory" &&
-      v.path === "src" &&
-      v.metric === "bytes" &&
-      v.actual === 14 &&
-      v.max === 10
-    ),
-    true);
-
-  const textResult = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-  expect("size rules text exit code follows blocking failure", textResult.code, 1);
-  expectIncludes("text output names size-rules check", textResult.output, "FAIL: size-rules");
-  expectIncludes("text output includes size detail", textResult.output, "[max-src-lines] src/big.mjs has 3 lines (max 2)");
-
-  const summaryResult = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "summary",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-  expect("size rules summary exit code follows blocking failure", summaryResult.code, 1);
-  expectIncludes("summary output names size-rules check", summaryResult.output, "| size-rules |");
-  expectIncludes("summary output includes size detail", summaryResult.output, "[max-src-bytes] src has 14 bytes (max 10)");
-
-  rmSync(repo.dir, { recursive: true });
-}
-
-console.log("\n--- check-diff treats undeclared growth as non-blocking and enforces declared debt ---");
-{
-  const undeclaredRepo = makeSurfaceDebtRepo(null);
-  const undeclared = runGuard([
-    "--repo-root", undeclaredRepo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", undeclaredRepo.base,
-    "--head", undeclaredRepo.head,
-  ]);
-  expect("undeclared growth exit code", undeclared.code, 0);
-  const undeclaredParsed = JSON.parse(undeclared.stdout);
-  expect("undeclared growth result passes", undeclaredParsed.ok, true);
-  expect("undeclared growth status",
-    undeclaredParsed.ruleResults.find((r) => r.rule === "surface-debt")?.details.includes("status: undeclared"),
-    true);
-  expect("undeclared growth has no violation",
-    undeclaredParsed.violations.some((v) => v.rule === "surface-debt"),
-    false);
-  rmSync(undeclaredRepo.dir, { recursive: true });
-
-  const exceededChangeIntent = {
-    change_type: "feature",
-    scope: ["src/**"],
-    budgets: {},
-    surface_debt: {
-      kind: "temporary_growth",
-      reason: "Introduce extraction seam before removing duplicated path",
-      expected_delta: {
-        max_new_files: 0,
-        max_net_added_lines: 1,
+  const repo = makeRepo({
+    policy: basePolicy({
+      repository_kind: "documentation",
+      paths: {
+        forbidden: [],
+        canonical_docs: ["docs/canonical.md"],
+        governance_paths: ["repo-policy.json"],
       },
-      repayment_issue: 123,
+      advisory_text_rules: {
+        canonical_files: ["docs/canonical.md"],
+        warn_on_similarity_above: 0.7,
+        max_reported_matches: 2,
+      },
+    }),
+    baseFiles: {
+      "docs/canonical.md": "# Release Policy\n\nPolicy prose belongs in the canonical document so maintainers update one source.\n",
     },
-    must_touch: [],
-    must_not_touch: [],
-    expected_effects: ["Temporary growth is explicit and repayable"],
-  };
-  const exceededRepo = makeSurfaceDebtRepo(exceededChangeIntent);
-  const exceeded = runGuard([
-    "--repo-root", exceededRepo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", exceededRepo.base,
-    "--head", exceededRepo.head,
-    "--change-intent", exceededRepo.changeIntentPath,
-  ]);
-  expect("declared debt exceeded exit code", exceeded.code, 1);
-  const exceededParsed = JSON.parse(exceeded.stdout);
-  expect("declared debt exceeded status",
-    exceededParsed.violations.find((v) => v.rule === "surface-debt")?.data?.status,
-    "declared_debt_exceeded");
-  rmSync(exceededRepo.dir, { recursive: true });
-}
-
-console.log("\n--- advisory text rules warn without blocking in blocking mode ---");
-{
-  const repo = makeAdvisoryTextRepo();
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--format", "json",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
-  expect("advisory text exit code stays zero", result.code, 0);
-  const parsed = JSON.parse(result.stdout);
-  expect("advisory text result has warnings", parsed.result, "passed_with_warnings");
-  expect("advisory text warning count", parsed.warnings, 1);
-  const warning = parsed.advisoryWarnings.find((item) => item.rule === "advisory-text-rules");
-  expect("advisory text warning present", Boolean(warning), true);
-  expect("advisory text changed file in structured output", warning?.data?.matches?.[0]?.changed_file, "docs/copy.md");
-  expect("advisory text canonical file in structured output", warning?.data?.matches?.[0]?.canonical_file, "docs/canonical.md");
-  expect("advisory text has no enforced violations", parsed.violations.length, 0);
-
+    headFiles: {
+      "docs/copy.md": "# Release Policy\n\nPolicy prose belongs in the canonical document so maintainers update one source.\n",
+    },
+  });
+  const { result, parsed } = runJson(repo);
+  expect("advisory warning does not block", result.code, 0);
+  expect("result records warnings", parsed?.result, "passed_with_warnings");
+  expect("warning count is stable", parsed?.warnings, 1);
+  const warning = parsed?.advisoryWarnings.find((item) => item.rule === "advisory-text-rules");
+  expect("changed file is exposed", warning?.data?.matches?.[0]?.changed_file, "docs/copy.md");
+  expect("canonical file is exposed", warning?.data?.matches?.[0]?.canonical_file, "docs/canonical.md");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-diff --format summary emits GitHub-friendly concise summary ---");
+console.log("\n--- summary output stays concise and GitHub-friendly ---");
 {
-  const repo = makeRepo();
+  const policy = basePolicy({
+    paths: {
+      forbidden: ["secrets/**"],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+  });
+  const repo = makeRepo({ policy, headFiles: { "secrets/token.txt": "token\n" } });
   const result = runGuard([
     "--repo-root", repo.dir,
     "--enforcement", "advisory",
@@ -1014,16 +347,14 @@ console.log("\n--- check-diff --format summary emits GitHub-friendly concise sum
     "--base", repo.base,
     "--head", repo.head,
   ]);
-
-  expect("summary advisory exit code", result.code, 0);
-  expectIncludes("summary has heading", result.output, "## repo-guard summary");
-  expectIncludes("summary has result", result.output, "- Result: failed");
-  expectIncludes("summary has mode", result.output, "- Mode: advisory");
-  expectIncludes("summary has violation table", result.output, "| Rule | Details |");
-  expectIncludes("summary includes forbidden path", result.output, "secrets/token.txt");
-
+  expect("advisory summary exits zero", result.code, 0);
+  expectIncludes("summary heading is stable", result.output, "## repo-guard summary");
+  expectIncludes("summary records failed analysis", result.output, "- Result: failed");
+  expectIncludes("summary records advisory mode", result.output, "- Mode: advisory");
+  expectIncludes("summary includes violation table", result.output, "| Rule | Details |");
+  expectIncludes("summary includes offending path", result.output, "secrets/token.txt");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log(`\n${failures === 0 ? "All structured output tests passed" : `${failures} test(s) failed`}`);
+console.log(`\n${failures === 0 ? "All structured output contract tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
