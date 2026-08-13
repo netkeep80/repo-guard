@@ -17,7 +17,7 @@ describe("repo-guard init", () => {
   it("creates a valid default scaffold", () => {
     const dir = temp(), result = run(["--repo-root", dir, "init"]);
     assert.equal(result.status, 0);
-    for (const path of ["repo-policy.json", ".github/workflows/repo-guard.yml", ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/change-contract.yml"]) assert.equal(existsSync(join(dir, path)), true, path);
+    for (const path of ["repo-policy.json", ".github/workflows/repo-guard.yml", ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/change-intent.yml"]) assert.equal(existsSync(join(dir, path)), true, path);
     const policy = JSON.parse(readFileSync(join(dir, "repo-policy.json"), "utf-8"));
     assert.equal(policy.repository_kind, "application"); assert.equal(policy.enforcement.mode, "blocking"); assert.equal(validate(policy), true);
   });
@@ -36,7 +36,7 @@ describe("repo-guard init", () => {
     assert.match(workflow, /fetch-depth: 0/); assert.match(workflow, /mode: check-pr/); assert.match(workflow, /GH_TOKEN/);
     const pr = readFileSync(join(dir, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8");
     assert.match(pr, /Намерение изменения/); assert.match(pr, /repo-guard-yaml/); assert.doesNotMatch(pr, /repo-guard-grant/);
-    const issue = readFileSync(join(dir, ".github/ISSUE_TEMPLATE/change-contract.yml"), "utf-8");
+    const issue = readFileSync(join(dir, ".github/ISSUE_TEMPLATE/change-intent.yml"), "utf-8");
     assert.match(issue, /label: ChangeIntent/); assert.match(issue, /repo-guard-grant/); assert.match(issue, /GovernanceGrant/);
   });
 
