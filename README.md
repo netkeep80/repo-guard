@@ -48,8 +48,9 @@ npx repo-guard
 
 ```bash
 npm ci
+npm run check:dist
 npm test
-node src/repo-guard.mjs
+node dist/repo-guard.mjs
 ```
 
 ## Быстрый старт
