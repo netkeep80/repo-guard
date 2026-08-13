@@ -44,6 +44,7 @@ function checkProfileNewFiles(files, classes, rule, changeType, detected = null)
 
 export function checkChangeProfile(files, policy, changeType, derived = {}) {
   const profiles = policy.change_profiles || {};
+  if (changeType === "governance") return { ok: true, change_type: changeType, delegated_to: "governance-change-authorization" };
   if (!Object.keys(profiles).length) return { ok: true };
   if (!changeType) return { ok: false, message: "change_profiles requires a declared change_type", change_type: null, hint: "Set change_type in the ChangeIntent." };
   const profile = profiles[changeType];
