@@ -1,11 +1,11 @@
-import { defaultRuleFamilies } from "../src/checks/default-rule-families.mjs";
-import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
-import { checkChangeProfile } from "../src/checks/rules/change-profiles.mjs";
-import { compileConstraintIR, evaluateConstraintIR } from "../src/checks/rules/constraints.mjs";
-import { comparePolicyStrictness } from "../src/checks/rules/policy-delta-rules.mjs";
-import { checkSizeRules } from "../src/checks/rules/size-rules.mjs";
-import { parseMarkdown } from "../src/document-facts.mjs";
-import { classifyPathSets, selectPaths } from "../src/diff/classification.mjs";
+import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
+import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
+import { checkChangeProfile } from "../dist/checks/rules/change-profiles.mjs";
+import { compileConstraintIR, evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
+import { comparePolicyStrictness } from "../dist/checks/rules/policy-delta-rules.mjs";
+import { checkSizeRules } from "../dist/checks/rules/size-rules.mjs";
+import { parseMarkdown } from "../dist/document-facts.mjs";
+import { classifyPathSets, selectPaths } from "../dist/diff/classification.mjs";
 
 let failures = 0;
 function expect(label, actual, expected) {
