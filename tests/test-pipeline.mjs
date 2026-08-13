@@ -132,6 +132,20 @@ console.log("\n--- shared policy pipeline normalizes facts and checks ---");
   expect("pipeline runs existing checks", result.violations.some((violation) => violation.rule.startsWith("cochange:")), true);
 }
 
+console.log("\n--- pipeline accepts only canonical ChangeIntent input ---");
+{
+  const changeIntent = {
+    change_type: "refactor",
+    must_touch: [],
+    must_not_touch: ["src/**"],
+    expected_effects: ["exercise ChangeIntent boundary"],
+  };
+  const canonical = runEquivalentInput({ changeIntent, changeIntentSource: "test" });
+  const legacy = runEquivalentInput({ contract: changeIntent, contractSource: "legacy test" });
+  expect("canonical ChangeIntent reaches runtime constraints", canonical.violations.some((violation) => violation.rule === "must-not-touch"), true);
+  expect("legacy contract input is not a supported alias", legacy.violations.some((violation) => violation.rule === "must-not-touch"), false);
+}
+
 console.log("\n--- equivalent command inputs share one result shape ---");
 {
   const checkDiffStyle = runEquivalentInput();
