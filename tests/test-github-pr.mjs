@@ -4,11 +4,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
-import { loadGitHubEvent, resolvePRChangeIntentFacts } from "../src/github-pr.mjs";
-import { extractLinkedIssueNumbers, resolveChangeIntent } from "../src/change-intent.mjs";
+import { loadGitHubEvent, resolvePRChangeIntentFacts } from "../dist/github-pr.mjs";
+import { extractLinkedIssueNumbers, resolveChangeIntent } from "../dist/change-intent.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
-const cli = resolve(projectRoot, "src/repo-guard.mjs");
+const cli = resolve(projectRoot, "dist/repo-guard.mjs");
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
 const intent = (scope = ["src/**"], type = "feature") => `\`\`\`repo-guard-yaml
 change_type: ${type}
