@@ -128,7 +128,7 @@ console.log("\n--- declared ChangeIntent anchors require evidence ---");
     {
       id: "declared-anchors-need-evidence",
       kind: "declared_anchors_require_evidence",
-      contract_field: "anchors.affects",
+      change_intent_field: "anchors.affects",
       must_touch_any: evidenceSurfaces,
     },
   ];
@@ -156,7 +156,7 @@ console.log("\n--- declared ChangeIntent anchors require evidence ---");
   const violation = result.violations.find((item) => item.data?.trace_rule === "declared-anchors-need-evidence");
   expect("declared anchor evidence violation is reported", Boolean(violation), true);
   expect("declared anchor evidence violation has distinct kind", violation?.data?.trace_kind, "declared_anchors_require_evidence");
-  expect("declared anchor evidence keeps staged contract_field DSL", violation?.data?.contract_field, "anchors.affects");
+  expect("declared anchor evidence keeps change_intent_field DSL", violation?.data?.change_intent_field, "anchors.affects");
   expect("declared anchor evidence violation keeps declared anchors", violation?.data?.declared_anchors, ["FR-001"]);
   expectIncludes("declared anchor evidence message is distinct", violation?.message, "missing evidence");
 }
@@ -167,7 +167,7 @@ console.log("\n--- evidence surfaces satisfy declared anchor rule ---");
     {
       id: "declared-anchors-need-evidence",
       kind: "declared_anchors_require_evidence",
-      contract_field: "anchors.affects",
+      change_intent_field: "anchors.affects",
       must_touch_any: evidenceSurfaces,
     },
   ];
