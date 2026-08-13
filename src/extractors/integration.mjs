@@ -113,7 +113,7 @@ function fieldPathsFromObject(value, prefix = "") {
   });
 }
 
-function parseContractBlock(block) {
+function parseChangeIntentBlock(block) {
   try {
     const data = block.language === "repo-guard-json" ? parseJson(block.content) : parseYaml(block.content);
     return { ok: true, fieldNames: isPlainObject(data) ? Object.keys(data).sort() : [], fieldPaths: uniqueSorted(fieldPathsFromObject(data)) };
@@ -122,11 +122,11 @@ function parseContractBlock(block) {
   }
 }
 
-function extractContractBlocks(markdown) {
+function extractChangeIntentBlocks(markdown) {
   const blocks = [];
   const errors = [];
   for (const block of markdown.codeBlocks.filter((item) => ["repo-guard-yaml", "repo-guard-json"].includes(item.language))) {
-    const parsed = parseContractBlock(block);
+    const parsed = parseChangeIntentBlock(block);
     blocks.push({
       format: block.language, startLine: block.startLine, endLine: block.endLine, ok: parsed.ok,
       fieldNames: parsed.fieldNames || [], fieldPaths: parsed.fieldPaths || [],
@@ -137,15 +137,15 @@ function extractContractBlocks(markdown) {
 }
 
 function templateFactFromMarkdown(entry, markdown) {
-  const { blocks, errors } = extractContractBlocks(markdown);
+  const { blocks, errors } = extractChangeIntentBlocks(markdown);
   return {
     fact: {
       id: entry.id, kind: entry.kind, path: entry.path, present: true, optional: Boolean(entry.optional),
-      requiresContractBlock: Boolean(entry.requires_contract_block), requiredBlockKind: entry.required_block_kind || null,
-      requiredContractFields: entry.required_contract_fields || [],
+      requiresChangeIntentBlock: Boolean(entry.requires_change_intent_block), requiredBlockKind: entry.required_block_kind || null,
+      requiredChangeIntentFields: entry.required_change_intent_fields || [],
       hasRepoGuardYamlBlock: blocks.some((block) => block.format === "repo-guard-yaml"),
       hasRepoGuardJsonBlock: blocks.some((block) => block.format === "repo-guard-json"),
-      contractBlocks: blocks, contractFieldNames: uniqueSorted(blocks.flatMap((block) => block.fieldPaths)),
+      changeIntentBlocks: blocks, changeIntentFieldNames: uniqueSorted(blocks.flatMap((block) => block.fieldPaths)),
       headings: markdown.headings, codeBlocks: markdown.codeBlocks.map(publicCodeBlock),
     }, errors,
   };
@@ -163,18 +163,18 @@ function collectIssueFormTemplateFacts(entry, content) {
   for (const source of collectStringValues(parseYaml(content))) {
     const markdown = parseMarkdown(source.value);
     errors.push(...markdown.errors.map((error) => ({ message: `${source.sourcePath}: ${error.message}` })));
-    const extracted = extractContractBlocks(markdown);
+    const extracted = extractChangeIntentBlocks(markdown);
     blocks.push(...extracted.blocks.map((block) => ({ ...block, sourcePath: source.sourcePath })));
     errors.push(...extracted.errors.map((error) => ({ message: `${source.sourcePath}: ${error.message}` })));
   }
   return {
     fact: {
       id: entry.id, kind: entry.kind, path: entry.path, present: true, optional: Boolean(entry.optional),
-      requiresContractBlock: Boolean(entry.requires_contract_block), requiredBlockKind: entry.required_block_kind || null,
-      requiredContractFields: entry.required_contract_fields || [],
+      requiresChangeIntentBlock: Boolean(entry.requires_change_intent_block), requiredBlockKind: entry.required_block_kind || null,
+      requiredChangeIntentFields: entry.required_change_intent_fields || [],
       hasRepoGuardYamlBlock: blocks.some((block) => block.format === "repo-guard-yaml"),
       hasRepoGuardJsonBlock: blocks.some((block) => block.format === "repo-guard-json"),
-      contractBlocks: blocks, contractFieldNames: uniqueSorted(blocks.flatMap((block) => block.fieldPaths)),
+      changeIntentBlocks: blocks, changeIntentFieldNames: uniqueSorted(blocks.flatMap((block) => block.fieldPaths)),
     }, errors,
   };
 }
@@ -182,9 +182,9 @@ function collectIssueFormTemplateFacts(entry, content) {
 function missingOptionalTemplateFact(entry) {
   return {
     id: entry.id, kind: entry.kind, path: entry.path, present: false, optional: true,
-    requiresContractBlock: Boolean(entry.requires_contract_block), requiredBlockKind: entry.required_block_kind || null,
-    requiredContractFields: entry.required_contract_fields || [], hasRepoGuardYamlBlock: false, hasRepoGuardJsonBlock: false,
-    contractBlocks: [], contractFieldNames: [], headings: [], codeBlocks: [],
+    requiresChangeIntentBlock: Boolean(entry.requires_change_intent_block), requiredBlockKind: entry.required_block_kind || null,
+    requiredChangeIntentFields: entry.required_change_intent_fields || [], hasRepoGuardYamlBlock: false, hasRepoGuardJsonBlock: false,
+    changeIntentBlocks: [], changeIntentFieldNames: [], headings: [], codeBlocks: [],
   };
 }
 
@@ -224,7 +224,7 @@ function collectDocFacts(entry, content, markdown) {
       mentions: (entry.must_mention || []).map((term) => mentionFact(content, term)),
       fileReferences: (entry.must_reference_files || []).map((term) => mentionFact(content, term)),
       profileMentions: (entry.must_mention_profiles || []).map((term) => mentionFact(content, term)),
-      contractFieldMentions: (entry.must_mention_contract_fields || []).map((term) => mentionFact(content, term)),
+      changeIntentFieldMentions: (entry.must_mention_change_intent_fields || []).map((term) => mentionFact(content, term)),
     }, errors: markdown.errors,
   };
 }
