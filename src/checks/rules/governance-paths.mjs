@@ -10,11 +10,13 @@ const trusted = (authorizer) => Boolean(authorizer && (
 
 export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null }) {
   const patterns = expandGovernancePatterns(governancePaths || []), governanceChange = changeIntentType === "governance";
-  const matchesBoundary = (path) => patterns.some((pattern) => matchesAny(path, pattern));
+  const matchesBoundary = (path) => matchesAny(path, patterns);
   if (!patterns.length && !governanceChange) return { ok: true };
 
   const touched = files.filter((file) => matchesBoundary(file.path)).map((file) => file.path);
   const nonGovernance = governanceChange ? files.filter((file) => !matchesBoundary(file.path)).map((file) => file.path) : [];
+  if (!governanceChange && !touched.length) return { ok: true, touched_governance_paths: [] };
+
   const declared = Array.isArray(governanceGrant?.authorized_governance_paths) ? governanceGrant.authorized_governance_paths : [];
   const sourceTrusted = trusted(trustedAuthorizer), authorized = sourceTrusted ? declared : [];
   const unauthorized = touched.filter((path) => !matchesAny(path, expandGovernancePatterns(authorized)));
