@@ -97,12 +97,12 @@ function workflowDetails(workflow) {
 
 function templateDetails(template) {
   if (template.present === false && template.optional) return [];
-  const details = [], blocks = template.contractBlocks || [];
+  const details = [], blocks = template.changeIntentBlocks || [];
   const selected = template.requiredBlockKind ? blocks.filter((block) => block.format === template.requiredBlockKind) : blocks;
-  if (template.requiredBlockKind && !selected.length) details.push(`${template.path}: ${template.id} requires a ${template.requiredBlockKind} fenced contract block`);
-  else if (template.requiresContractBlock && !template.hasRepoGuardYamlBlock && !template.hasRepoGuardJsonBlock) details.push(`${template.path}: ${template.id} requires a repo-guard contract block`);
+  if (template.requiredBlockKind && !selected.length) details.push(`${template.path}: ${template.id} requires a ${template.requiredBlockKind} fenced ChangeIntent block`);
+  else if (template.requiresChangeIntentBlock && !template.hasRepoGuardYamlBlock && !template.hasRepoGuardJsonBlock) details.push(`${template.path}: ${template.id} requires a repo-guard ChangeIntent block`);
   const fields = new Set(selected.flatMap((block) => block.fieldPaths || []));
-  for (const field of template.requiredContractFields || []) if (!fields.has(field)) details.push(`${template.path}: ${template.id} contract block missing required field "${field}"`);
+  for (const field of template.requiredChangeIntentFields || []) if (!fields.has(field)) details.push(`${template.path}: ${template.id} ChangeIntent block missing required field "${field}"`);
   return details;
 }
 function missingMentions(doc, facts, label) {
@@ -115,14 +115,14 @@ export function integrationConstraintEntries(integration = {}) {
   const templates = array(integration.templates).flatMap(templateDetails);
   const docs = array(integration.docs).flatMap((doc) => [
     ...missingMentions(doc, doc.mentions, "mention"), ...missingMentions(doc, doc.fileReferences, "file reference"),
-    ...missingMentions(doc, doc.profileMentions, "profile mention"), ...missingMentions(doc, doc.contractFieldMentions, "contract field mention"),
+    ...missingMentions(doc, doc.profileMentions, "profile mention"), ...missingMentions(doc, doc.changeIntentFieldMentions, "ChangeIntent field mention"),
   ]);
   const profiles = array(integration.profiles).flatMap((profile) => profile.profileNameReferences?.length ? [] : [`${profile.docPath}: profile "${profile.id}" is not mentioned`]);
   const entry = (name, details, pass, fail, hint) => ({ name, check: details.length ? { ok: false, message: fail, details, hint } : { ok: true, message: pass } });
   return [
-    entry("integration-artifacts", artifacts, "All declared integration artifacts were read and parsed", "Integration artifact extraction failed", "Fix missing files, malformed workflow YAML, malformed contract blocks, or Markdown fences"),
+    entry("integration-artifacts", artifacts, "All declared integration artifacts were read and parsed", "Integration artifact extraction failed", "Fix missing files, malformed workflow YAML, malformed ChangeIntent blocks, or Markdown fences"),
     entry("integration-workflows", workflows, "Workflow integration wiring is valid", "Workflow integration wiring has issues", "Compare declared repo-guard workflows with templates/example-workflow.yml"),
-    entry("integration-templates", templates, "Template integration wiring is valid", "Template integration wiring has issues", "Add repo-guard-yaml or repo-guard-json fenced contract blocks to required templates"),
+    entry("integration-templates", templates, "Template integration wiring is valid", "Template integration wiring has issues", "Add repo-guard-yaml or repo-guard-json fenced ChangeIntent blocks to required templates"),
     entry("integration-docs", docs, "Documentation integration wiring is valid", "Documentation integration wiring has issues", "Update declared docs so every must_mention term appears"),
     entry("integration-profiles", profiles, "Profile documentation wiring is valid", "Profile documentation wiring has issues", "Mention each integration profile id in its declared profile document"),
   ];
