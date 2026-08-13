@@ -54,7 +54,7 @@ function trust(authorizer) {
 
 export function checkPolicyRelaxation({
   basePolicy, headPolicy, changedFiles, trustedAuthorizer, governanceGrant,
-  contractChangeType, configuredProtectedSurfaces = null,
+  changeIntentType, configuredProtectedSurfaces = null,
 }) {
   if (!basePolicy || !headPolicy) return { ok: true };
   const { relaxations } = computePolicyDelta(basePolicy, headPolicy);
@@ -65,7 +65,7 @@ export function checkPolicyRelaxation({
   if (!grant.ok) reasons.push(grant.reason);
   const governanceOnly = !classified.protectedFiles.length && !classified.otherFiles.length && classified.governanceFiles.length > 0;
   if (!governanceOnly) reasons.push("policy_relaxation_mixed_with_non_governance_changes");
-  if (contractChangeType && contractChangeType !== "governance") reasons.push("contract_change_type_is_not_governance");
+  if (changeIntentType && changeIntentType !== "governance") reasons.push("change_intent_type_is_not_governance");
   const details = relaxations.map((item) => `- ${item.pointer}: ${item.message}`);
   if (!governanceOnly && classified.protectedFiles.length) details.push(`Mixed with protected-surface changes: ${classified.protectedFiles.slice(0, 10).join(", ")}`);
   if (authorizer.reasons.length) details.push(`trusted_authorizer: ${authorizer.reasons.join(", ")}`);
@@ -85,6 +85,6 @@ export const policyRelaxationRuleFamily = {
   evaluate: (facts) => ({ name: "policy-relaxation", check: checkPolicyRelaxation({
     basePolicy: facts.basePolicy, headPolicy: facts.headPolicy, changedFiles: facts.diff.files.checked,
     trustedAuthorizer: facts.trustedAuthorizer, governanceGrant: facts.governanceGrant,
-    contractChangeType: facts.contract?.change_type, configuredProtectedSurfaces: facts.basePolicy?.policy_delta_rules?.protected_surfaces,
+    changeIntentType: facts.changeIntent?.change_type, configuredProtectedSurfaces: facts.basePolicy?.policy_delta_rules?.protected_surfaces,
   }) }),
 };
