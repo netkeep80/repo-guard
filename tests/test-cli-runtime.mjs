@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { runCli } from "../src/repo-guard.mjs";
+import { runCli } from "../dist/repo-guard.mjs";
 
 const originalError = console.error, errors = [];
 console.error = (...args) => errors.push(args.join(" "));
