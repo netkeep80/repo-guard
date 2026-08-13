@@ -32,9 +32,9 @@ const PACKS = {
       { id: "doc-heading-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "doc_heading_req_ref", to_anchor_type: "requirement_id" },
       { id: "doc-headings-must-have-req-ref", kind: "must_resolve", from_anchor_type: "doc_heading_without_req_ref", to_anchor_type: "requirement_id" },
       { id: "changed-requirements-need-evidence", kind: "changed_files_require_evidence", if_changed: "$requirement_json_globs", must_touch_any: "$changed_requirement_evidence_surfaces" },
-      { id: "declared-affected-anchors-need-evidence", kind: "declared_anchors_require_evidence", contract_field: "anchors.affects", must_touch_any: "$affected_evidence_surfaces" },
-      { id: "declared-implemented-anchors-need-evidence", kind: "declared_anchors_require_evidence", contract_field: "anchors.implements", must_touch_any: "$implementation_evidence_surfaces" },
-      { id: "declared-verified-anchors-need-evidence", kind: "declared_anchors_require_evidence", contract_field: "anchors.verifies", must_touch_any: "$verification_evidence_surfaces" },
+      { id: "declared-affected-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.affects", must_touch_any: "$affected_evidence_surfaces" },
+      { id: "declared-implemented-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.implements", must_touch_any: "$implementation_evidence_surfaces" },
+      { id: "declared-verified-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.verifies", must_touch_any: "$verification_evidence_surfaces" },
     ],
   },
 };
