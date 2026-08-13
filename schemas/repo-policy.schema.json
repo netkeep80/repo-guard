@@ -516,7 +516,7 @@
     },
     "integration_template": {
       "type": "object",
-      "required": ["id", "kind", "path", "requires_contract_block"],
+      "required": ["id", "kind", "path"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/definitions/non_empty_string" },
