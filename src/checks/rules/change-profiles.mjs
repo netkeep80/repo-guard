@@ -2,18 +2,12 @@ import { classifyNewFiles, detectTouchedSurfaces } from "../../diff/classificati
 import { formatList, uniqueSorted } from "../../utils/collections.mjs";
 import { maxBound } from "../relation-kernel.mjs";
 
-function budget(actual, max, files = undefined) {
-  return max === undefined ? { ok: true } : { ok: maxBound(actual, max), actual, limit: max, ...(files ? { files } : {}) };
-}
+function budget(actual, max, files = undefined) { return max === undefined ? { ok: true } : { ok: maxBound(actual, max), actual, limit: max, ...(files ? { files } : {}) }; }
 function profileBudgets(files, canonicalDocs, limits = {}) {
   const added = files.filter((file) => file.status === "added");
   const docs = added.filter((file) => /\.md$/i.test(file.path) && !canonicalDocs.includes(file.path));
   const net = files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
-  return {
-    docs: budget(docs.length, limits.max_new_docs, docs.map((file) => file.path)),
-    files: budget(added.length, limits.max_new_files, added.map((file) => file.path)),
-    lines: budget(net, limits.max_net_added_lines),
-  };
+  return { docs: budget(docs.length, limits.max_new_docs, docs.map((file) => file.path)), files: budget(added.length, limits.max_new_files, added.map((file) => file.path)), lines: budget(net, limits.max_net_added_lines) };
 }
 
 function checkProfileNewFiles(files, classes, rule, changeType, detected = null) {
