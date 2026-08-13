@@ -22,11 +22,11 @@ export function runPolicyPipeline(input, options = {}) {
     reporter.report(initialCheck.name, initialCheck.check);
   }
 
-  const { contract = null, contractSource = "none", ...runtimeInput } = input;
+  const { changeIntent = null, changeIntentSource = "none", ...runtimeInput } = input;
   const facts = buildPolicyFacts({
     ...runtimeInput,
-    changeIntent: contract,
-    changeIntentSource: contractSource,
+    changeIntent,
+    changeIntentSource,
   });
   if (!quiet) {
     console.log(`\n${renderDiffAnalysis(facts)}`);
