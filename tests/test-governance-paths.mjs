@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { checkGovernanceChangeAuthorization } from "../src/checks/rules/governance-paths.mjs";
-import { createDefaultRuleRegistry } from "../src/checks/default-rule-families.mjs";
-import { buildPolicyFacts } from "../src/facts/input.mjs";
-import { runPolicyChecks } from "../src/checks/orchestrator.mjs";
-import { createAnalysisCollector } from "../src/runtime/analysis-report.mjs";
-import { extractGovernanceGrant } from "../src/change-intent.mjs";
+import { checkGovernanceChangeAuthorization } from "../dist/checks/rules/governance-paths.mjs";
+import { createDefaultRuleRegistry } from "../dist/checks/default-rule-families.mjs";
+import { buildPolicyFacts } from "../dist/facts/input.mjs";
+import { runPolicyChecks } from "../dist/checks/orchestrator.mjs";
+import { createAnalysisCollector } from "../dist/runtime/analysis-report.mjs";
+import { extractGovernanceGrant } from "../dist/change-intent.mjs";
 
 const PATHS = ["repo-policy.json", "schemas/", ".github/workflows/", ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/", "templates/", "action.yml"];
 const TRUSTED = { issue_author_permission_trusted: true, governance_approved_label: false, codeowner_approved: false, trusted_team_approval: false };
