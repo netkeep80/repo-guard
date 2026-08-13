@@ -36,27 +36,33 @@
         "id": "pull-request-template",
         "kind": "markdown",
         "path": ".github/PULL_REQUEST_TEMPLATE.md",
-        "required_block_kind": "repo-guard-yaml"
+        "requires_change_intent_block": true,
+        "required_block_kind": "repo-guard-yaml",
+        "required_change_intent_fields": ["change_type", "scope", "anchors.affects"]
       },
       {
-        "id": "change-contract-issue-form",
+        "id": "change-intent-issue-form",
         "kind": "github_issue_form",
-        "path": ".github/ISSUE_TEMPLATE/change-contract.yml",
+        "path": ".github/ISSUE_TEMPLATE/change-intent.yml",
         "optional": true,
-        "required_block_kind": "repo-guard-yaml"
+        "requires_change_intent_block": true,
+        "required_block_kind": "repo-guard-yaml",
+        "required_change_intent_fields": ["change_type", "scope", "anchors.affects"]
       }
     ],
     "docs": [
       {
         "id": "readme",
         "path": "README.md",
-        "must_mention": ["repo-guard", "contract", "integration"],
+        "must_mention": ["repo-guard", "ChangeIntent", "integration"],
         "must_reference_files": [
           "repo-policy.json",
           ".github/PULL_REQUEST_TEMPLATE.md",
+          ".github/ISSUE_TEMPLATE/change-intent.yml",
           "docs/self-hosting-coverage.md"
         ],
-        "must_mention_profiles": ["self-hosting"]
+        "must_mention_profiles": ["self-hosting"],
+        "must_mention_change_intent_fields": ["change_type", "scope", "anchors.affects"]
       }
     ],
     "profiles": [
