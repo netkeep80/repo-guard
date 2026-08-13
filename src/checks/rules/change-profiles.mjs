@@ -51,7 +51,7 @@ function checkProfileNewFiles(files, classes, rule, changeType, detected = null)
 export function checkChangeProfile(files, policy, changeType, derived = {}) {
   const profiles = policy.change_profiles || {};
   if (!Object.keys(profiles).length) return { ok: true };
-  if (!changeType) return { ok: false, message: "change_profiles requires a declared change_type", change_type: null, hint: "Set change_type in the contract." };
+  if (!changeType) return { ok: false, message: "change_profiles requires a declared change_type", change_type: null, hint: "Set change_type in the ChangeIntent." };
   const profile = profiles[changeType];
   if (!profile) return { ok: false, message: `change_type "${changeType}" is not defined in change_profiles`, change_type: changeType, details: [`known change types: ${formatList(Object.keys(profiles).sort())}`], hint: "Define the change type in change_profiles or use one of the configured types." };
 
