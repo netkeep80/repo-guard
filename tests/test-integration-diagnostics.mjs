@@ -36,7 +36,7 @@ function expectTrue(label, value) {
 
 function runGuard(args) {
   const result = spawnSync(process.execPath, [
-    resolve(projectRoot, "src/repo-guard.mjs"),
+    resolve(projectRoot, "dist/repo-guard.mjs"),
     ...args,
   ], {
     cwd: projectRoot,
@@ -236,7 +236,7 @@ function makeBrokenRepo() {
     "        continue-on-error: true",
     "        run: |",
     "          git clone https://github.com/netkeep80/repo-guard \"$RUNNER_TEMP/repo-guard\"",
-    "          node \"$RUNNER_TEMP/repo-guard/src/repo-guard.mjs\" check-diff",
+    "          node \"$RUNNER_TEMP/repo-guard/dist/repo-guard.mjs\" check-diff",
     "",
   ].join("\n"));
   writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "## Missing ChangeIntent\n");
