@@ -13,11 +13,7 @@ function statusAllowed(file: ParsedDiffFile, statuses: readonly DiffFileStatus[]
   return !statuses || statuses.includes(file.status);
 }
 
-export function selectPaths(
-  files: readonly ParsedDiffFile[],
-  patterns: readonly string[] | null = [],
-  options: PathSelectionOptions = {},
-): string[] {
+export function selectPaths(files: readonly ParsedDiffFile[], patterns: readonly string[] | null = [], options: PathSelectionOptions = {}): string[] {
   const { statuses = null, excludeStatuses = [] } = options;
   return uniqueSorted(files
     .filter((file) => statusAllowed(file, statuses) && !excludeStatuses.includes(file.status))
@@ -25,11 +21,7 @@ export function selectPaths(
     .map((file) => file.path));
 }
 
-export function classifyPathSets(
-  files: readonly ParsedDiffFile[],
-  selectors: PathSelectorMap | null = {},
-  options: PathSelectionOptions = {},
-) {
+export function classifyPathSets(files: readonly ParsedDiffFile[], selectors: PathSelectorMap | null = {}, options: PathSelectionOptions = {}) {
   const candidates = files.filter((file) =>
     statusAllowed(file, options.statuses || null) && !(options.excludeStatuses || []).includes(file.status));
   const selectedPaths = uniqueSorted(candidates.map((file) => file.path));
@@ -53,10 +45,7 @@ export function classifyPathSets(
   };
 }
 
-export function detectTouchedSurfaces(
-  files: readonly ParsedDiffFile[],
-  surfaces: PathSelectorMap | null = {},
-) {
+export function detectTouchedSurfaces(files: readonly ParsedDiffFile[], surfaces: PathSelectorMap | null = {}) {
   const selected = classifyPathSets(files, surfaces);
   return {
     touched_surfaces: selected.touched_selectors,
@@ -65,10 +54,7 @@ export function detectTouchedSurfaces(
   };
 }
 
-export function classifyNewFiles(
-  files: readonly ParsedDiffFile[],
-  classes: PathSelectorMap | null = {},
-) {
+export function classifyNewFiles(files: readonly ParsedDiffFile[], classes: PathSelectorMap | null = {}) {
   const selected = classifyPathSets(files, classes, { statuses: ["added"] });
   return {
     new_files: selected.selected_paths,
