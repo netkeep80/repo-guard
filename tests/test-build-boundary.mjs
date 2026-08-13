@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -21,7 +21,12 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(config.compilerOptions.moduleResolution, "NodeNext");
   assert.equal(config.compilerOptions.allowJs, true);
   assert.equal(config.compilerOptions.checkJs, false);
-  assert.deepEqual(config.include, ["src/**/*.mjs"]);
+  assert.deepEqual(config.include, ["src/**/*.mjs", "src/**/*.mts"]);
+
+  assert.equal(existsSync(resolve(projectRoot, "src/utils/collections.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/utils/collections.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "src/utils/path-patterns.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/utils/path-patterns.mjs")), false);
 
   const action = read("action.yml");
   assert.match(action, /node \$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs/);
@@ -35,7 +40,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
 
 console.log("\n--- stale generated dist is rejected ---");
 {
-  const sourcePath = resolve(projectRoot, "src/utils/collections.mjs");
+  const sourcePath = resolve(projectRoot, "src/utils/collections.mts");
   const distPath = resolve(projectRoot, "dist/utils/collections.mjs");
   const sourceBefore = readFileSync(sourcePath, "utf-8");
   const distBefore = readFileSync(distPath, "utf-8");
@@ -55,7 +60,7 @@ console.log("\n--- stale generated dist is rejected ---");
 
 console.log("\n--- untracked generated output is rejected ---");
 {
-  const sourcePath = resolve(projectRoot, "src/untracked-dist-fixture.mjs");
+  const sourcePath = resolve(projectRoot, "src/untracked-dist-fixture.mts");
   const distPath = resolve(projectRoot, "dist/untracked-dist-fixture.mjs");
   try {
     writeFileSync(sourcePath, "export const fixture = true;\n");
