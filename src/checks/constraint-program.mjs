@@ -9,8 +9,8 @@ const set = (relation, value, metadata) => compare(relation, array(value), metad
 const exact = (value, metadata) => compare("equal_or_incomparable", value, metadata);
 const entity = (metadata) => compare("required_entity", true, metadata);
 
-export function compileConstraintProgram(policy = {}, contract = null) {
-  const program = [], diff = policy.diff_rules || {}, budgets = contract?.budgets || {};
+export function compileConstraintProgram(policy = {}, changeIntent = null) {
+  const program = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
   const add = (key, runtime = null, strictness = null) => program.push({ key, runtime, strictness });
 
   add("paths:forbidden", { kind: "forbid_paths", name: "forbidden-paths", patterns: policy.paths?.forbidden || [] },
@@ -70,12 +70,12 @@ export function compileConstraintProgram(policy = {}, contract = null) {
   if (array(policy.trace_rules).length) add("runtime:trace-rules", { kind: "trace_rules", name: "trace-rules" });
   if (policy.change_profiles) add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
   if (policy.integration) add("runtime:integration", { kind: "integration", name: "integration" });
-  add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: contract?.surface_debt });
+  add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: changeIntent?.surface_debt });
   array(policy.cochange_rules).forEach((rule, index) => add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }));
-  if (contract) {
-    add("contract:scope", { kind: "scope_paths", name: "contract-scope", patterns: contract.scope });
-    add("contract:must-touch", { kind: "require_paths", name: "must-touch", patterns: contract.must_touch });
-    add("contract:must-not-touch", { kind: "forbid_paths", name: "must-not-touch", patterns: contract.must_not_touch, contract: true });
+  if (changeIntent) {
+    add("change-intent:scope", { kind: "scope_paths", name: "change-intent-scope", patterns: changeIntent.scope });
+    add("change-intent:must-touch", { kind: "require_paths", name: "must-touch", patterns: changeIntent.must_touch });
+    add("change-intent:must-not-touch", { kind: "forbid_paths", name: "must-not-touch", patterns: changeIntent.must_not_touch, changeIntent: true });
   }
   return program;
 }

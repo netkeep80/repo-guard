@@ -5,7 +5,7 @@ import { createDefaultRuleRegistry } from "../src/checks/default-rule-families.m
 import { buildPolicyFacts } from "../src/facts/input.mjs";
 import { runPolicyChecks } from "../src/checks/orchestrator.mjs";
 import { createAnalysisCollector } from "../src/runtime/analysis-report.mjs";
-import { extractGovernanceGrant } from "../src/markdown-contract.mjs";
+import { extractGovernanceGrant } from "../src/change-intent.mjs";
 
 const PATHS = ["repo-policy.json", "schemas/", ".github/workflows/", ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/", "templates/", "action.yml"];
 const TRUSTED = { issue_author_permission_trusted: true, governance_approved_label: false, codeowner_approved: false, trusted_team_approval: false };
@@ -58,7 +58,7 @@ describe("governance authorization through pipeline", () => {
   const diff = (path) => ["diff --git a/" + path + " b/" + path, "--- a/" + path, "+++ b/" + path, "+x"].join("\n");
   function run({ path = "repo-policy.json", governanceGrant = null, trustedAuthorizer = null, trustedGovernancePaths = policy.paths.governance_paths, runtimePolicy = policy }) {
     const facts = buildPolicyFacts({ mode: "check-pr", repositoryRoot: "/tmp/repo-guard-governance-test", policy: runtimePolicy,
-      contract: null, contractSource: "none", governanceGrant, trustedGovernancePaths, trustedAuthorizer,
+      changeIntent: null, changeIntentSource: "none", governanceGrant, trustedGovernancePaths, trustedAuthorizer,
       enforcement: { mode: "blocking" }, diffText: diff(path), trackedFiles: [path, "README.md"] });
     const reporter = createAnalysisCollector({ mode: "blocking" });
     runPolicyChecks(facts, reporter, { registry: createDefaultRuleRegistry() });

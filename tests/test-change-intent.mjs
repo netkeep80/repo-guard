@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { extractContract, extractGovernanceGrant, extractLinkedIssueNumbers, resolveContract } from "../src/markdown-contract.mjs";
+import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "../src/change-intent.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const intent = (type = "bugfix") => `\`\`\`repo-guard-yaml
@@ -26,22 +26,22 @@ allow_policy_relaxation:
 
 describe("ChangeIntent extraction", () => {
   it("supports YAML and JSON", () => {
-    assert.equal(extractContract(intent()).contract.change_type, "bugfix");
-    assert.equal(extractContract(jsonIntent).contract.change_type, "bugfix");
+    assert.equal(extractChangeIntent(intent()).changeIntent.change_type, "bugfix");
+    assert.equal(extractChangeIntent(jsonIntent).changeIntent.change_type, "bugfix");
   });
   it("keeps repository templates self-hosted", () => {
-    assert.equal(extractContract(readFileSync(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8")).ok, true);
-    assert.equal(extractContract(readFileSync(resolve(root, ".github/ISSUE_TEMPLATE/change-contract.yml"), "utf-8")).ok, true);
+    assert.equal(extractChangeIntent(readFileSync(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8")).ok, true);
+    assert.equal(extractChangeIntent(readFileSync(resolve(root, ".github/ISSUE_TEMPLATE/change-contract.yml"), "utf-8")).ok, true);
   });
-  it("rejects missing, malformed and multiple contracts", () => {
-    assert.equal(extractContract("text").error, "contract_not_found");
-    assert.equal(extractContract("```repo-guard-json\n{bad\n```").error, "contract_malformed_json");
-    assert.equal(extractContract(`${intent()}\n${intent("feature")}`).error, "multiple_contracts");
+  it("rejects missing, malformed and multiple ChangeIntents", () => {
+    assert.equal(extractChangeIntent("text").error, "change_intent_not_found");
+    assert.equal(extractChangeIntent("```repo-guard-json\n{bad\n```").error, "change_intent_malformed_json");
+    assert.equal(extractChangeIntent(`${intent()}\n${intent("feature")}`).error, "multiple_change_intents");
   });
   it("falls back to linked issue but never over malformed PR intent", () => {
-    assert.equal(resolveContract("text", intent("feature")).contract.change_type, "feature");
-    assert.equal(resolveContract(intent(), intent("feature")).contract.change_type, "bugfix");
-    assert.equal(resolveContract("```repo-guard-json\n{bad\n```", intent()).error, "contract_malformed_json");
+    assert.equal(resolveChangeIntent("text", intent("feature")).changeIntent.change_type, "feature");
+    assert.equal(resolveChangeIntent(intent(), intent("feature")).changeIntent.change_type, "bugfix");
+    assert.equal(resolveChangeIntent("```repo-guard-json\n{bad\n```", intent()).error, "change_intent_malformed_json");
   });
 });
 

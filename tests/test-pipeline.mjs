@@ -63,8 +63,8 @@ function runEquivalentInput(extra = {}) {
     mode: "check-diff",
     repositoryRoot: "/tmp/repo-guard-test",
     policy,
-    contract: null,
-    contractSource: "none",
+    changeIntent: null,
+    changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
     diffText,
     trackedFiles: ["README.md", "src/existing.mjs"],
@@ -78,8 +78,8 @@ function buildEquivalentFacts(extra = {}) {
     mode: "check-diff",
     repositoryRoot: "/tmp/repo-guard-test",
     policy,
-    contract: null,
-    contractSource: "none",
+    changeIntent: null,
+    changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
     diffText,
     trackedFiles: ["README.md", "src/existing.mjs"],
@@ -89,33 +89,16 @@ function buildEquivalentFacts(extra = {}) {
 
 function expectCanonicalEnvelope(label, report, command) {
   const canonicalKeys = [
-    "command",
-    "mode",
-    "ok",
-    "result",
-    "passed",
-    "failed",
-    "violations",
-    "advisoryWarnings",
-    "warnings",
-    "violationCount",
-    "exitCode",
-    "ruleResults",
-    "hints",
-    "repositoryRoot",
+    "command", "mode", "ok", "result", "passed", "failed", "violations", "advisoryWarnings", "warnings",
+    "violationCount", "exitCode", "ruleResults", "hints", "repositoryRoot",
   ];
   expect(`${label} command`, report.command, command);
-  expect(`${label} canonical keys`, canonicalKeys.every((key) =>
-    Object.prototype.hasOwnProperty.call(report, key)
-  ), true);
+  expect(`${label} canonical keys`, canonicalKeys.every((key) => Object.prototype.hasOwnProperty.call(report, key)), true);
   expect(`${label} ruleResults array`, Array.isArray(report.ruleResults), true);
   expect(`${label} violations array`, Array.isArray(report.violations), true);
   expect(`${label} hints array`, Array.isArray(report.hints), true);
   expect(`${label} canonical check result shape`, report.ruleResults.every((item) =>
-    typeof item.rule === "string" &&
-    typeof item.ok === "boolean" &&
-    ["pass", "warning", "failure"].includes(item.severity) &&
-    Array.isArray(item.details)
+    typeof item.rule === "string" && typeof item.ok === "boolean" && ["pass", "warning", "failure"].includes(item.severity) && Array.isArray(item.details)
   ), true);
 }
 
@@ -124,20 +107,10 @@ function makeIntegrationKernelRepo() {
   const policy = {
     policy_format_version: "0.3.0",
     repository_kind: "tooling",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 5,
-      max_new_files: 5,
-      max_net_added_lines: 500,
-    },
-    content_rules: [],
-    cochange_rules: [],
+    paths: { forbidden: [], canonical_docs: ["README.md"], governance_paths: ["repo-policy.json"] },
+    diff_rules: { max_new_docs: 5, max_new_files: 5, max_net_added_lines: 500 },
+    content_rules: [], cochange_rules: [],
   };
-
   writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
   writeFileSync(join(dir, "README.md"), "# Test\n");
   return dir;
@@ -147,29 +120,30 @@ console.log("\n--- shared policy pipeline normalizes facts and checks ---");
 {
   const facts = buildEquivalentFacts();
   const result = runEquivalentInput();
-  expect("pipeline records changed files before and after operational filtering", result.diff, {
-    changedFiles: 2,
-    checkedFiles: 1,
-    skippedOperationalFiles: 1,
-  });
+  expect("pipeline records changed files before and after operational filtering", result.diff, { changedFiles: 2, checkedFiles: 1, skippedOperationalFiles: 1 });
   expect("facts identify check-diff mode", facts.mode, "check-diff");
-  expect("facts identify contract source", facts.contractSource, "none");
-  expect("facts expose all diff files", facts.diff.files.all.map((file) => file.path), [
-    "src/feature.mjs",
-    ".github/workflows/ci.yml",
-  ]);
+  expect("facts identify ChangeIntent source", facts.changeIntentSource, "none");
+  expect("facts expose all diff files", facts.diff.files.all.map((file) => file.path), ["src/feature.mjs", ".github/workflows/ci.yml"]);
   expect("facts expose checked diff files", facts.diff.files.checked.map((file) => file.path), ["src/feature.mjs"]);
   expect("facts expose skipped operational files", facts.diff.files.skippedOperational.map((file) => file.path), [".github/workflows/ci.yml"]);
   expect("facts expose normalized changed paths", facts.derived.changedPaths, ["src/feature.mjs"]);
   expect("facts extract touched surfaces", facts.derived.touchedSurfaces.touched_surfaces, ["source"]);
-  expect("facts classify new files", facts.derived.newFileClasses.files_by_class, {
-    source: ["src/feature.mjs"],
-  });
-  expect(
-    "pipeline runs existing checks",
-    result.violations.some((violation) => violation.rule.startsWith("cochange:")),
-    true
-  );
+  expect("facts classify new files", facts.derived.newFileClasses.files_by_class, { source: ["src/feature.mjs"] });
+  expect("pipeline runs existing checks", result.violations.some((violation) => violation.rule.startsWith("cochange:")), true);
+}
+
+console.log("\n--- pipeline accepts only canonical ChangeIntent input ---");
+{
+  const changeIntent = {
+    change_type: "refactor",
+    must_touch: [],
+    must_not_touch: ["src/**"],
+    expected_effects: ["exercise ChangeIntent boundary"],
+  };
+  const canonical = runEquivalentInput({ changeIntent, changeIntentSource: "test" });
+  const legacy = runEquivalentInput({ contract: changeIntent, contractSource: "legacy test" });
+  expect("canonical ChangeIntent reaches runtime constraints", canonical.violations.some((violation) => violation.rule === "must-not-touch"), true);
+  expect("legacy contract input is not a supported alias", legacy.violations.some((violation) => violation.rule === "must-not-touch"), false);
 }
 
 console.log("\n--- equivalent command inputs share one result shape ---");
@@ -177,34 +151,20 @@ console.log("\n--- equivalent command inputs share one result shape ---");
   const checkDiffStyle = runEquivalentInput();
   const checkPrStyle = runEquivalentInput({
     mode: "check-pr",
-    contractSource: "pr body",
-    initialChecks: [{ name: "change-contract", check: { ok: true } }],
+    changeIntentSource: "pr body",
+    initialChecks: [{ name: "change-intent", check: { ok: true } }],
   });
   const integrationRepo = makeIntegrationKernelRepo();
-  const validateIntegrationStyle = createIntegrationAnalysisReport({
-    packageRoot: projectRoot,
-    repoRoot: integrationRepo,
-    enforcementMode: null,
-  }, { format: "json" });
+  const validateIntegrationStyle = createIntegrationAnalysisReport({ packageRoot: projectRoot, repoRoot: integrationRepo, enforcementMode: null }, { format: "json" });
   const checkDiffFacts = buildEquivalentFacts();
-  const checkPrFacts = buildEquivalentFacts({ mode: "check-pr", contractSource: "pr body" });
+  const checkPrFacts = buildEquivalentFacts({ mode: "check-pr", changeIntentSource: "pr body" });
 
   expectCanonicalEnvelope("check-diff report", checkDiffStyle, "check-diff");
   expectCanonicalEnvelope("check-pr report", checkPrStyle, "check-pr");
   expectCanonicalEnvelope("validate-integration report", validateIntegrationStyle, "validate-integration");
-  expect("equivalent facts keep mode-specific provenance", {
-    mode: checkPrFacts.mode,
-    contractSource: checkPrFacts.contractSource,
-  }, {
-    mode: "check-pr",
-    contractSource: "pr body",
-  });
+  expect("equivalent facts keep mode-specific provenance", { mode: checkPrFacts.mode, changeIntentSource: checkPrFacts.changeIntentSource }, { mode: "check-pr", changeIntentSource: "pr body" });
   expect("equivalent facts share checked diff paths", checkPrFacts.derived.changedPaths, checkDiffFacts.derived.changedPaths);
-  expect(
-    "check-pr style input adds contract validation without changing policy check result",
-    checkPrStyle.violations.map((violation) => violation.rule),
-    checkDiffStyle.violations.map((violation) => violation.rule)
-  );
+  expect("check-pr style input adds ChangeIntent validation without changing policy check result", checkPrStyle.violations.map((violation) => violation.rule), checkDiffStyle.violations.map((violation) => violation.rule));
   rmSync(integrationRepo, { recursive: true });
 }
 
@@ -214,21 +174,9 @@ console.log("\n--- check-pr style pipeline evaluates size rules ---");
     mode: "check-pr",
     policy: {
       ...policy,
-      size_rules: [
-        {
-          id: "max-feature-lines",
-          scope: "file",
-          metric: "lines",
-          glob: "src/feature.mjs",
-          max: 0,
-          count: "changed_only",
-        },
-      ],
+      size_rules: [{ id: "max-feature-lines", scope: "file", metric: "lines", glob: "src/feature.mjs", max: 0, count: "changed_only" }],
     },
-    readFile: (path) => {
-      if (path === "src/feature.mjs") return "export const value = 1;\n";
-      return "";
-    },
+    readFile: (path) => path === "src/feature.mjs" ? "export const value = 1;\n" : "",
   });
 
   const violation = sizeResult.violations.find((item) => item.rule === "size-rules");

@@ -227,7 +227,7 @@ console.log("\n--- CLI enforcement overrides policy config ---");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-pr missing contract is advisory when requested ---");
+console.log("\n--- check-pr missing ChangeIntent is advisory when requested ---");
 {
   const repo = makeRepo();
   const eventPath = join(repo.dir, "event.json");
@@ -236,7 +236,7 @@ console.log("\n--- check-pr missing contract is advisory when requested ---");
       number: 123,
       base: { sha: repo.base },
       head: { sha: repo.head },
-      body: "No contract here.",
+      body: "No ChangeIntent here.",
     },
     repository: { full_name: "owner/repo" },
   }));
@@ -249,8 +249,8 @@ console.log("\n--- check-pr missing contract is advisory when requested ---");
     env: { GITHUB_EVENT_PATH: eventPath },
   });
 
-  expect("check-pr advisory missing contract exit code", result.code, 0);
-  expectIncludes("check-pr missing contract warning", result.output, "WARN: change-contract");
+  expect("check-pr advisory missing ChangeIntent exit code", result.code, 0);
+  expectIncludes("check-pr missing ChangeIntent warning", result.output, "WARN: change-intent");
   expectIncludes("check-pr advisory summary", result.output, "advisory violation");
 
   rmSync(repo.dir, { recursive: true });

@@ -33,7 +33,7 @@ export const checkForbiddenPaths = (files, patterns) => selectPaths(files, patte
 export function checkScope(files, patterns) {
   if (!patterns?.length) return { ok: true };
   const out = files.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path).sort();
-  return { ok: !out.length, declared_scope: patterns, out_of_scope_paths: out, message: out.length ? "changed files fall outside declared contract scope" : undefined, details: out.map((path) => `out of scope: ${path}`) };
+  return { ok: !out.length, declared_scope: patterns, out_of_scope_paths: out, message: out.length ? "changed files fall outside declared ChangeIntent scope" : undefined, details: out.map((path) => `out of scope: ${path}`) };
 }
 export function checkMustTouch(files, patterns) {
   if (!patterns?.length) return { ok: true };
@@ -47,7 +47,7 @@ export function checkMustNotTouch(files, patterns) {
 }
 export const checkCochangeRules = (files, rules = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
 export function compileConstraintIR(facts) {
-  return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.contract)) };
+  return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) };
 }
 function evaluateMetric(files, constraint, policy) {
   if (constraint.metric === "new_docs") return checkCanonicalDocsBudget(files, policy.paths.canonical_docs, constraint.max);
@@ -64,7 +64,7 @@ export function evaluateConstraintIR(facts, context = {}) {
     else if (constraint.kind === "scope_paths") check = checkScope(files, constraint.patterns);
     else if (constraint.kind === "require_paths") check = checkMustTouch(files, constraint.patterns);
     else if (constraint.kind === "forbid_paths") {
-      if (constraint.contract) check = checkMustNotTouch(files, constraint.patterns);
+      if (constraint.changeIntent) check = checkMustNotTouch(files, constraint.patterns);
       else { const found = checkForbiddenPaths(files, constraint.patterns); check = { ok: !found.length, files: found }; }
     } else if (constraint.kind === "implies_nonempty") {
       if (selectPaths(files, constraint.if_changed).length && !selectPaths(files, constraint.must_change_any).length) cochange.push(constraint);
@@ -72,13 +72,13 @@ export function evaluateConstraintIR(facts, context = {}) {
     } else if (constraint.kind === "size_rules") {
       const result = checkSizeRules(files, constraint.rules, {
         repoRoot: facts.repositoryRoot, trackedFiles: facts.trackedFiles, readFile: facts.readFile,
-        ignorePatterns: facts.policy.paths.operational_paths, changeType: facts.contract?.change_type,
+        ignorePatterns: facts.policy.paths.operational_paths, changeType: facts.changeIntent?.change_type,
       });
       results.push({ name: constraint.name, check: result });
       if (result.advisory_violations.length) results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
       continue;
     } else if (constraint.kind === "registry_rules") check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
-    else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy, facts.contract?.change_type, facts.derived);
+    else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy, facts.changeIntent?.change_type, facts.derived);
     else if (constraint.kind === "trace_rules") {
       for (const trace of context.anchorDiagnostics?.traceRuleResults || []) results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
       continue;
