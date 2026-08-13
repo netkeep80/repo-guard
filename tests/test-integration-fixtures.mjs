@@ -81,19 +81,19 @@ function integrationPolicy() {
           id: "pull-request-template",
           kind: "markdown",
           path: ".github/PULL_REQUEST_TEMPLATE.md",
-          requires_contract_block: true,
+          requires_change_intent_block: true,
           required_block_kind: "repo-guard-yaml",
-          required_contract_fields: ["change_type", "scope", "anchors.affects"],
+          required_change_intent_fields: ["change_type", "scope", "anchors.affects"],
           profiles: ["requirements-strict"],
         },
         {
-          id: "change-contract-issue-form",
+          id: "change-intent-issue-form",
           kind: "github_issue_form",
-          path: ".github/ISSUE_TEMPLATE/change-contract.yml",
-          requires_contract_block: true,
+          path: ".github/ISSUE_TEMPLATE/change-intent.yml",
+          requires_change_intent_block: true,
           optional: true,
           required_block_kind: "repo-guard-yaml",
-          required_contract_fields: ["change_type", "scope", "anchors.affects"],
+          required_change_intent_fields: ["change_type", "scope", "anchors.affects"],
           profiles: ["requirements-strict"],
         },
       ],
@@ -102,14 +102,14 @@ function integrationPolicy() {
           id: "readme",
           kind: "markdown",
           path: "README.md",
-          must_mention: ["repo-guard", "contract", "integration"],
+          must_mention: ["repo-guard", "ChangeIntent", "integration"],
           must_reference_files: [
             "repo-policy.json",
             ".github/PULL_REQUEST_TEMPLATE.md",
             ".github/workflows/repo-guard.yml",
           ],
           must_mention_profiles: ["requirements-strict"],
-          must_mention_contract_fields: ["change_type", "scope", "anchors.affects"],
+          must_mention_change_intent_fields: ["change_type", "scope", "anchors.affects"],
           profiles: ["requirements-strict"],
         },
       ],
@@ -144,7 +144,7 @@ function makeFixtureRepo({ workflow, prTemplate, issueTemplate = null, readme })
   writeFileSync(join(dir, ".github", "workflows", "repo-guard.yml"), readFixture(workflow));
   writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), readFixture(prTemplate));
   if (issueTemplate) {
-    writeFileSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-contract.yml"), readFixture(issueTemplate));
+    writeFileSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-intent.yml"), readFixture(issueTemplate));
   }
   writeFileSync(join(dir, "README.md"), readFixture(readme));
 
@@ -220,10 +220,10 @@ console.log("\n--- integration fixture e2e: invalid downstream wiring fails with
   expectIncludes("invalid workflow reports event drift", result.output, "missing required pull_request type synchronize");
   expectIncludes("invalid workflow reports missing action", result.output, "must use netkeep80/repo-guard via uses");
   expectIncludes("invalid workflow reports manual clone", result.output, "must not clone repo-guard manually");
-  expectIncludes("invalid template reports missing contract block", result.output, "requires a repo-guard-yaml fenced contract block");
+  expectIncludes("invalid template reports missing ChangeIntent block", result.output, "requires a repo-guard-yaml fenced ChangeIntent block");
   expectIncludes("invalid docs report missing file reference", result.output, "missing required file reference");
   expectIncludes("invalid docs report missing profile", result.output, "missing required profile mention");
-  expectIncludes("invalid docs report missing contract field", result.output, "missing required contract field mention");
+  expectIncludes("invalid docs report missing ChangeIntent field", result.output, "missing required ChangeIntent field mention");
 
   rmSync(dir, { recursive: true });
 }
