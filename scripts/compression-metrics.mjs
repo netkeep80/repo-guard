@@ -26,7 +26,7 @@ function physical(target, roots) {
 }
 
 function sourceCorpus(target) {
-  return pathsAt(target, ["src"]).filter((path) => /\.(?:mjs|js)$/.test(path)).map((path) => textAt(target, path)).join("\n");
+  return pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path)).map((path) => textAt(target, path)).join("\n");
 }
 
 function architecture(target) {
@@ -35,7 +35,7 @@ function architecture(target) {
   const coverage = jsonAt(target, "docs/self-hosting-coverage.json");
   const defaults = textAt(target, "src/checks/default-rule-families.mjs");
   const corpus = sourceCorpus(target);
-  const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
+  const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
   const metric = {
     rule_families: (defaults.match(/\b[A-Za-z][A-Za-z0-9]*RuleFamily\b/g) || []).length,
     declared_surfaces: Object.keys(policy.surfaces || {}).length,
