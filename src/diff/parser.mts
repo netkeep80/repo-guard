@@ -1,6 +1,15 @@
-export function parseDiff(diffText) {
-  const files = [];
-  let current = null;
+export type DiffFileStatus = "modified" | "added" | "deleted";
+
+export interface ParsedDiffFile {
+  path: string;
+  addedLines: string[];
+  deletedLines: string[];
+  status: DiffFileStatus;
+}
+
+export function parseDiff(diffText: string): ParsedDiffFile[] {
+  const files: ParsedDiffFile[] = [];
+  let current: ParsedDiffFile | null = null;
 
   for (const line of diffText.split("\n")) {
     if (line.startsWith("diff --git")) {

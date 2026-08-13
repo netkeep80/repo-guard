@@ -1,4 +1,6 @@
-export function calculateDiffGrowth(files) {
+import type { ParsedDiffFile } from "./parser.mjs";
+
+export function calculateDiffGrowth(files: readonly ParsedDiffFile[]) {
   const newFiles = files.filter((file) => file.status === "added").map((file) => file.path);
   let netAddedLines = 0;
   for (const file of files) {
