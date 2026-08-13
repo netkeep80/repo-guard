@@ -39,7 +39,7 @@ const constraintFacts = {
     diff_rules: { max_new_docs: 0, max_new_files: 2, max_net_added_lines: 5 },
     cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
   },
-  contract: { must_touch: ["src/**"], must_not_touch: ["schemas/**"], budgets: {} },
+  changeIntent: { must_touch: ["src/**"], must_not_touch: ["schemas/**"], budgets: {} },
 };
 const constraintIR = compileConstraintIR(constraintFacts);
 expect("policy frontends compile into primitive constraints", constraintIR.constraints.some((c) => c.kind === "implies_nonempty"), true);
