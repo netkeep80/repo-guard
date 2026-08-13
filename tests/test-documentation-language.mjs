@@ -31,8 +31,8 @@ const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
 const readme = read("README.md");
 assert.doesNotMatch(readme, /Constraint IR|contract\.overrides/, "README не должен описывать переходную архитектуру");
 for (const marker of ["Constraint Program", "repo-guard-grant", "GovernanceGrant", "schemas/governance-grant.schema.json"]) assert.match(readme, new RegExp(marker.replaceAll(".", "\\.")), `README должен содержать ${marker}`);
-assert.match(read("templates/issue-contract-example.md"), /repo-guard-grant/, "issue example должен показывать отдельный GovernanceGrant");
-assert.doesNotMatch(read("templates/pr-contract-example.md"), /```repo-guard-grant/, "PR example не должен выдавать GovernanceGrant");
+assert.match(read("templates/issue-change-intent-example.md"), /repo-guard-grant/, "issue example должен показывать отдельный GovernanceGrant");
+assert.doesNotMatch(read("templates/pr-change-intent-example.md"), /```repo-guard-grant/, "PR example не должен выдавать GovernanceGrant");
 assert.match(read(".github/workflows/ci.yml"), /--compare 94f702271f6fe27672102f5271046151b023f94c/, "CI должен измерять Compression 2.0 от его baseline");
 
 console.log(`Проверено Markdown-файлов: ${markdownFiles.length}. Язык и архитектурные инварианты актуальны.`);
