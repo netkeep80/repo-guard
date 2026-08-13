@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import { classifyNewFiles, detectTouchedSurfaces } from "../src/diff/classification.mjs";
-import { filterOperationalPaths } from "../src/diff/filters.mjs";
-import { parseDiff } from "../src/diff/parser.mjs";
-import { checkAdvisoryTextRules } from "../src/checks/rules/advisory-text-rules.mjs";
-import { checkChangeProfile } from "../src/checks/rules/change-profiles.mjs";
-import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
+import { classifyNewFiles, detectTouchedSurfaces } from "../dist/diff/classification.mjs";
+import { filterOperationalPaths } from "../dist/diff/filters.mjs";
+import { parseDiff } from "../dist/diff/parser.mjs";
+import { checkAdvisoryTextRules } from "../dist/checks/rules/advisory-text-rules.mjs";
+import { checkChangeProfile } from "../dist/checks/rules/change-profiles.mjs";
+import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
 import {
   checkCanonicalDocsBudget, checkCochangeRules, checkForbiddenPaths, checkMustNotTouch, checkMustTouch,
   checkNetAddedLinesBudget, checkNewFilesBudget, checkScope, checkSurfaceDebt,
-} from "../src/checks/rules/constraints.mjs";
-import { checkRegistryRules } from "../src/checks/rules/registry-rules.mjs";
-import { checkSizeRules, countTextLines } from "../src/checks/rules/size-rules.mjs";
+} from "../dist/checks/rules/constraints.mjs";
+import { checkRegistryRules } from "../dist/checks/rules/registry-rules.mjs";
+import { checkSizeRules, countTextLines } from "../dist/checks/rules/size-rules.mjs";
 
 const sampleDiff = [
   "diff --git a/src/app.mjs b/src/app.mjs", "new file mode 100644", "--- /dev/null", "+++ b/src/app.mjs", "+one", "+two",
