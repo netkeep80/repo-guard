@@ -100,18 +100,18 @@ function basePolicy(overrides = {}) {
           id: "pull-request-template",
           kind: "markdown",
           path: ".github/PULL_REQUEST_TEMPLATE.md",
-          requires_contract_block: true,
+          requires_change_intent_block: true,
           required_block_kind: "repo-guard-yaml",
-          required_contract_fields: ["change_type", "scope"],
+          required_change_intent_fields: ["change_type", "scope"],
         },
         {
-          id: "change-contract-issue-form",
+          id: "change-intent-issue-form",
           kind: "github_issue_form",
-          path: ".github/ISSUE_TEMPLATE/change-contract.yml",
-          requires_contract_block: true,
+          path: ".github/ISSUE_TEMPLATE/change-intent.yml",
+          requires_change_intent_block: true,
           optional: true,
           required_block_kind: "repo-guard-yaml",
-          required_contract_fields: ["change_type", "scope"],
+          required_change_intent_fields: ["change_type", "scope"],
         },
       ],
       docs: [
@@ -119,10 +119,10 @@ function basePolicy(overrides = {}) {
           id: "readme",
           kind: "markdown",
           path: "README.md",
-          must_mention: ["repo-guard", "contract", "integration"],
+          must_mention: ["repo-guard", "ChangeIntent", "integration"],
           must_reference_files: ["repo-policy.json", ".github/PULL_REQUEST_TEMPLATE.md"],
           must_mention_profiles: ["self-hosting"],
-          must_mention_contract_fields: ["change_type", "scope"],
+          must_mention_change_intent_fields: ["change_type", "scope"],
           profiles: ["self-hosting"],
         },
       ],
@@ -184,7 +184,7 @@ function makeRepo() {
     "",
   ].join("\n"));
   writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), [
-    "## Change Contract",
+    "## ChangeIntent",
     "",
     "```repo-guard-yaml",
     "change_type: feature",
@@ -193,8 +193,8 @@ function makeRepo() {
     "```",
     "",
   ].join("\n"));
-  writeFileSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-contract.yml"), [
-    "name: Change contract",
+  writeFileSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-intent.yml"), [
+    "name: ChangeIntent",
     "body:",
     "  - type: textarea",
     "    attributes:",
@@ -209,9 +209,9 @@ function makeRepo() {
   writeFileSync(join(dir, "README.md"), [
     "# Test Repo",
     "",
-    "This repository documents repo-guard contract integration for self-hosting.",
-    "The repo-policy.json file declares the .github/PULL_REQUEST_TEMPLATE.md contract wiring.",
-    "Required contract fields include change_type and scope.",
+    "This repository documents repo-guard ChangeIntent integration for self-hosting.",
+    "The repo-policy.json file declares the .github/PULL_REQUEST_TEMPLATE.md ChangeIntent wiring.",
+    "Required ChangeIntent fields include change_type and scope.",
     "Profile id: self-hosting",
     "",
   ].join("\n"));
@@ -239,7 +239,7 @@ function makeBrokenRepo() {
     "          node \"$RUNNER_TEMP/repo-guard/src/repo-guard.mjs\" check-diff",
     "",
   ].join("\n"));
-  writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "## Missing contract\n");
+  writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "## Missing ChangeIntent\n");
   writeFileSync(join(dir, "README.md"), "# Missing integration docs\n");
   return dir;
 }
@@ -288,7 +288,7 @@ console.log("\n--- validate-integration --format json emits normalized integrati
 console.log("\n--- optional issue-template fallback may be absent ---");
 {
   const dir = makeRepo();
-  rmSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-contract.yml"));
+  rmSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-intent.yml"));
   const result = runGuard([
     "--repo-root", dir,
     "validate-integration",
@@ -298,7 +298,7 @@ console.log("\n--- optional issue-template fallback may be absent ---");
 
   expect("missing optional issue template exits 0", result.code, 0);
   expect("optional template fact is still emitted",
-    parsed.integration.templates.find((template) => template.id === "change-contract-issue-form")?.present,
+    parsed.integration.templates.find((template) => template.id === "change-intent-issue-form")?.present,
     false);
   expect("optional template does not create artifact errors", parsed.diagnostics.artifactErrors, []);
 
@@ -341,11 +341,11 @@ console.log("\n--- validate-integration --format summary reports CI-readable dia
   expectIncludes("manual clone diagnostic appears", result.output, "must not clone repo-guard manually");
   expectIncludes("direct temp CLI diagnostic appears", result.output, "must not run repo-guard directly from a temporary clone");
   expectIncludes("summary diagnostic appears", result.output, "must publish to GITHUB_STEP_SUMMARY");
-  expectIncludes("template diagnostic appears", result.output, "requires a repo-guard-yaml fenced contract block");
+  expectIncludes("template diagnostic appears", result.output, "requires a repo-guard-yaml fenced ChangeIntent block");
   expectIncludes("doc diagnostic appears", result.output, "missing required mention");
   expectIncludes("doc file reference diagnostic appears", result.output, "missing required file reference");
   expectIncludes("doc profile mention diagnostic appears", result.output, "missing required profile mention");
-  expectIncludes("doc contract field diagnostic appears", result.output, "missing required contract field mention");
+  expectIncludes("doc ChangeIntent field diagnostic appears", result.output, "missing required ChangeIntent field mention");
 
   rmSync(dir, { recursive: true });
 }
