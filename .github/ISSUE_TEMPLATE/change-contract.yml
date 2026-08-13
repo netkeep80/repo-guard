@@ -1,4 +1,4 @@
-name: Контракт изменения
+name: Намерение изменения
 description: Предложить изменение с ChangeIntent и, при необходимости, отдельным GovernanceGrant.
 title: "[change] "
 body:
@@ -10,7 +10,7 @@ body:
     validations:
       required: true
   - type: textarea
-    id: contract
+    id: change_intent
     attributes:
       label: ChangeIntent
       description: Обычное намерение изменения. Этот блок сам по себе не даёт управляющих разрешений.
