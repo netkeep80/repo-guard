@@ -13,10 +13,10 @@ function group(instances = []) {
 }
 const changedPaths = (facts) => (facts.diff?.files?.checked || []).map((file) => file.path);
 const matchingPaths = (paths, patterns) => uniqueSorted(paths.filter((path) => matchesAny(path, patterns || [])));
-function contractValues(contract, field) {
+function changeIntentValues(changeIntent, field) {
   const path = CONTRACT_ANCHOR_FIELDS.get(field);
   if (!path) return [];
-  let value = contract || {};
+  let value = changeIntent || {};
   for (const segment of path) value = value?.[segment];
   return Array.isArray(value) ? uniqueSorted(value.map(String)) : [];
 }
@@ -43,7 +43,7 @@ export function buildTraceRuleDiagnostics(facts) {
   return (facts.policy.trace_rules || []).map((rule) => {
     if (rule.kind === "must_resolve") return mustResolve(rule, facts.anchors || {});
     if (rule.kind === "changed_files_require_evidence") return evidence(rule, facts);
-    if (rule.kind === "declared_anchors_require_evidence") return evidence(rule, facts, contractValues(facts.contract, rule.contract_field));
+    if (rule.kind === "declared_anchors_require_evidence") return evidence(rule, facts, changeIntentValues(facts.changeIntent, rule.contract_field));
     return { id: rule.id, kind: rule.kind, ok: true, stats: {} };
   });
 }
