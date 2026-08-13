@@ -2,7 +2,7 @@ import { uniqueSorted } from "../utils/collections.mjs";
 import { matchesAny } from "../utils/path-patterns.mjs";
 import { compareSets, implies } from "./relation-kernel.mjs";
 
-const CONTRACT_ANCHOR_FIELDS = new Map([
+const CHANGE_INTENT_ANCHOR_FIELDS = new Map([
   ["anchors.affects", ["anchors", "affects"]], ["anchors.implements", ["anchors", "implements"]], ["anchors.verifies", ["anchors", "verifies"]],
 ]);
 const location = (instance) => `${instance.file}${instance.line ? `:${instance.line}` : ""}${instance.column ? `:${instance.column}` : ""}`;
@@ -14,7 +14,7 @@ function group(instances = []) {
 const changedPaths = (facts) => (facts.diff?.files?.checked || []).map((file) => file.path);
 const matchingPaths = (paths, patterns) => uniqueSorted(paths.filter((path) => matchesAny(path, patterns || [])));
 function changeIntentValues(changeIntent, field) {
-  const path = CONTRACT_ANCHOR_FIELDS.get(field);
+  const path = CHANGE_INTENT_ANCHOR_FIELDS.get(field);
   if (!path) return [];
   let value = changeIntent || {};
   for (const segment of path) value = value?.[segment];
@@ -36,14 +36,14 @@ function evidence(rule, facts, declared = null) {
   const common = { id: rule.id, kind: rule.kind, ok: implies(trigger.length, evidenceFiles.length), mustTouchAny: [...(rule.must_touch_any || [])], evidenceFiles };
   return declared === null
     ? { ...common, ifChanged: [...(rule.if_changed || [])], changedFiles: trigger, stats: { changedFiles: trigger.length, evidenceFiles: evidenceFiles.length } }
-    : { ...common, contractField: rule.contract_field, declaredAnchors: trigger, stats: { declaredAnchors: trigger.length, evidenceFiles: evidenceFiles.length } };
+    : { ...common, changeIntentField: rule.change_intent_field, declaredAnchors: trigger, stats: { declaredAnchors: trigger.length, evidenceFiles: evidenceFiles.length } };
 }
 
 export function buildTraceRuleDiagnostics(facts) {
   return (facts.policy.trace_rules || []).map((rule) => {
     if (rule.kind === "must_resolve") return mustResolve(rule, facts.anchors || {});
     if (rule.kind === "changed_files_require_evidence") return evidence(rule, facts);
-    if (rule.kind === "declared_anchors_require_evidence") return evidence(rule, facts, changeIntentValues(facts.changeIntent, rule.contract_field));
+    if (rule.kind === "declared_anchors_require_evidence") return evidence(rule, facts, changeIntentValues(facts.changeIntent, rule.change_intent_field));
     return { id: rule.id, kind: rule.kind, ok: true, stats: {} };
   });
 }
@@ -63,11 +63,11 @@ function checkMustResolve(result) {
 function checkEvidence(result) {
   const details = [];
   if (result.changedFiles) details.push(`changed_files: ${result.changedFiles.join(", ")}`);
-  if (result.contractField) details.push(`contract_field: ${result.contractField}`);
+  if (result.changeIntentField) details.push(`change_intent_field: ${result.changeIntentField}`);
   if (result.declaredAnchors) details.push(`declared_anchors: ${result.declaredAnchors.join(", ")}`);
   details.push(`must_touch_any: ${result.mustTouchAny.join(", ")}`, `evidence_files: ${result.evidenceFiles.length ? result.evidenceFiles.join(", ") : "(none)"}`);
   return { ok: result.ok, message: result.ok ? undefined : `missing evidence for trace rule "${result.id}"`, trace_rule: result.id, trace_kind: result.kind,
-    if_changed: result.ifChanged, must_touch_any: result.mustTouchAny, changed_files: result.changedFiles, contract_field: result.contractField,
+    if_changed: result.ifChanged, must_touch_any: result.mustTouchAny, changed_files: result.changedFiles, change_intent_field: result.changeIntentField,
     declared_anchors: result.declaredAnchors, evidence_files: result.evidenceFiles, files: uniqueSorted([...(result.changedFiles || []), ...(result.evidenceFiles || [])]), details };
 }
 export function checkTraceRuleResult(result) {
