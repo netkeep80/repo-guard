@@ -4,8 +4,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
-import { loadGitHubEvent, resolvePRContractFacts } from "../src/github-pr.mjs";
-import { extractLinkedIssueNumbers, resolveContract } from "../src/markdown-contract.mjs";
+import { loadGitHubEvent, resolvePRChangeIntentFacts } from "../src/github-pr.mjs";
+import { extractLinkedIssueNumbers, resolveChangeIntent } from "../src/change-intent.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const cli = resolve(projectRoot, "src/repo-guard.mjs");
@@ -43,7 +43,7 @@ function run(root, body, extraEnv = {}) {
   return spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr"], { cwd: root, env: { ...process.env, GITHUB_EVENT_PATH: eventPath, ...extraEnv }, encoding: "utf-8" });
 }
 
-describe("GitHub event and contract resolution", () => {
+describe("GitHub event and ChangeIntent resolution", () => {
   it("fails cleanly outside GitHub Actions", () => {
     const saved = process.env.GITHUB_EVENT_PATH; delete process.env.GITHUB_EVENT_PATH;
     try { assert.equal(loadGitHubEvent().error, "no_event"); }
@@ -60,22 +60,22 @@ describe("GitHub event and contract resolution", () => {
 
   it("uses PR ChangeIntent and linked-issue GovernanceGrant independently", () => {
     const prBody = `${intent(["schemas/**"])}\n\nFixes #77`;
-    const facts = resolvePRContractFacts({ prBody, issueBody: `${intent(["schemas/**"])}\n\n${grant()}` });
-    assert.equal(facts.ok, true); assert.equal(facts.contractSource, "pr body");
+    const facts = resolvePRChangeIntentFacts({ prBody, issueBody: `${intent(["schemas/**"])}\n\n${grant()}` });
+    assert.equal(facts.ok, true); assert.equal(facts.changeIntentSource, "pr body");
     assert.deepEqual(facts.grantResult.grant.authorized_governance_paths, ["schemas/**"]);
   });
 
   it("falls back to issue ChangeIntent and keeps the same issue grant", () => {
-    const facts = resolvePRContractFacts({ prBody: "Fixes #15", issueBody: `${intent(["src/new.mjs"])}\n${grant(["repo-policy.json"])}` });
-    assert.equal(facts.ok, true); assert.equal(facts.contractSource, "linked issue");
-    assert.equal(facts.contract.scope[0], "src/new.mjs"); assert.equal(facts.grantResult.grant.authorized_governance_paths[0], "repo-policy.json");
+    const facts = resolvePRChangeIntentFacts({ prBody: "Fixes #15", issueBody: `${intent(["src/new.mjs"])}\n${grant(["repo-policy.json"])}` });
+    assert.equal(facts.ok, true); assert.equal(facts.changeIntentSource, "linked issue");
+    assert.equal(facts.changeIntent.scope[0], "src/new.mjs"); assert.equal(facts.grantResult.grant.authorized_governance_paths[0], "repo-policy.json");
   });
 
   it("rejects ambiguous linked issues only when fallback is needed", () => {
     const body = "Fixes #10\nCloses #20";
     assert.deepEqual(extractLinkedIssueNumbers(body), [10, 20]);
-    assert.equal(resolvePRContractFacts({ prBody: body }).error, "issue_link_ambiguous");
-    assert.equal(resolveContract(`${intent()}\n${body}`, null).ok, true);
+    assert.equal(resolvePRChangeIntentFacts({ prBody: body }).error, "issue_link_ambiguous");
+    assert.equal(resolveChangeIntent(`${intent()}\n${body}`, null).ok, true);
   });
 });
 
