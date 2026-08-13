@@ -4,8 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import Ajv from "ajv";
-import { loadJSON, loadPolicyRuntime } from "../src/runtime/validation.mjs";
-import { runPolicyPipeline } from "../src/runtime/pipeline.mjs";
+import { loadJSON, loadPolicyRuntime } from "../dist/runtime/validation.mjs";
+import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
