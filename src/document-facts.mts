@@ -150,7 +150,7 @@ export function createDocumentReader(options: DocumentReaderOptions = {}): Docum
     if (!textCache.has(path)) textCache.set(path, readRepositoryTextFile(path, options));
     return textCache.get(path)!;
   };
-  const cached = <T>(kind: DocumentKind, path: string, parser: (content: string) => T): T => {
+  const cached = <T,>(kind: DocumentKind, path: string, parser: (content: string) => T): T => {
     if (!parsed[kind].has(path)) parsed[kind].set(path, parser(text(path)));
     return parsed[kind].get(path) as T;
   };
