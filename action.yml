@@ -1,5 +1,5 @@
 name: "repo-guard"
-description: "Enforce repository policy and change contracts on pull requests"
+description: "Enforce repository policy and ChangeIntent on pull requests"
 author: "netkeep80"
 
 branding:
@@ -10,7 +10,7 @@ inputs:
   mode:
     description: >
       Command mode. Use `check-pr` to validate a pull request against policy
-      and change contract (requires GitHub Actions PR event context). Use `check-diff`
+      and ChangeIntent (requires GitHub Actions PR event context). Use `check-diff`
       to validate a local diff between two refs.
     required: false
     default: "check-pr"
@@ -44,9 +44,9 @@ inputs:
     required: false
     default: ""
 
-  contract:
+  change-intent:
     description: >
-      Path to a change contract JSON file (used with `mode: check-diff`).
+      Path to a ChangeIntent JSON file (used with `mode: check-diff`).
       Path is relative to `repo-root`.
     required: false
     default: ""
@@ -121,8 +121,8 @@ runs:
           if [ -n "${{ inputs.head }}" ]; then
             CMD="$CMD --head ${{ inputs.head }}"
           fi
-          if [ -n "${{ inputs.contract }}" ]; then
-            CMD="$CMD --contract ${{ inputs.contract }}"
+          if [ -n "${{ inputs.change-intent }}" ]; then
+            CMD="$CMD --change-intent ${{ inputs.change-intent }}"
           fi
         fi
 
