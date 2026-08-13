@@ -97,7 +97,7 @@ console.log("\n--- normalized facts share repository content cache ---");
     "+test('new behavior [REQ-42]', () => {});",
   ].join("\n");
   const facts = buildPolicyFacts({
-    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, contract: null, contractSource: "none",
+    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, changeIntent: null, changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" }, diffText,
     trackedFiles: ["requirements/req-42.json"], readFile,
   });
@@ -132,7 +132,7 @@ console.log("\n--- anchor extraction errors are predictable and reported by pipe
   expectIncludes("missing field error identifies the field", extraction.errors[1]?.message, 'field "id"');
 
   const result = runPolicyPipeline({
-    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, contract: null, contractSource: "none",
+    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, changeIntent: null, changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" }, diffText: "",
     trackedFiles: Object.keys(files), readFile: makeReadFile(files), initialChecks: [],
   }, { quiet: true });
@@ -165,7 +165,7 @@ console.log("\n--- must_resolve trace rules enforce code and doc anchors ---");
     "+Covers [FR-002] and [FR-405].",
   ].join("\n");
   const input = {
-    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, contract: null, contractSource: "none",
+    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, changeIntent: null, changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" }, diffText,
     trackedFiles: ["requirements/fr-001.json", "requirements/fr-002.json"], readFile: makeReadFile(files), initialChecks: [],
   };
@@ -214,7 +214,7 @@ console.log("\n--- resolved must_resolve refs pass cleanly ---");
     "diff --git a/docs/feature.md b/docs/feature.md", "new file mode 100644", "--- /dev/null", "+++ b/docs/feature.md", "+Covers [FR-002].",
   ].join("\n");
   const result = runPolicyPipeline({
-    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, contract: null, contractSource: "none",
+    mode: "check-diff", repositoryRoot: "/tmp/repo", policy, changeIntent: null, changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" }, diffText,
     trackedFiles: ["requirements/fr-001.json", "requirements/fr-002.json"], readFile: makeReadFile(files), initialChecks: [],
   }, { quiet: true });
