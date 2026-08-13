@@ -64,7 +64,7 @@ repo-guard doctor
 - `repo-policy.json`;
 - `.github/workflows/repo-guard.yml`;
 - `.github/PULL_REQUEST_TEMPLATE.md`;
-- `.github/ISSUE_TEMPLATE/change-contract.yml`.
+- `.github/ISSUE_TEMPLATE/change-intent.yml`.
 
 Сгенерированный рабочий процесс закрепляет действие за версией выпуска, а не за изменяемой веткой.
 
@@ -73,7 +73,7 @@ repo-guard doctor
 | Команда | Назначение |
 | --- | --- |
 | `repo-guard` | проверить и скомпилировать политику |
-| `repo-guard path/to/contract.json` | проверить политику и контракт из файла |
+| `repo-guard path/to/change-intent.json` | проверить политику и намерение из файла |
 | `repo-guard check-diff` | проверить локальное изменение |
 | `repo-guard check-diff --base main --head feature` | проверить диапазон ссылок Git |
 | `repo-guard check-pr` | проверить PR в CI |
@@ -125,6 +125,8 @@ repo-guard doctor
 
 ## Намерение изменения `ChangeIntent`
 
+Термин `contract` зарезервирован для версионируемой машинной границы проекта; намерение PR называется только `ChangeIntent`.
+
 Предпочтительная форма в PR и задачах:
 
 ```repo-guard-yaml
@@ -151,7 +153,7 @@ expected_effects:
 
 `check-pr` сначала ищет `ChangeIntent` в теле PR. Если его нет и PR однозначно связывает одну задачу через `Fixes #N`, `Closes #N` или `Resolves #N`, намерение может быть прочитано из этой задачи.
 
-Схема намерения находится в `schemas/change-contract.schema.json`. Привилегированные разрешения в неё не входят.
+Схема намерения находится в `schemas/change-intent.schema.json`. Привилегированные разрешения в неё не входят.
 
 ## Управляющая санкция `GovernanceGrant`
 
