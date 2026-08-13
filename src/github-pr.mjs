@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
-import { extractContract, extractGovernanceGrant, extractLinkedIssueNumbers, resolveContract } from "./markdown-contract.mjs";
+import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
@@ -28,18 +28,18 @@ export function checkPrerequisites() {
 }
 export const checkIssueFallbackPrerequisites = () => cliAvailable("gh") ? [] : ["gh CLI (required for linked issue fallback)"];
 
-export function resolvePRContractFacts({ prBody, issueBody = null, linkedIssueCount = null }) {
+export function resolvePRChangeIntentFacts({ prBody, issueBody = null, linkedIssueCount = null }) {
   const linkedIssues = extractLinkedIssueNumbers(prBody), grantResult = extractGovernanceGrant(issueBody);
-  const prResult = extractContract(prBody);
+  const prResult = extractChangeIntent(prBody);
   const common = { linkedIssues, grantResult };
-  if (prResult.ok) return { ok: true, contract: prResult.contract, contractSource: "pr body", ...common };
-  if (prResult.error !== "contract_not_found") return { ok: false, error: prResult.error, message: prResult.message, contractSource: "pr body", ...common };
+  if (prResult.ok) return { ok: true, changeIntent: prResult.changeIntent, changeIntentSource: "pr body", ...common };
+  if (prResult.error !== "change_intent_not_found") return { ok: false, error: prResult.error, message: prResult.message, changeIntentSource: "pr body", ...common };
   const count = linkedIssueCount ?? linkedIssues.length;
-  if (count > 1) return { ok: false, error: "issue_link_ambiguous", message: `PR body references ${count} issues (${linkedIssues.map((n) => `#${n}`).join(", ")}); expected exactly one`, contractSource: "none", ...common };
-  const issueResult = resolveContract(prBody, issueBody);
+  if (count > 1) return { ok: false, error: "issue_link_ambiguous", message: `PR body references ${count} issues (${linkedIssues.map((n) => `#${n}`).join(", ")}); expected exactly one`, changeIntentSource: "none", ...common };
+  const issueResult = resolveChangeIntent(prBody, issueBody);
   return issueResult.ok
-    ? { ok: true, contract: issueResult.contract, contractSource: "linked issue", ...common }
-    : { ok: false, error: issueResult.error, message: issueResult.message, contractSource: "none", ...common };
+    ? { ok: true, changeIntent: issueResult.changeIntent, changeIntentSource: "linked issue", ...common }
+    : { ok: false, error: issueResult.error, message: issueResult.message, changeIntentSource: "none", ...common };
 }
 
 function loadRuntime(load, label, failure) {
@@ -49,17 +49,17 @@ function loadRuntime(load, label, failure) {
 }
 function printMissing(title, missing) { console.error(title); for (const item of missing) console.error(`  - ${item}`); }
 function fetchLinkedIssue({ prBody, repoFullName }) {
-  const linkedIssues = extractLinkedIssueNumbers(prBody), pr = extractContract(prBody);
-  const hasContract = pr.ok, needsFallback = !hasContract && pr.error === "contract_not_found" && linkedIssues.length === 1;
-  if (linkedIssues.length !== 1 || (!needsFallback && !hasContract)) return { linkedIssues, issueBody: null, fatal: false };
-  console.log(needsFallback ? `No contract in PR body; trying linked issue #${linkedIssues[0]}...` : `Fetching linked issue #${linkedIssues[0]} for GovernanceGrant...`);
+  const linkedIssues = extractLinkedIssueNumbers(prBody), pr = extractChangeIntent(prBody);
+  const hasChangeIntent = pr.ok, needsFallback = !hasChangeIntent && pr.error === "change_intent_not_found" && linkedIssues.length === 1;
+  if (linkedIssues.length !== 1 || (!needsFallback && !hasChangeIntent)) return { linkedIssues, issueBody: null, fatal: false };
+  console.log(needsFallback ? `No ChangeIntent in PR body; trying linked issue #${linkedIssues[0]}...` : `Fetching linked issue #${linkedIssues[0]} for GovernanceGrant...`);
   const missing = checkIssueFallbackPrerequisites();
   if (missing.length) {
     if (needsFallback) { printMissing("ERROR: linked issue fallback prerequisites not met:", missing); return { linkedIssues, issueBody: null, fatal: true }; }
     console.warn("WARN: linked issue lookup unavailable; GovernanceGrant cannot be established"); return { linkedIssues, issueBody: null, fatal: false };
   }
   const issueBody = fetchIssueBody(repoFullName, linkedIssues[0]);
-  if (issueBody === null && hasContract) console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
+  if (issueBody === null && hasChangeIntent) console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
   return { linkedIssues, issueBody, fatal: false };
 }
 
@@ -78,7 +78,7 @@ export function runCheckPR(roots, args = []) {
     catch (error) { console.error(`ERROR: cannot resolve current PR base ref ${baseRef}: ${error.message}`); return 1; }
     if (base !== eventBase) console.log(`Base ref ${baseRef} advanced from event snapshot ${eventBase.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
   }
-  console.log(`PR #${prNumber}: checking contract and diff (${base.slice(0, 7)}..${head.slice(0, 7)})`);
+  console.log(`PR #${prNumber}: checking ChangeIntent and diff (${base.slice(0, 7)}..${head.slice(0, 7)})`);
 
   const headRuntime = loadRuntime(() => loadPolicyRuntime(roots, { label: "repo-policy.json (PR head)" }), "repo-policy.json (PR head)", "Proposed policy compilation failed");
   if (!headRuntime) return 1;
@@ -91,21 +91,21 @@ export function runCheckPR(roots, args = []) {
     basePolicy = runtime.policy; trustedGovernancePaths = basePolicy.paths?.governance_paths ?? [];
   }
 
-  const { ajv, policy, contractSchema, governanceGrantSchema } = runtime;
+  const { ajv, policy, changeIntentSchema, governanceGrantSchema } = runtime;
   const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy });
   if (!enforcement.ok) { console.error(`ERROR: ${enforcement.message}`); return 1; }
   const linked = fetchLinkedIssue({ prBody, repoFullName });
   if (linked.fatal) return 1;
   const { linkedIssues, issueBody } = linked;
-  let resolved = resolvePRContractFacts({ prBody, issueBody });
+  let resolved = resolvePRChangeIntentFacts({ prBody, issueBody });
   if (!resolved.ok && resolved.linkedIssues.length === 1 && issueBody === null && resolved.error !== "issue_link_ambiguous") resolved = { ...resolved, error: "issue_fetch_failed", message: `Could not fetch issue #${resolved.linkedIssues[0]} body` };
 
-  let contract = null, contractSource = resolved.contractSource || "none";
-  if (!resolved.ok) initialChecks.push({ name: "change-contract", check: { ok: false, message: `[${resolved.error}]: ${resolved.message}` } });
+  let changeIntent = null, changeIntentSource = resolved.changeIntentSource || "none";
+  if (!resolved.ok) initialChecks.push({ name: "change-intent", check: { ok: false, message: `[${resolved.error}]: ${resolved.message}` } });
   else {
-    const check = validationCheck(ajv, contractSchema, resolved.contract, "change-intent (from markdown)");
-    initialChecks.push({ name: "change-contract", check });
-    if (check.ok) contract = resolved.contract;
+    const check = validationCheck(ajv, changeIntentSchema, resolved.changeIntent, "change-intent (from markdown)");
+    initialChecks.push({ name: "change-intent", check });
+    if (check.ok) changeIntent = resolved.changeIntent;
   }
 
   let governanceGrant = null;
@@ -124,6 +124,6 @@ export function runCheckPR(roots, args = []) {
 
   return runPolicyPipeline({
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy,
-    contract, contractSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
+    changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
   }).exitCode;
 }
