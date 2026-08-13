@@ -55,9 +55,11 @@ node src/repo-guard.mjs
 ## Быстрый старт
 
 ```bash
-repo-guard init --preset application --mode advisory
+repo-guard init --action-ref "$REPO_GUARD_SHA" --preset application --mode advisory
 repo-guard doctor
 ```
+
+`REPO_GUARD_SHA` должен быть полным 40-символьным commit SHA. Вместо SHA можно явно указать строгий version tag `vX.Y.Z`, но он обязан совпадать с текущей `package.json.version`. `init` не использует `main`, `latest` и не выводит ref из версии автоматически: без `--action-ref` команда завершается ошибкой **до записи любых файлов**.
 
 `init` создаёт, не перезаписывая существующие файлы:
 
@@ -66,7 +68,7 @@ repo-guard doctor
 - `.github/PULL_REQUEST_TEMPLATE.md`;
 - `.github/ISSUE_TEMPLATE/change-contract.yml`.
 
-Сгенерированный рабочий процесс закрепляет действие за версией выпуска, а не за изменяемой веткой.
+Сгенерированный рабочий процесс закрепляет действие ровно за переданным immutable SHA или явным version tag. Существование официального release tag проверяется отдельно через `npm run verify:release-ref`.
 
 ## Команды
 
@@ -77,7 +79,7 @@ repo-guard doctor
 | `repo-guard check-diff` | проверить локальное изменение |
 | `repo-guard check-diff --base main --head feature` | проверить диапазон ссылок Git |
 | `repo-guard check-pr` | проверить PR в CI |
-| `repo-guard init` | создать начальную конфигурацию |
+| `repo-guard init --action-ref <ref>` | создать начальную конфигурацию с явным Action ref |
 | `repo-guard doctor` | проверить окружение и подключение |
 | `repo-guard validate-integration` | проверить декларативный слой `integration` |
 
