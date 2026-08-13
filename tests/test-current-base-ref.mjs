@@ -19,7 +19,7 @@ function writePolicy(root) {
   }, null, 2));
 }
 
-function contractBody({ docs = false } = {}) {
+function changeIntentBody({ docs = false } = {}) {
   const scope = docs ? ["src/**", "docs/**"] : ["src/**"];
   const mustTouch = docs ? "docs/theory/Основания МТС.md" : "src/kernel.txt";
   return [
@@ -55,7 +55,7 @@ const output = (result) => `${result.stdout || ""}${result.stderr || ""}`;
 
 {
   const { root, oldBase, currentBase, head } = setupRepo();
-  const result = runCheck(root, event(100, oldBase, head, contractBody())); const text = output(result);
+  const result = runCheck(root, event(100, oldBase, head, changeIntentBody())); const text = output(result);
   expect("advanced base: check-pr passes", result.status === 0);
   expect("advanced base: diagnostic reports current base", text.includes(currentBase.slice(0, 7)));
   expect("advanced base: old snapshot is recognized as stale", text.includes(oldBase.slice(0, 7)));
@@ -64,14 +64,14 @@ const output = (result) => `${result.stdout || ""}${result.stderr || ""}`;
 }
 {
   const { root, oldBase, currentBase } = setupRepo(); writeFileSync(join(root, "governance.txt"), "landed-on-base\nchanged-by-pr\n");
-  const result = runCheck(root, event(101, oldBase, commit(root, "feature also changes governance"), contractBody())); const text = output(result);
+  const result = runCheck(root, event(101, oldBase, commit(root, "feature also changes governance"), changeIntentBody())); const text = output(result);
   expect("genuine governance delta: current base remains selected", text.includes(currentBase.slice(0, 7)));
   expect("genuine governance delta: blocking check fails", result.status === 1);
   expect("genuine governance delta: must-not-touch reports governance file", text.includes("governance.txt"));
   rmSync(root, { recursive: true, force: true });
 }
 {
-  const { root, oldBase, head } = setupRepo(); const result = runCheck(root, event(102, oldBase, head, contractBody(), "missing-base"));
+  const { root, oldBase, head } = setupRepo(); const result = runCheck(root, event(102, oldBase, head, changeIntentBody(), "missing-base"));
   expect("missing current base ref: check-pr fails closed", result.status === 1);
   expect("missing current base ref: diagnostic is explicit", output(result).includes("cannot resolve current PR base ref missing-base"));
   rmSync(root, { recursive: true, force: true });
@@ -79,7 +79,7 @@ const output = (result) => `${result.stdout || ""}${result.stderr || ""}`;
 {
   const { root, oldBase } = setupRepo(); mkdirSync(join(root, "docs/theory"), { recursive: true });
   writeFileSync(join(root, "docs/theory/Основания МТС.md"), "# Основания МТС\n");
-  const result = runCheck(root, event(103, oldBase, commit(root, "add Cyrillic documentation path"), contractBody({ docs: true })));
+  const result = runCheck(root, event(103, oldBase, commit(root, "add Cyrillic documentation path"), changeIntentBody({ docs: true })));
   expect("UTF-8 diff path: check-pr passes", result.status === 0);
   expect("UTF-8 diff path: must-touch does not lose Cyrillic filename", !output(result).includes("FAIL: must-touch"));
   rmSync(root, { recursive: true, force: true });

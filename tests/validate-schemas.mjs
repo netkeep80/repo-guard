@@ -6,7 +6,7 @@ const root = resolve(new URL("..", import.meta.url).pathname);
 const json = (path) => JSON.parse(readFileSync(resolve(root, path), "utf-8"));
 const ajv = new Ajv({ allErrors: true });
 const policy = ajv.compile(json("schemas/repo-policy.schema.json"));
-const intent = ajv.compile(json("schemas/change-contract.schema.json"));
+const intent = ajv.compile(json("schemas/change-intent.schema.json"));
 const grant = ajv.compile(json("schemas/governance-grant.schema.json"));
 let failures = 0;
 function expect(label, actual, expected = true) {
@@ -29,11 +29,25 @@ expect("evidence trace", policy({ ...validPolicy, trace_rules: [{ id: "evidence"
 
 const integration = {
   workflows: [{ id: "gate", kind: "github_actions", path: ".github/workflows/ci.yml", role: "repo_guard_pr_gate", expect: { events: ["pull_request"], action: { uses: "netkeep80/repo-guard", ref_pinning: "semver" }, mode: "check-pr", enforcement: "blocking", permissions: { contents: "read" }, token_env: ["GH_TOKEN"], summary: true, disallow: ["continue_on_error"] } }],
-  templates: [{ id: "pr", kind: "markdown", path: ".github/PULL_REQUEST_TEMPLATE.md", requires_contract_block: true, required_block_kind: "repo-guard-yaml", required_contract_fields: ["change_type"] }],
+  templates: [{ id: "pr", kind: "markdown", path: ".github/PULL_REQUEST_TEMPLATE.md", requires_change_intent_block: true, required_block_kind: "repo-guard-yaml", required_change_intent_fields: ["change_type"] }],
   docs: [{ id: "readme", kind: "markdown", path: "README.md", must_mention: ["repo-guard"] }],
   profiles: [{ id: "self", doc_path: "README.md" }],
 };
 expect("integration shape", policy({ ...validPolicy, integration }));
+for (const field of ["requires_contract_block", "required_contract_fields"]) {
+  expect(`legacy integration template field ${field} rejected`, policy({
+    ...validPolicy,
+    integration: { ...integration, templates: [{ ...integration.templates[0], [field]: field === "requires_contract_block" ? true : ["change_type"] }] },
+  }), false);
+}
+expect("legacy integration doc field must_mention_contract_fields rejected", policy({
+  ...validPolicy,
+  integration: { ...integration, docs: [{ ...integration.docs[0], must_mention_contract_fields: ["change_type"] }] },
+}), false);
+expect("legacy trace field contract_field rejected", policy({
+  ...validPolicy,
+  trace_rules: [{ id: "legacy", kind: "declared_anchors_require_evidence", contract_field: "anchors.affects", must_touch_any: ["tests/**"] }],
+}), false);
 expect("invalid integration role", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "custom" }] } }), false);
 expect("invalid integration expectation", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "repo_guard_pr_gate", expect: { mode: "deploy" } }] } }), false);
 expect("valid size rule", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }));
@@ -45,11 +59,11 @@ for (const field of ["change_classes", "surface_matrix", "new_file_rules", "chan
   expect(`removed policy field ${field}`, policy({ ...validPolicy, [field]: field === "allow_unclassified_files" ? true : {} }), false);
 }
 
-const validIntent = json("tests/fixtures/valid-contract.json");
+const validIntent = json("tests/fixtures/valid-change-intent.json");
 expect("valid ChangeIntent", intent(validIntent));
 expect("repository-specific change_type", intent({ ...validIntent, change_type: "governance" }));
 expect("anchor intent", intent({ ...validIntent, anchors: { affects: ["FR-014"], implements: ["FR-014"], verifies: ["FR-014"] } }));
-expect("invalid ChangeIntent fixture", intent(json("tests/fixtures/invalid-contract.json")), false);
+expect("invalid ChangeIntent fixture", intent(json("tests/fixtures/invalid-change-intent.json")), false);
 expect("duplicate anchor intent", intent({ ...validIntent, anchors: { affects: ["FR-014", "FR-014"] } }), false);
 expect("unknown anchor field", intent({ ...validIntent, anchors: { affects: ["FR-014"], notes: [] } }), false);
 for (const field of ["change_class", "authorized_governance_paths", "overrides", "allow_policy_relaxation"]) {

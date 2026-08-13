@@ -54,7 +54,7 @@ expected_effects:
   - Опишите ожидаемый эффект
 \`\`\`
 `;
-const issueTemplate = () => `name: Контракт изменения
+const issueTemplate = () => `name: Намерение изменения
 description: Предложить изменение с ChangeIntent и, при необходимости, GovernanceGrant.
 title: "[change] "
 body:
@@ -63,7 +63,7 @@ body:
     attributes: { label: Описание, description: Что меняется и зачем? }
     validations: { required: true }
   - type: textarea
-    id: contract
+    id: change_intent
     attributes:
       label: ChangeIntent
       description: Обычное намерение изменения; не даёт управляющих разрешений.
@@ -113,7 +113,7 @@ export function runInit(roots, args = []) {
   writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset, enforcement.mode), null, 2)}\n`, created, skipped);
   writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), workflow(enforcement.mode, actionRef(roots.packageRoot)), created, skipped);
   writeIfAbsent(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), prTemplate(), created, skipped);
-  writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-contract.yml"), issueTemplate(), created, skipped);
+  writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-intent.yml"), issueTemplate(), created, skipped);
 
   console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcement.mode})`);
   if (created.length) console.log(`Created:\n${created.map((path) => `  ${relative(root, path)}`).join("\n")}`);

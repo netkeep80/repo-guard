@@ -6,7 +6,7 @@
 # Minimal setup:
 #   1. Add repo-policy.json to your repo root.
 #   2. Copy this workflow file to .github/workflows/repo-guard.yml.
-#   3. Add a change contract to PR descriptions or linked issues.
+#   3. Add a ChangeIntent to PR descriptions or linked issues.
 
 name: repo-guard policy check
 
@@ -35,7 +35,7 @@ jobs:
           mode: check-pr
           enforcement: blocking  # use advisory while observing violations before rollout
         env:
-          # Required for fetching linked issue contracts
+          # Required for fetching linked issue ChangeIntent
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish repo-guard summary

@@ -167,7 +167,7 @@ function checkAuth() {
         execFileSync("gh", ["auth", "status"], { encoding: "utf-8", stdio: "pipe" });
         return { name: "auth-token", status: PASS, message: "gh CLI authenticated (no explicit token)" };
       } catch {
-        return { name: "auth-token", status: WARN, message: "No GH_TOKEN/GITHUB_TOKEN and gh CLI not authenticated", hint: "Set GH_TOKEN or GITHUB_TOKEN, or run 'gh auth login'. Auth is only required when check-pr falls back to linked-issue body for the change contract" };
+        return { name: "auth-token", status: WARN, message: "No GH_TOKEN/GITHUB_TOKEN and gh CLI not authenticated", hint: "Set GH_TOKEN or GITHUB_TOKEN, or run 'gh auth login'. Auth is only required when check-pr falls back to linked-issue ChangeIntent" };
       }
     }
     return { name: "auth-token", status: PASS, message: "Token present via environment" };

@@ -72,9 +72,9 @@ repo-guard doctor --integration --format summary
   "id": "pull-request-template",
   "kind": "markdown",
   "path": ".github/PULL_REQUEST_TEMPLATE.md",
-  "requires_contract_block": true,
+  "requires_change_intent_block": true,
   "required_block_kind": "repo-guard-yaml",
-  "required_contract_fields": ["change_type", "scope", "anchors.affects"]
+  "required_change_intent_fields": ["change_type", "scope", "anchors.affects"]
 }
 ```
 
@@ -91,10 +91,10 @@ repo-guard doctor --integration --format summary
   "id": "readme",
   "kind": "markdown",
   "path": "README.md",
-  "must_mention": ["repo-guard", "contract", "integration"],
+  "must_mention": ["repo-guard", "ChangeIntent", "integration"],
   "must_reference_files": ["repo-policy.json", ".github/PULL_REQUEST_TEMPLATE.md"],
   "must_mention_profiles": ["requirements-strict"],
-  "must_mention_contract_fields": ["change_type", "scope", "anchors.affects"],
+  "must_mention_change_intent_fields": ["change_type", "scope", "anchors.affects"],
   "profiles": ["requirements-strict"]
 }
 ```

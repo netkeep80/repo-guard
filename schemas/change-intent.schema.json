@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/netkeep80/repo-guard/schemas/change-contract.schema.json",
+  "$id": "https://github.com/netkeep80/repo-guard/schemas/change-intent.schema.json",
   "title": "Change Intent",
   "type": "object",
   "required": ["change_type", "scope", "budgets", "must_touch", "must_not_touch", "expected_effects"],

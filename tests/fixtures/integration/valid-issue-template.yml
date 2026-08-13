@@ -1,11 +1,11 @@
-name: Change contract
-description: Capture a repo-guard change contract for linked issues.
+name: ChangeIntent
+description: Capture a repo-guard ChangeIntent for linked issues.
 title: "[change] "
 body:
   - type: textarea
-    id: contract
+    id: change_intent
     attributes:
-      label: Change Contract
+      label: ChangeIntent
       value: |
         ```repo-guard-yaml
         change_type: feature
@@ -18,7 +18,7 @@ body:
           - tests/**
         must_not_touch: []
         expected_effects:
-          - The linked issue carries the same contract fields as a PR.
+          - The linked issue carries the same ChangeIntent fields as a PR.
         ```
     validations:
       required: true

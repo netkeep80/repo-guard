@@ -2,7 +2,7 @@
 
 Describe the intended change.
 
-## Change Contract
+## ChangeIntent
 
 ```repo-guard-yaml
 change_type: feature

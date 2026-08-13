@@ -49,7 +49,7 @@
     },
     "integration": {
       "type": "object",
-      "description": "Declarative downstream integration layer for documenting which workflows run repo-guard, which templates carry contract blocks, which docs explain the contract, and which profiles are documented. Accepted as policy metadata; file parsing and enforcement are outside this schema layer.",
+      "description": "Declarative downstream integration layer for documenting which workflows run repo-guard, which templates carry ChangeIntent blocks, which docs explain ChangeIntent, and which profiles are documented. Accepted as policy metadata; file parsing and enforcement are outside this schema layer.",
       "additionalProperties": false,
       "properties": {
         "workflows": {
@@ -59,17 +59,17 @@
         },
         "templates": {
           "type": "array",
-          "description": "Expected repository templates that carry or require repo-guard contract blocks.",
+          "description": "Expected repository templates that carry or require repo-guard ChangeIntent blocks.",
           "items": { "$ref": "#/definitions/integration_template" }
         },
         "docs": {
           "type": "array",
-          "description": "Documentation files that should explain repo-guard workflows, contracts, anchors, or profiles.",
+          "description": "Documentation files that should explain repo-guard workflows, ChangeIntent, anchors, or profiles.",
           "items": { "$ref": "#/definitions/integration_doc" }
         },
         "profiles": {
           "type": "array",
-          "description": "Documented policy/profile contracts exposed to downstream contributors.",
+          "description": "Documented policy profiles exposed to downstream contributors.",
           "items": { "$ref": "#/definitions/integration_profile" }
         }
       }
@@ -90,7 +90,7 @@
         "governance_paths": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Canonical list of paths that define repository governance. In check-pr, runtime policy is read from the base branch of the PR rather than from the PR's head, so a PR cannot relax policy rules or escape governance by narrowing this list in the same diff. Changes to files that match any pattern here require the linked issue body to carry a repo-guard contract block with matching authorized_governance_paths; authorization placed in the PR body is ignored so the change is sanctioned outside the PR an AI agent can author."
+          "description": "Canonical list of paths that define repository governance. In check-pr, runtime policy is read from the base branch of the PR rather than from the PR's head, so a PR cannot relax policy rules or escape governance by narrowing this list in the same diff. Changes to files that match any pattern here require the linked issue body to carry a GovernanceGrant with matching authorized_governance_paths; authorization placed in the PR body is ignored so the change is sanctioned outside the PR an AI agent can author."
         },
         "operational_paths": {
           "type": "array",
@@ -150,7 +150,7 @@
     },
     "change_profiles": {
       "type": "object",
-      "description": "Per-change-type policy constraints keyed by contract change_type. Each profile fully describes the change intent: allowed/forbidden/required surfaces, new-file class rules, and per-type budgets. Replaces the deprecated change_classes, surface_matrix, new_file_rules, and change_type_rules fields.",
+      "description": "Per-change-type policy constraints keyed by ChangeIntent change_type. Each profile fully describes the change intent: allowed/forbidden/required surfaces, new-file class rules, and per-type budgets. Replaces the deprecated change_classes, surface_matrix, new_file_rules, and change_type_rules fields.",
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
@@ -288,7 +288,7 @@
     },
     "trace_rules": {
       "type": "array",
-      "description": "Trace/evidence rules. must_resolve rules enforce that from-anchor values resolve to matching to-anchor values. Evidence rules enforce that changed requirement artifacts or declared contract anchors are backed by configured evidence surfaces.",
+      "description": "Trace/evidence rules. must_resolve rules enforce that from-anchor values resolve to matching to-anchor values. Evidence rules enforce that changed requirement artifacts or declared ChangeIntent anchors are backed by configured evidence surfaces.",
       "items": { "$ref": "#/definitions/trace_rule" }
     },
     "content_rules": {
@@ -525,9 +525,9 @@
           "enum": ["markdown", "github_issue_form"]
         },
         "path": { "$ref": "#/definitions/non_empty_string" },
-        "requires_contract_block": {
+        "requires_change_intent_block": {
           "type": "boolean",
-          "description": "Whether the template is expected to include a repo-guard contract block."
+          "description": "Whether the template is expected to include a repo-guard ChangeIntent block."
         },
         "optional": {
           "type": "boolean",
@@ -538,9 +538,9 @@
           "enum": ["repo-guard-yaml", "repo-guard-json"],
           "description": "Specific repo-guard fenced block kind required in the template."
         },
-        "required_contract_fields": {
+        "required_change_intent_fields": {
           "$ref": "#/definitions/non_empty_string_array",
-          "description": "Contract field paths that must be present in at least one extracted contract example."
+          "description": "ChangeIntent field paths that must be present in at least one extracted ChangeIntent example."
         },
         "profiles": { "$ref": "#/definitions/non_empty_string_array" }
       }
@@ -565,9 +565,9 @@
           "$ref": "#/definitions/non_empty_string_array",
           "description": "Integration profile ids that must be mentioned in this documentation file."
         },
-        "must_mention_contract_fields": {
+        "must_mention_change_intent_fields": {
           "$ref": "#/definitions/non_empty_string_array",
-          "description": "Contract field paths that must be mentioned in this documentation file."
+          "description": "ChangeIntent field paths that must be mentioned in this documentation file."
         },
         "profiles": { "$ref": "#/definitions/non_empty_string_array" }
       }
@@ -607,12 +607,12 @@
         },
         {
           "type": "object",
-          "required": ["id", "kind", "contract_field", "must_touch_any"],
+          "required": ["id", "kind", "change_intent_field", "must_touch_any"],
           "additionalProperties": false,
           "properties": {
             "id": { "type": "string", "minLength": 1 },
             "kind": { "const": "declared_anchors_require_evidence" },
-            "contract_field": {
+            "change_intent_field": {
               "type": "string",
               "enum": ["anchors.affects", "anchors.implements", "anchors.verifies"]
             },
