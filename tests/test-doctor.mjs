@@ -58,7 +58,7 @@ function validPolicy() {
 }
 
 function runRepoGuard(args = "", opts = {}) {
-  const cmd = `node ${resolve(projectRoot, "src/repo-guard.mjs")} ${args}`;
+  const cmd = `node ${resolve(projectRoot, "dist/repo-guard.mjs")} ${args}`;
   try {
     const stdout = execSync(cmd, { encoding: "utf-8", cwd: opts.cwd || projectRoot, stdio: ["pipe", "pipe", "pipe"] });
     return { stdout, stderr: "", code: 0 };
