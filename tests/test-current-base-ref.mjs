@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repoGuard = resolve(projectRoot, "src/repo-guard.mjs");
+const repoGuard = resolve(projectRoot, "dist/repo-guard.mjs");
 let failures = 0;
 const expect = (label, condition) => { const ok = Boolean(condition); console.log(`${ok ? "PASS" : "FAIL"}: ${label}`); if (!ok) failures++; };
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
