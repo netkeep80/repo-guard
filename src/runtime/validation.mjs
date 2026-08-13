@@ -21,7 +21,7 @@ export function validationCheck(ajv, schema, data, label) {
 
 export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
   const schema = (name) => loadJSON(resolve(roots.packageRoot, `schemas/${name}.schema.json`));
-  const policySchema = schema("repo-policy"), contractSchema = schema("change-contract"), governanceGrantSchema = schema("governance-grant");
+  const policySchema = schema("repo-policy"), changeIntentSchema = schema("change-contract"), governanceGrantSchema = schema("governance-grant");
   const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
   let ok = validate(ajv, policySchema, rawPolicy, label, { quiet });
   const profile = resolvePolicyProfile(rawPolicy), policy = profile.policy;
@@ -37,7 +37,7 @@ export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
     if (!quiet) { console.error(`FAIL: ${group}`); for (const error of errors) console.error(`  ${format(error)}`); }
   }
   if (!quiet) for (const warning of warnReservedPolicyFields(policy)) console.warn(`WARN: ${warning}`);
-  return { ok, ajv, policy, contractSchema, governanceGrantSchema };
+  return { ok, ajv, policy, changeIntentSchema, governanceGrantSchema };
 }
 
 export function loadPolicyRuntime(roots, options = {}) {
