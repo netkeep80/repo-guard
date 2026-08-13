@@ -29,6 +29,14 @@ jobs:
       - name: Verify generated dist freshness
         run: npm run check:dist
 
+      - name: Upload generated dist on freshness failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-dist
+          path: dist
+          retention-days: 1
+
       - name: Report architecture compression metrics
         run: npm run compression:metrics -- --compare 94f702271f6fe27672102f5271046151b023f94c
 
