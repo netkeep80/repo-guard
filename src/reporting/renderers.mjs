@@ -78,7 +78,7 @@ function renderCheckExtraLines(report) {
 
   if (report.anchors) {
     const stats = report.anchors.stats;
-    lines.push(`- Anchors: ${stats.detected} detected, ${stats.changed} changed, ${stats.declaredByContract} declared, ${stats.unresolved} unresolved`);
+    lines.push(`- Anchors: ${stats.detected} detected, ${stats.changed} changed, ${stats.declaredByChangeIntent} declared, ${stats.unresolved} unresolved`);
 
     if (report.anchors.unresolved.length > 0) {
       lines.push("", "| Trace rule | Anchor | Locations |", "|---|---|---|");
