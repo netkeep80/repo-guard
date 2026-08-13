@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { runPolicyPipeline } from "../src/runtime/pipeline.mjs";
+import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 let failures = 0;
 
