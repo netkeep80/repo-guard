@@ -41,8 +41,8 @@ export function compileAnchorPolicy(policy = {}) {
     if (rule?.kind === "must_resolve") for (const field of ["from_anchor_type", "to_anchor_type"]) {
       if (!typeNames.has(rule[field])) errors.push({ trace_rule: rule.id, anchor_type: rule[field], message: `trace_rules[${index}].${field} references unknown anchor type "${rule[field]}"` });
     }
-    if (rule?.kind === "declared_anchors_require_evidence" && !["anchors.affects", "anchors.implements", "anchors.verifies"].includes(rule.contract_field)) {
-      errors.push({ trace_rule: rule.id, contract_field: rule.contract_field, message: `trace_rules[${index}].contract_field references unsupported contract anchor field` });
+    if (rule?.kind === "declared_anchors_require_evidence" && !["anchors.affects", "anchors.implements", "anchors.verifies"].includes(rule.change_intent_field)) {
+      errors.push({ trace_rule: rule.id, change_intent_field: rule.change_intent_field, message: `trace_rules[${index}].change_intent_field references unsupported ChangeIntent anchor field` });
     }
   }
   return errors;
