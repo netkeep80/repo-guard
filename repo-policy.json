@@ -188,7 +188,7 @@
       "id": "max-source-file-lines",
       "scope": "file",
       "metric": "lines",
-      "glob": "src/**/*.mjs",
+      "glob": "src/**/*.{mjs,mts}",
       "max": 900,
       "count": "all_tracked",
       "level": "advisory"
