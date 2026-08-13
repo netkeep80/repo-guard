@@ -1,7 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { checkGovernanceChangeAuthorization } from "../src/checks/rules/governance-paths.mjs";
-import { checkChangeProfile } from "../src/checks/rules/change-profiles.mjs";
 import { createDefaultRuleRegistry } from "../src/checks/default-rule-families.mjs";
 import { buildPolicyFacts } from "../src/facts/input.mjs";
 import { runPolicyChecks } from "../src/checks/orchestrator.mjs";
@@ -13,7 +12,7 @@ const TRUSTED = { issue_author_permission_trusted: true, governance_approved_lab
 const UNTRUSTED = { issue_author_permission_trusted: false, governance_approved_label: false, codeowner_approved: false, trusted_team_approval: false };
 const file = (path) => ({ path, status: "modified", addedLines: ["+"], deletedLines: [] });
 const grant = (...paths) => ({ authorized_governance_paths: paths });
-const governanceIntent = { change_type: "governance", scope: ["**"], budgets: {}, must_touch: [], must_not_touch: [], expected_effects: ["governance"] };
+const intent = (changeType) => ({ change_type: changeType, scope: ["**"], budgets: {}, must_touch: [], must_not_touch: [], expected_effects: [changeType] });
 
 describe("GovernanceGrant authorization", () => {
   it("passes when governance is untouched for ordinary changes", () => assert.equal(checkGovernanceChangeAuthorization({ files: [file("src/a.mjs")], governancePaths: PATHS }).ok, true));
@@ -62,13 +61,6 @@ describe("reserved governance ChangeIntent", () => {
     const result = checkGovernanceChangeAuthorization({ files: [file("repo-policy.json")], governancePaths: [], changeIntentType: "governance" });
     assert.equal(result.ok, false); assert.deepEqual(result.non_governance_paths, ["repo-policy.json"]);
   });
-  it("delegates governance out of repository-specific change_profiles", () => {
-    const result = checkChangeProfile([file("repo-policy.json")], { change_profiles: { feature: {} }, paths: { canonical_docs: [] } }, "governance");
-    assert.equal(result.ok, true); assert.equal(result.delegated_to, "governance-change-authorization");
-  });
-  it("keeps ordinary unknown change types rejected", () => {
-    assert.equal(checkChangeProfile([], { change_profiles: { feature: {} }, paths: { canonical_docs: [] } }, "unknown").ok, false);
-  });
 });
 
 describe("GovernanceGrant markdown", () => {
@@ -83,7 +75,8 @@ describe("governance authorization through pipeline", () => {
   const policy = {
     policy_format_version: "0.3.0", repository_kind: "tooling",
     paths: { forbidden: [], canonical_docs: ["README.md"], operational_paths: [], governance_paths: ["repo-policy.json", "schemas/"] },
-    diff_rules: { max_new_docs: 5, max_new_files: 5, max_net_added_lines: 2000 }, content_rules: [], cochange_rules: [],
+    diff_rules: { max_new_docs: 5, max_new_files: 5, max_net_added_lines: 2000 },
+    change_profiles: { feature: {} }, content_rules: [], cochange_rules: [],
   };
   const diff = (path) => ["diff --git a/" + path + " b/" + path, "--- a/" + path, "+++ b/" + path, "+x"].join("\n");
   function run({ path = "repo-policy.json", governanceGrant = null, trustedAuthorizer = null, trustedGovernancePaths = policy.paths.governance_paths, runtimePolicy = policy, changeIntent = null }) {
@@ -97,10 +90,19 @@ describe("governance authorization through pipeline", () => {
   it("blocks without grant", () => assert.ok(run({}).violations.some((item) => item.rule === "governance-change-authorization")));
   it("allows trusted grant", () => assert.equal(run({ governanceGrant: grant("repo-policy.json"), trustedAuthorizer: TRUSTED }).ruleResults.find((item) => item.rule === "governance-change-authorization").ok, true));
   it("blocks untrusted grant", () => assert.equal(run({ governanceGrant: grant("repo-policy.json"), trustedAuthorizer: UNTRUSTED }).violations.find((item) => item.rule === "governance-change-authorization").data.untrusted_governance_grant_ignored, true));
+  it("delegates governance away from repository-specific change_profiles", () => {
+    const result = run({ path: "repo-policy.json", governanceGrant: grant("repo-policy.json"), trustedAuthorizer: TRUSTED, changeIntent: intent("governance") });
+    assert.equal(result.violations.some((item) => item.rule === "change-profiles"), false);
+    assert.equal(result.ruleResults.find((item) => item.rule === "governance-change-authorization").ok, true);
+  });
   it("blocks governance ChangeIntent outside trusted governance paths", () => {
-    const result = run({ path: "src/a.mjs", governanceGrant: grant("repo-policy.json"), trustedAuthorizer: TRUSTED, changeIntent: governanceIntent });
+    const result = run({ path: "src/a.mjs", governanceGrant: grant("repo-policy.json"), trustedAuthorizer: TRUSTED, changeIntent: intent("governance") });
     const violation = result.violations.find((item) => item.rule === "governance-change-authorization");
     assert.deepEqual(violation.data.non_governance_paths, ["src/a.mjs"]);
+  });
+  it("keeps ordinary unknown change types rejected by change_profiles", () => {
+    const result = run({ path: "src/a.mjs", changeIntent: intent("unknown") });
+    assert.equal(result.violations.some((item) => item.rule === "change-profiles"), true);
   });
   it("base governance boundary cannot be narrowed by head policy", () => {
     const narrowed = { ...policy, paths: { ...policy.paths, governance_paths: ["nonexistent.json"] } };
