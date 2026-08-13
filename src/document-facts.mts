@@ -1,32 +1,100 @@
 import { parseDocument } from "yaml";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 
-function collapseMessage(message) {
+export interface MarkdownHeading {
+  level: number;
+  text: string;
+  line: number;
+}
+
+export interface MarkdownCodeBlock {
+  language: string;
+  infoString: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+}
+
+export interface MarkdownProseLine {
+  line: number;
+  text: string;
+}
+
+export interface MarkdownLink {
+  target: string;
+  line: number;
+  column: number;
+}
+
+export interface MarkdownParseError {
+  message: string;
+}
+
+export interface MarkdownDocument {
+  lines: string[];
+  headings: MarkdownHeading[];
+  codeBlocks: MarkdownCodeBlock[];
+  proseLines: MarkdownProseLine[];
+  links: MarkdownLink[];
+  errors: MarkdownParseError[];
+}
+
+export interface MarkdownSection {
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  links: MarkdownLink[];
+}
+
+export interface DocumentReaderOptions {
+  repoRoot?: string;
+  readFile?: (filePath: string) => unknown;
+}
+
+export interface DocumentReader {
+  text(path: string): string;
+  markdown(path: string): MarkdownDocument;
+  json(path: string): unknown;
+  yaml(path: string): unknown;
+}
+
+type DocumentKind = "markdown" | "json" | "yaml";
+
+interface OpenMarkdownFence {
+  indent: string;
+  marker: string;
+  length: number;
+  infoString: string;
+  startLine: number;
+  contentLines: string[];
+}
+
+function collapseMessage(message: unknown): string {
   return String(message || "").replace(/\s+/g, " ").trim();
 }
 
-export function parseYaml(content) {
+export function parseYaml(content: string): unknown {
   const doc = parseDocument(content, { prettyErrors: false });
   if (doc.errors.length) throw new Error(`invalid YAML: ${doc.errors.map((e) => collapseMessage(e.message)).join("; ")}`);
   return doc.toJSON();
 }
 
-export function parseJson(content) {
+export function parseJson(content: string): unknown {
   return JSON.parse(content);
 }
 
-export function stripMarkdownInline(line) {
+export function stripMarkdownInline(line: string): string {
   return line.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]").replace(/https?:\/\/\S+/g, "");
 }
 
-export function parseMarkdown(content) {
+export function parseMarkdown(content: unknown): MarkdownDocument {
   const lines = String(content || "").split(/\r?\n/);
-  const headings = [];
-  const codeBlocks = [];
-  const proseLines = [];
-  const links = [];
-  const errors = [];
-  let fence = null;
+  const headings: MarkdownHeading[] = [];
+  const codeBlocks: MarkdownCodeBlock[] = [];
+  const proseLines: MarkdownProseLine[] = [];
+  const links: MarkdownLink[] = [];
+  const errors: MarkdownParseError[] = [];
+  let fence: OpenMarkdownFence | null = null;
 
   for (const [offset, line] of lines.entries()) {
     const lineNumber = offset + 1;
@@ -64,7 +132,7 @@ export function parseMarkdown(content) {
   return { lines, headings, codeBlocks, proseLines, links, errors };
 }
 
-export function markdownSection(markdown, section) {
+export function markdownSection(markdown: MarkdownDocument, section: string): MarkdownSection {
   const heading = markdown.headings.find((item) => item.text.toLowerCase() === section.trim().toLowerCase());
   if (!heading) throw new Error(`markdown section "${section}" not found`);
   const end = markdown.headings.find((item) => item.line > heading.line && item.level <= heading.level)?.line || markdown.lines.length + 1;
@@ -75,16 +143,16 @@ export function markdownSection(markdown, section) {
   };
 }
 
-export function createDocumentReader(options = {}) {
-  const textCache = new Map();
-  const parsed = { markdown: new Map(), json: new Map(), yaml: new Map() };
-  const text = (path) => {
+export function createDocumentReader(options: DocumentReaderOptions = {}): DocumentReader {
+  const textCache = new Map<string, string>();
+  const parsed: Record<DocumentKind, Map<string, unknown>> = { markdown: new Map(), json: new Map(), yaml: new Map() };
+  const text = (path: string): string => {
     if (!textCache.has(path)) textCache.set(path, readRepositoryTextFile(path, options));
-    return textCache.get(path);
+    return textCache.get(path)!;
   };
-  const cached = (kind, path, parser) => {
+  const cached = <T,>(kind: DocumentKind, path: string, parser: (content: string) => T): T => {
     if (!parsed[kind].has(path)) parsed[kind].set(path, parser(text(path)));
-    return parsed[kind].get(path);
+    return parsed[kind].get(path) as T;
   };
   return {
     text,
