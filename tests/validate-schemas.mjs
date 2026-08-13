@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
+import { loadPolicyRuntimeFromObject, loadTrustedBasePolicyRuntimeFromObject } from "../src/runtime/validation.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const json = (path) => JSON.parse(readFileSync(resolve(root, path), "utf-8"));
@@ -44,6 +45,27 @@ expect("new_files requires allow_classes", policy({ ...validPolicy, change_profi
 for (const field of ["change_classes", "surface_matrix", "new_file_rules", "change_type_rules", "allow_unclassified_files"]) {
   expect(`removed policy field ${field}`, policy({ ...validPolicy, [field]: field === "allow_unclassified_files" ? true : {} }), false);
 }
+
+const roots = { packageRoot: root };
+const historicalPolicy = { ...validPolicy, historical_policy_field: true };
+const publicRuntime = loadPolicyRuntimeFromObject(roots, historicalPolicy, { quiet: true });
+expect("head/public runtime rejects historical-only policy syntax", publicRuntime.ok, false);
+const trustedRuntime = loadTrustedBasePolicyRuntimeFromObject(roots, historicalPolicy, {
+  quiet: true,
+  normalizeTrustedBase: (candidate) => {
+    delete candidate.historical_policy_field;
+    return candidate;
+  },
+});
+expect("trusted base may normalize historical syntax before canonical validation", trustedRuntime.ok);
+expect("trusted normalization does not mutate base source", historicalPolicy.historical_policy_field, true);
+expect("trusted base canonical policy omits historical syntax", trustedRuntime.policy.historical_policy_field, undefined);
+const failedTrustedRuntime = loadTrustedBasePolicyRuntimeFromObject(roots, historicalPolicy, {
+  quiet: true,
+  normalizeTrustedBase: () => { throw new Error("normalization failed"); },
+});
+expect("trusted base normalization fails closed", failedTrustedRuntime.ok, false);
+expect("trusted base normalization exposes explicit error", failedTrustedRuntime.error, "trusted_base_normalization_failed");
 
 const validIntent = json("tests/fixtures/valid-contract.json");
 expect("valid ChangeIntent", intent(validIntent));
