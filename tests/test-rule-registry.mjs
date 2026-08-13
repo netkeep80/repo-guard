@@ -153,7 +153,7 @@ const facts = {
       },
     ],
   },
-  contract: {
+  changeIntent: {
     change_type: "implementation",
     must_touch: ["tests/**"],
     must_not_touch: ["secrets/**"],
