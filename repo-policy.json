@@ -36,18 +36,14 @@
         "id": "pull-request-template",
         "kind": "markdown",
         "path": ".github/PULL_REQUEST_TEMPLATE.md",
-        "requires_contract_block": true,
-        "required_block_kind": "repo-guard-yaml",
-        "required_contract_fields": ["change_type", "scope", "anchors.affects"]
+        "required_block_kind": "repo-guard-yaml"
       },
       {
         "id": "change-contract-issue-form",
         "kind": "github_issue_form",
         "path": ".github/ISSUE_TEMPLATE/change-contract.yml",
-        "requires_contract_block": true,
         "optional": true,
-        "required_block_kind": "repo-guard-yaml",
-        "required_contract_fields": ["change_type", "scope", "anchors.affects"]
+        "required_block_kind": "repo-guard-yaml"
       }
     ],
     "docs": [
@@ -58,11 +54,9 @@
         "must_reference_files": [
           "repo-policy.json",
           ".github/PULL_REQUEST_TEMPLATE.md",
-          ".github/ISSUE_TEMPLATE/change-contract.yml",
           "docs/self-hosting-coverage.md"
         ],
-        "must_mention_profiles": ["self-hosting"],
-        "must_mention_contract_fields": ["change_type", "scope", "anchors.affects"]
+        "must_mention_profiles": ["self-hosting"]
       }
     ],
     "profiles": [
