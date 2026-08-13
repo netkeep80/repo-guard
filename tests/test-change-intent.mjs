@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "../src/change-intent.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
+const selfPolicy = JSON.parse(readFileSync(resolve(root, "repo-policy.json"), "utf-8"));
+const issueTemplatePath = selfPolicy.integration.templates.find((entry) => entry.kind === "github_issue_form").path;
 const intent = (type = "bugfix") => `\`\`\`repo-guard-yaml
 change_type: ${type}
 scope: ["src/**"]
@@ -31,7 +33,7 @@ describe("ChangeIntent extraction", () => {
   });
   it("keeps repository templates self-hosted", () => {
     assert.equal(extractChangeIntent(readFileSync(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8")).ok, true);
-    assert.equal(extractChangeIntent(readFileSync(resolve(root, ".github/ISSUE_TEMPLATE/change-contract.yml"), "utf-8")).ok, true);
+    assert.equal(extractChangeIntent(readFileSync(resolve(root, issueTemplatePath), "utf-8")).ok, true);
   });
   it("rejects missing, malformed and multiple ChangeIntents", () => {
     assert.equal(extractChangeIntent("text").error, "change_intent_not_found");
