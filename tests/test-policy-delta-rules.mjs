@@ -55,14 +55,14 @@ describe("governance classification", () => {
 describe("GovernanceGrant relaxation authorization", () => {
   const check = (overrides = {}) => checkPolicyRelaxation({
     basePolicy: BASE, headPolicy: relax(), changedFiles: [file("repo-policy.json")], trustedAuthorizer: TRUSTED,
-    governanceGrant: grant(), contractChangeType: "governance", ...overrides,
+    governanceGrant: grant(), changeIntentType: "governance", ...overrides,
   });
   it("allows a trusted governance-only grant covering the pointer", () => assert.equal(check().ok, true));
   it("accepts parent pointers", () => assert.equal(check({ governanceGrant: grant("/size_rules/max-source") }).ok, true));
   it("blocks missing grant", () => assert.ok(check({ governanceGrant: null }).blocked_reasons.includes("governance_grant_missing")));
   it("blocks incomplete grant", () => assert.ok(check({ governanceGrant: grant("/diff_rules/max_new_files") }).blocked_reasons.includes("governance_grant_does_not_cover_all_relaxations")));
   it("blocks untrusted authorizer", () => assert.ok(check({ trustedAuthorizer: UNTRUSTED }).blocked_reasons.includes("no_trusted_authorization_source")));
-  it("blocks non-governance intent", () => assert.ok(check({ contractChangeType: "feature" }).blocked_reasons.includes("contract_change_type_is_not_governance")));
+  it("blocks non-governance intent", () => assert.ok(check({ changeIntentType: "feature" }).blocked_reasons.includes("change_intent_type_is_not_governance")));
   it("blocks mixing relaxation with source changes", () => {
     const result = check({ changedFiles: [file("repo-policy.json"), file("src/a.mjs")] });
     assert.ok(result.blocked_reasons.includes("policy_relaxation_mixed_with_non_governance_changes"));
@@ -77,7 +77,7 @@ describe("policy-delta rule family", () => {
   it("uses GovernanceGrant facts", () => {
     const entry = policyRelaxationRuleFamily.evaluate({
       basePolicy: BASE, headPolicy: relax(), diff: { files: { checked: [file("repo-policy.json")] } },
-      trustedAuthorizer: TRUSTED, governanceGrant: grant(), contract: { change_type: "governance" },
+      trustedAuthorizer: TRUSTED, governanceGrant: grant(), changeIntent: { change_type: "governance" },
     });
     assert.equal(entry.name, "policy-relaxation");
     assert.equal(entry.check.ok, true);
