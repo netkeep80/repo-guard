@@ -1,6 +1,6 @@
 import { buildTraceRuleDiagnostics } from "../checks/trace-rules.mjs";
 
-const CONTRACT_ANCHOR_FIELDS = ["affects", "implements", "verifies"];
+const CHANGE_INTENT_ANCHOR_FIELDS = ["affects", "implements", "verifies"];
 
 function cloneAnchorInstance(instance) {
   return { ...instance };
@@ -26,13 +26,13 @@ function groupByType(anchorTypes, instances) {
   return byType;
 }
 
-function declaredContractAnchors(contract) {
-  const contractAnchors = contract?.anchors || {};
+function declaredChangeIntentAnchors(changeIntent) {
+  const changeIntentAnchors = changeIntent?.anchors || {};
   const declared = {};
   const all = [];
 
-  for (const field of CONTRACT_ANCHOR_FIELDS) {
-    const values = sortedUnique(contractAnchors[field]);
+  for (const field of CHANGE_INTENT_ANCHOR_FIELDS) {
+    const values = sortedUnique(changeIntentAnchors[field]);
     declared[field] = values;
     for (const value of values) {
       all.push({ relation: field, value });
@@ -71,19 +71,19 @@ export function buildAnchorDiagnostics(facts) {
   const changed = detected
     .filter((instance) => changedPaths.has(instance.file))
     .map(cloneAnchorInstance);
-  const declaredByContract = declaredContractAnchors(facts.contract);
+  const declaredByChangeIntent = declaredChangeIntentAnchors(facts.changeIntent);
   const unresolved = flattenUnresolved(traceRuleResults);
 
   return {
     anchors: {
       detected,
       changed,
-      declaredByContract,
+      declaredByChangeIntent,
       unresolved,
       stats: {
         detected: detected.length,
         changed: changed.length,
-        declaredByContract: declaredByContract.all.length,
+        declaredByChangeIntent: declaredByChangeIntent.all.length,
         unresolved: unresolved.length,
         extractionErrors: (facts.anchors?.errors || []).length,
         byType: groupByType(facts.policy.anchors.types, { detected, changed }),
