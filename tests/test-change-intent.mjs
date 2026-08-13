@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "../src/change-intent.mjs";
+import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "../dist/change-intent.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const selfPolicy = JSON.parse(readFileSync(resolve(root, "repo-policy.json"), "utf-8"));
