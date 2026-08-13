@@ -2,10 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { defaultRuleFamilies } from "../src/checks/default-rule-families.mjs";
-import { parseYaml } from "../src/document-facts.mjs";
-import { listBuiltInProfiles } from "../src/policy-profiles.mjs";
-import { COMMANDS } from "../src/repo-guard.mjs";
+import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
+import { parseYaml } from "../dist/document-facts.mjs";
+import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
+import { COMMANDS } from "../dist/repo-guard.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
