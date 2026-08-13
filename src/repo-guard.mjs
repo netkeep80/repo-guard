@@ -14,7 +14,7 @@ const COMMAND_SPECS = {
     run: async (roots, args) => (await import("./validate.mjs")).runValidate(roots, args),
   },
   "check-diff": {
-    options: valueOptions("--base", "--head", "--contract", "--format"), positionals: 0,
+    options: valueOptions("--base", "--head", "--change-intent", "--format"), positionals: 0,
     run: async (roots, args) => (await import("./check-diff.mjs")).runCheckDiff(roots, args),
   },
   "check-pr": {
