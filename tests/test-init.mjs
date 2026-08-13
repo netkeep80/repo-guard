@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import Ajv from "ajv";
 
-const root = resolve(new URL("..", import.meta.url).pathname), cli = resolve(root, "src/repo-guard.mjs");
+const root = resolve(new URL("..", import.meta.url).pathname), cli = resolve(root, "dist/repo-guard.mjs");
 const schema = JSON.parse(readFileSync(resolve(root, "schemas/repo-policy.schema.json"), "utf-8"));
 const version = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8")).version;
 const validate = new Ajv({ allErrors: true }).compile(schema);
