@@ -12,17 +12,16 @@
 
 ## Инвариант выпуска
 
-`package.json.version` определяет ссылку на `Action`, которую создаёт `repo-guard init`: `netkeep80/repo-guard@v<version>`.
-
-Для каждой публикуемой версии пакета заранее должны существовать соответствующие тег и выпуск на `GitHub`:
+`package.json.version` определяет официальный тег выпуска `v<version>`. Публикуемый пакет считается согласованным только если соответствующие Git tag и GitHub release уже существуют:
 
 ```text
 package.json.version = X.Y.Z
-Git tag/release       = vX.Y.Z
-Generated Action ref  = netkeep80/repo-guard@vX.Y.Z
+Expected tag/release  = vX.Y.Z
 ```
 
-До публикации проверьте инвариант:
+`repo-guard init` **не выводит Action ref из версии автоматически**. Пользователь обязан явно передать `--action-ref`: полный 40-символьный commit SHA либо строгий `vX.Y.Z`, совпадающий с текущей `package.json.version`. Поэтому отсутствие опубликованного релиза не превращается в фиктивный workflow ref.
+
+Для официального version tag перед публикацией проверьте инвариант:
 
 ```bash
 npm run verify:release-ref -- --tag vX.Y.Z
@@ -58,6 +57,8 @@ npm run verify:release-ref -- --tag vX.Y.Z
    ```bash
    npm publish
    ```
+
+После этого `repo-guard init --action-ref vX.Y.Z ...` может использовать официальный version tag. Для pre-release/candidate интеграции перед публикацией используйте полный 40-символьный commit SHA.
 
 Поле `files` в `package.json` определяет содержимое публикуемого пакета.
 
