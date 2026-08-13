@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
-import { buildPolicyFacts } from "../src/facts/input.mjs";
-import { extractIntegration } from "../src/extractors/integration.mjs";
+import { buildPolicyFacts } from "../dist/facts/input.mjs";
+import { extractIntegration } from "../dist/extractors/integration.mjs";
 
 let failures = 0;
 
@@ -129,7 +129,7 @@ const files = {
     "        env:",
     "          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
     "        run: |",
-    "          node src/repo-guard.mjs check-pr",
+    "          node dist/repo-guard.mjs check-pr",
     "          echo \"### repo-guard\" >> \"$GITHUB_STEP_SUMMARY\"",
     "      - uses: ./",
     "        with:",

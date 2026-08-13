@@ -1,7 +1,7 @@
 import {
   createDefaultRuleRegistry,
   defaultRuleFamilies,
-} from "../src/checks/default-rule-families.mjs";
+} from "../dist/checks/default-rule-families.mjs";
 
 let failures = 0;
 

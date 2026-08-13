@@ -3,7 +3,7 @@ import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolveRoots } from "../src/repo-guard.mjs";
+import { resolveRoots } from "../dist/repo-guard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -61,7 +61,7 @@ function expect(label, actual, expected) {
 
 {
   try {
-    const output = execSync(`node src/repo-guard.mjs`, {
+    const output = execSync(`node dist/repo-guard.mjs`, {
       encoding: "utf-8",
       cwd: projectRoot,
     });
@@ -78,7 +78,7 @@ function expect(label, actual, expected) {
   const binDir = join(tmp, "node_modules", ".bin");
   mkdirSync(binDir, { recursive: true });
   const binPath = join(binDir, "repo-guard");
-  symlinkSync(resolve(projectRoot, "src/repo-guard.mjs"), binPath);
+  symlinkSync(resolve(projectRoot, "dist/repo-guard.mjs"), binPath);
 
   try {
     const output = execSync(
@@ -113,7 +113,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp}`,
+      `node dist/repo-guard.mjs --repo-root ${tmp}`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("--repo-root validate loads external policy", output.includes("OK: repo-policy.json"), true);
@@ -144,7 +144,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp}`,
+      `node dist/repo-guard.mjs --repo-root ${tmp}`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("schemas load from package (no schemas/ in target)", output.includes("OK: repo-policy.json"), true);
@@ -183,7 +183,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
+      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("check-diff --repo-root uses target git", output.includes("1 file(s) changed"), true);
@@ -226,7 +226,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
+      `node dist/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("validate resolves ChangeIntent relative to repoRoot", output.includes("OK: repo-policy.json"), true);
@@ -280,7 +280,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD --change-intent change-intents/change.json`,
+      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD --change-intent change-intents/change.json`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("check-diff resolves --change-intent relative to repoRoot", output.includes("1 file(s) changed"), true);
@@ -322,7 +322,7 @@ function expect(label, actual, expected) {
 
   try {
     const result = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp} check-pr 2>&1`,
+      `node dist/repo-guard.mjs --repo-root ${tmp} check-pr 2>&1`,
       { encoding: "utf-8", cwd: projectRoot, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "GITHUB_EVENT_PATH")) }
     );
     const isCheckPR = result.includes("check-pr") && !result.includes("ENOENT");
@@ -364,7 +364,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp} check-diff --base HEAD~1 --head HEAD`,
+      `node dist/repo-guard.mjs --repo-root ${tmp} check-diff --base HEAD~1 --head HEAD`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("pre-command --repo-root check-diff works", output.includes("1 file(s) changed"), true);
@@ -407,7 +407,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
+      `node dist/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("pre-command --repo-root validate with ChangeIntent works", output.includes("OK: repo-policy.json"), true);
@@ -426,7 +426,7 @@ function expect(label, actual, expected) {
 {
   try {
     execSync(
-      `node src/repo-guard.mjs --unknown-flag 2>&1`,
+      `node dist/repo-guard.mjs --unknown-flag 2>&1`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("unknown option exits with error", false, true);
@@ -465,7 +465,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
+      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("post-command --repo-root check-diff still works", output.includes("1 file(s) changed"), true);
@@ -481,7 +481,7 @@ function expect(label, actual, expected) {
 {
   try {
     execSync(
-      `node src/repo-guard.mjs --repo-root 2>&1`,
+      `node dist/repo-guard.mjs --repo-root 2>&1`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("--repo-root without value exits with error", false, true);
@@ -497,7 +497,7 @@ function expect(label, actual, expected) {
 {
   try {
     execSync(
-      `node src/repo-guard.mjs check-diff --repo-root --base HEAD~1 --head HEAD 2>&1`,
+      `node dist/repo-guard.mjs check-diff --repo-root --base HEAD~1 --head HEAD 2>&1`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("--repo-root --base exits with error", false, true);
@@ -512,7 +512,7 @@ function expect(label, actual, expected) {
 {
   try {
     execSync(
-      `node src/repo-guard.mjs check-diff --hed HEAD 2>&1`,
+      `node dist/repo-guard.mjs check-diff --hed HEAD 2>&1`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("unknown check-diff option exits with error", false, true);
@@ -551,7 +551,7 @@ function expect(label, actual, expected) {
 
   try {
     const output = execSync(
-      `node src/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
+      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
       { encoding: "utf-8", cwd: projectRoot }
     );
     expect("known check-diff options still accepted", output.includes("1 file(s) changed"), true);

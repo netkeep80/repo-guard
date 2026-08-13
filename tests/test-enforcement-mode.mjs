@@ -5,7 +5,7 @@ import { execSync, spawnSync } from "node:child_process";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const projectRoot = resolve(__dirname, "..");
-const repoGuard = resolve(projectRoot, "src/repo-guard.mjs");
+const repoGuard = resolve(projectRoot, "dist/repo-guard.mjs");
 
 let failures = 0;
 

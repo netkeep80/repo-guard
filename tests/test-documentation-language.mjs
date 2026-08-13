@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { checkContentRules } from "../src/checks/rules/content-rules.mjs";
+import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const projectRoot = resolve(__dirname, "..");

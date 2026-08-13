@@ -153,7 +153,7 @@ function makeFixtureRepo({ workflow, prTemplate, issueTemplate = null, readme })
 
 function runGuard(args, cwd = projectRoot) {
   const result = spawnSync(process.execPath, [
-    resolve(projectRoot, "src/repo-guard.mjs"),
+    resolve(projectRoot, "dist/repo-guard.mjs"),
     ...args,
   ], {
     cwd,

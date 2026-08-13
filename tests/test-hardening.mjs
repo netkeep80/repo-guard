@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../src/policy-compiler.mjs";
-import { checkMustTouch } from "../src/checks/rules/constraints.mjs";
-import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../src/github-pr.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../dist/policy-compiler.mjs";
+import { checkMustTouch } from "../dist/checks/rules/constraints.mjs";
+import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../dist/github-pr.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repoGuard = resolve(projectRoot, "src/repo-guard.mjs");
+const repoGuard = resolve(projectRoot, "dist/repo-guard.mjs");
 const runRepoGuard = (args, options = {}) => spawnSync(process.execPath, [repoGuard, ...args], { cwd: options.cwd || projectRoot, env: options.env || process.env, encoding: "utf-8" });
 
 function initTinyRepo(prefix) {

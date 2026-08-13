@@ -81,7 +81,7 @@ runs:
       run: |
         # Install runtime dependencies for the checked-out Action source.
         cd "${GITHUB_ACTION_PATH}"
-        npm install --production --silent
+        npm install --omit=dev --silent
 
     - name: Run repo-guard
       id: run-repo-guard
@@ -91,8 +91,8 @@ runs:
       run: |
         set +e
 
-        # Always run the CLI from the checked-out Action source.
-        BIN="node ${GITHUB_ACTION_PATH}/src/repo-guard.mjs"
+        # Always run the checked, generated runtime shipped with the Action.
+        BIN="node ${GITHUB_ACTION_PATH}/dist/repo-guard.mjs"
 
         # Build the command
         CMD="$BIN"
