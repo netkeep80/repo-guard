@@ -52,28 +52,28 @@ function makePolicy(overrides = {}) {
           id: "pull-request-template",
           kind: "markdown",
           path: ".github/PULL_REQUEST_TEMPLATE.md",
-          requires_contract_block: true,
+          requires_change_intent_block: true,
           required_block_kind: "repo-guard-yaml",
-          required_contract_fields: ["change_type", "scope", "anchors.affects"],
+          required_change_intent_fields: ["change_type", "scope", "anchors.affects"],
         },
         {
-          id: "change-contract-issue-form",
+          id: "change-intent-issue-form",
           kind: "github_issue_form",
-          path: ".github/ISSUE_TEMPLATE/change-contract.yml",
-          requires_contract_block: true,
+          path: ".github/ISSUE_TEMPLATE/change-intent.yml",
+          requires_change_intent_block: true,
           optional: true,
           required_block_kind: "repo-guard-yaml",
-          required_contract_fields: ["change_type", "expected_effects"],
+          required_change_intent_fields: ["change_type", "expected_effects"],
         },
       ],
       docs: [
         {
           id: "readme",
           path: "README.md",
-          must_mention: ["repo-guard", "contract", "integration", "anchors.affects"],
+          must_mention: ["repo-guard", "ChangeIntent", "integration", "anchors.affects"],
           must_reference_files: ["repo-policy.json"],
           must_mention_profiles: ["self-hosting"],
-          must_mention_contract_fields: ["anchors.affects"],
+          must_mention_change_intent_fields: ["anchors.affects"],
         },
       ],
       profiles: [
@@ -136,7 +136,7 @@ const files = {
     "          mode: check-pr",
   ].join("\n"),
   ".github/PULL_REQUEST_TEMPLATE.md": [
-    "# Change Contract",
+    "# ChangeIntent",
     "",
     "```repo-guard-yaml",
     "change_type: feature",
@@ -147,8 +147,8 @@ const files = {
     "    - FR-001",
     "```",
   ].join("\n"),
-  ".github/ISSUE_TEMPLATE/change-contract.yml": [
-    "name: Change contract",
+  ".github/ISSUE_TEMPLATE/change-intent.yml": [
+    "name: ChangeIntent",
     "body:",
     "  - type: markdown",
     "    attributes:",
@@ -156,15 +156,15 @@ const files = {
     "        ```repo-guard-yaml",
     "        change_type: docs",
     "        expected_effects:",
-    "          - README explains the contract",
+    "          - README explains ChangeIntent",
     "        ```",
   ].join("\n"),
   "README.md": [
     "# Repo Guard",
     "",
-    "Uses repo-guard contract and integration policy.",
+    "Uses repo-guard ChangeIntent and integration policy.",
     "See repo-policy.json for integration configuration.",
-    "Documented contract field: anchors.affects.",
+    "Documented ChangeIntent field: anchors.affects.",
     "",
     "```bash",
     "repo-guard check-pr",
@@ -230,23 +230,23 @@ console.log("\n--- integration extractor builds normalized workflow, template, d
   ]);
 
   const prTemplate = extraction.templates.find((template) => template.id === "pull-request-template");
-  const issueTemplate = extraction.templates.find((template) => template.id === "change-contract-issue-form");
+  const issueTemplate = extraction.templates.find((template) => template.id === "change-intent-issue-form");
   expect("template exposes configured block kind requirement", prTemplate?.requiredBlockKind, "repo-guard-yaml");
-  expect("template exposes configured contract field requirements", prTemplate?.requiredContractFields, [
+  expect("template exposes configured ChangeIntent field requirements", prTemplate?.requiredChangeIntentFields, [
     "change_type",
     "scope",
     "anchors.affects",
   ]);
   expect("issue template exposes optional fallback metadata", issueTemplate?.optional, true);
   expect("markdown template detects repo-guard-yaml block", prTemplate?.hasRepoGuardYamlBlock, true);
-  expect("markdown template extracts nested contract field names", prTemplate?.contractFieldNames, [
+  expect("markdown template extracts nested ChangeIntent field names", prTemplate?.changeIntentFieldNames, [
     "anchors",
     "anchors.affects",
     "change_type",
     "scope",
   ]);
-  expect("issue form template extracts markdown contract blocks from YAML string fields",
-    issueTemplate?.contractFieldNames,
+  expect("issue form template extracts markdown ChangeIntent blocks from YAML string fields",
+    issueTemplate?.changeIntentFieldNames,
     ["change_type", "expected_effects"]);
 
   const doc = extraction.docs[0];
@@ -256,15 +256,15 @@ console.log("\n--- integration extractor builds normalized workflow, template, d
   ]);
   expect("docs expose text mention facts",
     doc.mentions.map((mention) => `${mention.term}:${mention.present}:${mention.count}`),
-    ["repo-guard:true:2", "contract:true:2", "integration:true:2", "anchors.affects:true:1"]);
+    ["repo-guard:true:2", "ChangeIntent:true:2", "integration:true:2", "anchors.affects:true:1"]);
   expect("docs expose file reference facts",
     doc.fileReferences.map((mention) => `${mention.term}:${mention.present}:${mention.count}`),
     ["repo-policy.json:true:1"]);
   expect("docs expose profile mention facts",
     doc.profileMentions.map((mention) => `${mention.term}:${mention.present}:${mention.count}`),
     ["self-hosting:true:2"]);
-  expect("docs expose contract field mention facts",
-    doc.contractFieldMentions.map((mention) => `${mention.term}:${mention.present}:${mention.count}`),
+  expect("docs expose ChangeIntent field mention facts",
+    doc.changeIntentFieldMentions.map((mention) => `${mention.term}:${mention.present}:${mention.count}`),
     ["anchors.affects:true:1"]);
 
   const profile = extraction.profiles[0];
@@ -285,8 +285,8 @@ console.log("\n--- policy facts expose integration extraction independently from
     mode: "check-diff",
     repositoryRoot: "/tmp/repo",
     policy: makePolicy(),
-    contract: null,
-    contractSource: "none",
+    changeIntent: null,
+    changeIntentSource: "none",
     enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
     diffText: "",
     trackedFiles: Object.keys(files),
@@ -317,7 +317,7 @@ console.log("\n--- malformed integration artifacts produce explicit diagnostics 
           id: "bad-template",
           kind: "markdown",
           path: ".github/PULL_REQUEST_TEMPLATE.md",
-          requires_contract_block: true,
+          requires_change_intent_block: true,
         },
       ],
       docs: [
@@ -355,7 +355,7 @@ console.log("\n--- malformed integration artifacts produce explicit diagnostics 
   expectIncludes("workflow error identifies invalid YAML",
     extraction.errors.find((error) => error.section === "workflows")?.message,
     "invalid YAML");
-  expectIncludes("template error identifies invalid contract block",
+  expectIncludes("template error identifies invalid ChangeIntent block",
     extraction.errors.find((error) => error.section === "templates")?.message,
     "invalid repo-guard-yaml block");
   expectIncludes("doc error identifies unclosed Markdown fence",
