@@ -2,9 +2,9 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildPolicyFacts } from "../src/facts/input.mjs";
-import { createIntegrationAnalysisReport } from "../src/integration-validator.mjs";
-import { runPolicyPipeline } from "../src/runtime/pipeline.mjs";
+import { buildPolicyFacts } from "../dist/facts/input.mjs";
+import { createIntegrationAnalysisReport } from "../dist/integration-validator.mjs";
+import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 let failures = 0;
 const __dirname = new URL(".", import.meta.url).pathname;
