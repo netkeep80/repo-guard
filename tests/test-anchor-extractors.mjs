@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { buildPolicyFacts } from "../src/facts/input.mjs";
-import { extractAnchors } from "../src/extractors/anchors.mjs";
-import { runPolicyPipeline } from "../src/runtime/pipeline.mjs";
+import { buildPolicyFacts } from "../dist/facts/input.mjs";
+import { extractAnchors } from "../dist/extractors/anchors.mjs";
+import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 let failures = 0;
 
