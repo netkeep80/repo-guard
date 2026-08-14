@@ -1,22 +1,8 @@
-import { createDocumentReader, markdownSection } from "../../document-facts.mjs";
+import { createDocumentReader, markdownSection, resolveJsonPointer } from "../../document-facts.mjs";
 import { compareSets } from "../relation-kernel.mjs";
 import { formatList, uniqueSorted } from "../../utils/collections.mjs";
 import { normalizePathEntry } from "../../utils/path-patterns.mjs";
 const normalizeAll = (values) => uniqueSorted(values.map(normalizePathEntry).filter(Boolean));
-function resolveJsonPointer(data, pointer) {
-    if (pointer === "")
-        return data;
-    if (!pointer?.startsWith("/"))
-        throw new Error(`invalid json_pointer "${pointer}"`);
-    let current = data;
-    for (const raw of pointer.slice(1).split("/")) {
-        const part = raw.replace(/~1/g, "/").replace(/~0/g, "~");
-        if (current == null || !Object.hasOwn(current, part))
-            throw new Error(`json_pointer "${pointer}" does not exist`);
-        current = current[part];
-    }
-    return current;
-}
 function normalizeMarkdownLinkTarget(target, source) {
     const clean = normalizePathEntry(target.split("#")[0].split("?")[0]);
     if (!clean || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("#"))
