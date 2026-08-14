@@ -18,6 +18,15 @@ interface PullRequestProjection {
   head?: { sha?: unknown } | null;
 }
 interface GitHubEventProjection { pull_request?: PullRequestProjection | null; }
+interface AjvErrorProjection { instancePath?: string; message?: string; }
+interface AjvRuntime {
+  errors: readonly AjvErrorProjection[] | null;
+  validate(schema: unknown, data: unknown): boolean | Promise<unknown>;
+}
+type AjvConstructor = new (options?: { allErrors?: boolean }) => AjvRuntime;
+type EffectivePolicyProjection = NonNullable<Parameters<typeof compileAnchorPolicy>[0]>
+  & NonNullable<Parameters<typeof compileIntegrationPolicy>[0]>
+  & { content_rules?: unknown; profile?: unknown; repository_kind?: unknown; policy_format_version?: unknown };
 
 function check(name: string, fn: () => DoctorCheck): DoctorCheck {
   try {
@@ -95,10 +104,10 @@ function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
     }
 
     const schema: unknown = JSON.parse(readFileSync(schemaPath, "utf-8"));
-    const ajv = new Ajv({ allErrors: true });
+    const ajv = new (Ajv as unknown as AjvConstructor)({ allErrors: true });
     const valid = ajv.validate(schema, policy);
     if (!valid) {
-      const errors = (ajv.errors as NonNullable<typeof ajv.errors>).map(e => `${e.instancePath || "/"} ${e.message}`).join("; ");
+      const errors = (ajv.errors as readonly AjvErrorProjection[]).map(e => `${e.instancePath || "/"} ${e.message}`).join("; ");
       const integrationErrors = compileIntegrationPolicy(policy as Parameters<typeof compileIntegrationPolicy>[0]);
       const integrationDetails = integrationErrors.length > 0
         ? `; Invalid integration policy: ${integrationErrors.map(e => e.message).join("; ")}`
@@ -112,7 +121,7 @@ function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
       return { name: "repo-policy.json", status: FAIL, message: `Invalid profile policy: ${details}`, hint: "Fix profile and profile_overrides in repo-policy.json" };
     }
 
-    const effectivePolicy = profileResult.policy;
+    const effectivePolicy = profileResult.policy as EffectivePolicyProjection;
 
     const regexErrors = compileForbidRegex(effectivePolicy.content_rules || []);
     if (regexErrors.length > 0) {
@@ -132,8 +141,8 @@ function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
       return { name: "repo-policy.json", status: FAIL, message: `Invalid integration policy: ${details}`, hint: "Fix integration ids, kinds, roles, required fields, and profile references in repo-policy.json" };
     }
 
-    const profileSuffix = effectivePolicy.profile ? `, profile ${effectivePolicy.profile}` : "";
-    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind}, format ${effectivePolicy.policy_format_version}${profileSuffix})` };
+    const profileSuffix = effectivePolicy.profile ? `, profile ${effectivePolicy.profile as string}` : "";
+    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind as string}, format ${effectivePolicy.policy_format_version as string}${profileSuffix})` };
   });
 }
 
