@@ -14,7 +14,9 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(pkg.files.includes("dist/"), true);
   assert.equal(pkg.files.includes("src/"), false);
   assert.equal(pkg.dependencies.typescript, undefined);
+  assert.equal(pkg.dependencies["@types/node"], undefined);
   assert.equal(pkg.devDependencies.typescript, "7.0.2");
+  assert.equal(pkg.devDependencies["@types/node"], "20.19.43");
 
   const config = JSON.parse(read("tsconfig.json"));
   assert.equal(config.compilerOptions.module, "NodeNext");
@@ -27,6 +29,8 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/utils/collections.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/utils/path-patterns.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/utils/path-patterns.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "src/utils/repository-files.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/utils/repository-files.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/diff/parser.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/diff/parser.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/diff/growth.mts")), true);
@@ -41,6 +45,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/document-facts.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/extractors/anchors.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/extractors/anchors.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "dist/utils/repository-files.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/parser.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/growth.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/classification.mjs")), true);
