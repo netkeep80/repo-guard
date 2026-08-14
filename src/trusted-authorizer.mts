@@ -190,7 +190,7 @@ export function resolveTrustedAuthorizer({
   const issueContext = issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null;
   const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
   const username = (issueContext as IssueContextProjection | null)?.user?.login;
-  const permission = username && !isBotUser((issueContext as IssueContextProjection | null)?.user)
+  const permission = username && !isBotUser((issueContext as IssueContextProjection).user)
     ? fetchUserRepoPermission(repoFullName, username)
     : null;
 
