@@ -1,5 +1,7 @@
 import { parseDocument } from "yaml";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
+import { uniqueSorted } from "./utils/collections.mjs";
+import { normalizePathEntry } from "./utils/path-patterns.mjs";
 
 export interface MarkdownHeading {
   level: number;
@@ -58,6 +60,10 @@ export interface DocumentReader {
   yaml(path: string): unknown;
 }
 
+export type DocumentProjection = "value" | "array_items" | "object_values";
+export type DocumentFactType = "scalar" | "string" | "boolean" | "string_set" | "repository_path" | "repository_path_set";
+export type DocumentScalar = string | number | boolean | null;
+
 type DocumentKind = "markdown" | "json" | "yaml";
 
 interface OpenMarkdownFence {
@@ -98,6 +104,78 @@ export function resolveJsonPointer(data: unknown, pointer: string): unknown {
     current = (current as Record<string, unknown>)[part];
   }
   return current;
+}
+
+export function projectDocumentValue(data: unknown, pointer: string): unknown;
+export function projectDocumentValue(data: unknown, pointer: string, projection: "value"): unknown;
+export function projectDocumentValue(data: unknown, pointer: string, projection: "array_items" | "object_values"): unknown[];
+export function projectDocumentValue(data: unknown, pointer: string, projection: DocumentProjection = "value"): unknown | unknown[] {
+  const selected = resolveJsonPointer(data, pointer);
+  if (projection === "value") return selected;
+  if (projection === "array_items") {
+    if (!Array.isArray(selected)) throw new Error(`document projection "array_items" requires an array at json_pointer "${pointer}"`);
+    return [...selected];
+  }
+  if (projection === "object_values") {
+    if (selected === null || typeof selected !== "object" || Array.isArray(selected)) {
+      throw new Error(`document projection "object_values" requires an object at json_pointer "${pointer}"`);
+    }
+    return Object.values(selected as Record<string, unknown>);
+  }
+  const exhaustive: never = projection;
+  throw new Error(`unsupported document projection "${exhaustive}"`);
+}
+
+function normalizeRepositoryPathFact(value: unknown): string {
+  if (typeof value !== "string") throw new Error("document fact repository_path requires a string");
+  const normalized = normalizePathEntry(value);
+  const parts = normalized.split("/");
+  if (
+    !normalized
+    || normalized.includes("\\")
+    || normalized.startsWith("/")
+    || /^[A-Za-z]:/.test(normalized)
+    || /^[a-z][a-z0-9+.-]*:/i.test(normalized)
+    || parts.some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error(`invalid repository_path "${value}"`);
+  }
+  return normalized;
+}
+
+function normalizeStringSet(value: unknown, itemType: "string" | "repository_path"): string[] {
+  if (!Array.isArray(value)) throw new Error(`document fact ${itemType === "string" ? "string_set" : "repository_path_set"} requires a collection`);
+  const normalized = value.map((item) => {
+    if (itemType === "repository_path") return normalizeRepositoryPathFact(item);
+    if (typeof item !== "string") throw new Error("document fact string_set requires string items");
+    return item;
+  });
+  return uniqueSorted(normalized);
+}
+
+export function normalizeDocumentFact(value: unknown, type: "scalar"): DocumentScalar;
+export function normalizeDocumentFact(value: unknown, type: "string"): string;
+export function normalizeDocumentFact(value: unknown, type: "boolean"): boolean;
+export function normalizeDocumentFact(value: unknown, type: "string_set" | "repository_path_set"): string[];
+export function normalizeDocumentFact(value: unknown, type: "repository_path"): string;
+export function normalizeDocumentFact(value: unknown, type: DocumentFactType): DocumentScalar | string[] {
+  if (type === "scalar") {
+    if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value;
+    throw new Error("document fact scalar requires a JSON scalar");
+  }
+  if (type === "string") {
+    if (typeof value === "string") return value;
+    throw new Error("document fact string requires a string");
+  }
+  if (type === "boolean") {
+    if (typeof value === "boolean") return value;
+    throw new Error("document fact boolean requires a boolean");
+  }
+  if (type === "string_set") return normalizeStringSet(value, "string");
+  if (type === "repository_path") return normalizeRepositoryPathFact(value);
+  if (type === "repository_path_set") return normalizeStringSet(value, "repository_path");
+  const exhaustive: never = type;
+  throw new Error(`unsupported document fact type "${exhaustive}"`);
 }
 
 export function stripMarkdownInline(line: string): string {
