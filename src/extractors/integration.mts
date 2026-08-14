@@ -37,6 +37,13 @@ interface ProfileEntry {
   doc_path: string;
 }
 
+interface ErrorContextEntry {
+  id: string;
+  kind?: string;
+  path?: string;
+  doc_path?: string;
+}
+
 interface IntegrationConfiguration {
   workflows?: WorkflowEntry[];
   templates?: TemplateEntry[];
@@ -450,8 +457,8 @@ function compareErrors(a: IntegrationExtractionError, b: IntegrationExtractionEr
     (a.id || "").localeCompare(b.id || "") || a.message.localeCompare(b.message);
 }
 
-function withErrorContext(section: IntegrationSection, entry: IntegrationEntryBase | ProfileEntry, message: string): IntegrationExtractionError {
-  return { section, id: entry.id, kind: entry.kind, path: "path" in entry ? entry.path : entry.doc_path, message };
+function withErrorContext(section: IntegrationSection, entry: ErrorContextEntry, message: string): IntegrationExtractionError {
+  return { section, id: entry.id, kind: entry.kind, path: entry.path || entry.doc_path as string, message };
 }
 
 function isMissingRepositoryFileError(error: NodeJS.ErrnoException, entry: TemplateEntry): boolean {
