@@ -4,11 +4,24 @@ import { realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+interface CliRoots {
+  packageRoot: string;
+  repoRoot: string;
+  enforcementMode: string | null;
+  args: string[];
+}
+
+interface CommandSpec {
+  options: Record<string, boolean>;
+  positionals: number;
+  run: (roots: CliRoots, args: string[]) => number | Promise<number>;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(__dirname, "..");
-const valueOptions = (...names) => Object.fromEntries(names.map((name) => [name, true]));
+const valueOptions = (...names: string[]): Record<string, boolean> => Object.fromEntries(names.map((name) => [name, true]));
 
-const COMMAND_SPECS = {
+const COMMAND_SPECS: Record<string, CommandSpec> = {
   validate: {
     options: {}, positionals: 1,
     run: async (roots, args) => (await import("./validate.mjs")).runValidate(roots, args),
@@ -40,9 +53,9 @@ const COMMAND_SPECS = {
 export const COMMANDS = Object.freeze(Object.keys(COMMAND_SPECS));
 const USAGE = `Usage: repo-guard [--repo-root <path>] [--enforcement <advisory|blocking>] [${COMMANDS.join("|")}] [options]`;
 
-export function resolveRoots(args) {
-  let repoRoot = process.cwd(), enforcementMode = null;
-  const filtered = [];
+export function resolveRoots(args: string[]): CliRoots {
+  let repoRoot = process.cwd(), enforcementMode: string | null = null;
+  const filtered: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const option = args[i];
     if (!["--repo-root", "--enforcement", "--enforcement-mode"].includes(option)) { filtered.push(option); continue; }
@@ -53,10 +66,10 @@ export function resolveRoots(args) {
   return { packageRoot, repoRoot, enforcementMode, args: filtered };
 }
 
-function parseCommand(args) {
+function parseCommand(args: string[]) {
   const remaining = [...args];
   const first = remaining[0];
-  const command = COMMAND_SPECS[first] ? remaining.shift() : "validate";
+  const command = COMMAND_SPECS[first as string] ? remaining.shift() as string : "validate";
   if (first?.startsWith("-") && command === "validate") throw new Error(`Unknown option: ${first}\n${USAGE}`);
   const spec = COMMAND_SPECS[command];
   let positionals = 0;
@@ -72,19 +85,19 @@ function parseCommand(args) {
   return { command, args: remaining };
 }
 
-function sameEntrypointPath(left, right) {
+function sameEntrypointPath(left: string, right: string) {
   try { return realpathSync(left) === realpathSync(right); }
   catch { return resolve(left) === resolve(right); }
 }
 
-async function dispatch(roots) {
+async function dispatch(roots: CliRoots) {
   const parsed = parseCommand(roots.args);
   return COMMAND_SPECS[parsed.command].run(roots, parsed.args);
 }
 
-export async function runCli(args = process.argv.slice(2)) {
+export async function runCli(args: string[] = process.argv.slice(2)) {
   try { return await dispatch(resolveRoots([...args])); }
-  catch (error) { console.error(`ERROR: ${error.message}`); return 1; }
+  catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
 }
 
 const isMain = process.argv[1] && sameEntrypointPath(process.argv[1], resolve(__dirname, "repo-guard.mjs"));
