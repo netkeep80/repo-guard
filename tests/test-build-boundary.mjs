@@ -58,6 +58,8 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/checks/default-rule-families.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/orchestrator.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/orchestrator.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "src/checks/trace-rules.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/checks/trace-rules.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/rules/constraints.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/rules/constraints.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/rules/anchor-rules.mts")), true);
@@ -90,6 +92,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/rule-registry.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/default-rule-families.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/orchestrator.mjs")), true);
+  assert.equal(existsSync(resolve(projectRoot, "dist/checks/trace-rules.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/rules/constraints.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/rules/anchor-rules.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/rules/content-rules.mjs")), true);
