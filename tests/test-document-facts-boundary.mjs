@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { resolveJsonPointer } from "../dist/document-facts.mjs";
+import { checkRegistryRules } from "../dist/checks/rules/registry-rules.mjs";
 
 const document = {
   "": "empty-key",
@@ -33,5 +34,26 @@ describe("shared JSON Pointer boundary", () => {
     assert.throws(() => resolveJsonPointer(document, "/a~2b"), /invalid json_pointer/);
     assert.throws(() => resolveJsonPointer(document, "/m~"), /invalid json_pointer/);
     assert.throws(() => resolveJsonPointer(document, null), /invalid json_pointer/);
+  });
+
+  it("preserves registry behavior through the shared escaped-key resolver", () => {
+    const registryDocument = { "a/b": ["docs/canonical.md"], canonical: ["docs/canonical.md"] };
+    const documents = {
+      text: () => "",
+      markdown: () => { throw new Error("not used"); },
+      json: () => registryDocument,
+      yaml: () => { throw new Error("not used"); },
+    };
+    const result = checkRegistryRules([{
+      id: "escaped-json-pointer",
+      kind: "equal",
+      left: { type: "json_array", file: "registry.json", json_pointer: "/a~1b" },
+      right: { type: "json_array", file: "registry.json", json_pointer: "/canonical" },
+    }], { documents });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.results[0]?.ok, true);
+    assert.deepEqual(result.results[0]?.left_entries, ["docs/canonical.md"]);
+    assert.deepEqual(result.results[0]?.right_entries, ["docs/canonical.md"]);
   });
 });
