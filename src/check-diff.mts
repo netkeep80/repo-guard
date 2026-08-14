@@ -5,29 +5,34 @@ import { renderAnalysisReport } from "./reporting/renderers.mjs";
 import { loadJSON, loadPolicyRuntime, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
 
-const value = (args, name) => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
-export function runCheckDiff(roots, args = []) {
+type CheckDiffRoots = Parameters<typeof loadPolicyRuntime>[0] & {
+  enforcementMode?: Parameters<typeof resolveEnforcementMode>[0]["cliValue"];
+};
+interface InitialCheck { name: string; check: unknown; }
+
+const value = (args: string[], name: string): string | null | undefined => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
+export function runCheckDiff(roots: CheckDiffRoots, args: string[] = []) {
   const base = value(args, "--base"), head = value(args, "--head"), changeIntentArg = value(args, "--change-intent");
   const changeIntentPath = changeIntentArg ? resolve(roots.repoRoot, changeIntentArg) : null, format = value(args, "--format") || "text";
   if (!["text", "json", "summary"].includes(format)) { console.error(`Unknown check-diff format: ${format}`); return 1; }
   const quiet = format !== "text", runtime = loadPolicyRuntime(roots, { quiet });
   const { ajv, policy, changeIntentSchema } = runtime;
   if (!runtime.ok) { if (!quiet) console.error("\nPolicy compilation failed; aborting enforcement."); return 1; }
-  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy });
+  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy } as Parameters<typeof resolveEnforcementMode>[0]);
   if (!enforcement.ok) { console.error(`ERROR: ${enforcement.message}`); return 1; }
 
-  let changeIntent = null;
-  const initialChecks = [];
+  let changeIntent: unknown = null;
+  const initialChecks: InitialCheck[] = [];
   if (changeIntentPath) try {
     const loaded = loadJSON(changeIntentPath), check = validationCheck(ajv, changeIntentSchema, loaded, changeIntentPath);
     initialChecks.push({ name: "change-intent", check });
     if (check.ok) changeIntent = loaded;
-  } catch (error) { initialChecks.push({ name: "change-intent", check: { ok: false, message: `Cannot read ${changeIntentPath}: ${error.message}` } }); }
+  } catch (error: unknown) { initialChecks.push({ name: "change-intent", check: { ok: false, message: `Cannot read ${changeIntentPath}: ${(error as Error).message}` } }); }
 
-  let diffText;
+  let diffText: string;
   try { diffText = getDiff(base, head, roots.repoRoot); }
-  catch (error) { console.error(`Error: ${error.message}`); return 1; }
-  const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks }, { quiet });
+  catch (error: unknown) { console.error(`Error: ${(error as Error).message}`); return 1; }
+  const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks } as Parameters<typeof runPolicyPipeline>[0], { quiet });
   const output = renderAnalysisReport(report, { format });
   if (output) console.log(output);
   return report.exitCode;
