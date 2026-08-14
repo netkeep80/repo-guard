@@ -110,10 +110,15 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
     for (const binding of array(policy.evidence_bindings)) {
         const id = String(binding.id ?? ""), owner = `evidence-binding:${id}`, pointer = `/evidence_bindings/${id}`;
         const source = compileDocumentSelector(binding.source, documents);
-        const shape = { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
+        const shape = binding.kind === "anchor_value_coverage"
+            ? { kind: binding.kind, source, target_anchor_type: binding.target_anchor_type }
+            : { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
         const runtime = binding.kind === "workflow_path_coverage" ? {
             kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
             workflow: binding.workflow, covers: array(binding.covers),
+        } : binding.kind === "anchor_value_coverage" ? {
+            kind: "evidence_anchor_value_coverage", name: owner, binding_id: id, source,
+            target_anchor_type: binding.target_anchor_type,
         } : null;
         add(owner, runtime, entity({ owner, pointer, removeKind: "evidence_binding_removed", evidence_binding_id: id,
             removeBefore: shape, removeAfter: { present: false }, removeMessage: `evidence binding "${id}" removed` }));

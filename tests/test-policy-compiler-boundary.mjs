@@ -203,3 +203,125 @@ describe("workflow path evidence public/runtime boundary", () => {
     assert.equal(missing.find((entry) => entry.name === "evidence-binding:owners-covered")?.check.ok, true);
   });
 });
+
+const anchorEvidencePolicy = (overrides = {}) => ({
+  ...basePolicy,
+  anchors: {
+    types: {
+      case_evidence: {
+        sources: [{ kind: "regex", glob: "tests/**", pattern: "CASE:([a-z-]+)" }],
+      },
+    },
+  },
+  document_relations: {
+    documents: { conformance: { path: "contracts/conformance.json", format: "json" } },
+    rules: [],
+  },
+  evidence_bindings: [{
+    id: "cases-have-evidence",
+    kind: "anchor_value_coverage",
+    source: { document: "conformance", pointer: "/requiredCases", projection: "array_items", type: "string_set" },
+    target_anchor_type: "case_evidence",
+  }],
+  ...overrides,
+});
+
+describe("anchor value evidence public/runtime boundary", () => {
+  it("treats evidence bindings as first-class document consumers and rejects unknown targets", () => {
+    const policy = anchorEvidencePolicy();
+    assert.deepEqual(compileDocumentRelationsPolicy(policy), []);
+    assert.deepEqual(compileEvidenceBindingsPolicy(policy), []);
+
+    const unused = anchorEvidencePolicy({ evidence_bindings: [] });
+    assert.ok(compileDocumentRelationsPolicy(unused).some((error) => /declared but unused/.test(error.message)));
+
+    const missingTarget = anchorEvidencePolicy();
+    missingTarget.evidence_bindings[0].target_anchor_type = "missing";
+    assert.ok(compileEvidenceBindingsPolicy(missingTarget).some((error) => /unknown anchor type/.test(error.message)));
+
+    const missingDocument = anchorEvidencePolicy();
+    missingDocument.evidence_bindings[0].source.document = "missing";
+    assert.ok(compileEvidenceBindingsPolicy(missingDocument).some((error) => /unknown document/.test(error.message)));
+  });
+
+  it("keeps the public schema narrow and non-executable", () => {
+    assert.equal(loadPolicyRuntimeFromObject({ packageRoot: projectRoot, repoRoot: projectRoot }, anchorEvidencePolicy(), { quiet: true }).ok, true);
+
+    const executable = anchorEvidencePolicy();
+    executable.evidence_bindings[0].command = "pytest";
+    assert.equal(loadPolicyRuntimeFromObject({ packageRoot: projectRoot, repoRoot: projectRoot }, executable, { quiet: true }).ok, false);
+
+    const wrongType = anchorEvidencePolicy();
+    wrongType.evidence_bindings[0].source.type = "repository_path_set";
+    assert.equal(loadPolicyRuntimeFromObject({ packageRoot: projectRoot, repoRoot: projectRoot }, wrongType, { quiet: true }).ok, false);
+
+    const scalarProjection = anchorEvidencePolicy();
+    scalarProjection.evidence_bindings[0].source.projection = "value";
+    assert.equal(loadPolicyRuntimeFromObject({ packageRoot: projectRoot, repoRoot: projectRoot }, scalarProjection, { quiet: true }).ok, false);
+  });
+
+  const run = (requiredCases, anchors) => {
+    const policy = anchorEvidencePolicy();
+    const documentsReader = createDocumentReader({
+      readFile: (path) => path === "contracts/conformance.json" ? JSON.stringify({ requiredCases }) : "",
+    });
+    return evaluateConstraintIR({
+      policy,
+      changeIntent: null,
+      diff: { files: { checked: [] } },
+      documents: documentsReader,
+      anchors,
+    }).find((entry) => entry.name === "evidence-binding:cases-have-evidence")?.check;
+  };
+
+  it("normalizes source ids, preserves duplicate target locations, and reports missing ids", () => {
+    const anchors = {
+      byType: {
+        case_evidence: [
+          { value: "case-a", file: "tests/a.test", line: 10, column: 3 },
+          { value: "case-a", file: "tests/b.test", line: 20, column: 7 },
+          { value: "extra-case", file: "tests/extra.test", line: 1, column: 1 },
+        ],
+      },
+    };
+    const failed = run(["case-b", "case-a", "case-a"], anchors);
+    assert.equal(failed.ok, false);
+    assert.deepEqual(failed.data.source_values, ["case-a", "case-b"]);
+    assert.deepEqual(failed.data.missing_values, ["case-b"]);
+    assert.deepEqual(failed.data.evidence_locations, [{
+      value: "case-a",
+      locations: [
+        { file: "tests/a.test", line: 10, column: 3 },
+        { file: "tests/b.test", line: 20, column: 7 },
+      ],
+    }]);
+
+    const passed = run(["case-a"], anchors);
+    assert.equal(passed.ok, true);
+    assert.deepEqual(passed.data.missing_values, []);
+  });
+
+  it("fails closed when canonical anchor facts are unavailable", () => {
+    const result = run(["case-a"], undefined);
+    assert.equal(result.ok, false);
+    assert.equal(result.data.anchor_facts_available, false);
+    assert.deepEqual(result.data.missing_values, ["case-a"]);
+  });
+
+  it("reuses evidence-binding strictness for adoption, removal, and target changes", async () => {
+    const { compareConstraintPrograms } = await import("../dist/checks/constraint-program.mjs");
+    const withoutBinding = anchorEvidencePolicy({ evidence_bindings: [] });
+    assert.equal(compareConstraintPrograms(withoutBinding, anchorEvidencePolicy()).relation, "stricter");
+
+    const removed = compareConstraintPrograms(anchorEvidencePolicy(), withoutBinding);
+    assert.equal(removed.relation, "weaker");
+    assert.ok(removed.relaxations.some((item) => item.kind === "evidence_binding_removed"));
+
+    const changedTarget = anchorEvidencePolicy();
+    changedTarget.anchors.types.other_evidence = { sources: [{ kind: "regex", glob: "tests/**", pattern: "OTHER:([a-z-]+)" }] };
+    changedTarget.evidence_bindings[0].target_anchor_type = "other_evidence";
+    const changed = compareConstraintPrograms(anchorEvidencePolicy(), changedTarget);
+    assert.equal(changed.relation, "incomparable");
+    assert.ok(changed.incomparable.some((item) => /evidence binding/.test(item.message)));
+  });
+});
