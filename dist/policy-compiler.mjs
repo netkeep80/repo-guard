@@ -1,3 +1,4 @@
+import { normalizeDocumentFact } from "./document-facts.mjs";
 const list = (value) => Array.isArray(value) ? value : [];
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 export function compileForbidRegex(contentRules = []) {
@@ -92,6 +93,65 @@ export function compileIntegrationPolicy(policy = {}) {
     for (const ref of references)
         if (!profileIds.has(ref.profileId))
             errors.push({ section: ref.section, index: ref.index, field: ref.field, profile_id: ref.profileId, message: `integration.${ref.section}[${ref.index}].${ref.field} references unknown integration.profiles id "${ref.profileId}"` });
+    return errors;
+}
+function scalarLiteralMatches(type, value) {
+    if (type === "string")
+        return typeof value === "string";
+    if (type === "boolean")
+        return typeof value === "boolean";
+    return type === "scalar" && (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)));
+}
+function normalizeDeclaredDocumentPath(name, definition, errors) {
+    try {
+        const path = normalizeDocumentFact(definition.path, "repository_path");
+        const format = definition.format;
+        const matchesFormat = format === "json" ? /\.json$/i.test(path) : format === "yaml" ? /\.ya?ml$/i.test(path) : false;
+        if (!matchesFormat)
+            errors.push({ document: name, path, format, message: `document_relations.documents["${name}"] format "${format}" does not match path "${path}"` });
+        return path;
+    }
+    catch (error) {
+        errors.push({ document: name, path: definition.path, message: `document_relations.documents["${name}"].path is invalid: ${error.message}` });
+        return null;
+    }
+}
+export function compileDocumentRelationsPolicy(policy = {}) {
+    if (!policy.document_relations)
+        return [];
+    const section = object(policy.document_relations), documents = object(section.documents), rules = list(section.rules);
+    const errors = [], seenRuleIds = new Set(), usedDocuments = new Set();
+    for (const [name, rawDefinition] of Object.entries(documents))
+        normalizeDeclaredDocumentPath(name, object(rawDefinition), errors);
+    const useSelector = (ruleId, field, rawSelector) => {
+        const selector = object(rawSelector), document = selector.document;
+        if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
+            errors.push({ rule_id: ruleId, field, document, message: `document_relations rule "${ruleId}" ${field} references unknown document "${document}"` });
+            return;
+        }
+        usedDocuments.add(document);
+    };
+    for (const [index, rule] of rules.entries()) {
+        const id = rule.id;
+        if (seenRuleIds.has(id))
+            errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
+        seenRuleIds.add(id);
+        if (rule.kind === "scalar_equal") {
+            useSelector(id, "left", rule.left);
+            useSelector(id, "right", rule.right);
+        }
+        else if (rule.kind === "scalar_equals_literal") {
+            useSelector(id, "source", rule.source);
+            const selector = object(rule.source);
+            if (!scalarLiteralMatches(selector.type, rule.value)) {
+                errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
+            }
+        }
+    }
+    for (const name of Object.keys(documents))
+        if (!usedDocuments.has(name)) {
+            errors.push({ document: name, message: `document_relations.documents["${name}"] is declared but unused` });
+        }
     return errors;
 }
 export function warnReservedPolicyFields(policy = {}) {
