@@ -4,28 +4,11 @@ type LooseObject = Record<string, unknown>;
 type SemanticDiagnostic = { message: string } & LooseObject;
 type IntegrationSection = "workflows" | "templates" | "docs" | "profiles";
 
-interface ContentRuleProjection {
-  id?: unknown;
-  forbid_regex?: unknown;
-}
-interface AnchorSourceProjection {
-  kind?: unknown;
-  pattern: string;
-}
-interface AnchorTypeProjection {
-  sources?: unknown;
-}
-interface TraceRuleProjection extends LooseObject {
-  id?: unknown;
-  kind?: unknown;
-  change_intent_field?: unknown;
-}
-interface IntegrationProjection extends LooseObject {
-  workflows?: unknown;
-  templates?: unknown;
-  docs?: unknown;
-  profiles?: unknown;
-}
+interface ContentRuleProjection { id?: unknown; forbid_regex?: unknown; }
+interface AnchorSourceProjection { kind?: unknown; pattern: string; }
+interface AnchorTypeProjection { sources?: unknown; }
+interface TraceRuleProjection extends LooseObject { id?: unknown; kind?: unknown; change_intent_field?: unknown; }
+interface IntegrationProjection extends LooseObject { workflows?: unknown; templates?: unknown; docs?: unknown; profiles?: unknown; }
 interface PolicyProjection {
   change_profiles?: unknown;
   surfaces?: unknown;
@@ -38,12 +21,7 @@ interface PolicyProjection {
   document_relations?: unknown;
   evidence_bindings?: unknown;
 }
-interface IntegrationReference {
-  section: IntegrationSection;
-  index: number;
-  field: "profiles" | "must_mention_profiles";
-  profileId: unknown;
-}
+interface IntegrationReference { section: IntegrationSection; index: number; field: "profiles" | "must_mention_profiles"; profileId: unknown; }
 
 const list = <T = unknown,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
 const object = (value: unknown): LooseObject => value && typeof value === "object" && !Array.isArray(value) ? value as LooseObject : {};
@@ -113,12 +91,8 @@ export function compileIntegrationPolicy(policy: PolicyProjection = {}): Semanti
     }
     if (section === "workflows" && entry.role === "ci_gate") {
       const expect = object(entry.expect);
-      for (const field of ["action", "mode"] as const) if (expect[field] !== undefined) {
-        errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
-      }
-      for (const disallowed of list<string>(expect.disallow)) if (disallowed !== "continue_on_error") {
-        errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
-      }
+      for (const field of ["action", "mode"] as const) if (expect[field] !== undefined) errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
+      for (const disallowed of list<string>(expect.disallow)) if (disallowed !== "continue_on_error") errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
     }
     for (const profileId of list(entry.profiles)) references.push({ section, index, field: "profiles", profileId });
     if (section === "docs") for (const profileId of list(entry.must_mention_profiles)) references.push({ section, index, field: "must_mention_profiles", profileId });
@@ -132,7 +106,6 @@ function scalarLiteralMatches(type: unknown, value: unknown): boolean {
   if (type === "boolean") return typeof value === "boolean";
   return type === "scalar" && (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)));
 }
-
 function normalizeDeclaredDocumentPath(name: string, definition: LooseObject, errors: SemanticDiagnostic[]): string | null {
   try {
     const path = normalizeDocumentFact(definition.path, "repository_path") as string;
@@ -145,7 +118,6 @@ function normalizeDeclaredDocumentPath(name: string, definition: LooseObject, er
     return null;
   }
 }
-
 function documentSelectorKey(value: unknown): string {
   const selector = object(value);
   return JSON.stringify({ document: selector.document, pointer: selector.pointer, projection: selector.projection, type: selector.type });
@@ -155,9 +127,7 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
   if (!policy.document_relations) return [];
   const section = object(policy.document_relations), documents = object(section.documents), rules = list<LooseObject>(section.rules);
   const errors: SemanticDiagnostic[] = [], seenRuleIds = new Set<unknown>(), usedDocuments = new Set<string>();
-
   for (const [name, rawDefinition] of Object.entries(documents)) normalizeDeclaredDocumentPath(name, object(rawDefinition), errors);
-
   const useSelector = (ruleId: unknown, field: string, rawSelector: unknown) => {
     const selector = object(rawSelector), document = selector.document;
     if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
@@ -166,28 +136,23 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
     }
     usedDocuments.add(document);
   };
-
   for (const [index, rule] of rules.entries()) {
     const id = rule.id;
     if (seenRuleIds.has(id)) errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
     seenRuleIds.add(id);
-    if (rule.kind === "scalar_equal") {
-      useSelector(id, "left", rule.left);
-      useSelector(id, "right", rule.right);
-    } else if (rule.kind === "scalar_equals_literal") {
+    if (rule.kind === "scalar_equal") { useSelector(id, "left", rule.left); useSelector(id, "right", rule.right); }
+    else if (rule.kind === "scalar_equals_literal") {
       useSelector(id, "source", rule.source);
       const selector = object(rule.source);
-      if (!scalarLiteralMatches(selector.type, rule.value)) {
-        errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
-      }
-    } else if (rule.kind === "referenced_paths_exist") {
-      useSelector(id, "source", rule.source);
-    }
+      if (!scalarLiteralMatches(selector.type, rule.value)) errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
+    } else if (rule.kind === "referenced_paths_exist") useSelector(id, "source", rule.source);
   }
-
-  for (const name of Object.keys(documents)) if (!usedDocuments.has(name)) {
-    errors.push({ document: name, message: `document_relations.documents["${name}"] is declared but unused` });
+  // Evidence bindings are first-class consumers of the shared document pool.
+  for (const binding of list<LooseObject>(policy.evidence_bindings)) {
+    const document = object(binding.source).document;
+    if (typeof document === "string" && Object.hasOwn(documents, document)) usedDocuments.add(document);
   }
+  for (const name of Object.keys(documents)) if (!usedDocuments.has(name)) errors.push({ document: name, message: `document_relations.documents["${name}"] is declared but unused` });
   return errors;
 }
 
@@ -199,28 +164,24 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
   const pathExistenceSelectors = new Set(relationRules.filter((rule) => rule.kind === "referenced_paths_exist").map((rule) => documentSelectorKey(rule.source)));
   const workflows = new Map<string, LooseObject>();
   for (const workflow of list<LooseObject>(object(policy.integration).workflows)) if (typeof workflow.id === "string" && workflow.id) workflows.set(workflow.id, workflow);
+  const anchorTypes = new Set(Object.keys(object(policy.anchors?.types)));
 
   for (const [index, binding] of bindings.entries()) {
     const id = binding.id;
     if (seenIds.has(id)) errors.push({ evidence_binding: id, index, message: `evidence_bindings[${index}].id duplicates binding "${id}"` });
     seenIds.add(id);
-    if (binding.kind !== "workflow_path_coverage") continue;
-
     const source = object(binding.source), document = source.document;
-    if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
-      errors.push({ evidence_binding: id, document, message: `evidence binding "${id}" source references unknown document "${document}"` });
-    }
+    if (typeof document !== "string" || !Object.hasOwn(documents, document)) errors.push({ evidence_binding: id, document, message: `evidence binding "${id}" source references unknown document "${document}"` });
 
-    const workflowId = binding.workflow;
-    const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
-    if (!workflow) {
-      errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
-    } else if (object(workflow.expect).enforcement !== "blocking") {
-      errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
-    }
-
-    if (!pathExistenceSelectors.has(documentSelectorKey(source))) {
-      errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
+    if (binding.kind === "workflow_path_coverage") {
+      const workflowId = binding.workflow;
+      const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
+      if (!workflow) errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
+      else if (object(workflow.expect).enforcement !== "blocking") errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
+      if (!pathExistenceSelectors.has(documentSelectorKey(source))) errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
+    } else if (binding.kind === "anchor_value_coverage") {
+      const target = binding.target_anchor_type;
+      if (typeof target !== "string" || !anchorTypes.has(target)) errors.push({ evidence_binding: id, target_anchor_type: target, message: `evidence binding "${id}" references unknown anchor type "${target}"` });
     }
   }
   return errors;
