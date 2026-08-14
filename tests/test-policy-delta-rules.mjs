@@ -93,7 +93,7 @@ describe("document relation strictness projection", () => {
 
   for (const [name, edit] of [
     ["selector", (policy) => { policy.document_relations.rules[0].left.pointer = "/other"; }],
-    ["literal", (policy) => { policy.document_relations.rules.push(structuredClone(literalRule)); policy.document_relations.rules[1].value = "R"; }],
+    ["literal", (policy) => { policy.document_relations.rules[1].value = "R"; }],
     ["document path", (policy) => { policy.document_relations.documents.contract.path = "contracts/other.json"; }],
     ["document format", (policy) => { policy.document_relations.documents.contract.path = "contracts/contract.yaml"; policy.document_relations.documents.contract.format = "yaml"; }],
   ]) it(`treats ${name} edit as incomparable`, () => {
