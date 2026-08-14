@@ -3,7 +3,7 @@ import { selectPaths } from "../../diff/classification.mjs";
 import { readDocumentFact } from "../../document-facts.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
-import { integrationConstraintEntries } from "../integration-constraints.mjs";
+import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
 import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
@@ -116,6 +116,26 @@ function checkDocumentReferencedPathsExist(facts, constraint) {
         data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: missingPaths },
     };
 }
+function checkEvidenceWorkflowPathCoverage(facts, constraint) {
+    const source = factOperand(facts.documents, constraint.source);
+    if (!source.ok)
+        return {
+            ok: false,
+            message: `evidence binding "${constraint.binding_id}" could not read repository path references`,
+            data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source },
+        };
+    if (!Array.isArray(source.value))
+        return {
+            ok: false,
+            message: `evidence binding "${constraint.binding_id}" did not produce a repository path set`,
+            data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source },
+        };
+    const coverage = checkWorkflowPathCoverage(facts.integration, { workflow: constraint.workflow || "", covers: constraint.covers || [] }, source.value);
+    return {
+        ...coverage,
+        data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data },
+    };
+}
 export function evaluateConstraintIR(facts, context = {}) {
     const { files, constraints } = compileConstraintIR(facts), results = [], cochange = [];
     for (const constraint of constraints) {
@@ -170,6 +190,8 @@ export function evaluateConstraintIR(facts, context = {}) {
             check = checkDocumentScalarLiteral(facts, constraint);
         else if (constraint.kind === "document_referenced_paths_exist")
             check = checkDocumentReferencedPathsExist(facts, constraint);
+        else if (constraint.kind === "evidence_workflow_path_coverage")
+            check = checkEvidenceWorkflowPathCoverage(facts, constraint);
         else
             continue;
         results.push({ name: constraint.name, check });

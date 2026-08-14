@@ -84,6 +84,17 @@ export function compileIntegrationPolicy(policy = {}) {
             if (section === "profiles")
                 profileIds.add(id);
         }
+        if (section === "workflows" && entry.role === "ci_gate") {
+            const expect = object(entry.expect);
+            for (const field of ["action", "mode"])
+                if (expect[field] !== undefined) {
+                    errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
+                }
+            for (const disallowed of list(expect.disallow))
+                if (disallowed !== "continue_on_error") {
+                    errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
+                }
+        }
         for (const profileId of list(entry.profiles))
             references.push({ section, index, field: "profiles", profileId });
         if (section === "docs")
@@ -115,6 +126,10 @@ function normalizeDeclaredDocumentPath(name, definition, errors) {
         errors.push({ document: name, path: definition.path, message: `document_relations.documents["${name}"].path is invalid: ${error.message}` });
         return null;
     }
+}
+function documentSelectorKey(value) {
+    const selector = object(value);
+    return JSON.stringify({ document: selector.document, pointer: selector.pointer, projection: selector.projection, type: selector.type });
 }
 export function compileDocumentRelationsPolicy(policy = {}) {
     if (!policy.document_relations)
@@ -155,6 +170,42 @@ export function compileDocumentRelationsPolicy(policy = {}) {
         if (!usedDocuments.has(name)) {
             errors.push({ document: name, message: `document_relations.documents["${name}"] is declared but unused` });
         }
+    return errors;
+}
+export function compileEvidenceBindingsPolicy(policy = {}) {
+    const bindings = list(policy.evidence_bindings);
+    if (!bindings.length)
+        return [];
+    const errors = [], seenIds = new Set();
+    const relationSection = object(policy.document_relations), documents = object(relationSection.documents), relationRules = list(relationSection.rules);
+    const pathExistenceSelectors = new Set(relationRules.filter((rule) => rule.kind === "referenced_paths_exist").map((rule) => documentSelectorKey(rule.source)));
+    const workflows = new Map();
+    for (const workflow of list(object(policy.integration).workflows))
+        if (typeof workflow.id === "string" && workflow.id)
+            workflows.set(workflow.id, workflow);
+    for (const [index, binding] of bindings.entries()) {
+        const id = binding.id;
+        if (seenIds.has(id))
+            errors.push({ evidence_binding: id, index, message: `evidence_bindings[${index}].id duplicates binding "${id}"` });
+        seenIds.add(id);
+        if (binding.kind !== "workflow_path_coverage")
+            continue;
+        const source = object(binding.source), document = source.document;
+        if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
+            errors.push({ evidence_binding: id, document, message: `evidence binding "${id}" source references unknown document "${document}"` });
+        }
+        const workflowId = binding.workflow;
+        const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
+        if (!workflow) {
+            errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
+        }
+        else if (object(workflow.expect).enforcement !== "blocking") {
+            errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
+        }
+        if (!pathExistenceSelectors.has(documentSelectorKey(source))) {
+            errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
+        }
+    }
     return errors;
 }
 export function warnReservedPolicyFields(policy = {}) {

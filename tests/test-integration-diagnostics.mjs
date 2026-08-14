@@ -35,19 +35,8 @@ function expectTrue(label, value) {
 }
 
 function runGuard(args) {
-  const result = spawnSync(process.execPath, [
-    resolve(projectRoot, "dist/repo-guard.mjs"),
-    ...args,
-  ], {
-    cwd: projectRoot,
-    encoding: "utf-8",
-  });
-  return {
-    code: result.status,
-    stdout: result.stdout || "",
-    stderr: result.stderr || "",
-    output: `${result.stdout || ""}${result.stderr || ""}`,
-  };
+  const result = spawnSync(process.execPath, [resolve(projectRoot, "dist/repo-guard.mjs"), ...args], { cwd: projectRoot, encoding: "utf-8" });
+  return { code: result.status, stdout: result.stdout || "", stderr: result.stderr || "", output: `${result.stdout || ""}${result.stderr || ""}` };
 }
 
 function writeJson(path, value) {
@@ -58,24 +47,14 @@ function prGateExpect(overrides = {}) {
   return {
     events: ["pull_request"],
     event_types: ["opened", "synchronize", "reopened", "ready_for_review"],
-    action: {
-      uses: "netkeep80/repo-guard",
-      ref_pinning: "semver",
-      ...overrides.action,
-    },
+    action: { uses: "netkeep80/repo-guard", ref_pinning: "semver", ...overrides.action },
     mode: "check-pr",
     enforcement: "blocking",
-    permissions: {
-      contents: "read",
-      "pull-requests": "read",
-      ...overrides.permissions,
-    },
+    permissions: { contents: "read", "pull-requests": "read", ...overrides.permissions },
     token_env: ["GH_TOKEN"],
     summary: true,
     disallow: ["continue_on_error", "manual_clone", "direct_temp_cli_execution"],
-    ...Object.fromEntries(Object.entries(overrides).filter(([key]) =>
-      key !== "action" && key !== "permissions"
-    )),
+    ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== "action" && key !== "permissions")),
   };
 }
 
@@ -85,65 +64,17 @@ function basePolicy(overrides = {}) {
     repository_kind: "tooling",
     enforcement: { mode: "blocking" },
     integration: {
-      workflows: [
-        {
-          id: "pr-gate",
-          kind: "github_actions",
-          path: ".github/workflows/repo-guard.yml",
-          role: "repo_guard_pr_gate",
-          profiles: ["self-hosting"],
-          expect: prGateExpect(),
-        },
-      ],
+      workflows: [{ id: "pr-gate", kind: "github_actions", path: ".github/workflows/repo-guard.yml", role: "repo_guard_pr_gate", profiles: ["self-hosting"], expect: prGateExpect() }],
       templates: [
-        {
-          id: "pull-request-template",
-          kind: "markdown",
-          path: ".github/PULL_REQUEST_TEMPLATE.md",
-          requires_change_intent_block: true,
-          required_block_kind: "repo-guard-yaml",
-          required_change_intent_fields: ["change_type", "scope"],
-        },
-        {
-          id: "change-intent-issue-form",
-          kind: "github_issue_form",
-          path: ".github/ISSUE_TEMPLATE/change-intent.yml",
-          requires_change_intent_block: true,
-          optional: true,
-          required_block_kind: "repo-guard-yaml",
-          required_change_intent_fields: ["change_type", "scope"],
-        },
+        { id: "pull-request-template", kind: "markdown", path: ".github/PULL_REQUEST_TEMPLATE.md", requires_change_intent_block: true, required_block_kind: "repo-guard-yaml", required_change_intent_fields: ["change_type", "scope"] },
+        { id: "change-intent-issue-form", kind: "github_issue_form", path: ".github/ISSUE_TEMPLATE/change-intent.yml", requires_change_intent_block: true, optional: true, required_block_kind: "repo-guard-yaml", required_change_intent_fields: ["change_type", "scope"] },
       ],
-      docs: [
-        {
-          id: "readme",
-          kind: "markdown",
-          path: "README.md",
-          must_mention: ["repo-guard", "ChangeIntent", "integration"],
-          must_reference_files: ["repo-policy.json", ".github/PULL_REQUEST_TEMPLATE.md"],
-          must_mention_profiles: ["self-hosting"],
-          must_mention_change_intent_fields: ["change_type", "scope"],
-          profiles: ["self-hosting"],
-        },
-      ],
-      profiles: [
-        {
-          id: "self-hosting",
-          doc_path: "README.md",
-        },
-      ],
+      docs: [{ id: "readme", kind: "markdown", path: "README.md", must_mention: ["repo-guard", "ChangeIntent", "integration"], must_reference_files: ["repo-policy.json", ".github/PULL_REQUEST_TEMPLATE.md"], must_mention_profiles: ["self-hosting"], must_mention_change_intent_fields: ["change_type", "scope"], profiles: ["self-hosting"] }],
+      profiles: [{ id: "self-hosting", doc_path: "README.md" }],
       ...overrides.integration,
     },
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: {
-      max_new_docs: 2,
-      max_new_files: 15,
-      max_net_added_lines: 2000,
-    },
+    paths: { forbidden: [], canonical_docs: ["README.md"], governance_paths: ["repo-policy.json"] },
+    diff_rules: { max_new_docs: 2, max_new_files: 15, max_net_added_lines: 2000 },
     content_rules: [],
     cochange_rules: [],
   };
@@ -156,132 +87,60 @@ function makeRepo() {
 
   writeJson(join(dir, "repo-policy.json"), basePolicy());
   writeFileSync(join(dir, ".github", "workflows", "repo-guard.yml"), [
-    "name: repo guard",
-    "on:",
-    "  pull_request:",
-    "    types: [opened, synchronize, reopened, ready_for_review]",
-    "  push:",
-    "permissions:",
-    "  contents: read",
-    "  pull-requests: read",
-    "jobs:",
-    "  validate:",
-    "    runs-on: ubuntu-latest",
-    "    steps:",
-    "      - uses: actions/checkout@v4",
-    "        with:",
-    "          fetch-depth: 0",
-    "      - name: Run repo-guard",
-    "        uses: netkeep80/repo-guard@v1.2.3",
-    "        with:",
-    "          mode: check-pr",
-    "          enforcement: blocking",
-    "        env:",
-    "          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
-    "      - name: Publish repo-guard summary",
-    "        if: always()",
-    "        run: echo \"### repo-guard\" >> \"$GITHUB_STEP_SUMMARY\"",
-    "",
+    "name: repo guard", "on:", "  pull_request:", "    types: [opened, synchronize, reopened, ready_for_review]", "  push:",
+    "permissions:", "  contents: read", "  pull-requests: read", "jobs:", "  validate:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - uses: actions/checkout@v4", "        with:", "          fetch-depth: 0", "      - name: Run repo-guard", "        uses: netkeep80/repo-guard@v1.2.3",
+    "        with:", "          mode: check-pr", "          enforcement: blocking", "        env:", "          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+    "      - name: Publish repo-guard summary", "        if: always()", "        run: echo \"### repo-guard\" >> \"$GITHUB_STEP_SUMMARY\"", "",
   ].join("\n"));
-  writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), [
-    "## ChangeIntent",
-    "",
-    "```repo-guard-yaml",
-    "change_type: feature",
-    "scope:",
-    "  - src/**",
-    "```",
-    "",
-  ].join("\n"));
-  writeFileSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-intent.yml"), [
-    "name: ChangeIntent",
-    "body:",
-    "  - type: textarea",
-    "    attributes:",
-    "      value: |",
-    "        ```repo-guard-yaml",
-    "        change_type: feature",
-    "        scope:",
-    "          - src/**",
-    "        ```",
-    "",
-  ].join("\n"));
-  writeFileSync(join(dir, "README.md"), [
-    "# Test Repo",
-    "",
-    "This repository documents repo-guard ChangeIntent integration for self-hosting.",
-    "The repo-policy.json file declares the .github/PULL_REQUEST_TEMPLATE.md ChangeIntent wiring.",
-    "Required ChangeIntent fields include change_type and scope.",
-    "Profile id: self-hosting",
-    "",
-  ].join("\n"));
+  writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), ["## ChangeIntent", "", "```repo-guard-yaml", "change_type: feature", "scope:", "  - src/**", "```", ""].join("\n"));
+  writeFileSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-intent.yml"), ["name: ChangeIntent", "body:", "  - type: textarea", "    attributes:", "      value: |", "        ```repo-guard-yaml", "        change_type: feature", "        scope:", "          - src/**", "        ```", ""].join("\n"));
+  writeFileSync(join(dir, "README.md"), ["# Test Repo", "", "This repository documents repo-guard ChangeIntent integration for self-hosting.", "The repo-policy.json file declares the .github/PULL_REQUEST_TEMPLATE.md ChangeIntent wiring.", "Required ChangeIntent fields include change_type and scope.", "Profile id: self-hosting", ""].join("\n"));
   return dir;
 }
 
 function makeBrokenRepo() {
   const dir = makeRepo();
   writeFileSync(join(dir, ".github", "workflows", "repo-guard.yml"), [
-    "name: repo guard",
-    "on:",
-    "  pull_request:",
-    "    types: [opened]",
-    "permissions:",
-    "  contents: write",
-    "jobs:",
-    "  validate:",
-    "    runs-on: ubuntu-latest",
-    "    steps:",
-    "      - uses: actions/checkout@v4",
-    "      - name: Drifted repo-guard",
-    "        continue-on-error: true",
-    "        run: |",
-    "          git clone https://github.com/netkeep80/repo-guard \"$RUNNER_TEMP/repo-guard\"",
-    "          node \"$RUNNER_TEMP/repo-guard/dist/repo-guard.mjs\" check-diff",
-    "",
+    "name: repo guard", "on:", "  pull_request:", "    types: [opened]", "permissions:", "  contents: write", "jobs:", "  validate:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - uses: actions/checkout@v4", "      - name: Drifted repo-guard", "        continue-on-error: true", "        run: |",
+    "          git clone https://github.com/netkeep80/repo-guard \"$RUNNER_TEMP/repo-guard\"", "          node \"$RUNNER_TEMP/repo-guard/dist/repo-guard.mjs\" check-diff", "",
   ].join("\n"));
   writeFileSync(join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "## Missing ChangeIntent\n");
   writeFileSync(join(dir, "README.md"), "# Missing integration docs\n");
   return dir;
 }
 
+function configureCiGate(dir, broken = false) {
+  const policy = basePolicy({ integration: { workflows: [{
+    id: "project-ci", kind: "github_actions", path: ".github/workflows/ci.yml", role: "ci_gate",
+    expect: { events: ["pull_request"], enforcement: "blocking", disallow: ["continue_on_error"] },
+  }] } });
+  writeJson(join(dir, "repo-policy.json"), policy);
+  writeFileSync(join(dir, ".github", "workflows", "ci.yml"), [
+    "name: project ci", "on:", broken ? "  push:" : "  pull_request:", "jobs:", "  test:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - uses: actions/checkout@v4", "      - name: Run tests", ...(broken ? ["        continue-on-error: true"] : []), "        run: npm test", "",
+  ].join("\n"));
+}
+
 console.log("\n--- validate-integration --format json emits normalized integration diagnostics ---");
 {
   const dir = makeRepo();
-  const result = runGuard([
-    "--repo-root", dir,
-    "validate-integration",
-    "--format", "json",
-  ]);
-
+  const result = runGuard(["--repo-root", dir, "validate-integration", "--format", "json"]);
   expect("valid integration exits 0", result.code, 0);
   expect("json stderr is empty", result.stderr, "");
-
   let parsed = null;
-  try {
-    parsed = JSON.parse(result.stdout);
-    expect("stdout is valid json", true, true);
-  } catch (e) {
-    expect("stdout is valid json", e.message, "valid json");
-  }
-
+  try { parsed = JSON.parse(result.stdout); expect("stdout is valid json", true, true); } catch (e) { expect("stdout is valid json", e.message, "valid json"); }
   expect("command name is stable", parsed?.command, "validate-integration");
   expect("mode is blocking", parsed?.mode, "blocking");
   expect("result passed", parsed?.result, "passed");
   expect("repository root is included", parsed?.repositoryRoot, dir);
   expect("workflow facts are emitted", parsed?.integration?.workflows?.[0]?.triggerEvents, ["pull_request", "push"]);
-  expect("workflow event types are emitted", parsed?.integration?.workflows?.[0]?.triggerEventTypes, [
-    {
-      event: "pull_request",
-      types: ["opened", "synchronize", "reopened", "ready_for_review"],
-    },
-  ]);
-  expect("action inputs are normalized facts",
-    parsed?.integration?.workflows?.[0]?.stepInputs?.find((fact) => fact.uses === "netkeep80/repo-guard@v1.2.3")?.inputs,
-    { enforcement: "blocking", mode: "check-pr" });
+  expect("workflow event types are emitted", parsed?.integration?.workflows?.[0]?.triggerEventTypes, [{ event: "pull_request", types: ["opened", "synchronize", "reopened", "ready_for_review"] }]);
+  expect("action inputs are normalized facts", parsed?.integration?.workflows?.[0]?.stepInputs?.find((fact) => fact.uses === "netkeep80/repo-guard@v1.2.3")?.inputs, { enforcement: "blocking", mode: "check-pr" });
   expect("template diagnostics pass", parsed?.ruleResults?.some((rule) => rule.rule === "integration-templates" && rule.ok), true);
   expect("doc diagnostics pass", parsed?.ruleResults?.some((rule) => rule.rule === "integration-docs" && rule.ok), true);
   expect("stats include declared templates", parsed?.diagnostics?.declared?.templates, 2);
-
   rmSync(dir, { recursive: true });
 }
 
@@ -289,49 +148,46 @@ console.log("\n--- optional issue-template fallback may be absent ---");
 {
   const dir = makeRepo();
   rmSync(join(dir, ".github", "ISSUE_TEMPLATE", "change-intent.yml"));
-  const result = runGuard([
-    "--repo-root", dir,
-    "validate-integration",
-    "--format", "json",
-  ]);
+  const result = runGuard(["--repo-root", dir, "validate-integration", "--format", "json"]);
   const parsed = JSON.parse(result.stdout);
-
   expect("missing optional issue template exits 0", result.code, 0);
-  expect("optional template fact is still emitted",
-    parsed.integration.templates.find((template) => template.id === "change-intent-issue-form")?.present,
-    false);
+  expect("optional template fact is still emitted", parsed.integration.templates.find((template) => template.id === "change-intent-issue-form")?.present, false);
   expect("optional template does not create artifact errors", parsed.diagnostics.artifactErrors, []);
-
   rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- doctor --integration aliases validate-integration diagnostics ---");
 {
   const dir = makeRepo();
-  const result = runGuard([
-    "--repo-root", dir,
-    "doctor",
-    "--integration",
-    "--format", "json",
-  ]);
+  const result = runGuard(["--repo-root", dir, "doctor", "--integration", "--format", "json"]);
   const parsed = JSON.parse(result.stdout);
-
   expect("doctor integration alias exits 0", result.code, 0);
   expect("alias uses validate-integration command shape", parsed.command, "validate-integration");
   expect("alias emits integration facts", parsed.integration.workflows.length, 1);
+  rmSync(dir, { recursive: true });
+}
 
+console.log("\n--- generic ci_gate reuses workflow extraction without repo-guard invocation ---");
+{
+  const dir = makeRepo();
+  configureCiGate(dir, false);
+  const passing = runGuard(["--repo-root", dir, "validate-integration", "--format", "json"]);
+  const parsed = JSON.parse(passing.stdout);
+  expect("ordinary project CI passes as blocking ci_gate", passing.code, 0);
+  expect("ci_gate does not require a repo-guard action", parsed.ruleResults.some((rule) => rule.rule === "integration-workflows" && rule.ok), true);
+
+  configureCiGate(dir, true);
+  const broken = runGuard(["--repo-root", dir, "validate-integration", "--format", "summary"]);
+  expect("broken blocking ci_gate fails", broken.code, 1);
+  expectIncludes("ci_gate event mismatch is reported", broken.output, "ci_gate workflow missing required event pull_request");
+  expectIncludes("ci_gate continue-on-error is reported", broken.output, "blocking ci_gate step must not set continue-on-error");
   rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- validate-integration --format summary reports CI-readable diagnostics ---");
 {
   const dir = makeBrokenRepo();
-  const result = runGuard([
-    "--repo-root", dir,
-    "validate-integration",
-    "--format", "summary",
-  ]);
-
+  const result = runGuard(["--repo-root", dir, "validate-integration", "--format", "summary"]);
   expect("broken integration blocks in blocking mode", result.code, 1);
   expectIncludes("summary heading", result.output, "## repo-guard integration summary");
   expectIncludes("summary result", result.output, "- Result: failed");
@@ -346,27 +202,19 @@ console.log("\n--- validate-integration --format summary reports CI-readable dia
   expectIncludes("doc file reference diagnostic appears", result.output, "missing required file reference");
   expectIncludes("doc profile mention diagnostic appears", result.output, "missing required profile mention");
   expectIncludes("doc ChangeIntent field diagnostic appears", result.output, "missing required ChangeIntent field mention");
-
   rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- validate-integration advisory mode reports but does not block ---");
 {
   const dir = makeBrokenRepo();
-  const result = runGuard([
-    "--repo-root", dir,
-    "--enforcement", "advisory",
-    "validate-integration",
-    "--format", "json",
-  ]);
+  const result = runGuard(["--repo-root", dir, "--enforcement", "advisory", "validate-integration", "--format", "json"]);
   const parsed = JSON.parse(result.stdout);
-
   expect("advisory integration exits 0", result.code, 0);
   expect("advisory result still records failure", parsed.result, "failed");
   expect("advisory has zero enforced failures", parsed.failed, 0);
   expectTrue("advisory records violations", parsed.violationCount > 0);
   expectTrue("template violation is present", parsed.violations.some((violation) => violation.rule === "integration-templates"));
-
   rmSync(dir, { recursive: true });
 }
 
