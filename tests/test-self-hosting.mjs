@@ -131,7 +131,7 @@ describe("self-hosted integration and documentation", () => {
   });
 
   it("routes integration facts through the Constraint Program", () => {
-    assert.match(read("src/checks/constraint-program.mjs"), /kind: "integration"/);
+    assert.match(read("src/checks/constraint-program.mts"), /kind: "integration"/);
     assert.doesNotMatch(read("src/integration-validator.mjs"), /validateRepoGuardPrGate/);
   });
 
