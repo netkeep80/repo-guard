@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { checkPolicyRelaxation, classifyChangedFiles, computePolicyDelta, policyRelaxationRuleFamily } from "../dist/checks/rules/policy-delta-rules.mjs";
+import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 
 const file = (path, extra = {}) => ({ path, status: "modified", addedLines: [], deletedLines: [], ...extra });
 const TRUSTED = { issue_author_permission_trusted: true };
@@ -47,6 +48,29 @@ const referencedPathsRule = {
   kind: "referenced_paths_exist",
   source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
 };
+const macroPolicy = () => ({
+  ...structuredClone(BASE),
+  cochange_rules: [],
+  contract_conformance: {
+    current: {
+      contract: { path: "contracts/spec-v2.json", format: "json" },
+      conformance: { path: "contracts/checks-v2.json", format: "json" },
+    },
+    pair_fields: {
+      contract_id: "/schema",
+      conformance_contract_id: "/contract",
+      contract_conformance_path: "/conformanceCorpus",
+      contract_status: "/status",
+      conformance_status: "/status",
+      contract_accepted: "/accepted",
+      conformance_accepted: "/accepted",
+    },
+    accepted_state: { status: "accepted", accepted: true },
+    required_paths: [{ document: "current.contract", pointer: "/owners", projection: "object_values" }],
+    cochange: ["current.contract", "current.conformance"],
+    control_paths: ["contracts/**"],
+  },
+});
 
 describe("Constraint Program strictness projection", () => {
   const cases = [
@@ -131,6 +155,25 @@ describe("document relation strictness projection", () => {
     const comparison = compareConstraintPrograms(base, head);
     assert.equal(comparison.relation, "incomparable");
     assert.ok(comparison.incomparable.some((item) => item.pointer === "/document_relations/rules/owners-exist"));
+  });
+});
+
+describe("contract/conformance macro strictness", () => {
+  it("compares only expanded ordinary policy", () => {
+    const source = macroPolicy(), resolved = resolvePolicyProfile(source);
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.policy.contract_conformance, undefined);
+
+    const baseline = structuredClone(source);
+    delete baseline.contract_conformance;
+    const adoption = compareConstraintPrograms(baseline, resolved.policy);
+    assert.notEqual(adoption.relation, "equal");
+    assert.notEqual(adoption.relation, "weaker");
+    assert.ok(adoption.incomparable.every((item) => !JSON.stringify(item).includes("contract_conformance")));
+
+    const removal = compareConstraintPrograms(resolved.policy, baseline);
+    assert.equal(removal.relation, "weaker");
+    assert.ok(removal.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "contract-conformance:current-id"));
   });
 });
 
