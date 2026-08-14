@@ -1,8 +1,10 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import Ajv from "ajv";
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { checkPolicyRelaxation, classifyChangedFiles, computePolicyDelta, policyRelaxationRuleFamily } from "../dist/checks/rules/policy-delta-rules.mjs";
 import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { loadJSON } from "../dist/runtime/validation.mjs";
 
 const file = (path, extra = {}) => ({ path, status: "modified", addedLines: [], deletedLines: [], ...extra });
 const TRUSTED = { issue_author_permission_trusted: true };
@@ -70,6 +72,15 @@ const macroPolicy = () => ({
     cochange: ["current.contract", "current.conformance"],
     control_paths: ["contracts/**"],
   },
+});
+const macroSchemaPolicy = () => ({
+  policy_format_version: "0.3.0",
+  repository_kind: "tooling",
+  paths: { forbidden: [], canonical_docs: [], governance_paths: ["repo-policy.json"] },
+  diff_rules: { max_new_files: 5, max_new_docs: 2 },
+  content_rules: [],
+  cochange_rules: [],
+  contract_conformance: structuredClone(macroPolicy().contract_conformance),
 });
 
 describe("Constraint Program strictness projection", () => {
@@ -155,6 +166,23 @@ describe("document relation strictness projection", () => {
     const comparison = compareConstraintPrograms(base, head);
     assert.equal(comparison.relation, "incomparable");
     assert.ok(comparison.incomparable.some((item) => item.pointer === "/document_relations/rules/owners-exist"));
+  });
+});
+
+describe("contract/conformance macro source schema", () => {
+  const validate = new Ajv({ allErrors: true }).compile(loadJSON(new URL("../schemas/repo-policy.schema.json", import.meta.url)));
+
+  it("accepts the current-pair R3a source shape", () => {
+    assert.equal(validate(macroSchemaPolicy()), true);
+  });
+
+  it("rejects future previous-pair syntax in R3a", () => {
+    const source = macroSchemaPolicy();
+    source.contract_conformance.previous = {
+      contract: { path: "contracts/spec-v1.json", format: "json" },
+      conformance: { path: "contracts/checks-v1.json", format: "json" },
+    };
+    assert.equal(validate(source), false);
   });
 });
 
