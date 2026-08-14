@@ -50,6 +50,12 @@ const referencedPathsRule = {
   kind: "referenced_paths_exist",
   source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
 };
+const evidencePolicy = () => {
+  const policy = relationPolicy([structuredClone(referencedPathsRule)]);
+  policy.integration.workflows = [{ id: "project-ci", role: "ci_gate", path: ".github/workflows/ci.yml", expect: { enforcement: "blocking", events: ["pull_request"] } }];
+  policy.evidence_bindings = [{ id: "owners-covered", kind: "workflow_path_coverage", source: structuredClone(referencedPathsRule.source), workflow: "project-ci", covers: ["tests/**"] }];
+  return policy;
+};
 const macroPolicy = () => ({
   ...structuredClone(BASE),
   cochange_rules: [],
@@ -181,6 +187,24 @@ describe("document relation strictness projection", () => {
     const comparison = compareConstraintPrograms(base, head);
     assert.equal(comparison.relation, "incomparable");
     assert.ok(comparison.incomparable.some((item) => item.pointer === "/document_relations/rules/owners-exist"));
+  });
+});
+
+describe("evidence binding strictness projection", () => {
+  it("treats adoption as stricter and removal as an explicit relaxation", () => {
+    const head = evidencePolicy(), base = structuredClone(head);
+    delete base.evidence_bindings;
+    assert.equal(compareConstraintPrograms(base, head).relation, "stricter");
+    const removal = computePolicyDelta(head, base);
+    assert.ok(removal.relaxations.some((item) => item.kind === "evidence_binding_removed" && item.evidence_binding_id === "owners-covered"));
+  });
+
+  it("treats binding source/workflow/coverage edits as incomparable", () => {
+    const base = evidencePolicy(), head = structuredClone(base);
+    head.evidence_bindings[0].covers = ["src/**"];
+    const comparison = compareConstraintPrograms(base, head);
+    assert.equal(comparison.relation, "incomparable");
+    assert.ok(comparison.incomparable.some((item) => item.pointer === "/evidence_bindings/owners-covered"));
   });
 });
 
