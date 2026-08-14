@@ -294,10 +294,17 @@ console.log("\n--- referenced repository paths execute through Constraint Progra
   });
   expect("invalid repository path stays a structured R1 failure", invalid.violations.find((item) => item.rule === "document-relation:gates-exist")?.data?.source?.error?.code, "invalid_repository_path");
 
-  const noTrackedFacts = runEquivalentInput({ policy: relationPolicy, readFile, trackedFiles: undefined });
-  const noTrackedViolation = noTrackedFacts.violations.find((item) => item.rule === "document-relation:owners-exist");
-  expect("missing tracked repository facts fail closed", Boolean(noTrackedViolation), true);
-  expect("missing tracked repository facts are explicit", noTrackedViolation?.data?.tracked_repository_available, false);
+  const { evaluateConstraintIR } = await import("../dist/checks/rules/constraints.mjs");
+  const { createDocumentReader } = await import("../dist/document-facts.mjs");
+  const noTrackedChecks = evaluateConstraintIR({
+    policy: relationPolicy,
+    diff: { files: { checked: [] } },
+    documents: createDocumentReader({ readFile }),
+    trackedFiles: undefined,
+  });
+  const noTrackedCheck = noTrackedChecks.find((item) => item.name === "document-relation:owners-exist")?.check;
+  expect("missing tracked repository facts fail closed", noTrackedCheck?.ok, false);
+  expect("missing tracked repository facts are explicit", noTrackedCheck?.data?.tracked_repository_available, false);
 }
 
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
