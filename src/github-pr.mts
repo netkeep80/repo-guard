@@ -119,7 +119,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   let runtime = headRuntime, basePolicy: RuntimePolicy | null = null, trustedGovernancePaths: unknown = [];
   if (baseRead.error) initialChecks.push({ name: "governance-trusted-boundary", check: { ok: false, message: `cannot establish trusted governance boundary: ${baseRead.error}`, details: [`base_ref: ${base}`] } });
   else {
-    runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, { label: "repo-policy.json (base)" }), "repo-policy.json (base)", "Base policy compilation failed");
+    runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, { label: "repo-policy.json (base)" }), "repo-policy.json (base)", "Base policy compilation failed") as PolicyRuntime;
     if (!runtime) return 1;
     basePolicy = runtime.policy; trustedGovernancePaths = (basePolicy as RuntimePolicy & { paths?: { governance_paths?: unknown } }).paths?.governance_paths ?? [];
   }
