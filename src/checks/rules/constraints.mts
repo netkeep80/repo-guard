@@ -102,7 +102,7 @@ export function checkSurfaceDebt(files: ParsedDiffFile[], debt: SurfaceDebt | nu
   if (expected.max_net_added_lines !== undefined && growth.net_added_lines > expected.max_net_added_lines) exceeded.push(`net added lines ${growth.net_added_lines} exceeds declared debt ${expected.max_net_added_lines}`);
   return { ok: !exceeded.length, status: exceeded.length ? "declared_debt_exceeded" : "declared", message: exceeded.length ? "declared surface debt is smaller than actual diff growth" : undefined, growth, surface_debt: debt, details: exceeded, hint: exceeded.length ? "Update expected_delta to match intentional temporary growth or reduce the diff." : undefined };
 }
-export const checkForbiddenPaths = (files: ParsedDiffFile[], patterns: string[]): ParsedDiffFile[] => selectPaths(files, patterns, { excludeStatuses: ["deleted"] });
+export const checkForbiddenPaths = (files: ParsedDiffFile[], patterns: string[]): string[] => selectPaths(files, patterns, { excludeStatuses: ["deleted"] });
 export function checkScope(files: ParsedDiffFile[], patterns?: string[]) {
   if (!patterns?.length) return { ok: true };
   const out = files.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path).sort();
@@ -120,7 +120,7 @@ export function checkMustNotTouch(files: ParsedDiffFile[], patterns?: string[]) 
 }
 export const checkCochangeRules = (files: ParsedDiffFile[], rules: Array<{ if_changed: string[]; must_change_any: string[] }> = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
 export function compileConstraintIR(facts: ConstraintFacts): ConstraintIR {
-  return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) as RuntimeConstraint[] };
+  return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
 }
 function evaluateMetric(files: ParsedDiffFile[], constraint: RuntimeConstraint, policy: ConstraintPolicyProjection) {
   if (constraint.metric === "new_docs") return checkCanonicalDocsBudget(files, policy.paths.canonical_docs, constraint.max);
@@ -150,13 +150,13 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
       results.push({ name: constraint.name, check: result });
       if (result.advisory_violations.length) results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
       continue;
-    } else if (constraint.kind === "registry_rules") check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
+    } else if (constraint.kind === "registry_rules") check = checkRegistryRules(constraint.rules as Parameters<typeof checkRegistryRules>[0], { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
     else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy as Parameters<typeof checkChangeProfile>[1], facts.changeIntent?.change_type, facts.derived as Parameters<typeof checkChangeProfile>[3]);
     else if (constraint.kind === "trace_rules") {
       for (const trace of context.anchorDiagnostics?.traceRuleResults || []) results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
       continue;
     } else if (constraint.kind === "integration") {
-      results.push(...integrationConstraintEntries(facts.integration));
+      results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
       continue;
     } else continue;
     results.push({ name: constraint.name, check });
