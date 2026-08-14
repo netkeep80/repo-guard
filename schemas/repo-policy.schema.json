@@ -49,12 +49,12 @@
     },
     "integration": {
       "type": "object",
-      "description": "Declarative downstream integration layer for documenting which workflows run repo-guard, which templates carry ChangeIntent blocks, which docs explain ChangeIntent, and which profiles are documented. Accepted as policy metadata; file parsing and enforcement are outside this schema layer.",
+      "description": "Declarative downstream integration layer for workflows, templates, documentation, and profiles. Accepted as policy metadata; file parsing and enforcement are outside this schema layer.",
       "additionalProperties": false,
       "properties": {
         "workflows": {
           "type": "array",
-          "description": "Expected automation entry points that invoke repo-guard.",
+          "description": "Expected automation entry points, including repo-guard workflows and generic CI gates.",
           "items": { "$ref": "#/definitions/integration_workflow" }
         },
         "templates": {
@@ -244,6 +244,9 @@
     },
     "contract_conformance": {
       "$ref": "#/definitions/contract_conformance"
+    },
+    "evidence_bindings": {
+      "$ref": "#/definitions/evidence_bindings"
     },
     "advisory_text_rules": {
       "type": "object",
@@ -540,6 +543,27 @@
         }
       ]
     },
+    "evidence_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/evidence_binding" }
+    },
+    "evidence_binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["id", "kind", "source", "workflow", "covers"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "workflow_path_coverage" },
+            "source": { "$ref": "#/definitions/document_repository_path_set_selector" },
+            "workflow": { "$ref": "#/definitions/non_empty_string" },
+            "covers": { "$ref": "#/definitions/non_empty_string_array" }
+          }
+        }
+      ]
+    },
     "profile_overrides": {
       "type": "object",
       "additionalProperties": false,
@@ -632,8 +656,8 @@
         "path": { "$ref": "#/definitions/non_empty_string" },
         "role": {
           "type": "string",
-          "enum": ["repo_guard_advisory", "repo_guard_policy_validation", "repo_guard_pr_gate"],
-          "description": "Supported repo-guard role for this workflow."
+          "enum": ["repo_guard_advisory", "repo_guard_policy_validation", "repo_guard_pr_gate", "ci_gate"],
+          "description": "Supported integration role for this workflow."
         },
         "expect": { "$ref": "#/definitions/integration_workflow_expectation" },
         "profiles": { "$ref": "#/definitions/non_empty_string_array" }
@@ -642,7 +666,7 @@
     "integration_workflow_expectation": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Optional workflow expectations checked by validate-integration for repo-guard workflow roles.",
+      "description": "Optional workflow expectations checked by validate-integration.",
       "properties": {
         "events": { "$ref": "#/definitions/non_empty_string_array" },
         "event_types": { "$ref": "#/definitions/non_empty_string_array" },
