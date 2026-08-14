@@ -1,8 +1,53 @@
+import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import { uniqueSorted } from "../../utils/collections.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { readRepositoryTextFile } from "../../utils/repository-files.mjs";
+import type { RepositoryFileOptions } from "../../utils/repository-files.mjs";
+import type { RuleFamily } from "../rule-registry.mjs";
 
-function stripMarkdownNoise(content) {
+export interface AdvisoryTextRules {
+  canonical_files?: string[];
+  warn_on_similarity_above?: number;
+  max_reported_matches?: number;
+}
+
+interface AdvisoryTextOptions extends RepositoryFileOptions {
+  allFiles?: string[];
+}
+
+interface MarkdownHeading {
+  level: number;
+  title: string;
+  normalized: string;
+}
+
+export interface AdvisoryTextMatch {
+  changed_file: string;
+  canonical_file: string;
+  score: number;
+  threshold: number;
+  duplicate_section_titles: string[];
+  reason: "text_similarity" | "duplicate_section_title";
+}
+
+export interface AdvisoryTextCheckResult {
+  ok: boolean;
+  advisory?: true;
+  message?: string;
+  matches: AdvisoryTextMatch[];
+  details?: string[];
+  hint?: string;
+}
+
+interface AdvisoryRuleFacts {
+  diff: { files: { checked: ParsedDiffFile[] } };
+  policy: { advisory_text_rules?: AdvisoryTextRules | null };
+  repositoryRoot?: string;
+  trackedFiles?: string[];
+  readFile?: (filePath: string) => unknown;
+}
+
+function stripMarkdownNoise(content: string): string {
   return content
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`[^`]*`/g, " ")
@@ -11,18 +56,18 @@ function stripMarkdownNoise(content) {
     .replace(/<[^>]+>/g, " ");
 }
 
-function markdownTokens(content) {
+function markdownTokens(content: string): string[] {
   const normalized = stripMarkdownNoise(content)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ");
   return normalized.split(/\s+/).filter((token) => token.length >= 3);
 }
 
-function tokenSet(content) {
+function tokenSet(content: string): Set<string> {
   return new Set(markdownTokens(content));
 }
 
-function jaccardScore(left, right) {
+function jaccardScore(left: Set<string>, right: Set<string>): number {
   if (left.size === 0 || right.size === 0) return 0;
   let intersection = 0;
   for (const token of left) {
@@ -32,8 +77,8 @@ function jaccardScore(left, right) {
   return union === 0 ? 0 : intersection / union;
 }
 
-function markdownHeadings(content) {
-  const headings = [];
+function markdownHeadings(content: string): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = [];
   for (const line of content.split(/\r?\n/)) {
     const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
     if (match) {
@@ -47,7 +92,7 @@ function markdownHeadings(content) {
   return headings;
 }
 
-export function checkAdvisoryTextRules(files, rules, options = {}) {
+export function checkAdvisoryTextRules(files: ParsedDiffFile[], rules: AdvisoryTextRules | null | undefined, options: AdvisoryTextOptions = {}): AdvisoryTextCheckResult {
   if (!rules) return { ok: true, matches: [] };
 
   const canonicalPatterns = rules.canonical_files || [];
@@ -61,15 +106,15 @@ export function checkAdvisoryTextRules(files, rules, options = {}) {
   const threshold = rules.warn_on_similarity_above ?? 0.7;
   const maxReported = rules.max_reported_matches ?? 3;
   const canonicalFiles = uniqueSorted(options.allFiles || []);
-  const results = [];
-  const readErrors = [];
+  const results: AdvisoryTextMatch[] = [];
+  const readErrors: string[] = [];
 
   for (const changed of changedMarkdown) {
-    let changedContent;
+    let changedContent: string;
     try {
       changedContent = readRepositoryTextFile(changed.path, options);
     } catch (error) {
-      readErrors.push(`${changed.path}: ${error.message}`);
+      readErrors.push(`${changed.path}: ${(error as Error).message}`);
       continue;
     }
 
@@ -82,11 +127,11 @@ export function checkAdvisoryTextRules(files, rules, options = {}) {
       if (!canonicalPath.match(/\.md$/i)) continue;
       if (!matchesAny(canonicalPath, canonicalPatterns)) continue;
 
-      let canonicalContent;
+      let canonicalContent: string;
       try {
         canonicalContent = readRepositoryTextFile(canonicalPath, options);
       } catch (error) {
-        readErrors.push(`${canonicalPath}: ${error.message}`);
+        readErrors.push(`${canonicalPath}: ${(error as Error).message}`);
         continue;
       }
 
@@ -137,15 +182,15 @@ export function checkAdvisoryTextRules(files, rules, options = {}) {
   };
 }
 
-export const advisoryTextRuleFamily = {
+export const advisoryTextRuleFamily: RuleFamily = {
   id: "advisory-text-rules",
   evaluate(facts) {
     return {
       name: "advisory-text-rules",
-      check: checkAdvisoryTextRules(facts.diff.files.checked, facts.policy.advisory_text_rules, {
-        repoRoot: facts.repositoryRoot,
-        allFiles: facts.trackedFiles,
-        readFile: facts.readFile,
+      check: checkAdvisoryTextRules((facts as AdvisoryRuleFacts).diff.files.checked, (facts as AdvisoryRuleFacts).policy.advisory_text_rules, {
+        repoRoot: (facts as AdvisoryRuleFacts).repositoryRoot,
+        allFiles: (facts as AdvisoryRuleFacts).trackedFiles,
+        readFile: (facts as AdvisoryRuleFacts).readFile,
       }),
     };
   },
