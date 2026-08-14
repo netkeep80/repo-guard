@@ -472,7 +472,7 @@
         },
         "rules": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "items": { "$ref": "#/definitions/document_relation_rule" }
         }
       }
@@ -505,6 +505,17 @@
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values"] },
         "type": { "const": "repository_path_set" }
+      }
+    },
+    "document_string_set_selector": {
+      "type": "object",
+      "required": ["document", "pointer", "projection", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "$ref": "#/definitions/non_empty_string" },
+        "pointer": { "type": "string" },
+        "projection": { "type": "string", "enum": ["array_items", "object_values"] },
+        "type": { "const": "string_set" }
       }
     },
     "document_relation_rule": {
@@ -560,6 +571,17 @@
             "source": { "$ref": "#/definitions/document_repository_path_set_selector" },
             "workflow": { "$ref": "#/definitions/non_empty_string" },
             "covers": { "$ref": "#/definitions/non_empty_string_array" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "source", "target_anchor_type"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "anchor_value_coverage" },
+            "source": { "$ref": "#/definitions/document_string_set_selector" },
+            "target_anchor_type": { "$ref": "#/definitions/non_empty_string" }
           }
         }
       ]
