@@ -37,13 +37,15 @@ interface ProfileEntry {
   doc_path: string;
 }
 
+interface IntegrationConfiguration {
+  workflows?: WorkflowEntry[];
+  templates?: TemplateEntry[];
+  docs?: DocEntry[];
+  profiles?: ProfileEntry[];
+}
+
 interface IntegrationPolicyProjection {
-  integration?: {
-    workflows?: WorkflowEntry[];
-    templates?: TemplateEntry[];
-    docs?: DocEntry[];
-    profiles?: ProfileEntry[];
-  };
+  integration?: unknown;
 }
 
 interface ExtractIntegrationOptions extends DocumentReaderOptions {
@@ -222,7 +224,7 @@ function collectWorkflowFacts(entry: WorkflowEntry, content: string): Integratio
   for (const [jobId, job] of Object.entries(jobs)) {
     if (!isPlainObject(job)) continue;
     const permission = normalizeMap(job.permissions);
-    if (permission || typeof job.permissions === "string") jobPermissions.push({ jobId, permissions: permission || job.permissions });
+    if (permission || typeof job.permissions === "string") jobPermissions.push({ jobId, permissions: permission || job.permissions as string });
     envVars.push(...collectEnvVars(job.env, "job", { jobId }));
     if (job.if !== undefined) ifConditions.push({ scope: "job", jobId, condition: normalizeValue(job.if) });
     if (job["continue-on-error"] !== undefined) continueOnError.push({ scope: "job", jobId, value: normalizeValue(job["continue-on-error"]) });
@@ -459,7 +461,7 @@ function isMissingRepositoryFileError(error: NodeJS.ErrnoException, entry: Templ
 }
 
 export function extractIntegration(policy: IntegrationPolicyProjection, options: ExtractIntegrationOptions = {}): IntegrationExtraction {
-  const integration = policy.integration;
+  const integration = policy.integration as IntegrationConfiguration | undefined;
   const result: IntegrationExtraction = { workflows: [], templates: [], docs: [], profiles: [], errors: [] };
   if (!integration) return result;
   const documents = options.documents || createDocumentReader(options);
