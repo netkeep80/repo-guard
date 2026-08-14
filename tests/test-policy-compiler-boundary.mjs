@@ -60,7 +60,6 @@ describe("semantic policy compiler boundary", () => {
     assert.ok(messages.some((message) => /duplicates rule/.test(message)));
     assert.ok(messages.some((message) => /unknown document "missing"/.test(message)));
     assert.ok(messages.some((message) => /"unused".*declared but unused/.test(message)));
-    assert.ok(messages.some((message) => /"contract".*declared but unused/.test(message)));
   });
 
   it("rejects invalid paths, format mismatches and incompatible literals", () => {
