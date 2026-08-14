@@ -107,6 +107,18 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
             removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));
         add(`${owner}:shape`, null, exact(shape, { owner, pointer, rule_id: id, incomparableMessage: `document_relations rule "${id}" changed semantics` }));
     }
+    for (const binding of array(policy.evidence_bindings)) {
+        const id = String(binding.id ?? ""), owner = `evidence-binding:${id}`, pointer = `/evidence_bindings/${id}`;
+        const source = compileDocumentSelector(binding.source, documents);
+        const shape = { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
+        const runtime = binding.kind === "workflow_path_coverage" ? {
+            kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
+            workflow: binding.workflow, covers: array(binding.covers),
+        } : null;
+        add(owner, runtime, entity({ owner, pointer, removeKind: "evidence_binding_removed", evidence_binding_id: id,
+            removeBefore: shape, removeAfter: { present: false }, removeMessage: `evidence binding "${id}" removed` }));
+        add(`${owner}:shape`, null, exact(shape, { owner, pointer, evidence_binding_id: id, incomparableMessage: `evidence binding "${id}" changed semantics` }));
+    }
     if (array(policy.size_rules).length)
         add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
     if (array(policy.registry_rules).length)
@@ -139,6 +151,7 @@ function unknownProjection(policy = {}) {
     delete copy.diff_rules;
     delete copy.size_rules;
     delete copy.document_relations;
+    delete copy.evidence_bindings;
     if (copy.paths) {
         for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"])
             delete copy.paths[field];
@@ -153,7 +166,7 @@ function unknownProjection(policy = {}) {
     return copy;
 }
 const relaxation = (entry, before, after = null, kind = entry.weakenKind, message = null, extra = {}) => ({
-    kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), pointer: entry.pointer, before, after,
+    kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
     message: message || entry.message?.(before, after) || entry.removeMessage, ...extra,
 });
 const incomparable = (entry, before, after) => ({ kind: "policy_incomparable", pointer: entry.pointer, before, after, message: entry.incomparableMessage || `policy constraint ${entry.key} changed with no proven monotonic ordering` });
