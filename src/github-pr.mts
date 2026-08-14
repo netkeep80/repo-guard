@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
@@ -41,6 +42,7 @@ type PRChangeIntentFacts =
 interface InitialCheck { name: string; check: unknown; }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
+const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
 export function loadGitHubEvent(): GitHubEventResult {
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventPath) return { ok: false, error: "no_event", message: "GITHUB_EVENT_PATH not set; not running in GitHub Actions" };
@@ -155,8 +157,27 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
   if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber }); } catch {}
 
-  return runPolicyPipeline({
+  const baseResult = runPolicyPipeline({
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
-  } as Parameters<typeof runPolicyPipeline>[0]).exitCode;
+  } as Parameters<typeof runPolicyPipeline>[0]);
+  if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy)) return baseResult.exitCode;
+
+  const proposedEnforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: headRuntime.policy } as Parameters<typeof resolveEnforcementMode>[0]);
+  if (!proposedEnforcement.ok) { console.error(`ERROR: proposed policy enforcement: ${proposedEnforcement.message}`); return 1; }
+
+  // Head policy — только дополнительный veto. Governance authorization и policy-delta уже
+  // проверены trusted base pass и намеренно не могут быть переопределены самим head policy.
+  console.log("\nProposed policy differs from trusted base; checking head runtime policy as an additional veto.");
+  const proposedResult = runPolicyPipeline({
+    mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy,
+    changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
+    enforcement: proposedEnforcement, diffText, initialChecks: [],
+  } as Parameters<typeof runPolicyPipeline>[0], {
+    printEnforcement: false,
+    ruleNamePrefix: "proposed-policy:",
+    excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES,
+  });
+
+  return Math.max(baseResult.exitCode, proposedResult.exitCode);
 }
