@@ -7,10 +7,10 @@ export interface NormalizedRuleEntry extends RuleEntry {
   family: string;
 }
 
-export interface RuleFamily<Facts = unknown, Context = Record<string, unknown>> {
+export interface RuleFamily {
   id: string;
-  applies?: (facts: Facts, context: Context) => unknown;
-  evaluate: (facts: Facts, context: Context) => RuleEntry | readonly RuleEntry[] | null | undefined | false;
+  applies?: (facts: unknown, context: unknown) => unknown;
+  evaluate: (facts: unknown, context: unknown) => RuleEntry | readonly RuleEntry[] | null | undefined | false;
 }
 
 export interface RuleRegistry<Facts = unknown, Context = Record<string, unknown>> {
@@ -23,11 +23,11 @@ function assertRuleFamily(family: unknown): asserts family is RuleFamily {
   if (!family || typeof family !== "object") {
     throw new TypeError("rule family must be an object");
   }
-  if (!("id" in family) || !family.id || typeof family.id !== "string") {
+  if (!(family as Partial<RuleFamily>).id || typeof (family as Partial<RuleFamily>).id !== "string") {
     throw new TypeError("rule family requires a string id");
   }
-  if (!("evaluate" in family) || typeof family.evaluate !== "function") {
-    throw new TypeError(`rule family "${family.id}" requires an evaluate function`);
+  if (typeof (family as Partial<RuleFamily>).evaluate !== "function") {
+    throw new TypeError(`rule family "${(family as Partial<RuleFamily>).id}" requires an evaluate function`);
   }
 }
 
@@ -36,13 +36,13 @@ function normalizeRuleEntries(family: RuleFamily, entries: ReturnType<RuleFamily
   return list
     .filter(Boolean)
     .map((entry) => {
-      if (!entry.name || !entry.check) {
+      if (!(entry as RuleEntry).name || !(entry as RuleEntry).check) {
         throw new TypeError(`rule family "${family.id}" returned an invalid rule entry`);
       }
       return {
         family: family.id,
-        name: entry.name,
-        check: entry.check,
+        name: (entry as RuleEntry).name,
+        check: (entry as RuleEntry).check,
       };
     });
 }
