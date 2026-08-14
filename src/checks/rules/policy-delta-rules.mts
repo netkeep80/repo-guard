@@ -7,7 +7,7 @@ import { expandGovernancePatterns } from "./governance-paths.mjs";
 interface PolicyProjection {
   surfaces?: Record<string, unknown>;
   paths?: { governance_paths?: unknown };
-  policy_delta_rules?: { protected_surfaces?: unknown };
+  policy_delta_rules?: { protected_surfaces?: string[] };
 }
 
 interface PolicyRelaxation {
@@ -54,7 +54,7 @@ interface PolicyRelaxationCheckInput {
   trustedAuthorizer?: TrustedAuthorizerProjection | null;
   governanceGrant?: GovernanceGrantProjection | null;
   changeIntentType?: string | null;
-  configuredProtectedSurfaces?: unknown;
+  configuredProtectedSurfaces?: string[] | null;
 }
 
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -66,11 +66,11 @@ export function computePolicyDelta(basePolicy: PolicyProjection | null | undefin
 }
 
 const DEFAULT_PROTECTED_SURFACES = ["source", "tests", "schemas"];
-function protectedPatterns(policy: PolicyProjection | null | undefined, configured: unknown): string[] {
-  return [...new Set(((Array.isArray(configured) && configured.length ? configured : DEFAULT_PROTECTED_SURFACES) as string[]).flatMap((name) => array(policy?.surfaces?.[name]) as string[]))];
+function protectedPatterns(policy: PolicyProjection | null | undefined, configured: string[] | null | undefined): string[] {
+  return [...new Set((configured?.length ? configured : DEFAULT_PROTECTED_SURFACES).flatMap((name) => array(policy?.surfaces?.[name]) as string[]))];
 }
 const governanceFile = (path: string, policy: PolicyProjection | null | undefined): boolean => path === "repo-policy.json" || matchesAny(path, expandGovernancePatterns(array(policy?.paths?.governance_paths)));
-export function classifyChangedFiles(files: ParsedDiffFile[], basePolicy: PolicyProjection | null | undefined, configured: unknown = null): ClassifiedChangedFiles {
+export function classifyChangedFiles(files: ParsedDiffFile[], basePolicy: PolicyProjection | null | undefined, configured: string[] | null = null): ClassifiedChangedFiles {
   const patterns = protectedPatterns(basePolicy, configured), protectedFiles: string[] = [], governanceFiles: string[] = [], otherFiles: string[] = [];
   for (const file of files) {
     if (governanceFile(file.path, basePolicy)) governanceFiles.push(file.path);
