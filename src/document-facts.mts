@@ -63,6 +63,47 @@ export interface DocumentReader {
 export type DocumentProjection = "value" | "array_items" | "object_values";
 export type DocumentFactType = "scalar" | "string" | "boolean" | "string_set" | "repository_path" | "repository_path_set";
 export type DocumentScalar = string | number | boolean | null;
+export type NormalizedDocumentFact = DocumentScalar | string[];
+export type DocumentFactErrorCode =
+  | "malformed_pointer"
+  | "missing_pointer_segment"
+  | "projection_type_mismatch"
+  | "fact_type_mismatch"
+  | "invalid_repository_path"
+  | "document_read_error"
+  | "unsupported_document_type";
+
+export interface DocumentFactSelector {
+  path: string;
+  pointer: string;
+  projection?: DocumentProjection;
+  type: DocumentFactType;
+}
+
+export interface DocumentFactError {
+  code: DocumentFactErrorCode;
+  pointer: string;
+  segment?: string;
+  message: string;
+}
+
+export type DocumentFactResult =
+  | { ok: true; value: NormalizedDocumentFact }
+  | { ok: false; error: DocumentFactError };
+
+export class DocumentFactFailure extends Error implements DocumentFactError {
+  readonly code: DocumentFactErrorCode;
+  readonly pointer: string;
+  readonly segment?: string;
+
+  constructor(code: DocumentFactErrorCode, message: string, pointer = "", segment?: string) {
+    super(message);
+    this.name = "DocumentFactFailure";
+    this.code = code;
+    this.pointer = pointer;
+    this.segment = segment;
+  }
+}
 
 type DocumentKind = "markdown" | "json" | "yaml";
 
@@ -79,6 +120,18 @@ function collapseMessage(message: unknown): string {
   return String(message || "").replace(/\s+/g, " ").trim();
 }
 
+function failDocumentFact(code: DocumentFactErrorCode, message: string, pointer = "", segment?: string): never {
+  throw new DocumentFactFailure(code, message, pointer, segment);
+}
+
+function documentFactError(error: unknown, pointer: string): DocumentFactError {
+  if (error instanceof DocumentFactFailure) {
+    return { code: error.code, pointer: error.pointer, ...(error.segment === undefined ? {} : { segment: error.segment }), message: error.message };
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return { code: "document_read_error", pointer, message: collapseMessage(message) || "document read failed" };
+}
+
 export function parseYaml(content: string): unknown {
   const doc = parseDocument(content, { prettyErrors: false });
   if (doc.errors.length) throw new Error(`invalid YAML: ${doc.errors.map((e) => collapseMessage(e.message)).join("; ")}`);
@@ -90,17 +143,22 @@ export function parseJson(content: string): unknown {
 }
 
 function decodeJsonPointerSegment(raw: string, pointer: string): string {
-  if (/~(?:[^01]|$)/.test(raw)) throw new Error(`invalid json_pointer "${pointer}"`);
+  if (/~(?:[^01]|$)/.test(raw)) failDocumentFact("malformed_pointer", `invalid json_pointer "${pointer}"`, pointer);
   return raw.replace(/~1/g, "/").replace(/~0/g, "~");
 }
 
 export function resolveJsonPointer(data: unknown, pointer: string): unknown {
   if (pointer === "") return data;
-  if (typeof pointer !== "string" || !pointer.startsWith("/")) throw new Error(`invalid json_pointer "${pointer}"`);
+  if (typeof pointer !== "string" || !pointer.startsWith("/")) {
+    const rendered = typeof pointer === "string" ? pointer : String(pointer ?? "");
+    failDocumentFact("malformed_pointer", `invalid json_pointer "${rendered}"`, rendered);
+  }
   let current: unknown = data;
   for (const raw of pointer.slice(1).split("/")) {
     const part = decodeJsonPointerSegment(raw, pointer);
-    if (current === null || typeof current !== "object" || !Object.hasOwn(current, part)) throw new Error(`json_pointer "${pointer}" does not exist`);
+    if (current === null || typeof current !== "object" || !Object.hasOwn(current, part)) {
+      failDocumentFact("missing_pointer_segment", `json_pointer "${pointer}" does not exist`, pointer, part);
+    }
     current = (current as Record<string, unknown>)[part];
   }
   return current;
@@ -113,21 +171,23 @@ export function projectDocumentValue(data: unknown, pointer: string, projection:
   const selected = resolveJsonPointer(data, pointer);
   if (projection === "value") return selected;
   if (projection === "array_items") {
-    if (!Array.isArray(selected)) throw new Error(`document projection "array_items" requires an array at json_pointer "${pointer}"`);
+    if (!Array.isArray(selected)) {
+      failDocumentFact("projection_type_mismatch", `document projection "array_items" requires an array at json_pointer "${pointer}"`, pointer);
+    }
     return [...selected];
   }
   if (projection === "object_values") {
     if (selected === null || typeof selected !== "object" || Array.isArray(selected)) {
-      throw new Error(`document projection "object_values" requires an object at json_pointer "${pointer}"`);
+      failDocumentFact("projection_type_mismatch", `document projection "object_values" requires an object at json_pointer "${pointer}"`, pointer);
     }
     return Object.values(selected as Record<string, unknown>);
   }
   const exhaustive: never = projection;
-  throw new Error(`unsupported document projection "${exhaustive}"`);
+  return failDocumentFact("projection_type_mismatch", `unsupported document projection "${String(exhaustive)}"`, pointer);
 }
 
-function normalizeRepositoryPathFact(value: unknown): string {
-  if (typeof value !== "string") throw new Error("document fact repository_path requires a string");
+function normalizeRepositoryPathFact(value: unknown, pointer = ""): string {
+  if (typeof value !== "string") failDocumentFact("fact_type_mismatch", "document fact repository_path requires a string", pointer);
   const normalized = normalizePathEntry(value);
   const parts = normalized.split("/");
   if (
@@ -138,44 +198,63 @@ function normalizeRepositoryPathFact(value: unknown): string {
     || /^[a-z][a-z0-9+.-]*:/i.test(normalized)
     || parts.some((part) => !part || part === "." || part === "..")
   ) {
-    throw new Error(`invalid repository_path "${value}"`);
+    failDocumentFact("invalid_repository_path", `invalid repository_path "${value}"`, pointer);
   }
   return normalized;
 }
 
-function normalizeStringSet(value: unknown, itemType: "string" | "repository_path"): string[] {
-  if (!Array.isArray(value)) throw new Error(`document fact ${itemType === "string" ? "string_set" : "repository_path_set"} requires a collection`);
+function normalizeStringSet(value: unknown, itemType: "string" | "repository_path", pointer = ""): string[] {
+  if (!Array.isArray(value)) {
+    failDocumentFact("fact_type_mismatch", `document fact ${itemType === "string" ? "string_set" : "repository_path_set"} requires a collection`, pointer);
+  }
   const normalized = value.map((item) => {
-    if (itemType === "repository_path") return normalizeRepositoryPathFact(item);
-    if (typeof item !== "string") throw new Error("document fact string_set requires string items");
+    if (itemType === "repository_path") return normalizeRepositoryPathFact(item, pointer);
+    if (typeof item !== "string") failDocumentFact("fact_type_mismatch", "document fact string_set requires string items", pointer);
     return item;
   });
   return uniqueSorted(normalized);
 }
 
-export function normalizeDocumentFact(value: unknown, type: "scalar"): DocumentScalar;
-export function normalizeDocumentFact(value: unknown, type: "string"): string;
-export function normalizeDocumentFact(value: unknown, type: "boolean"): boolean;
-export function normalizeDocumentFact(value: unknown, type: "string_set" | "repository_path_set"): string[];
-export function normalizeDocumentFact(value: unknown, type: "repository_path"): string;
-export function normalizeDocumentFact(value: unknown, type: DocumentFactType): DocumentScalar | string[] {
+export function normalizeDocumentFact(value: unknown, type: "scalar", pointer?: string): DocumentScalar;
+export function normalizeDocumentFact(value: unknown, type: "string", pointer?: string): string;
+export function normalizeDocumentFact(value: unknown, type: "boolean", pointer?: string): boolean;
+export function normalizeDocumentFact(value: unknown, type: "string_set" | "repository_path_set", pointer?: string): string[];
+export function normalizeDocumentFact(value: unknown, type: "repository_path", pointer?: string): string;
+export function normalizeDocumentFact(value: unknown, type: DocumentFactType, pointer = ""): NormalizedDocumentFact {
   if (type === "scalar") {
     if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value;
-    throw new Error("document fact scalar requires a JSON scalar");
+    return failDocumentFact("fact_type_mismatch", "document fact scalar requires a JSON scalar", pointer);
   }
   if (type === "string") {
     if (typeof value === "string") return value;
-    throw new Error("document fact string requires a string");
+    return failDocumentFact("fact_type_mismatch", "document fact string requires a string", pointer);
   }
   if (type === "boolean") {
     if (typeof value === "boolean") return value;
-    throw new Error("document fact boolean requires a boolean");
+    return failDocumentFact("fact_type_mismatch", "document fact boolean requires a boolean", pointer);
   }
-  if (type === "string_set") return normalizeStringSet(value, "string");
-  if (type === "repository_path") return normalizeRepositoryPathFact(value);
-  if (type === "repository_path_set") return normalizeStringSet(value, "repository_path");
+  if (type === "string_set") return normalizeStringSet(value, "string", pointer);
+  if (type === "repository_path") return normalizeRepositoryPathFact(value, pointer);
+  if (type === "repository_path_set") return normalizeStringSet(value, "repository_path", pointer);
   const exhaustive: never = type;
-  throw new Error(`unsupported document fact type "${exhaustive}"`);
+  return failDocumentFact("fact_type_mismatch", `unsupported document fact type "${String(exhaustive)}"`, pointer);
+}
+
+function readSelectorDocument(reader: DocumentReader, path: string, pointer: string): unknown {
+  const normalizedPath = normalizeRepositoryPathFact(path, pointer);
+  if (/\.json$/i.test(normalizedPath)) return reader.json(normalizedPath);
+  if (/\.ya?ml$/i.test(normalizedPath)) return reader.yaml(normalizedPath);
+  return failDocumentFact("unsupported_document_type", `unsupported document type for "${normalizedPath}"`, pointer);
+}
+
+export function readDocumentFact(reader: DocumentReader, selector: DocumentFactSelector): DocumentFactResult {
+  try {
+    const document = readSelectorDocument(reader, selector.path, selector.pointer);
+    const projected = projectDocumentValue(document, selector.pointer, selector.projection ?? "value");
+    return { ok: true, value: normalizeDocumentFact(projected, selector.type, selector.pointer) };
+  } catch (error: unknown) {
+    return { ok: false, error: documentFactError(error, selector.pointer) };
+  }
 }
 
 export function stripMarkdownInline(line: string): string {
