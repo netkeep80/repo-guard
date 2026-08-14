@@ -28,7 +28,7 @@ interface RegistryRule {
 }
 
 interface RegistryRuleOptions extends DocumentReaderOptions {
-  documents?: DocumentReader;
+  documents?: unknown;
 }
 
 const normalizeAll = (values: string[]): string[] => uniqueSorted(values.map(normalizePathEntry).filter(Boolean) as string[]);
@@ -68,7 +68,7 @@ function readRegistrySource(source: RegistrySource, documents: DocumentReader): 
 
 export function checkRegistryRules(rules: RegistryRule[] = [], options: RegistryRuleOptions = {}) {
   if (!rules?.length) return { ok: true, results: [] };
-  const documents = options.documents || createDocumentReader(options);
+  const documents = options.documents as DocumentReader | undefined || createDocumentReader(options);
   const results = rules.map((rule) => {
     try {
       const leftEntries = readRegistrySource(rule.left, documents), rightEntries = readRegistrySource(rule.right, documents);
