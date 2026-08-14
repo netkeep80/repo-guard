@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
 import { loadJSON, loadPolicyRuntime, validate } from "./runtime/validation.mjs";
 
-export function runValidate(roots, args) {
+type ValidateRoots = Parameters<typeof loadPolicyRuntime>[0];
+
+export function runValidate(roots: ValidateRoots, args: string[]) {
   const runtime = loadPolicyRuntime(roots);
   const { ajv, changeIntentSchema } = runtime;
   let ok = runtime.ok;
