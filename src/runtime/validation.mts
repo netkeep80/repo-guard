@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileDocumentRelationsPolicy, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../policy-compiler.mjs";
 import { resolvePolicyProfile } from "../policy-profiles.mjs";
 
 type AjvErrorProjection = { instancePath?: string; message?: string };
@@ -44,6 +44,7 @@ export function loadPolicyRuntimeFromObject(roots: RuntimeRoots, rawPolicy: unkn
     ["change_profiles compilation", compileChangeProfiles(policy), (error) => (error as { message: string }).message],
     ["anchor policy compilation", compileAnchorPolicy(policy), (error) => (error as { message: string }).message],
     ["integration policy compilation", compileIntegrationPolicy(policy), (error) => (error as { message: string }).message],
+    ["document relation policy compilation", compileDocumentRelationsPolicy(policy), (error) => (error as { message: string }).message],
   ];
   for (const [group, errors, format] of semanticGroups) if (errors.length) {
     ok = false;
