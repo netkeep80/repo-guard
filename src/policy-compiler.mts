@@ -111,6 +111,15 @@ export function compileIntegrationPolicy(policy: PolicyProjection = {}): Semanti
       } else seen.set(id, { section, index });
       if (section === "profiles") profileIds.add(id);
     }
+    if (section === "workflows" && entry.role === "ci_gate") {
+      const expect = object(entry.expect);
+      for (const field of ["action", "mode"] as const) if (expect[field] !== undefined) {
+        errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
+      }
+      for (const disallowed of list<string>(expect.disallow)) if (disallowed !== "continue_on_error") {
+        errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
+      }
+    }
     for (const profileId of list(entry.profiles)) references.push({ section, index, field: "profiles", profileId });
     if (section === "docs") for (const profileId of list(entry.must_mention_profiles)) references.push({ section, index, field: "must_mention_profiles", profileId });
   }
