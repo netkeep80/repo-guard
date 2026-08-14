@@ -13,6 +13,12 @@ const git = (argv) => execFileSync("git", argv, { encoding: "utf-8", stdio: ["ig
 const pathsAt = (target, roots) => git(["ls-tree", "-r", "--name-only", target, "--", ...roots]).split(/\r?\n/).filter(Boolean).sort();
 const textAt = (target, path) => git(["show", `${target}:${path}`]);
 const jsonAt = (target, path) => JSON.parse(textAt(target, path));
+const sourceModulePathsAt = (target, stem) => pathsAt(target, ["src"]).filter((path) => path === `${stem}.mts` || path === `${stem}.mjs` || path === `${stem}.js`);
+const sourceModuleTextAt = (target, stem) => {
+  const paths = sourceModulePathsAt(target, stem);
+  if (paths.length !== 1) throw new Error(`expected exactly one source module for ${stem} at ${target}, found ${paths.length}`);
+  return textAt(target, paths[0]);
+};
 const lines = (text) => text ? (text.match(/\n/g) || []).length + (text.endsWith("\n") ? 0 : 1) : 0;
 
 function physical(target, roots) {
@@ -33,7 +39,7 @@ function architecture(target) {
   const policy = jsonAt(target, "repo-policy.json");
   const pkg = jsonAt(target, "package.json");
   const coverage = jsonAt(target, "docs/self-hosting-coverage.json");
-  const defaults = textAt(target, "src/checks/default-rule-families.mjs");
+  const defaults = sourceModuleTextAt(target, "src/checks/default-rule-families");
   const corpus = sourceCorpus(target);
   const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
   const metric = {
@@ -47,7 +53,7 @@ function architecture(target) {
     runtime_ir_compilers: (corpus.match(/function compileConstraintIR\b/g) || []).length,
     strictness_ir_compilers: (corpus.match(/function compilePolicyStrictnessIR\b/g) || []).length,
     command_dispatch_branches: (corpus.match(/command ===/g) || []).length,
-    bespoke_integration_validator: pathsAt(target, ["src/integration-validator.mjs"]).length,
+    bespoke_integration_validator: sourceModulePathsAt(target, "src/integration-validator").length,
     privileged_field_workarounds: (corpus.match(/stripPrivilegedSchemaUnknownFields|SCHEMA_UNKNOWN_PRIVILEGED_FIELDS/g) || []).length,
   };
   metric.semantic_edit_sites = metric.rule_families + metric.runtime_ir_compilers + metric.strictness_ir_compilers + metric.bespoke_integration_validator + metric.command_dispatch_branches;
