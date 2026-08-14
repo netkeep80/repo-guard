@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { expectedTagForVersion } from "../src/init.mjs";
 
 const DEFAULT_REPO = "netkeep80/repo-guard";
 const GITHUB_API = "https://api.github.com";
@@ -58,10 +59,6 @@ function pass(name, message) {
 
 function fail(name, message, hint = null) {
   return { name, status: FAIL, message, hint };
-}
-
-export function expectedTagForVersion(version) {
-  return `v${version}`;
 }
 
 export async function verifyReleaseRef({
@@ -143,7 +140,7 @@ export async function verifyReleaseRef({
 function usage() {
   return `Usage: node scripts/verify-release-ref.mjs [--repo <owner/repo>] [--tag <vX.Y.Z>] [--package-root <path>]
 
-Checks the release invariant used by repo-guard init:
+Checks the release invariant shared with repo-guard init:
   package.json.version <-> published Git tag and GitHub release v<version>
 `;
 }
@@ -171,9 +168,7 @@ function printResult(result) {
   console.log("repo-guard release ref verification\n");
   console.log(`Repository: ${result.repo}`);
   if (result.packageVersion) console.log(`package.json version: ${result.packageVersion}`);
-  if (result.expectedTag) {
-    console.log(`Expected Action ref: ${result.repo}@${result.expectedTag}`);
-  }
+  if (result.expectedTag) console.log(`Expected release ref: ${result.repo}@${result.expectedTag}`);
   console.log("");
 
   for (const check of result.checks) {
