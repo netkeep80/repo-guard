@@ -83,6 +83,23 @@ export function parseJson(content: string): unknown {
   return JSON.parse(content);
 }
 
+function decodeJsonPointerSegment(raw: string, pointer: string): string {
+  if (/~(?:[^01]|$)/.test(raw)) throw new Error(`invalid json_pointer "${pointer}"`);
+  return raw.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+export function resolveJsonPointer(data: unknown, pointer: string): unknown {
+  if (pointer === "") return data;
+  if (typeof pointer !== "string" || !pointer.startsWith("/")) throw new Error(`invalid json_pointer "${pointer}"`);
+  let current: unknown = data;
+  for (const raw of pointer.slice(1).split("/")) {
+    const part = decodeJsonPointerSegment(raw, pointer);
+    if (current === null || typeof current !== "object" || !Object.hasOwn(current, part)) throw new Error(`json_pointer "${pointer}" does not exist`);
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
 export function stripMarkdownInline(line: string): string {
   return line.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]").replace(/https?:\/\/\S+/g, "");
 }
