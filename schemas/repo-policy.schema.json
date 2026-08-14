@@ -385,6 +385,15 @@
             "conformance": { "$ref": "#/definitions/document_relation_document" }
           }
         },
+        "previous": {
+          "type": "object",
+          "required": ["contract", "conformance"],
+          "additionalProperties": false,
+          "properties": {
+            "contract": { "$ref": "#/definitions/document_relation_document" },
+            "conformance": { "$ref": "#/definitions/document_relation_document" }
+          }
+        },
         "pair_fields": {
           "type": "object",
           "required": ["contract_id", "conformance_contract_id", "contract_conformance_path", "contract_status", "conformance_status", "contract_accepted", "conformance_accepted"],
@@ -408,6 +417,16 @@
             "accepted": { "type": "boolean" }
           }
         },
+        "acceptance": {
+          "type": "object",
+          "required": ["document", "current_contract_path", "current_conformance_path"],
+          "additionalProperties": false,
+          "properties": {
+            "document": { "$ref": "#/definitions/document_relation_document" },
+            "current_contract_path": { "type": "string" },
+            "current_conformance_path": { "type": "string" }
+          }
+        },
         "required_paths": {
           "type": "array",
           "minItems": 1,
@@ -417,7 +436,7 @@
             "required": ["document", "pointer", "projection"],
             "additionalProperties": false,
             "properties": {
-              "document": { "type": "string", "enum": ["current.contract", "current.conformance"] },
+              "document": { "type": "string", "enum": ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"] },
               "pointer": { "type": "string" },
               "projection": { "type": "string", "enum": ["array_items", "object_values"] }
             }
@@ -426,9 +445,9 @@
         "cochange": {
           "type": "array",
           "minItems": 2,
-          "maxItems": 2,
+          "maxItems": 5,
           "uniqueItems": true,
-          "items": { "type": "string", "enum": ["current.contract", "current.conformance"] }
+          "items": { "type": "string", "enum": ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"] }
         },
         "control_paths": {
           "type": "array",
