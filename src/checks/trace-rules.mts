@@ -81,7 +81,7 @@ function group(instances: AnchorInstance[] = []): Map<string, AnchorInstance[]> 
 const changedPaths = (facts: TraceFacts): string[] => (facts.diff?.files?.checked || []).map((file) => file.path);
 const matchingPaths = (paths: string[], patterns?: string[]): string[] => uniqueSorted(paths.filter((path) => matchesAny(path, patterns || [])));
 function changeIntentValues(changeIntent: ChangeIntentProjection | null | undefined, field?: string): string[] {
-  const path = CHANGE_INTENT_ANCHOR_FIELDS.get(field || "");
+  const path = CHANGE_INTENT_ANCHOR_FIELDS.get(field as string);
   if (!path) return [];
   let value: unknown = changeIntent || {};
   for (const segment of path) value = (value as Record<string, unknown> | null | undefined)?.[segment];
@@ -108,7 +108,7 @@ function evidence(rule: EvidenceTraceRule, facts: TraceFacts, declared: string[]
 
 export function buildTraceRuleDiagnostics(facts: TraceFacts): TraceDiagnostic[] {
   return (facts.policy.trace_rules || []).map((rule) => {
-    if (rule.kind === "must_resolve") return mustResolve(rule as MustResolveTraceRule, facts.anchors || { instances: [], byType: {}, errors: [] });
+    if (rule.kind === "must_resolve") return mustResolve(rule as MustResolveTraceRule, (facts.anchors || {}) as AnchorExtraction);
     if (rule.kind === "changed_files_require_evidence") return evidence(rule as EvidenceTraceRule, facts);
     if (rule.kind === "declared_anchors_require_evidence") return evidence(rule as EvidenceTraceRule, facts, changeIntentValues(facts.changeIntent, (rule as EvidenceTraceRule).change_intent_field));
     return { id: rule.id, kind: rule.kind, ok: true, stats: {} };
