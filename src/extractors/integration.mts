@@ -104,7 +104,6 @@ interface ChangeIntentBlock {
 
 interface LocalError { message: string; }
 interface LocationFact { line: number; column: number; }
-interface MentionFact extends LocationFact { value?: string; }
 
 export interface IntegrationTemplateFact {
   id: string;
@@ -311,7 +310,7 @@ function templateFactFromMarkdown(entry: TemplateEntry, markdown: MarkdownDocume
   };
 }
 
-function collectStringValues(value: unknown, sourcePath = "$ "): Array<{ sourcePath: string; value: string }> {
+function collectStringValues(value: unknown, sourcePath = "$"): Array<{ sourcePath: string; value: string }> {
   if (typeof value === "string") return [{ sourcePath, value }];
   if (Array.isArray(value)) return value.flatMap((item, index) => collectStringValues(item, `${sourcePath}[${index}]`));
   return isPlainObject(value) ? Object.entries(value).flatMap(([key, item]) => collectStringValues(item, `${sourcePath}.${key}`)) : [];
@@ -320,7 +319,7 @@ function collectStringValues(value: unknown, sourcePath = "$ "): Array<{ sourceP
 function collectIssueFormTemplateFacts(entry: TemplateEntry, content: string) {
   const blocks: ChangeIntentBlock[] = [];
   const errors: LocalError[] = [];
-  for (const source of collectStringValues(parseYaml(content), "$")) {
+  for (const source of collectStringValues(parseYaml(content))) {
     const markdown = parseMarkdown(source.value);
     errors.push(...markdown.errors.map((error) => ({ message: `${source.sourcePath}: ${error.message}` })));
     const extracted = extractChangeIntentBlocks(markdown);
