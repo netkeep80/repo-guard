@@ -6,9 +6,7 @@ export interface SetComparisonResult<T> {
   extra: T[];
 }
 
-function set<T>(values: readonly T[] = []): Set<T> {
-  return new Set(values);
-}
+const set = <T,>(values: readonly T[] = []): Set<T> => new Set(values);
 
 export function compareSets<T>(left: readonly T[] = [], right: readonly T[] = [], relation: SetRelation = "equal"): SetComparisonResult<T> {
   const l = set(left), r = set(right);
