@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-function readFromCallback(filePath, options = {}) {
+export interface RepositoryFileOptions {
+  repoRoot?: string;
+  readFile?: (filePath: string) => unknown;
+}
+
+function readFromCallback(filePath: string, options: RepositoryFileOptions = {}): unknown {
   if (!options.readFile) return undefined;
 
   const content = options.readFile(filePath);
@@ -11,7 +16,7 @@ function readFromCallback(filePath, options = {}) {
   return content;
 }
 
-export function readRepositoryTextFile(filePath, options = {}) {
+export function readRepositoryTextFile(filePath: string, options: RepositoryFileOptions = {}): string {
   const callbackContent = readFromCallback(filePath, options);
   if (callbackContent !== undefined) {
     return Buffer.isBuffer(callbackContent)
@@ -22,7 +27,7 @@ export function readRepositoryTextFile(filePath, options = {}) {
   return readFileSync(resolve(options.repoRoot || process.cwd(), filePath), "utf-8");
 }
 
-export function readRepositoryBufferFile(filePath, options = {}) {
+export function readRepositoryBufferFile(filePath: string, options: RepositoryFileOptions = {}): Buffer | null {
   const callbackContent = readFromCallback(filePath, options);
   if (callbackContent !== undefined) {
     return Buffer.isBuffer(callbackContent)
