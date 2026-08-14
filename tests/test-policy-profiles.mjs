@@ -91,7 +91,7 @@ function traceRule(policy, id) {
 console.log("\n--- profile compiler runtime narrowing ---");
 {
   expect(
-    "profile overrides require an object",
+    "profile overrides reject non-object values",
     compileProfilePolicy({ profile: "requirements-strict", profile_overrides: ["tests/**"] }),
     [{ field: "profile_overrides", message: "profile_overrides must be an object" }]
   );
