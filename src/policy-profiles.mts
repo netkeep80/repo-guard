@@ -60,14 +60,18 @@ interface PolicyProjection extends Record<string, unknown> {
   anchors?: unknown;
   trace_rules?: unknown;
 }
+type ProfileCompileResult =
+  | { ok: true; profile: null; config: null }
+  | { ok: true; profile: string; config: ProfileConfig; spec: ProfileSpec }
+  | { ok: false; error: string };
 
 const clone = <T,>(value: T): T => structuredClone(value);
-const isObject = (value: unknown): value is Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) as boolean;
+const isObject = (value: unknown) => value && typeof value === "object" && !Array.isArray(value);
 
 function configFor(spec: ProfileSpec, overrides: unknown): ProfileConfig {
   const config = clone(spec.defaults) as ProfileConfig;
   if (!isObject(overrides)) return config;
-  for (const [key, value] of Object.entries(overrides)) {
+  for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
     if (!Object.hasOwn(spec.defaults, key)) throw new Error(`unknown profile_overrides key "${key}"`);
     config[key] = clone(value);
   }
@@ -101,10 +105,10 @@ function materializeTraceRule(ruleSpec: ProfileTraceRule, config: ProfileConfig)
   return rule;
 }
 
-export function compileProfilePolicy(policy: unknown) {
-  const profile = (policy as PolicyProjection | null | undefined)?.profile;
+export function compileProfilePolicy(policy: unknown): ProfileCompileResult {
+  const profile = (policy as PolicyProjection | null | undefined)?.profile as string | undefined;
   if (!profile) return { ok: true, profile: null, config: null };
-  const spec = (PACKS as unknown as Record<string, ProfileSpec>)[profile as string];
+  const spec = (PACKS as unknown as Record<string, ProfileSpec>)[profile];
   if (!spec) return { ok: false, error: `unknown policy profile "${profile}"` };
   try {
     const config = configFor(spec, (policy as PolicyProjection).profile_overrides || {});
@@ -118,8 +122,7 @@ export function expandPolicyProfile(policy: unknown) {
   const compiled = compileProfilePolicy(policy);
   if (!compiled.ok || !compiled.profile) return compiled.ok ? { ok: true, policy: clone(policy) } : compiled;
   const base = clone(policy) as PolicyProjection;
-  const spec = compiled.spec!;
-  const config = compiled.config!;
+  const { spec, config } = compiled;
   if (base.anchors === undefined) base.anchors = materializeAnchor(spec, config);
   if (base.trace_rules === undefined) base.trace_rules = spec.trace_rules.map((rule) => materializeTraceRule(rule, config)).filter(Boolean);
   return { ok: true, policy: base };
