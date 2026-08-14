@@ -23,6 +23,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(config.compilerOptions.moduleResolution, "NodeNext");
   assert.equal(config.compilerOptions.allowJs, true);
   assert.equal(config.compilerOptions.checkJs, false);
+  assert.deepEqual(config.compilerOptions.types, ["node"]);
   assert.deepEqual(config.include, ["src/**/*.mjs", "src/**/*.mts"]);
 
   assert.equal(existsSync(resolve(projectRoot, "src/utils/collections.mts")), true);
