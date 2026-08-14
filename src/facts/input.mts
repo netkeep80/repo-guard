@@ -53,7 +53,7 @@ export function buildPolicyFacts(input: RepositoryFactsInput) {
   const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths);
   const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map<string, Buffer | null>();
   const cachedReadFile = (path: string): Buffer | null => {
-    if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile: readFile as ((filePath: string) => unknown) | undefined }));
+    if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile } as Parameters<typeof readRepositoryBufferFile>[1]));
     return cache.get(path)!;
   };
   const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
