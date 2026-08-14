@@ -11,8 +11,9 @@ export function runPolicyPipeline(input, options = {}) {
     const reporter = createAnalysisCollector(input.enforcement, {
         presenter: quiet ? null : createAnalysisTextPresenter(),
     });
+    const report = (name, check) => reporter.report(`${options.ruleNamePrefix || ""}${name}`, check);
     for (const initialCheck of input.initialChecks || []) {
-        reporter.report(initialCheck.name, initialCheck.check);
+        report(initialCheck.name, initialCheck.check);
     }
     const { changeIntent = null, changeIntentSource = "none", ...runtimeInput } = input;
     const facts = buildPolicyFacts({
@@ -24,7 +25,9 @@ export function runPolicyPipeline(input, options = {}) {
         console.log(`\n${renderDiffAnalysis(facts)}`);
     }
     const anchorDiagnostics = buildAnchorDiagnostics(facts);
-    runPolicyChecks(facts, reporter, { anchorDiagnostics });
+    // Префикс меняет только diagnostic namespace; вычисление остаётся в одном canonical
+    // pipeline и одном RuleRegistry, чтобы base/head не получили разные semantics engines.
+    runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies });
     return reporter.finish({
         command: input.mode,
         repositoryRoot: facts.repositoryRoot,
