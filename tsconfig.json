@@ -14,7 +14,8 @@
     "removeComments": false,
     "newLine": "lf",
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src/**/*.mjs", "src/**/*.mts"]
 }
