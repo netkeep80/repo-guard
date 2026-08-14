@@ -1,16 +1,94 @@
+import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import { classifyNewFiles, detectTouchedSurfaces } from "../../diff/classification.mjs";
 import { formatList, uniqueSorted } from "../../utils/collections.mjs";
 import { maxBound } from "../relation-kernel.mjs";
 
-function budget(actual, max, files = undefined) { return max === undefined ? { ok: true } : { ok: maxBound(actual, max), actual, limit: max, ...(files ? { files } : {}) }; }
-function profileBudgets(files, canonicalDocs, limits = {}) {
+interface BudgetLimits {
+  max_new_docs?: number;
+  max_new_files?: number;
+  max_net_added_lines?: number;
+}
+
+interface BudgetCheck {
+  ok: boolean;
+  actual?: number;
+  limit?: number;
+  files?: string[];
+}
+
+interface NewFileRule {
+  allow_classes?: string[];
+  max_per_class?: Record<string, number>;
+  max_new_files?: number;
+}
+
+interface ChangeProfile {
+  require_surfaces?: string[];
+  allow_surfaces?: string[];
+  forbid_surfaces?: string[];
+  allow_unclassified_surfaces?: boolean;
+  new_files?: NewFileRule;
+  budgets?: BudgetLimits;
+}
+
+interface ChangeProfilePolicy {
+  change_profiles?: Record<string, ChangeProfile>;
+  new_file_classes?: Record<string, string[]>;
+  surfaces?: Record<string, string[]>;
+  paths: { canonical_docs: string[] };
+}
+
+interface TouchedSurfaceFacts {
+  touched_surfaces: string[];
+  files_by_surface: Record<string, string[]>;
+  unclassified_files: string[];
+}
+
+interface NewFileClassFacts {
+  new_files: string[];
+  files_by_class: Record<string, string[]>;
+  class_by_file?: Record<string, string[]>;
+  unclassified_files: string[];
+}
+
+interface ChangeProfileDerived {
+  touchedSurfaces?: TouchedSurfaceFacts;
+  newFileClasses?: NewFileClassFacts;
+}
+
+interface ClassBudgetViolation {
+  class: string;
+  actual: number;
+  limit: number;
+  files: string[];
+}
+
+interface NewFileCheckResult {
+  ok: boolean;
+  message?: string;
+  change_type?: string;
+  new_files?: string[];
+  actual?: number;
+  limit?: number;
+  allowed_classes?: string[];
+  touched_classes?: string[];
+  violating_classes?: string[];
+  class_budget_violations?: ClassBudgetViolation[];
+  files_by_class?: Record<string, string[]>;
+  unclassified_files?: string[];
+  details?: string[];
+  hint?: string;
+}
+
+function budget(actual: number, max: number | undefined, files: string[] | undefined = undefined): BudgetCheck { return max === undefined ? { ok: true } : { ok: maxBound(actual, max), actual, limit: max, ...(files ? { files } : {}) }; }
+function profileBudgets(files: ParsedDiffFile[], canonicalDocs: string[], limits: BudgetLimits = {}): { docs: BudgetCheck; files: BudgetCheck; lines: BudgetCheck } {
   const added = files.filter((file) => file.status === "added");
   const docs = added.filter((file) => /\.md$/i.test(file.path) && !canonicalDocs.includes(file.path));
   const net = files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
   return { docs: budget(docs.length, limits.max_new_docs, docs.map((file) => file.path)), files: budget(added.length, limits.max_new_files, added.map((file) => file.path)), lines: budget(net, limits.max_net_added_lines) };
 }
 
-function checkProfileNewFiles(files, classes, rule, changeType, detected = null) {
+function checkProfileNewFiles(files: ParsedDiffFile[], classes: Record<string, string[]> | undefined, rule: NewFileRule | undefined, changeType: string, detected: NewFileClassFacts | null = null): NewFileCheckResult {
   if (!rule) return { ok: true };
   detected ||= classifyNewFiles(files, classes || {});
   const newFiles = detected.new_files;
@@ -42,7 +120,7 @@ function checkProfileNewFiles(files, classes, rule, changeType, detected = null)
   };
 }
 
-export function checkChangeProfile(files, policy, changeType, derived = {}) {
+export function checkChangeProfile(files: ParsedDiffFile[], policy: ChangeProfilePolicy, changeType: string | null | undefined, derived: ChangeProfileDerived = {}) {
   const profiles = policy.change_profiles || {};
   if (changeType === "governance") return { ok: true, change_type: changeType, delegated_to: "governance-change-authorization" };
   if (!Object.keys(profiles).length) return { ok: true };
@@ -63,10 +141,10 @@ export function checkChangeProfile(files, policy, changeType, derived = {}) {
     ...violating.map((surface) => `surface ${surface} violated change_profiles["${changeType}"] surface constraints; files: ${detected.files_by_surface[surface].join(", ")}`),
   ];
   if (hasUnclassified) details.push(`changed files matched no declared surface: ${detected.unclassified_files.join(", ")}`);
-  if (!budgets.docs.ok) details.push(`new docs ${budgets.docs.actual} exceeds change_profiles["${changeType}"].budgets.max_new_docs ${budgets.docs.limit}; files: ${budgets.docs.files.join(", ")}`);
-  if (!budgets.files.ok) details.push(`new files ${budgets.files.actual} exceeds change_profiles["${changeType}"].budgets.max_new_files ${budgets.files.limit}; files: ${budgets.files.files.join(", ")}`);
+  if (!budgets.docs.ok) details.push(`new docs ${budgets.docs.actual} exceeds change_profiles["${changeType}"].budgets.max_new_docs ${budgets.docs.limit}; files: ${budgets.docs.files!.join(", ")}`);
+  if (!budgets.files.ok) details.push(`new files ${budgets.files.actual} exceeds change_profiles["${changeType}"].budgets.max_new_files ${budgets.files.limit}; files: ${budgets.files.files!.join(", ")}`);
   if (!budgets.lines.ok) details.push(`net added lines ${budgets.lines.actual} exceeds change_profiles["${changeType}"].budgets.max_net_added_lines ${budgets.lines.limit}`);
-  if (!newFiles.ok) details.push(...(newFiles.details || [newFiles.message]).filter(Boolean));
+  if (!newFiles.ok) details.push(...((newFiles.details || [newFiles.message]).filter(Boolean) as string[]));
   const ok = !missing.length && !violating.length && !hasUnclassified && budgets.docs.ok && budgets.files.ok && budgets.lines.ok && newFiles.ok;
   return {
     ok, message: ok ? undefined : `change_type "${changeType}" violated change_profiles`, change_type: changeType,
