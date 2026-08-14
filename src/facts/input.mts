@@ -3,13 +3,46 @@ import { createDocumentReader } from "../document-facts.mjs";
 import { classifyNewFiles, detectTouchedSurfaces } from "../diff/classification.mjs";
 import { filterOperationalPaths } from "../diff/filters.mjs";
 import { parseDiff } from "../diff/parser.mjs";
+import type { AnchorPolicyProjection } from "../extractors/anchors.mjs";
 import { extractAnchors } from "../extractors/anchors.mjs";
 import { extractIntegration } from "../extractors/integration.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
 
-export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files"], { encoding: "utf-8", cwd: repoRoot }).split(/\r?\n/).filter(Boolean);
+type PathSelectorMap = Readonly<Record<string, readonly string[]>>;
 
-export function buildPolicyFacts(input) {
+export interface RepositoryFactsPolicyProjection extends AnchorPolicyProjection {
+  paths: { operational_paths?: readonly string[] | null };
+  surfaces?: PathSelectorMap | null;
+  new_file_classes?: PathSelectorMap | null;
+  integration?: unknown;
+}
+
+export interface RepositoryFactsEnforcement {
+  mode: string;
+  [key: string]: unknown;
+}
+
+export interface RepositoryFactsInput {
+  mode?: string;
+  repositoryRoot: string;
+  policy: RepositoryFactsPolicyProjection;
+  basePolicy?: unknown;
+  headPolicy?: unknown;
+  changeIntent?: unknown;
+  changeIntentSource?: string;
+  governanceGrant?: unknown;
+  trustedGovernancePaths?: unknown;
+  trustedAuthorizer?: unknown;
+  enforcement: RepositoryFactsEnforcement;
+  diffText: string;
+  trackedFiles?: string[] | null;
+  diagnostics?: Readonly<Record<string, unknown>>;
+  readFile?: ((filePath: string) => unknown) | null;
+}
+
+export const listTrackedFiles = (repoRoot: string): string[] => execFileSync("git", ["ls-files"], { encoding: "utf-8", cwd: repoRoot }).split(/\r?\n/).filter(Boolean);
+
+export function buildPolicyFacts(input: RepositoryFactsInput) {
   const {
     mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null,
     changeIntent = null, changeIntentSource = "none", governanceGrant = null,
@@ -18,10 +51,10 @@ export function buildPolicyFacts(input) {
   } = input;
   const allFiles = parseDiff(diffText);
   const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths);
-  const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map();
-  const cachedReadFile = (path) => {
-    if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile }));
-    return cache.get(path);
+  const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map<string, Buffer | null>();
+  const cachedReadFile = (path: string): Buffer | null => {
+    if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile } as Parameters<typeof readRepositoryBufferFile>[1]));
+    return cache.get(path)!;
   };
   const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
   const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
