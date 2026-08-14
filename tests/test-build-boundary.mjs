@@ -52,6 +52,8 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/facts/input.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/relation-kernel.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/relation-kernel.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "src/checks/rule-registry.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/checks/rule-registry.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "dist/utils/repository-files.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/git.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/parser.mjs")), true);
@@ -63,6 +65,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "dist/extractors/anchors.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/facts/input.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/relation-kernel.mjs")), true);
+  assert.equal(existsSync(resolve(projectRoot, "dist/checks/rule-registry.mjs")), true);
 
   const action = read("action.yml");
   assert.match(action, /node \$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs/);
