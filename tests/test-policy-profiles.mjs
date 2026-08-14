@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import Ajv from "ajv";
+import { compileProfilePolicy } from "../dist/policy-profiles.mjs";
 import { loadJSON, loadPolicyRuntime } from "../dist/runtime/validation.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
@@ -85,6 +86,20 @@ const pjsonEvidenceSurfaces = [
 
 function traceRule(policy, id) {
   return policy.trace_rules?.find((rule) => rule.id === id);
+}
+
+console.log("\n--- profile compiler runtime narrowing ---");
+{
+  expect(
+    "profile overrides require an object",
+    compileProfilePolicy({ profile: "requirements-strict", profile_overrides: ["tests/**"] }),
+    [{ field: "profile_overrides", message: "profile_overrides must be an object" }]
+  );
+  expect(
+    "profile overrides require a top-level profile",
+    compileProfilePolicy({ profile_overrides: { evidence_surfaces: ["tests/**"] } }),
+    [{ field: "profile_overrides", message: "profile_overrides requires top-level profile" }]
+  );
 }
 
 console.log("\n--- profile schema support ---");
