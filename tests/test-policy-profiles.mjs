@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import Ajv from "ajv";
-import { compileProfilePolicy } from "../dist/policy-profiles.mjs";
+import { compileContractConformancePolicy, compileProfilePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 import { loadJSON, loadPolicyRuntime } from "../dist/runtime/validation.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
@@ -86,6 +86,43 @@ const pjsonEvidenceSurfaces = [
 
 function traceRule(policy, id) {
   return policy.trace_rules?.find((rule) => rule.id === id);
+}
+
+function contractConformanceMacro(overrides = {}) {
+  return {
+    current: {
+      contract: { path: "contracts/spec-v2.json", format: "json" },
+      conformance: { path: "contracts/checks-v2.yaml", format: "yaml" },
+    },
+    pair_fields: {
+      contract_id: "/schema",
+      conformance_contract_id: "/contract",
+      contract_conformance_path: "/conformanceCorpus",
+      contract_status: "/status",
+      conformance_status: "/status",
+      contract_accepted: "/accepted",
+      conformance_accepted: "/accepted",
+    },
+    accepted_state: { status: "accepted", accepted: true },
+    required_paths: [
+      { document: "current.contract", pointer: "/owners", projection: "object_values" },
+      { document: "current.conformance", pointer: "/requiredGates", projection: "array_items" },
+    ],
+    cochange: ["current.contract", "current.conformance"],
+    control_paths: ["contracts/**"],
+    ...overrides,
+  };
+}
+
+function contractPolicy(overrides = {}) {
+  return {
+    ...basePolicy(),
+    profile: undefined,
+    profile_overrides: undefined,
+    paths: { ...basePolicy().paths, governance_paths: ["repo-policy.json", "schemas/**"] },
+    contract_conformance: contractConformanceMacro(),
+    ...overrides,
+  };
 }
 
 console.log("\n--- profile compiler runtime narrowing ---");
@@ -253,6 +290,134 @@ console.log("\n--- profile trace rules enforce changed requirement evidence ---"
     result.violations.find((item) => item.data?.trace_rule === "changed-requirements-need-evidence")?.message,
     "missing evidence"
   );
+}
+
+console.log("\n--- current contract/conformance macro semantic boundary ---");
+{
+  expect("valid current macro compiles without semantic errors", compileContractConformancePolicy(contractPolicy()), []);
+
+  const samePath = contractPolicy();
+  samePath.contract_conformance.current.conformance.path = samePath.contract_conformance.current.contract.path;
+  expect("macro rejects identical current pair paths", compileContractConformancePolicy(samePath).some((item) => item.field === "contract_conformance.current"), true);
+
+  const uncovered = contractPolicy();
+  uncovered.contract_conformance.control_paths = ["other/**"];
+  expect("macro rejects control paths that do not cover pair", compileContractConformancePolicy(uncovered).some((item) => /do not cover/.test(item.message)), true);
+
+  const duplicateSelector = contractPolicy();
+  duplicateSelector.contract_conformance.required_paths.push(structuredClone(duplicateSelector.contract_conformance.required_paths[0]));
+  expect("macro rejects duplicate required path selectors", compileContractConformancePolicy(duplicateSelector).some((item) => /duplicates selector/.test(item.message)), true);
+
+  const collision = contractPolicy({
+    document_relations: {
+      documents: { "contract-conformance.current.contract": { path: "explicit.json", format: "json" } },
+      rules: [],
+    },
+  });
+  expect("macro rejects generated namespace collisions", compileContractConformancePolicy(collision).some((item) => /collides/.test(item.message)), true);
+}
+
+console.log("\n--- current macro expands to ordinary policy only ---");
+{
+  const source = contractPolicy({
+    document_relations: {
+      documents: { explicit: { path: "contracts/extra.json", format: "json" } },
+      rules: [{ id: "explicit-state", kind: "scalar_equals_literal", source: { document: "explicit", pointer: "/state", type: "string" }, value: "ok" }],
+    },
+    cochange_rules: [{ if_changed: ["docs/**"], must_change_any: ["tests/**"] }],
+  });
+  const resolved = resolvePolicyProfile(source);
+  expect("macro resolves", resolved.ok, true);
+  expect("macro source field disappears after expansion", resolved.policy.contract_conformance, undefined);
+  expect("explicit document relation composes", resolved.policy.document_relations.documents.explicit.path, "contracts/extra.json");
+  expect("current contract generated document path", resolved.policy.document_relations.documents["contract-conformance.current.contract"].path, "contracts/spec-v2.json");
+  expect("current conformance generated document path", resolved.policy.document_relations.documents["contract-conformance.current.conformance"].path, "contracts/checks-v2.yaml");
+  expect("explicit relation remains first", resolved.policy.document_relations.rules[0].id, "explicit-state");
+  expect("macro emits six scalar relations plus required-path relations", resolved.policy.document_relations.rules.length, 9);
+  expect("existing cochange rule composes", resolved.policy.cochange_rules[0], { if_changed: ["docs/**"], must_change_any: ["tests/**"] });
+  expect("macro adds bidirectional current pair cochange", resolved.policy.cochange_rules.slice(1), [
+    { if_changed: ["contracts/spec-v2.json"], must_change_any: ["contracts/checks-v2.yaml"] },
+    { if_changed: ["contracts/checks-v2.yaml"], must_change_any: ["contracts/spec-v2.json"] },
+  ]);
+  expect("control paths compose into stable governance paths", resolved.policy.paths.governance_paths, ["contracts/**", "repo-policy.json", "schemas/**"]);
+}
+
+console.log("\n--- synthetic current macro executes through ordinary R2 constraints ---");
+{
+  const source = contractPolicy();
+  const resolved = resolvePolicyProfile(source);
+  const files = {
+    "contracts/spec-v2.json": JSON.stringify({
+      schema: "spec-v2",
+      status: "accepted",
+      accepted: true,
+      conformanceCorpus: "contracts/checks-v2.yaml",
+      owners: { spec: "docs/spec.md", tests: "tests/spec.test.mjs" },
+    }),
+    "contracts/checks-v2.yaml": [
+      "contract: spec-v2",
+      "status: accepted",
+      "accepted: true",
+      "requiredGates:",
+      "  - tests/gate.mjs",
+    ].join("\n"),
+    "docs/spec.md": "# Spec\n",
+    "tests/spec.test.mjs": "export {};\n",
+    "tests/gate.mjs": "export {};\n",
+  };
+  const run = (trackedFiles = Object.keys(files), diffText = "") => runPolicyPipeline({
+    mode: "check-diff",
+    repositoryRoot: "/tmp/contract-pack-test",
+    policy: resolved.policy,
+    changeIntent: null,
+    changeIntentSource: "none",
+    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+    diffText,
+    trackedFiles,
+    readFile: (file) => files[file],
+    initialChecks: [],
+  }, { quiet: true });
+
+  const passing = run();
+  expect("synthetic current topology passes ordinary R2 relations", passing.violations.filter((item) => item.rule.startsWith("document-relation:")).length, 0);
+
+  const missing = run(Object.keys(files).filter((path) => path !== "tests/gate.mjs"));
+  expect("required path failure is ordinary referenced_paths_exist", missing.violations.find((item) => item.rule === "document-relation:contract-conformance:required-path:1")?.data?.missing_paths, ["tests/gate.mjs"]);
+
+  const contractOnlyDiff = [
+    "diff --git a/contracts/spec-v2.json b/contracts/spec-v2.json",
+    "--- a/contracts/spec-v2.json",
+    "+++ b/contracts/spec-v2.json",
+    "+{}",
+  ].join("\n");
+  expect("current pair cochange uses ordinary cochange rule", run(Object.keys(files), contractOnlyDiff).violations.some((item) => item.rule.startsWith("cochange:")), true);
+}
+
+console.log("\n--- anum_docs-shaped current topology is data only ---");
+{
+  const source = contractPolicy({
+    contract_conformance: contractConformanceMacro({
+      current: {
+        contract: { path: "contracts/mts-contract-v0.7.json", format: "json" },
+        conformance: { path: "contracts/mts-conformance-v0.7.json", format: "json" },
+      },
+      required_paths: [
+        { document: "current.contract", pointer: "/owners", projection: "object_values" },
+        { document: "current.conformance", pointer: "/requiredExecutableGates", projection: "array_items" },
+      ],
+    }),
+  });
+  const resolved = resolvePolicyProfile(source);
+  expect("anum_docs-shaped macro resolves without domain-specific implementation", resolved.ok, true);
+  expect("anum_docs contract/conformance cross-link uses configured pointers", resolved.policy.document_relations.rules[0], {
+    id: "contract-conformance:current-id",
+    kind: "scalar_equal",
+    left: { document: "contract-conformance.current.conformance", pointer: "/contract", type: "string" },
+    right: { document: "contract-conformance.current.contract", pointer: "/schema", type: "string" },
+  });
+  expect("anum_docs current conformance path is a literal relation", resolved.policy.document_relations.rules[1].value, "contracts/mts-conformance-v0.7.json");
+  expect("anum_docs owners use generic object_values path projection", resolved.policy.document_relations.rules[6].source.projection, "object_values");
+  expect("anum_docs executable gates use generic array_items path projection", resolved.policy.document_relations.rules[7].source.projection, "array_items");
 }
 
 console.log(`\n${failures === 0 ? "All policy profile tests passed" : `${failures} test(s) failed`}`);
