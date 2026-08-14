@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -36,6 +36,10 @@ function tinyRepo(prefix, governance = ["repo-policy.json"]) {
   }));
   writeFileSync(join(root, "a.txt"), "a\n"); git(root, "add", "-A"); git(root, "commit", "-m", "base");
   return root;
+}
+function rewritePolicy(root, mutate) {
+  const path = join(root, "repo-policy.json"), policy = JSON.parse(readFileSync(path, "utf-8"));
+  mutate(policy); writeFileSync(path, JSON.stringify(policy));
 }
 function run(root, body, extraEnv = {}) {
   const eventPath = join(root, "event.json");
@@ -106,5 +110,48 @@ else console.log(JSON.stringify({labels:[]}));
     const output = `${result.stdout || ""}${result.stderr || ""}`;
     assert.equal(result.status, 0, output); assert.match(output, /PASS: governance-change-authorization/);
     rmSync(root, { recursive: true, force: true }); rmSync(fakeDir, { recursive: true, force: true });
+  });
+
+  it("skips duplicate proposed-policy evaluation when policy is unchanged", () => {
+    const root = tinyRepo("rg-pr-same-policy-", []);
+    writeFileSync(join(root, "a.txt"), "changed\n"); git(root, "add", "-A"); git(root, "commit", "-m", "change");
+    const result = run(root, intent(["a.txt"], "bugfix")), output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 0, output); assert.doesNotMatch(output, /proposed-policy:/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("applies stricter proposed head constraints in the same PR", () => {
+    const root = tinyRepo("rg-pr-head-strict-", []);
+    rewritePolicy(root, (policy) => { policy.paths.forbidden = ["a.txt"]; });
+    writeFileSync(join(root, "a.txt"), "changed\n"); git(root, "add", "-A"); git(root, "commit", "-m", "tighten policy");
+    const result = run(root, intent(["a.txt", "repo-policy.json"])), output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 1, output); assert.match(output, /FAIL: proposed-policy:forbidden-paths/);
+    assert.doesNotMatch(output, /proposed-policy:(governance-change-authorization|policy-relaxation)/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("rejects a broken registry rule in the policy adoption PR", () => {
+    const root = tinyRepo("rg-pr-head-registry-", []);
+    writeFileSync(join(root, "facts.json"), JSON.stringify({ expected: ["a"], actual: ["b"] })); git(root, "add", "-A"); git(root, "commit", "-m", "fixture");
+    rewritePolicy(root, (policy) => { policy.registry_rules = [{
+      id: "same-pr-registry", kind: "set_equality",
+      left: { type: "json_array", file: "facts.json", json_pointer: "/expected" },
+      right: { type: "json_array", file: "facts.json", json_pointer: "/actual" },
+    }]; });
+    git(root, "add", "repo-policy.json"); git(root, "commit", "-m", "add registry rule");
+    const result = run(root, intent(["repo-policy.json"])), output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 1, output); assert.match(output, /FAIL: proposed-policy:registry-rules/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("rejects a broken integration expectation in the policy adoption PR", () => {
+    const root = tinyRepo("rg-pr-head-integration-", []);
+    rewritePolicy(root, (policy) => { policy.integration = { workflows: [{
+      id: "same-pr-missing-workflow", kind: "github_actions", path: ".github/workflows/missing.yml", role: "repo_guard_pr_gate",
+    }] }; });
+    git(root, "add", "repo-policy.json"); git(root, "commit", "-m", "add integration expectation");
+    const result = run(root, intent(["repo-policy.json"])), output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 1, output); assert.match(output, /FAIL: proposed-policy:integration-artifacts/);
+    rmSync(root, { recursive: true, force: true });
   });
 });
