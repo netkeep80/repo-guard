@@ -114,6 +114,23 @@ function contractConformanceMacro(overrides = {}) {
   };
 }
 
+function historyContractConformanceMacro(overrides = {}) {
+  return contractConformanceMacro({
+    previous: {
+      contract: { path: "contracts/spec-v1.json", format: "json" },
+      conformance: { path: "contracts/checks-v1.json", format: "json" },
+    },
+    acceptance: {
+      document: { path: "cutover/acceptance.json", format: "json" },
+      current_contract_path: "/current/contract",
+      current_conformance_path: "/current/conformance",
+    },
+    cochange: ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"],
+    control_paths: ["contracts/**", "cutover/**"],
+    ...overrides,
+  });
+}
+
 function contractPolicy(overrides = {}) {
   return {
     ...basePolicy(),
@@ -298,7 +315,7 @@ console.log("\n--- current contract/conformance macro semantic boundary ---");
 
   const samePath = contractPolicy();
   samePath.contract_conformance.current.conformance.path = samePath.contract_conformance.current.contract.path;
-  expect("macro rejects identical current pair paths", compileContractConformancePolicy(samePath).some((item) => item.field === "contract_conformance.current"), true);
+  expect("macro rejects identical current pair paths", compileContractConformancePolicy(samePath).some((item) => /duplicates current\.contract/.test(item.message)), true);
 
   const uncovered = contractPolicy();
   uncovered.contract_conformance.control_paths = ["other/**"];
@@ -391,6 +408,85 @@ console.log("\n--- synthetic current macro executes through ordinary R2 constrai
     "+{}",
   ].join("\n");
   expect("current pair cochange uses ordinary cochange rule", run(Object.keys(files), contractOnlyDiff).violations.some((item) => item.rule.startsWith("cochange:")), true);
+}
+
+console.log("\n--- synthetic previous pair and acceptance execute through ordinary R2 constraints ---");
+{
+  const source = contractPolicy({
+    contract_conformance: historyContractConformanceMacro(),
+    document_relations: {
+      documents: { "consumer-context": { path: "cutover/acceptance.json", format: "json" } },
+      rules: [{
+        id: "historical-runtime-not-selectable",
+        kind: "scalar_equals_literal",
+        source: { document: "contract-conformance.acceptance", pointer: "/previousReleaseEvidence/liveRuntimeSelectable", type: "boolean" },
+        value: false,
+      }],
+    },
+  });
+  const resolved = resolvePolicyProfile(source);
+  const files = {
+    "contracts/spec-v2.json": JSON.stringify({
+      schema: "spec-v2",
+      status: "accepted",
+      accepted: true,
+      conformanceCorpus: "contracts/checks-v2.yaml",
+      owners: { spec: "docs/spec.md" },
+    }),
+    "contracts/checks-v2.yaml": [
+      "contract: spec-v2",
+      "status: accepted",
+      "accepted: true",
+      "requiredGates:",
+      "  - tests/gate.mjs",
+    ].join("\n"),
+    "contracts/spec-v1.json": JSON.stringify({ schema: "spec-v1", status: "accepted", accepted: true, conformanceCorpus: "contracts/checks-v1.json" }),
+    "contracts/checks-v1.json": JSON.stringify({ contract: "spec-v1", status: "accepted", accepted: true }),
+    "cutover/acceptance.json": JSON.stringify({
+      current: { contract: "contracts/spec-v2.json", conformance: "contracts/checks-v2.yaml" },
+      previousReleaseEvidence: { liveRuntimeSelectable: false },
+    }),
+    "docs/spec.md": "# Spec\n",
+    "tests/gate.mjs": "export {};\n",
+  };
+  const run = (overrides = {}) => {
+    const activeFiles = { ...files, ...overrides };
+    return runPolicyPipeline({
+      mode: "check-diff",
+      repositoryRoot: "/tmp/contract-pack-history-test",
+      policy: resolved.policy,
+      changeIntent: null,
+      changeIntentSource: "none",
+      enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+      diffText: "",
+      trackedFiles: Object.keys(activeFiles),
+      readFile: (file) => activeFiles[file],
+      initialChecks: [],
+    }, { quiet: true });
+  };
+
+  const passing = run();
+  expect("synthetic history topology passes ordinary R2 relations", passing.violations.filter((item) => item.rule.startsWith("document-relation:")).length, 0);
+  expect("current-only required path selectors are not copied to previous pair", resolved.policy.document_relations.rules.filter((rule) => rule.kind === "referenced_paths_exist").map((rule) => rule.id), ["contract-conformance:required-path:0", "contract-conformance:required-path:1"]);
+
+  const brokenPrevious = run({ "contracts/checks-v1.json": JSON.stringify({ contract: "wrong-spec", status: "accepted", accepted: true }) });
+  expect("broken previous cross-link fails through ordinary scalar relation", brokenPrevious.violations.some((item) => item.rule === "document-relation:contract-conformance:previous-id"), true);
+
+  const stalePointer = run({
+    "cutover/acceptance.json": JSON.stringify({
+      current: { contract: "contracts/spec-v1.json", conformance: "contracts/checks-v1.json" },
+      previousReleaseEvidence: { liveRuntimeSelectable: false },
+    }),
+  });
+  expect("stale acceptance current pointer fails through ordinary literal relation", stalePointer.violations.some((item) => item.rule === "document-relation:contract-conformance:acceptance-current-contract"), true);
+
+  const consumerVeto = run({
+    "cutover/acceptance.json": JSON.stringify({
+      current: { contract: "contracts/spec-v2.json", conformance: "contracts/checks-v2.yaml" },
+      previousReleaseEvidence: { liveRuntimeSelectable: true },
+    }),
+  });
+  expect("consumer-specific historical veto remains an explicit R2 relation", consumerVeto.violations.some((item) => item.rule === "document-relation:historical-runtime-not-selectable"), true);
 }
 
 console.log("\n--- anum_docs-shaped current topology is data only ---");
