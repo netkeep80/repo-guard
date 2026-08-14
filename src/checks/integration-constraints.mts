@@ -54,7 +54,7 @@ interface WorkflowExpectation {
   action?: ExpectedActionUse;
   mode?: string;
   enforcement?: string;
-  permissions?: Record<string, unknown>;
+  permissions?: Record<string, string>;
   token_env?: string[];
   required_env?: string[];
   summary?: boolean;
@@ -178,7 +178,7 @@ const hasFetchDepthZero = (workflow: WorkflowFact): boolean => workflow.stepInpu
 const hasEnv = (workflow: WorkflowFact, names: string[]): boolean => { const actual = new Set(workflow.envVars.map((fact) => fact.name)); return names.some((name) => actual.has(name)); };
 const hasAllEnv = (workflow: WorkflowFact, names: string[]): boolean => { const actual = new Set(workflow.envVars.map((fact) => fact.name)); return names.every((name) => actual.has(name)); };
 function hasPermission(workflow: WorkflowFact, name: string, expected: unknown): boolean {
-  const matches = (value: unknown): boolean => Boolean(value) && lower(value) === lower(expected);
+  const matches = (value: unknown) => value && lower(value) === lower(expected);
   if (matches(object(workflow.permissions.workflow)[name])) return true;
   return workflow.permissions.jobs.some((job) => matches(object(job.permissions)[name]));
 }
@@ -222,11 +222,11 @@ function workflowDetails(workflow: WorkflowFact): string[] {
     }
   }
   const mode = expect.mode || "check-pr";
-  for (const [field, wanted] of [["mode", mode], ["enforcement", expect.enforcement]] as const) {
-    if (wanted && actions.length && !actions.some((fact) => stepInputs(workflow, fact)[field] === wanted)) details.push(detail(workflow, actions[0], `repo_guard_pr_gate action must set ${field}: ${wanted}`));
+  for (const [field, wanted] of [["mode", mode], ["enforcement", expect.enforcement]]) {
+    if (wanted && actions.length && !actions.some((fact) => stepInputs(workflow, fact)[field!] === wanted)) details.push(detail(workflow, actions[0], `repo_guard_pr_gate action must set ${field}: ${wanted}`));
   }
   if (!actions.length && mode === "check-pr" && !workflow.runCommands.some((fact) => String(fact.run || "").includes("check-pr"))) details.push(`${workflow.path}: repo_guard_pr_gate workflow must run check-pr`);
-  for (const [permission, wanted] of Object.entries(expect.permissions || {})) if (!hasPermission(workflow, permission, wanted)) details.push(`${workflow.path}: repo_guard_pr_gate workflow must declare permission ${permission}: ${String(wanted)}`);
+  for (const [permission, wanted] of Object.entries(expect.permissions || {})) if (!hasPermission(workflow, permission, wanted)) details.push(`${workflow.path}: repo_guard_pr_gate workflow must declare permission ${permission}: ${wanted}`);
   const tokenEnv = expect.token_env || (mode === "check-pr" ? ["GH_TOKEN", "GITHUB_TOKEN"] : []);
   if (tokenEnv.length && !hasEnv(workflow, tokenEnv)) details.push(`${workflow.path}: check-pr workflow should provide one of ${tokenEnv.join(", ")}`);
   if (expect.required_env?.length && !hasAllEnv(workflow, expect.required_env)) {
