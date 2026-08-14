@@ -10,7 +10,7 @@ type CheckDiffRoots = Parameters<typeof loadPolicyRuntime>[0] & {
 };
 interface InitialCheck { name: string; check: unknown; }
 
-const value = (args: string[], name: string): string | null => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1] || null; };
+const value = (args: string[], name: string): string | null | undefined => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
 export function runCheckDiff(roots: CheckDiffRoots, args: string[] = []) {
   const base = value(args, "--base"), head = value(args, "--head"), changeIntentArg = value(args, "--change-intent");
   const changeIntentPath = changeIntentArg ? resolve(roots.repoRoot, changeIntentArg) : null, format = value(args, "--format") || "text";
