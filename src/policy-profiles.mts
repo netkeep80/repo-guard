@@ -39,26 +39,46 @@ const PACKS = {
   },
 };
 
+type ProfileSource = { kind: string; globs: string | string[]; field?: string; pattern?: string };
+type ProfileRule = Record<string, unknown>;
+interface ProfileSpec {
+  defaults: Record<string, string[]>;
+  anchors: Record<string, ProfileSource>;
+  trace_rules: ProfileRule[];
+}
+type ProfileConfig = Record<string, unknown>;
+interface PolicyProjection extends Record<string, unknown> {
+  profile?: string;
+  profile_overrides?: unknown;
+  anchors?: unknown;
+  trace_rules?: unknown;
+}
+interface ProfileValidationError {
+  field: string;
+  profile?: string;
+  message: string;
+}
+
 const OVERRIDE_FIELDS = new Set([
   ...Object.keys(PACKS["requirements-strict"].defaults),
   "changed_requirement_evidence_surfaces", "affected_evidence_surfaces",
 ]);
-const clone = (value) => structuredClone(value);
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const ref = (value, config) => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
+const clone = <T,>(value: T): T => structuredClone(value);
+const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+const ref = (value: unknown, config: ProfileConfig): unknown => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
 
-function configFor(spec, overrides = {}) {
-  const config = clone(spec.defaults);
+function configFor(spec: ProfileSpec, overrides: Record<string, unknown> = {}): ProfileConfig {
+  const config: ProfileConfig = clone(spec.defaults);
   for (const [key, value] of Object.entries(overrides)) config[key] = clone(value);
   config.changed_requirement_evidence_surfaces ||= clone(config.evidence_surfaces);
   config.affected_evidence_surfaces ||= clone(config.evidence_surfaces);
   return config;
 }
 
-function materializePack(spec, overrides) {
-  const config = configFor(spec, overrides), types = {};
+function materializePack(spec: ProfileSpec, overrides: Record<string, unknown>) {
+  const config = configFor(spec, overrides), types: Record<string, { sources: Array<Record<string, unknown>> }> = {};
   for (const [name, source] of Object.entries(spec.anchors)) {
-    const globs = ref(source.globs, config);
+    const globs = ref(source.globs, config) as string[];
     types[name] = { sources: globs.map((glob) => source.kind === "json_field"
       ? { kind: source.kind, glob, field: source.field }
       : { kind: source.kind, glob, pattern: source.pattern }) };
@@ -69,12 +89,12 @@ function materializePack(spec, overrides) {
   return { anchors: { types }, trace_rules };
 }
 
-export const listBuiltInProfiles = () => Object.keys(PACKS).sort();
+export const listBuiltInProfiles = (): string[] => Object.keys(PACKS).sort();
 
-export function compileProfilePolicy(policy) {
-  const errors = [], profile = policy?.profile, overrides = policy?.profile_overrides;
+export function compileProfilePolicy(policy: unknown): ProfileValidationError[] {
+  const errors: ProfileValidationError[] = [], profile = (policy as PolicyProjection | null | undefined)?.profile, overrides = (policy as PolicyProjection | null | undefined)?.profile_overrides;
   if (overrides !== undefined && !profile) errors.push({ field: "profile_overrides", message: "profile_overrides requires top-level profile" });
-  if (profile !== undefined && !PACKS[profile]) errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
+  if (profile !== undefined && !(PACKS as unknown as Record<string, ProfileSpec>)[profile]) errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
   if (overrides !== undefined) {
     if (!isObject(overrides)) errors.push({ field: "profile_overrides", message: "profile_overrides must be an object" });
     else for (const [field, value] of Object.entries(overrides)) {
@@ -87,14 +107,14 @@ export function compileProfilePolicy(policy) {
   return errors;
 }
 
-export function expandPolicyProfile(policy) {
-  const base = clone(policy), spec = PACKS[base.profile];
+export function expandPolicyProfile(policy: unknown) {
+  const base: PolicyProjection = clone(policy as PolicyProjection), spec = (PACKS as unknown as Record<string, ProfileSpec>)[base.profile as string];
   if (!spec) return base;
-  const patch = materializePack(spec, base.profile_overrides || {});
+  const patch = materializePack(spec, (base.profile_overrides as Record<string, unknown>) || {});
   return { ...base, anchors: base.anchors || patch.anchors, trace_rules: base.trace_rules || patch.trace_rules };
 }
 
-export function resolvePolicyProfile(policy) {
+export function resolvePolicyProfile(policy: unknown) {
   const errors = compileProfilePolicy(policy);
   return { ok: !errors.length, policy: errors.length ? clone(policy) : expandPolicyProfile(policy), errors };
 }
