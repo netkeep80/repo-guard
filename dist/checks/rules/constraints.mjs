@@ -28,7 +28,7 @@ export function checkSurfaceDebt(files, debt) {
     if (!debt)
         return { ok: true, status: "undeclared", growth, details: [`new files: ${growth.new_files}`, `net added lines: ${growth.net_added_lines}`] };
     if (!debt.repayment_issue)
-        return { ok: false, status: "missing_repayment_target", message: "declared surface debt is missing repayment target: repayment_issue", growth, surface_debt: debt, details: ["missing repayment_issue"], hint: "Set repayment_issue to match intentional temporary growth or reduce the diff." };
+        return { ok: false, status: "missing_repayment_target", message: "declared surface debt is missing repayment target: repayment_issue", growth, surface_debt: debt, details: ["missing repayment_issue"], hint: "Set repayment_issue to the issue number where the temporary growth will be repaid." };
     const expected = debt.expected_delta || {}, exceeded = [];
     if (expected.max_new_files !== undefined && growth.new_files > expected.max_new_files)
         exceeded.push(`new files ${growth.new_files} exceeds declared debt ${expected.max_new_files}`);
