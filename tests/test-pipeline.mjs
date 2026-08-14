@@ -186,5 +186,67 @@ console.log("\n--- check-pr style pipeline evaluates size rules ---");
   expect("check-pr pipeline reports measured lines", violation?.data?.size_violations?.[0]?.actual, 1);
 }
 
+console.log("\n--- scalar document relations execute through Constraint Program ---");
+{
+  const relationPolicy = {
+    ...policy,
+    document_relations: {
+      documents: {
+        contract: { path: "contracts/contract.json", format: "json" },
+        conformance: { path: "contracts/conformance.yaml", format: "yaml" },
+      },
+      rules: [
+        {
+          id: "contract-id-matches",
+          kind: "scalar_equal",
+          left: { document: "conformance", pointer: "/contract", type: "string" },
+          right: { document: "contract", pointer: "/id", type: "string" },
+        },
+        {
+          id: "root-is-infinity",
+          kind: "scalar_equals_literal",
+          source: { document: "contract", pointer: "/root", type: "string" },
+          value: "∞",
+        },
+      ],
+    },
+  };
+  const files = {
+    "contracts/contract.json": JSON.stringify({ id: "mts-v0.7", root: "∞" }),
+    "contracts/conformance.yaml": "contract: mts-v0.7\nenabled: true\n",
+  };
+  const readFile = (path) => files[path];
+  const passing = runEquivalentInput({ policy: relationPolicy, readFile });
+  expect("JSON/YAML scalar equality passes", passing.ruleResults.find((item) => item.rule === "document-relation:contract-id-matches")?.ok, true);
+  expect("scalar literal relation passes", passing.ruleResults.find((item) => item.rule === "document-relation:root-is-infinity")?.ok, true);
+
+  const mismatch = runEquivalentInput({
+    policy: relationPolicy,
+    readFile: (path) => path === "contracts/conformance.yaml" ? "contract: other\n" : files[path],
+  });
+  const mismatchViolation = mismatch.violations.find((item) => item.rule === "document-relation:contract-id-matches");
+  expect("scalar mismatch fails in same pipeline", Boolean(mismatchViolation), true);
+  expect("scalar mismatch exposes relation kind", mismatchViolation?.data?.kind, "scalar_equal");
+  expect("scalar mismatch exposes normalized left value", mismatchViolation?.data?.left?.value, "other");
+  expect("scalar mismatch exposes normalized right value", mismatchViolation?.data?.right?.value, "mts-v0.7");
+
+  const missingDocument = runEquivalentInput({ policy: relationPolicy, readFile: (path) => path === "contracts/contract.json" ? undefined : files[path] });
+  const missingViolation = missingDocument.violations.find((item) => item.rule === "document-relation:contract-id-matches");
+  expect("missing document fails relation implicitly", Boolean(missingViolation), true);
+  expect("missing document surfaces structured read error", missingViolation?.data?.right?.error?.code, "document_read_error");
+
+  const malformedPointerPolicy = structuredClone(relationPolicy);
+  malformedPointerPolicy.document_relations.rules[0].left.pointer = "/contract~2";
+  const malformedPointer = runEquivalentInput({ policy: malformedPointerPolicy, readFile });
+  const pointerViolation = malformedPointer.violations.find((item) => item.rule === "document-relation:contract-id-matches");
+  expect("malformed pointer fails closed", pointerViolation?.data?.left?.error?.code, "malformed_pointer");
+
+  const wrongTypePolicy = structuredClone(relationPolicy);
+  wrongTypePolicy.document_relations.rules[0].left = { document: "conformance", pointer: "/enabled", type: "string" };
+  const wrongType = runEquivalentInput({ policy: wrongTypePolicy, readFile });
+  const typeViolation = wrongType.violations.find((item) => item.rule === "document-relation:contract-id-matches");
+  expect("wrong scalar type fails closed", typeViolation?.data?.left?.error?.code, "fact_type_mismatch");
+}
+
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
