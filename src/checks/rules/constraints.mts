@@ -1,6 +1,7 @@
 import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { selectPaths } from "../../diff/classification.mjs";
+import { readDocumentFact, type DocumentFactSelector, type DocumentReader } from "../../document-facts.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { integrationConstraintEntries } from "../integration-constraints.mjs";
@@ -35,7 +36,9 @@ type RuntimeConstraintKind =
   | "registry_rules"
   | "change_profile"
   | "trace_rules"
-  | "integration";
+  | "integration"
+  | "document_scalar_equal"
+  | "document_scalar_equals_literal";
 
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
@@ -48,6 +51,11 @@ interface RuntimeConstraint {
   if_changed?: string[];
   must_change_any?: string[];
   rules?: unknown;
+  relation_id?: string;
+  left?: DocumentFactSelector;
+  right?: DocumentFactSelector;
+  source?: DocumentFactSelector;
+  value?: unknown;
 }
 
 interface ConstraintPolicyProjection {
@@ -59,7 +67,7 @@ interface ConstraintFacts {
   repositoryRoot?: string;
   trackedFiles?: string[];
   readFile?: (filePath: string) => unknown;
-  documents?: unknown;
+  documents?: DocumentReader;
   policy: ConstraintPolicyProjection;
   changeIntent?: { change_type?: string } | null;
   diff: { files: { checked: ParsedDiffFile[] } };
@@ -128,6 +136,27 @@ function evaluateMetric(files: ParsedDiffFile[], constraint: RuntimeConstraint, 
   return checkNetAddedLinesBudget(files, constraint.max);
 }
 
+function factOperand(reader: DocumentReader | undefined, selector: DocumentFactSelector | undefined) {
+  if (!reader || !selector) return { ok: false as const, error: { code: "document_read_error", pointer: selector?.pointer || "", message: "document reader or selector is unavailable" } };
+  return readDocumentFact(reader, selector);
+}
+
+function checkDocumentScalarEqual(facts: ConstraintFacts, constraint: RuntimeConstraint) {
+  const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
+  const data = { kind: "scalar_equal", left, right };
+  if (!left.ok || !right.ok) return { ok: false, message: `document relation "${constraint.relation_id}" could not read scalar operands`, data };
+  const ok = left.value === right.value;
+  return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar values differ`, data };
+}
+
+function checkDocumentScalarLiteral(facts: ConstraintFacts, constraint: RuntimeConstraint) {
+  const source = factOperand(facts.documents, constraint.source), expected = constraint.value;
+  const data = { kind: "scalar_equals_literal", source, expected };
+  if (!source.ok) return { ok: false, message: `document relation "${constraint.relation_id}" could not read scalar operand`, data };
+  const ok = source.value === expected;
+  return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar value does not match literal`, data };
+}
+
 export function evaluateConstraintIR(facts: ConstraintFacts, context: ConstraintContext = {}): RuleResult[] {
   const { files, constraints } = compileConstraintIR(facts), results: RuleResult[] = [], cochange: RuntimeConstraint[] = [];
   for (const constraint of constraints) {
@@ -158,7 +187,9 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     } else if (constraint.kind === "integration") {
       results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
       continue;
-    } else continue;
+    } else if (constraint.kind === "document_scalar_equal") check = checkDocumentScalarEqual(facts, constraint);
+    else if (constraint.kind === "document_scalar_equals_literal") check = checkDocumentScalarLiteral(facts, constraint);
+    else continue;
     results.push({ name: constraint.name, check });
   }
   results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed!.join(",")} -> ${item.must_change_any!.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));

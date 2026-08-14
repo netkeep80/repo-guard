@@ -1,5 +1,6 @@
 import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { selectPaths } from "../../diff/classification.mjs";
+import { readDocumentFact } from "../../document-facts.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { integrationConstraintEntries } from "../integration-constraints.mjs";
@@ -65,6 +66,27 @@ function evaluateMetric(files, constraint, policy) {
         return checkNewFilesBudget(files, constraint.max);
     return checkNetAddedLinesBudget(files, constraint.max);
 }
+function factOperand(reader, selector) {
+    if (!reader || !selector)
+        return { ok: false, error: { code: "document_read_error", pointer: selector?.pointer || "", message: "document reader or selector is unavailable" } };
+    return readDocumentFact(reader, selector);
+}
+function checkDocumentScalarEqual(facts, constraint) {
+    const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
+    const data = { kind: "scalar_equal", left, right };
+    if (!left.ok || !right.ok)
+        return { ok: false, message: `document relation "${constraint.relation_id}" could not read scalar operands`, data };
+    const ok = left.value === right.value;
+    return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar values differ`, data };
+}
+function checkDocumentScalarLiteral(facts, constraint) {
+    const source = factOperand(facts.documents, constraint.source), expected = constraint.value;
+    const data = { kind: "scalar_equals_literal", source, expected };
+    if (!source.ok)
+        return { ok: false, message: `document relation "${constraint.relation_id}" could not read scalar operand`, data };
+    const ok = source.value === expected;
+    return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar value does not match literal`, data };
+}
 export function evaluateConstraintIR(facts, context = {}) {
     const { files, constraints } = compileConstraintIR(facts), results = [], cochange = [];
     for (const constraint of constraints) {
@@ -113,6 +135,10 @@ export function evaluateConstraintIR(facts, context = {}) {
             results.push(...integrationConstraintEntries(facts.integration));
             continue;
         }
+        else if (constraint.kind === "document_scalar_equal")
+            check = checkDocumentScalarEqual(facts, constraint);
+        else if (constraint.kind === "document_scalar_equals_literal")
+            check = checkDocumentScalarLiteral(facts, constraint);
         else
             continue;
         results.push({ name: constraint.name, check });

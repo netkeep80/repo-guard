@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { checkPolicyRelaxation, classifyChangedFiles, computePolicyDelta, policyRelaxationRuleFamily } from "../dist/checks/rules/policy-delta-rules.mjs";
 
 const file = (path, extra = {}) => ({ path, status: "modified", addedLines: [], deletedLines: [], ...extra });
@@ -20,6 +21,28 @@ const mutate = (fn) => { const copy = structuredClone(BASE); fn(copy); return co
 const relax = () => mutate((policy) => { policy.size_rules[0].max = 1000; });
 const grant = (pointer = "/size_rules/max-source/max") => ({ allow_policy_relaxation: [pointer] });
 
+const relationPolicy = (rules = null) => ({
+  ...structuredClone(BASE),
+  document_relations: {
+    documents: {
+      contract: { path: "contracts/contract.json", format: "json" },
+      conformance: { path: "contracts/conformance.json", format: "json" },
+    },
+    rules: rules || [{
+      id: "contract-id-matches",
+      kind: "scalar_equal",
+      left: { document: "conformance", pointer: "/contract", type: "string" },
+      right: { document: "contract", pointer: "/id", type: "string" },
+    }],
+  },
+});
+const literalRule = {
+  id: "root-is-infinity",
+  kind: "scalar_equals_literal",
+  source: { document: "contract", pointer: "/root", type: "string" },
+  value: "∞",
+};
+
 describe("Constraint Program strictness projection", () => {
   const cases = [
     ["size max", (p) => { p.size_rules[0].max = 1000; }, "size_rule_max_increased"],
@@ -39,6 +62,48 @@ describe("Constraint Program strictness projection", () => {
   it("fails closed for unknown semantic sections", () => {
     const result = computePolicyDelta(BASE, mutate((p) => { p.content_rules = [{ id: "x", glob: "**", mode: "added_lines", forbid_regex: ["x"] }]; }));
     assert.equal(result.relaxations[0].kind, "policy_incomparable");
+  });
+});
+
+describe("document relation strictness projection", () => {
+  it("treats first relation adoption as stricter rather than unknown/incomparable", () => {
+    const comparison = compareConstraintPrograms(BASE, relationPolicy());
+    assert.equal(comparison.relation, "stricter");
+    assert.deepEqual(comparison.relaxations, []);
+    assert.deepEqual(comparison.incomparable, []);
+  });
+
+  it("treats an added relation id as stricter", () => {
+    const base = relationPolicy(), head = structuredClone(base);
+    head.document_relations.rules.push(structuredClone(literalRule));
+    const comparison = compareConstraintPrograms(base, head);
+    assert.equal(comparison.relation, "stricter");
+    assert.deepEqual(comparison.relaxations, []);
+    assert.deepEqual(comparison.incomparable, []);
+  });
+
+  it("treats a removed relation id as weaker", () => {
+    const base = relationPolicy();
+    base.document_relations.rules.push(structuredClone(literalRule));
+    const head = structuredClone(base);
+    head.document_relations.rules = head.document_relations.rules.filter((rule) => rule.id !== literalRule.id);
+    const delta = computePolicyDelta(base, head);
+    assert.ok(delta.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "root-is-infinity"));
+  });
+
+  for (const [name, edit] of [
+    ["selector", (policy) => { policy.document_relations.rules[0].left.pointer = "/other"; }],
+    ["literal", (policy) => { policy.document_relations.rules[1].value = "R"; }],
+    ["document path", (policy) => { policy.document_relations.documents.contract.path = "contracts/other.json"; }],
+    ["document format", (policy) => { policy.document_relations.documents.contract.path = "contracts/contract.yaml"; policy.document_relations.documents.contract.format = "yaml"; }],
+  ]) it(`treats ${name} edit as incomparable`, () => {
+    const base = relationPolicy();
+    if (name === "literal") base.document_relations.rules.push(structuredClone(literalRule));
+    const head = structuredClone(base);
+    edit(head);
+    const comparison = compareConstraintPrograms(base, head);
+    assert.equal(comparison.relation, "incomparable");
+    assert.ok(comparison.incomparable.some((item) => item.pointer === "/document_relations/rules/contract-id-matches" || item.pointer === "/document_relations/rules/root-is-infinity"));
   });
 });
 
