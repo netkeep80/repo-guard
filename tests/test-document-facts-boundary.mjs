@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeDocumentFact, projectDocumentValue, resolveJsonPointer } from "../dist/document-facts.mjs";
+import {
+  createDocumentReader,
+  normalizeDocumentFact,
+  projectDocumentValue,
+  readDocumentFact,
+  resolveJsonPointer,
+} from "../dist/document-facts.mjs";
 import { checkRegistryRules } from "../dist/checks/rules/registry-rules.mjs";
 
 const document = {
@@ -15,6 +21,15 @@ const document = {
   enabled: true,
   nullable: null,
 };
+
+function captureFailure(run) {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  assert.fail("expected DocumentFact failure");
+}
 
 describe("shared JSON Pointer boundary", () => {
   it("selects root, nested, empty-key, escaped and array values", () => {
@@ -116,5 +131,96 @@ describe("typed document fact normalization", () => {
     }
     assert.throws(() => normalizeDocumentFact(42, "repository_path"), /requires a string/);
     assert.throws(() => normalizeDocumentFact(["docs/a", "../outside"], "repository_path_set"), /invalid repository_path/);
+  });
+});
+
+describe("DocumentFact selector/read boundary", () => {
+  const files = {
+    "facts.json": JSON.stringify({
+      contract: "contracts/mts-contract-v0.7.json",
+      corpus: "./contracts/mts-conformance-v0.7.json",
+      owners: { runtime: "./core/runtime.ts", schema: "schemas/mts.json" },
+    }),
+    "facts.yaml": "enabled: true\ngates:\n  - ./tools/check.mjs\n  - tools/check.mjs\n  - tests/smoke.mjs\n",
+    "bad.json": "{not-json",
+    "bad.yaml": "[unterminated",
+  };
+  const reader = createDocumentReader({ readFile: (path) => files[path] });
+
+  it("reads JSON scalar/path facts and defaults projection to value", () => {
+    assert.deepEqual(readDocumentFact(reader, { path: "facts.json", pointer: "/contract", type: "string" }), {
+      ok: true,
+      value: "contracts/mts-contract-v0.7.json",
+    });
+    assert.deepEqual(readDocumentFact(reader, { path: "facts.json", pointer: "/corpus", type: "repository_path" }), {
+      ok: true,
+      value: "contracts/mts-conformance-v0.7.json",
+    });
+  });
+
+  it("composes object/array projections with deterministic path sets", () => {
+    assert.deepEqual(readDocumentFact(reader, { path: "facts.json", pointer: "/owners", projection: "object_values", type: "repository_path_set" }), {
+      ok: true,
+      value: ["core/runtime.ts", "schemas/mts.json"],
+    });
+    assert.deepEqual(readDocumentFact(reader, { path: "facts.yaml", pointer: "/gates", projection: "array_items", type: "repository_path_set" }), {
+      ok: true,
+      value: ["tests/smoke.mjs", "tools/check.mjs"],
+    });
+    assert.deepEqual(readDocumentFact(reader, { path: "facts.yaml", pointer: "/enabled", type: "boolean" }), { ok: true, value: true });
+  });
+
+  it("exposes required structured failure codes without parsing messages", () => {
+    const malformed = captureFailure(() => resolveJsonPointer(document, "/a~2b"));
+    assert.equal(malformed.code, "malformed_pointer");
+    assert.equal(malformed.pointer, "/a~2b");
+
+    const missing = captureFailure(() => resolveJsonPointer(document, "/owner/missing"));
+    assert.equal(missing.code, "missing_pointer_segment");
+    assert.equal(missing.segment, "missing");
+
+    const projection = captureFailure(() => projectDocumentValue(document, "/owner", "array_items"));
+    assert.equal(projection.code, "projection_type_mismatch");
+
+    const type = captureFailure(() => normalizeDocumentFact(1, "string", "/contract"));
+    assert.equal(type.code, "fact_type_mismatch");
+    assert.equal(type.pointer, "/contract");
+
+    const path = captureFailure(() => normalizeDocumentFact("../outside", "repository_path", "/corpus"));
+    assert.equal(path.code, "invalid_repository_path");
+    assert.equal(path.pointer, "/corpus");
+  });
+
+  it("returns the same structured codes through the read boundary", () => {
+    const missing = readDocumentFact(reader, { path: "facts.json", pointer: "/missing", type: "string" });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.error.code, "missing_pointer_segment");
+    assert.equal(missing.error.segment, "missing");
+
+    const projection = readDocumentFact(reader, { path: "facts.json", pointer: "/owners", projection: "array_items", type: "string_set" });
+    assert.equal(projection.ok, false);
+    assert.equal(projection.error.code, "projection_type_mismatch");
+
+    const type = readDocumentFact(reader, { path: "facts.json", pointer: "/contract", type: "boolean" });
+    assert.equal(type.ok, false);
+    assert.equal(type.error.code, "fact_type_mismatch");
+
+    const path = readDocumentFact(reader, { path: "../facts.json", pointer: "/contract", type: "string" });
+    assert.equal(path.ok, false);
+    assert.equal(path.error.code, "invalid_repository_path");
+  });
+
+  it("fails closed for parser/read and unsupported document errors", () => {
+    const badJson = readDocumentFact(reader, { path: "bad.json", pointer: "", type: "string" });
+    assert.equal(badJson.ok, false);
+    assert.equal(badJson.error.code, "document_read_error");
+
+    const badYaml = readDocumentFact(reader, { path: "bad.yaml", pointer: "", type: "string" });
+    assert.equal(badYaml.ok, false);
+    assert.equal(badYaml.error.code, "document_read_error");
+
+    const unsupported = readDocumentFact(reader, { path: "facts.toml", pointer: "", type: "string" });
+    assert.equal(unsupported.ok, false);
+    assert.equal(unsupported.error.code, "unsupported_document_type");
   });
 });
