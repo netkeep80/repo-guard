@@ -7,7 +7,7 @@ type SetRelation = "superset_stricter" | "subset_stricter";
 type StrictnessRelation = RankRelation | SetRelation | "equal_or_incomparable" | "required_entity";
 type ComparisonRelation = "equal" | "weaker" | "incomparable" | "stricter";
 type DiagnosticValue = string | number | boolean | null | undefined;
-type DocumentScalarType = "scalar" | "string" | "boolean";
+type DocumentFactType = "scalar" | "string" | "boolean" | "string_set" | "repository_path" | "repository_path_set";
 
 interface StrictnessMetadata {
   owner?: string;
@@ -18,6 +18,7 @@ interface StrictnessMetadata {
   field?: string;
   rule_id?: string;
   workflow_id?: string;
+  evidence_binding_id?: string;
   raw?: DiagnosticValue;
   removeBefore?: unknown;
   removeAfter?: unknown;
@@ -97,9 +98,10 @@ interface DocumentDefinitionProjection {
   format?: unknown;
 }
 
-interface DocumentScalarSelectorProjection {
+interface DocumentSelectorProjection {
   document?: unknown;
   pointer?: unknown;
+  projection?: unknown;
   type?: unknown;
 }
 
@@ -117,6 +119,14 @@ interface DocumentRelationsProjection {
   rules?: DocumentRelationRuleProjection[];
 }
 
+interface EvidenceBindingProjection {
+  id?: unknown;
+  kind?: unknown;
+  source?: DocumentSelectorProjection;
+  workflow?: unknown;
+  covers?: unknown;
+}
+
 export interface ConstraintPolicyProjection {
   diff_rules?: DiffRulesProjection;
   paths?: PathsProjection;
@@ -128,6 +138,7 @@ export interface ConstraintPolicyProjection {
   change_profiles?: unknown;
   cochange_rules?: CochangeRuleProjection[];
   document_relations?: DocumentRelationsProjection;
+  evidence_bindings?: EvidenceBindingProjection[];
 }
 
 interface ChangeIntentProjection {
@@ -147,6 +158,7 @@ export interface PolicyRelaxation {
   rule_id?: string;
   field?: string;
   workflow_id?: string;
+  evidence_binding_id?: string;
   [key: string]: unknown;
 }
 
@@ -192,7 +204,7 @@ function compileDocumentSelector(selectorValue: unknown, documents: Record<strin
     format: definition.format,
     pointer: typeof selector.pointer === "string" ? selector.pointer : "",
     projection: selector.projection,
-    type: selector.type as DocumentScalarType,
+    type: selector.type as DocumentFactType,
   };
 }
 
@@ -275,6 +287,19 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     add(`${owner}:shape`, null, exact(shape, { owner, pointer, rule_id: id, incomparableMessage: `document_relations rule "${id}" changed semantics` }));
   }
 
+  for (const binding of array(policy.evidence_bindings)) {
+    const id = String(binding.id ?? ""), owner = `evidence-binding:${id}`, pointer = `/evidence_bindings/${id}`;
+    const source = compileDocumentSelector(binding.source, documents);
+    const shape = { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
+    const runtime = binding.kind === "workflow_path_coverage" ? {
+      kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
+      workflow: binding.workflow, covers: array(binding.covers as string[] | undefined),
+    } : null;
+    add(owner, runtime, entity({ owner, pointer, removeKind: "evidence_binding_removed", evidence_binding_id: id,
+      removeBefore: shape, removeAfter: { present: false }, removeMessage: `evidence binding "${id}" removed` }));
+    add(`${owner}:shape`, null, exact(shape, { owner, pointer, evidence_binding_id: id, incomparableMessage: `evidence binding "${id}" changed semantics` }));
+  }
+
   if (array(policy.size_rules).length) add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
   if (array(policy.registry_rules).length) add("runtime:registry-rules", { kind: "registry_rules", name: "registry-rules", rules: policy.registry_rules });
   if (array(policy.trace_rules).length) add("runtime:trace-rules", { kind: "trace_rules", name: "trace-rules" });
@@ -296,13 +321,13 @@ function canonical(value: unknown): unknown { if (Array.isArray(value)) return v
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
-  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.document_relations;
+  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.document_relations; delete copy.evidence_bindings;
   if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
   if (copy.integration) { delete copy.integration.workflows; if (!Object.keys(copy.integration).length) delete copy.integration; }
   return copy;
 }
 const relaxation = (entry: StrictnessProgramEntry, before: unknown, after: unknown = null, kind = entry.weakenKind as string, message: string | null = null, extra: Record<string, unknown> = {}): PolicyRelaxation => ({
-  kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), pointer: entry.pointer, before, after,
+  kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
   message: message || entry.message?.(before as string | number, after as string | number) || entry.removeMessage, ...extra,
 });
 const incomparable = (entry: StrictnessProgramEntry, before: unknown, after: unknown): PolicyIncomparableChange => ({ kind: "policy_incomparable", pointer: entry.pointer, before, after, message: entry.incomparableMessage || `policy constraint ${entry.key} changed with no proven monotonic ordering` });
