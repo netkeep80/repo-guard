@@ -62,8 +62,7 @@ function declaredChangeIntentAnchors(changeIntent: unknown) {
 
 function flattenUnresolved(traceRuleResults: ReturnType<typeof buildTraceRuleDiagnostics>) {
   const unresolved: Array<{ rule: string; kind: string; fromAnchorType?: string; toAnchorType?: string; value: string; instances?: AnchorInstance[] }> = [];
-  for (const rawResult of traceRuleResults) {
-    const result = rawResult as TraceResultProjection;
+  for (const result of traceRuleResults as TraceResultProjection[]) {
     for (const item of result.unresolved || []) {
       unresolved.push({
         rule: result.id,
