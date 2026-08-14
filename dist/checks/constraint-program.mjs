@@ -1,3 +1,4 @@
+import { normalizeDocumentFact } from "../document-facts.mjs";
 const RANKS = {
     enforcement: { advisory: 0, blocking: 1 },
     count: { changed_only: 0, all_tracked: 1 },
@@ -8,6 +9,27 @@ const scalar = (relation, value, metadata) => compare(relation, value, metadata)
 const set = (relation, value, metadata) => compare(relation, array(value), metadata);
 const exact = (value, metadata) => compare("equal_or_incomparable", value, metadata);
 const entity = (metadata) => compare("required_entity", true, metadata);
+function object(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function canonicalDocumentPath(value) {
+    try {
+        return normalizeDocumentFact(value, "repository_path");
+    }
+    catch {
+        return typeof value === "string" ? value : String(value ?? "");
+    }
+}
+function compileDocumentSelector(selectorValue, documents) {
+    const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
+    return {
+        document: name,
+        path: canonicalDocumentPath(definition.path),
+        format: definition.format,
+        pointer: typeof selector.pointer === "string" ? selector.pointer : "",
+        type: selector.type,
+    };
+}
 export function compileConstraintProgram(policy = {}, changeIntent = null) {
     const program = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
     const add = (key, runtime = null, strictness = null) => program.push({ key, runtime, strictness });
@@ -60,6 +82,25 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
                 message: (a, b) => `integration.workflows[${workflow.id}].expect.enforcement: ${a} -> ${b}`, removeMessage: `integration.workflows[${workflow.id}].expect.enforcement removed (was ${enforcement})`,
             }));
     }
+    const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
+    for (const rule of array(documentRelations?.rules)) {
+        const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
+        const runtimeBase = { name: owner, relation_id: id };
+        let runtime = null, shape = { kind: rule.kind };
+        if (rule.kind === "scalar_equal") {
+            const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
+            runtime = { ...runtimeBase, kind: "document_scalar_equal", left, right };
+            shape = { kind: rule.kind, left, right };
+        }
+        else if (rule.kind === "scalar_equals_literal") {
+            const source = compileDocumentSelector(rule.source, documents);
+            runtime = { ...runtimeBase, kind: "document_scalar_equals_literal", source, value: rule.value };
+            shape = { kind: rule.kind, source, value: rule.value };
+        }
+        add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
+            removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));
+        add(`${owner}:shape`, null, exact(shape, { owner, pointer, rule_id: id, incomparableMessage: `document_relations rule "${id}" changed semantics` }));
+    }
     if (array(policy.size_rules).length)
         add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
     if (array(policy.registry_rules).length)
@@ -91,6 +132,7 @@ function unknownProjection(policy = {}) {
     delete copy.enforcement;
     delete copy.diff_rules;
     delete copy.size_rules;
+    delete copy.document_relations;
     if (copy.paths) {
         for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"])
             delete copy.paths[field];
