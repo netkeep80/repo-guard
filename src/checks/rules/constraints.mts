@@ -12,18 +12,13 @@ import { checkRegistryRules } from "./registry-rules.mjs";
 import type { SizeRule } from "./size-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
 
-interface BudgetResult {
-  ok: boolean;
-  actual?: number;
-  limit?: number;
-  files?: string[];
-}
-
+interface BudgetResult { ok: boolean; actual?: number; limit?: number; files?: string[]; }
 interface SurfaceDebt {
   repayment_issue?: unknown;
   expected_delta?: { max_new_files?: number; max_net_added_lines?: number };
   [key: string]: unknown;
 }
+interface AnchorEvidenceInstance { value?: unknown; file?: unknown; line?: unknown; column?: unknown; }
 
 type RuntimeConstraintKind =
   | "max_metric"
@@ -40,7 +35,8 @@ type RuntimeConstraintKind =
   | "document_scalar_equal"
   | "document_scalar_equals_literal"
   | "document_referenced_paths_exist"
-  | "evidence_workflow_path_coverage";
+  | "evidence_workflow_path_coverage"
+  | "evidence_anchor_value_coverage";
 
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
@@ -61,13 +57,13 @@ interface RuntimeConstraint {
   value?: unknown;
   workflow?: string;
   covers?: string[];
+  target_anchor_type?: string;
 }
 
 interface ConstraintPolicyProjection {
   paths: { canonical_docs: string[]; operational_paths: string[] };
   [key: string]: unknown;
 }
-
 interface ConstraintFacts {
   repositoryRoot?: string;
   trackedFiles?: string[];
@@ -78,21 +74,11 @@ interface ConstraintFacts {
   diff: { files: { checked: ParsedDiffFile[] } };
   derived?: unknown;
   integration?: unknown;
+  anchors?: { byType?: Record<string, AnchorEvidenceInstance[]> };
 }
-
-interface ConstraintContext {
-  anchorDiagnostics?: { traceRuleResults?: Array<{ id: string; [key: string]: unknown }> };
-}
-
-interface ConstraintIR {
-  files: ParsedDiffFile[];
-  constraints: RuntimeConstraint[];
-}
-
-interface RuleResult {
-  name: string;
-  check: unknown;
-}
+interface ConstraintContext { anchorDiagnostics?: { traceRuleResults?: Array<{ id: string; [key: string]: unknown }> }; }
+interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint[]; }
+interface RuleResult { name: string; check: unknown; }
 
 function budget(selected: ParsedDiffFile[], max: number | undefined): BudgetResult {
   if (max === undefined) return { ok: true };
@@ -140,12 +126,10 @@ function evaluateMetric(files: ParsedDiffFile[], constraint: RuntimeConstraint, 
   if (constraint.metric === "new_files") return checkNewFilesBudget(files, constraint.max);
   return checkNetAddedLinesBudget(files, constraint.max);
 }
-
 function factOperand(reader: DocumentReader | undefined, selector: DocumentFactSelector | undefined) {
   if (!reader || !selector) return { ok: false as const, error: { code: "document_read_error", pointer: selector?.pointer || "", message: "document reader or selector is unavailable" } };
   return readDocumentFact(reader, selector);
 }
-
 function checkDocumentScalarEqual(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
   const data = { kind: "scalar_equal", left, right };
@@ -153,7 +137,6 @@ function checkDocumentScalarEqual(facts: ConstraintFacts, constraint: RuntimeCon
   const ok = left.value === right.value;
   return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar values differ`, data };
 }
-
 function checkDocumentScalarLiteral(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const source = factOperand(facts.documents, constraint.source), expected = constraint.value;
   const data = { kind: "scalar_equals_literal", source, expected };
@@ -161,56 +144,53 @@ function checkDocumentScalarLiteral(facts: ConstraintFacts, constraint: RuntimeC
   const ok = source.value === expected;
   return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar value does not match literal`, data };
 }
-
 function checkDocumentReferencedPathsExist(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const source = factOperand(facts.documents, constraint.source);
-  if (!source.ok) return {
-    ok: false,
-    message: `document relation "${constraint.relation_id}" could not read repository path references`,
-    data: { kind: "referenced_paths_exist", source },
-  };
-  if (!Array.isArray(source.value)) return {
-    ok: false,
-    message: `document relation "${constraint.relation_id}" did not produce a repository path set`,
-    data: { kind: "referenced_paths_exist", source },
-  };
-
+  if (!source.ok) return { ok: false, message: `document relation "${constraint.relation_id}" could not read repository path references`, data: { kind: "referenced_paths_exist", source } };
+  if (!Array.isArray(source.value)) return { ok: false, message: `document relation "${constraint.relation_id}" did not produce a repository path set`, data: { kind: "referenced_paths_exist", source } };
   const referencedPaths = source.value;
   if (facts.trackedFiles === undefined) return {
     ok: false,
     message: `document relation "${constraint.relation_id}" cannot verify references without tracked repository facts`,
     data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: [], tracked_repository_available: false },
   };
-
   const tracked = new Set(facts.trackedFiles);
   const missingPaths = referencedPaths.filter((path) => !tracked.has(path)).sort();
-  return {
-    ok: missingPaths.length === 0,
-    message: missingPaths.length ? `document relation "${constraint.relation_id}" references missing repository paths` : undefined,
-    data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: missingPaths },
-  };
+  return { ok: missingPaths.length === 0, message: missingPaths.length ? `document relation "${constraint.relation_id}" references missing repository paths` : undefined, data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: missingPaths } };
 }
-
 function checkEvidenceWorkflowPathCoverage(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const source = factOperand(facts.documents, constraint.source);
-  if (!source.ok) return {
+  if (!source.ok) return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read repository path references`, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source } };
+  if (!Array.isArray(source.value)) return { ok: false, message: `evidence binding "${constraint.binding_id}" did not produce a repository path set`, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source } };
+  const coverage = checkWorkflowPathCoverage(facts.integration as Parameters<typeof checkWorkflowPathCoverage>[0], { workflow: constraint.workflow || "", covers: constraint.covers || [] }, source.value);
+  return { ...coverage, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data } };
+}
+function checkEvidenceAnchorValueCoverage(facts: ConstraintFacts, constraint: RuntimeConstraint) {
+  const source = factOperand(facts.documents, constraint.source), target = constraint.target_anchor_type || "";
+  if (!source.ok) return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read semantic evidence ids`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
+  if (!Array.isArray(source.value)) return { ok: false, message: `evidence binding "${constraint.binding_id}" did not produce a string set`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
+  const byType = facts.anchors?.byType;
+  if (!byType) return {
     ok: false,
-    message: `evidence binding "${constraint.binding_id}" could not read repository path references`,
-    data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source },
+    message: `evidence binding "${constraint.binding_id}" cannot verify ids without anchor facts`,
+    data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: source.value, missing_values: source.value, anchor_facts_available: false },
   };
-  if (!Array.isArray(source.value)) return {
-    ok: false,
-    message: `evidence binding "${constraint.binding_id}" did not produce a repository path set`,
-    data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source },
-  };
-  const coverage = checkWorkflowPathCoverage(
-    facts.integration as Parameters<typeof checkWorkflowPathCoverage>[0],
-    { workflow: constraint.workflow || "", covers: constraint.covers || [] },
-    source.value,
-  );
+  const instances = Array.isArray(byType[target]) ? byType[target] : [], locations = new Map<string, Array<{ file: string; line?: number; column?: number }>>();
+  for (const instance of instances) {
+    if (typeof instance.value !== "string" || typeof instance.file !== "string") continue;
+    const location: { file: string; line?: number; column?: number } = { file: instance.file };
+    if (typeof instance.line === "number") location.line = instance.line;
+    if (typeof instance.column === "number") location.column = instance.column;
+    const found = locations.get(instance.value) || [];
+    found.push(location);
+    locations.set(instance.value, found);
+  }
+  const sourceValues = source.value as string[], missingValues = sourceValues.filter((value) => !locations.has(value)).sort();
+  const evidenceLocations = sourceValues.filter((value) => locations.has(value)).map((value) => ({ value, locations: locations.get(value) }));
   return {
-    ...coverage,
-    data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data },
+    ok: missingValues.length === 0,
+    message: missingValues.length ? `evidence binding "${constraint.binding_id}" has declared ids without evidence anchors` : undefined,
+    data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: sourceValues, missing_values: missingValues, evidence_locations: evidenceLocations },
   };
 }
 
@@ -248,6 +228,7 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     else if (constraint.kind === "document_scalar_equals_literal") check = checkDocumentScalarLiteral(facts, constraint);
     else if (constraint.kind === "document_referenced_paths_exist") check = checkDocumentReferencedPathsExist(facts, constraint);
     else if (constraint.kind === "evidence_workflow_path_coverage") check = checkEvidenceWorkflowPathCoverage(facts, constraint);
+    else if (constraint.kind === "evidence_anchor_value_coverage") check = checkEvidenceAnchorValueCoverage(facts, constraint);
     else continue;
     results.push({ name: constraint.name, check });
   }
