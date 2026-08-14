@@ -22,6 +22,8 @@ export interface PolicyPipelineInput extends RepositoryFactsInput {
 export interface PolicyPipelineOptions {
   quiet?: boolean;
   printEnforcement?: boolean;
+  ruleNamePrefix?: string;
+  excludeRuleFamilies?: readonly string[];
 }
 
 export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPipelineOptions = {}) {
@@ -33,9 +35,10 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
   const reporter = createAnalysisCollector(input.enforcement, {
     presenter: quiet ? null : createAnalysisTextPresenter(),
   });
+  const report = (name: string, check: unknown) => reporter.report(`${options.ruleNamePrefix || ""}${name}`, check);
 
   for (const initialCheck of input.initialChecks || []) {
-    reporter.report(initialCheck.name, initialCheck.check);
+    report(initialCheck.name, initialCheck.check);
   }
 
   const { changeIntent = null, changeIntentSource = "none", ...runtimeInput } = input;
@@ -49,7 +52,9 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
   }
 
   const anchorDiagnostics = buildAnchorDiagnostics(facts);
-  runPolicyChecks(facts, reporter, { anchorDiagnostics });
+  // Префикс меняет только diagnostic namespace; вычисление остаётся в одном canonical
+  // pipeline и одном RuleRegistry, чтобы base/head не получили разные semantics engines.
+  runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies });
 
   return reporter.finish({
     command: input.mode,
