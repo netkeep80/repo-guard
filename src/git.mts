@@ -6,6 +6,10 @@ interface ChildProcessFailure {
   message?: string;
 }
 
+interface BasePolicyProjection {
+  paths?: { governance_paths?: unknown } | null;
+}
+
 export interface RunGitOptions {
   cwd?: string;
   stdio?: ExecFileSyncOptionsWithStringEncoding["stdio"];
@@ -22,12 +26,11 @@ export interface BaseGovernancePathsResult {
 }
 
 function childProcessMessage(error: unknown): string {
-  const failure = error as ChildProcessFailure | null | undefined;
-  const stderr = failure?.stderr?.toString?.().trim();
+  const stderr = (error as ChildProcessFailure | null | undefined)?.stderr?.toString?.().trim();
   if (stderr) return stderr;
-  const stdout = failure?.stdout?.toString?.().trim();
+  const stdout = (error as ChildProcessFailure | null | undefined)?.stdout?.toString?.().trim();
   if (stdout) return stdout;
-  return failure?.message || "command failed";
+  return (error as ChildProcessFailure | null | undefined)?.message || "command failed";
 }
 
 function gitSubcommand(args: readonly string[]): string {
@@ -103,17 +106,10 @@ export function readBasePolicy(base: string | null | undefined, cwd: string, pol
   return { policy: parsed, error: null };
 }
 
-function governancePathsFromPolicy(policy: unknown): unknown {
-  if (policy === null || typeof policy !== "object") return undefined;
-  const paths = (policy as Record<string, unknown>).paths;
-  if (paths === null || typeof paths !== "object") return undefined;
-  return (paths as Record<string, unknown>).governance_paths;
-}
-
 export function readBaseGovernancePaths(base: string | null | undefined, cwd: string, policyPath = "repo-policy.json"): BaseGovernancePathsResult {
   const result = readBasePolicy(base, cwd, policyPath);
   if (result.error) return { governancePaths: null, error: result.error };
-  const list = governancePathsFromPolicy(result.policy);
+  const list = (result.policy as BasePolicyProjection | null)?.paths?.governance_paths;
   if (!Array.isArray(list)) return { governancePaths: [], error: null };
   return { governancePaths: list, error: null };
 }
