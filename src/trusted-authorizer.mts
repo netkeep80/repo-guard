@@ -1,20 +1,74 @@
 import { execFileSync } from "node:child_process";
 
+interface UserProjection {
+  login?: unknown;
+  type?: unknown;
+}
+
+interface IssueContextProjection {
+  user?: UserProjection | null;
+  author_association?: unknown;
+  labels?: unknown;
+}
+
+interface PullRequestContextProjection {
+  labels?: unknown;
+}
+
+interface PermissionProjection {
+  permission?: unknown;
+  role_name?: unknown;
+}
+
+interface TrustedAuthorizerOptions {
+  governanceApprovedLabel?: unknown;
+  trustedTeamApproval?: unknown;
+  codeownerApproved?: unknown;
+}
+
+interface LocalTrustedAuthorizerInput {
+  issueContext?: unknown;
+  prContext?: unknown;
+  permission?: unknown;
+  governanceApprovedLabel?: unknown;
+  trustedTeamApproval?: unknown;
+  codeownerApproved?: unknown;
+}
+
+interface ResolveTrustedAuthorizerInput {
+  repoFullName: unknown;
+  issueNumber?: unknown;
+  prNumber?: unknown;
+  options?: TrustedAuthorizerOptions;
+}
+
+export interface TrustedAuthorizerSummary {
+  issue_author_permission_trusted: boolean;
+  governance_approved_label: boolean;
+  codeowner_approved: boolean;
+  trusted_team_approval: boolean;
+  issue_author_is_bot: boolean;
+  detected_label: unknown | null;
+  detected_author_login: unknown | null;
+  detected_author_permission: unknown | null;
+  detected_author_association: unknown | null;
+}
+
 const GITHUB_REPO_FULL_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const POSITIVE_INTEGER = /^[1-9][0-9]*$/;
-const TRUSTED_PERMISSIONS = new Set(["admin", "maintain", "write"]);
-const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const TRUSTED_PERMISSIONS = new Set<string>(["admin", "maintain", "write"]);
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set<string>(["OWNER", "MEMBER", "COLLABORATOR"]);
 const DEFAULT_GOVERNANCE_LABEL = "governance-approved";
 
-function isValidRepo(repoFullName) {
+function isValidRepo(repoFullName: unknown): repoFullName is string {
   return typeof repoFullName === "string" && GITHUB_REPO_FULL_NAME.test(repoFullName);
 }
 
-function isValidIssueNumber(number) {
+function isValidIssueNumber(number: unknown): boolean {
   return POSITIVE_INTEGER.test(String(number));
 }
 
-function safeGhJson(args) {
+function safeGhJson(args: string[]): unknown | null {
   try {
     const out = execFileSync("gh", args, { encoding: "utf-8", timeout: 30000 });
     return out.trim() ? JSON.parse(out) : null;
@@ -23,27 +77,27 @@ function safeGhJson(args) {
   }
 }
 
-export function fetchIssueAuthorContext(repoFullName, issueNumber) {
+export function fetchIssueAuthorContext(repoFullName: unknown, issueNumber: unknown): unknown | null {
   if (!isValidRepo(repoFullName) || !isValidIssueNumber(issueNumber)) return null;
   return safeGhJson([
     "api",
-    `repos/${repoFullName}/issues/${issueNumber}`,
+    `repos/${repoFullName}/issues/${issueNumber as string | number | bigint}`,
     "--jq",
     "{user: {login: .user.login, type: .user.type}, author_association: .author_association, labels: [.labels[].name]}",
   ]);
 }
 
-export function fetchPullRequestContext(repoFullName, prNumber) {
+export function fetchPullRequestContext(repoFullName: unknown, prNumber: unknown): unknown | null {
   if (!isValidRepo(repoFullName) || !isValidIssueNumber(prNumber)) return null;
   return safeGhJson([
     "api",
-    `repos/${repoFullName}/pulls/${prNumber}`,
+    `repos/${repoFullName}/pulls/${prNumber as string | number | bigint}`,
     "--jq",
     "{labels: [.labels[].name]}",
   ]);
 }
 
-export function fetchUserRepoPermission(repoFullName, username) {
+export function fetchUserRepoPermission(repoFullName: unknown, username: unknown): unknown | null {
   if (!isValidRepo(repoFullName)) return null;
   if (typeof username !== "string" || username.length === 0) return null;
   const encodedUsername = encodeURIComponent(username);
@@ -52,25 +106,25 @@ export function fetchUserRepoPermission(repoFullName, username) {
     `repos/${repoFullName}/collaborators/${encodedUsername}/permission`,
     "--jq",
     "{permission, role_name}",
-  ]);
+  ]) as PermissionProjection | null;
   if (!result) return null;
   return result.permission || null;
 }
 
-export function isPermissionTrusted(permission) {
+export function isPermissionTrusted(permission: unknown): boolean {
   if (typeof permission !== "string") return false;
   return TRUSTED_PERMISSIONS.has(permission);
 }
 
-export function isAuthorAssociationTrusted(authorAssociation) {
+export function isAuthorAssociationTrusted(authorAssociation: unknown): boolean {
   if (typeof authorAssociation !== "string") return false;
   return TRUSTED_AUTHOR_ASSOCIATIONS.has(authorAssociation);
 }
 
-export function isBotUser(user) {
+export function isBotUser(user: unknown): boolean {
   if (!user || typeof user !== "object") return false;
-  if (user.type === "Bot") return true;
-  if (typeof user.login === "string" && /\[bot\]$/i.test(user.login)) return true;
+  if ((user as UserProjection).type === "Bot") return true;
+  if (typeof (user as UserProjection).login === "string" && /\[bot\]$/i.test((user as UserProjection).login as string)) return true;
   return false;
 }
 
@@ -81,8 +135,8 @@ export function detectTrustedAuthorizerLocally({
   governanceApprovedLabel = DEFAULT_GOVERNANCE_LABEL,
   trustedTeamApproval = false,
   codeownerApproved = false,
-}) {
-  const summary = {
+}: LocalTrustedAuthorizerInput): TrustedAuthorizerSummary {
+  const summary: TrustedAuthorizerSummary = {
     issue_author_permission_trusted: false,
     governance_approved_label: false,
     codeowner_approved: Boolean(codeownerApproved),
@@ -95,20 +149,20 @@ export function detectTrustedAuthorizerLocally({
   };
 
   if (issueContext && typeof issueContext === "object") {
-    summary.detected_author_login = issueContext.user?.login || null;
-    summary.detected_author_association = issueContext.author_association || null;
-    summary.issue_author_is_bot = isBotUser(issueContext.user);
+    summary.detected_author_login = (issueContext as IssueContextProjection).user?.login || null;
+    summary.detected_author_association = (issueContext as IssueContextProjection).author_association || null;
+    summary.issue_author_is_bot = isBotUser((issueContext as IssueContextProjection).user);
     if (!summary.issue_author_is_bot) {
       if (isPermissionTrusted(permission)) {
         summary.issue_author_permission_trusted = true;
         summary.detected_author_permission = permission;
-      } else if (isAuthorAssociationTrusted(issueContext.author_association)) {
+      } else if (isAuthorAssociationTrusted((issueContext as IssueContextProjection).author_association)) {
         summary.issue_author_permission_trusted = true;
-        summary.detected_author_permission = issueContext.author_association;
+        summary.detected_author_permission = (issueContext as IssueContextProjection).author_association;
       }
     }
 
-    const labels = Array.isArray(issueContext.labels) ? issueContext.labels : [];
+    const labels = Array.isArray((issueContext as IssueContextProjection).labels) ? (issueContext as IssueContextProjection).labels as unknown[] : [];
     if (labels.includes(governanceApprovedLabel)) {
       summary.governance_approved_label = true;
       summary.detected_label = governanceApprovedLabel;
@@ -116,7 +170,7 @@ export function detectTrustedAuthorizerLocally({
   }
 
   if (prContext && typeof prContext === "object") {
-    const labels = Array.isArray(prContext.labels) ? prContext.labels : [];
+    const labels = Array.isArray((prContext as PullRequestContextProjection).labels) ? (prContext as PullRequestContextProjection).labels as unknown[] : [];
     if (labels.includes(governanceApprovedLabel)) {
       summary.governance_approved_label = true;
       summary.detected_label = governanceApprovedLabel;
@@ -131,12 +185,12 @@ export function resolveTrustedAuthorizer({
   issueNumber,
   prNumber,
   options = {},
-}) {
+}: ResolveTrustedAuthorizerInput): TrustedAuthorizerSummary {
   const governanceApprovedLabel = options.governanceApprovedLabel || DEFAULT_GOVERNANCE_LABEL;
   const issueContext = issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null;
   const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
-  const username = issueContext?.user?.login;
-  const permission = username && !isBotUser(issueContext.user)
+  const username = (issueContext as IssueContextProjection | null)?.user?.login;
+  const permission = username && !isBotUser((issueContext as IssueContextProjection).user)
     ? fetchUserRepoPermission(repoFullName, username)
     : null;
 
