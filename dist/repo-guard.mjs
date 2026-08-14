@@ -19,7 +19,7 @@ const COMMAND_SPECS = {
         run: async (roots, args) => (await import("./github-pr.mjs")).runCheckPR(roots, args),
     },
     init: {
-        options: { ...valueOptions("--preset", "--mode"), "--help": false }, positionals: 0,
+        options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0,
         run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
     },
     doctor: {
