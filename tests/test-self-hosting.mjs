@@ -132,7 +132,7 @@ describe("self-hosted integration and documentation", () => {
 
   it("routes integration facts through the Constraint Program", () => {
     assert.match(read("src/checks/constraint-program.mts"), /kind: "integration"/);
-    assert.doesNotMatch(read("src/integration-validator.mjs"), /validateRepoGuardPrGate/);
+    assert.doesNotMatch(read("src/integration-validator.mts"), /validateRepoGuardPrGate/);
   });
 
   it("uses YAML ChangeIntent blocks itself and documents the exception model", () => {
