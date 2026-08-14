@@ -167,6 +167,7 @@ export function resolveJsonPointer(data: unknown, pointer: string): unknown {
 export function projectDocumentValue(data: unknown, pointer: string): unknown;
 export function projectDocumentValue(data: unknown, pointer: string, projection: "value"): unknown;
 export function projectDocumentValue(data: unknown, pointer: string, projection: "array_items" | "object_values"): unknown[];
+export function projectDocumentValue(data: unknown, pointer: string, projection: DocumentProjection): unknown | unknown[];
 export function projectDocumentValue(data: unknown, pointer: string, projection: DocumentProjection = "value"): unknown | unknown[] {
   const selected = resolveJsonPointer(data, pointer);
   if (projection === "value") return selected;
@@ -220,6 +221,7 @@ export function normalizeDocumentFact(value: unknown, type: "string", pointer?: 
 export function normalizeDocumentFact(value: unknown, type: "boolean", pointer?: string): boolean;
 export function normalizeDocumentFact(value: unknown, type: "string_set" | "repository_path_set", pointer?: string): string[];
 export function normalizeDocumentFact(value: unknown, type: "repository_path", pointer?: string): string;
+export function normalizeDocumentFact(value: unknown, type: DocumentFactType, pointer?: string): NormalizedDocumentFact;
 export function normalizeDocumentFact(value: unknown, type: DocumentFactType, pointer = ""): NormalizedDocumentFact {
   if (type === "scalar") {
     if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value;
