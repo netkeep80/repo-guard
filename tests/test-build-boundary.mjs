@@ -32,6 +32,8 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/utils/path-patterns.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/utils/repository-files.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/utils/repository-files.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "src/git.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/git.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/diff/parser.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/diff/parser.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/diff/growth.mts")), true);
@@ -47,6 +49,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/extractors/anchors.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/extractors/anchors.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "dist/utils/repository-files.mjs")), true);
+  assert.equal(existsSync(resolve(projectRoot, "dist/git.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/parser.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/growth.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/diff/classification.mjs")), true);
