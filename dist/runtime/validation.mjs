@@ -4,7 +4,9 @@ import Ajv from "ajv";
 import { compileAnchorPolicy, compileChangeProfiles, compileDocumentRelationsPolicy, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../policy-compiler.mjs";
 import { resolvePolicyProfile } from "../policy-profiles.mjs";
 export const loadJSON = (path) => JSON.parse(readFileSync(path, "utf-8"));
-export const createAjv = () => new Ajv({ allErrors: true });
+// Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
+// разрешаем этот стандартный синтаксис, чтобы валидная policy не писала warning в stderr.
+export const createAjv = () => new Ajv({ allErrors: true, allowUnionTypes: true });
 export const ajvErrors = (errors) => (errors || []).map((error) => `${error.instancePath || "/"} ${error.message}`);
 export function validate(ajv, schema, data, label, { quiet = false } = {}) {
     const valid = ajv.validate(schema, data);
