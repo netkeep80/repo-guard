@@ -50,7 +50,8 @@ interface ProfileSpec {
   trace_rules: ProfileRule[];
 }
 type ProfileConfig = Record<string, unknown>;
-type ContractRole = "current.contract" | "current.conformance";
+type PairRole = "current.contract" | "current.conformance" | "previous.contract" | "previous.conformance";
+type ContractRole = PairRole | "acceptance";
 interface PolicyProjection extends Record<string, unknown> {
   profile?: string;
   profile_overrides?: unknown;
@@ -71,18 +72,24 @@ const OVERRIDE_FIELDS = new Set([
   ...Object.keys(PACKS["requirements-strict"].defaults),
   "changed_requirement_evidence_surfaces", "affected_evidence_surfaces",
 ]);
-const CONTRACT_ROLES = new Set<ContractRole>(["current.contract", "current.conformance"]);
-const GENERATED_DOCUMENTS = {
+const GENERATED_DOCUMENTS: Record<ContractRole, string> = {
   "current.contract": "contract-conformance.current.contract",
   "current.conformance": "contract-conformance.current.conformance",
-} as const;
-const GENERATED_RULE_IDS = [
-  "contract-conformance:current-id",
-  "contract-conformance:current-conformance-path",
-  "contract-conformance:current-contract-status",
-  "contract-conformance:current-conformance-status",
-  "contract-conformance:current-contract-accepted",
-  "contract-conformance:current-conformance-accepted",
+  "previous.contract": "contract-conformance.previous.contract",
+  "previous.conformance": "contract-conformance.previous.conformance",
+  acceptance: "contract-conformance.acceptance",
+};
+const pairRuleIds = (prefix: "current" | "previous") => [
+  `contract-conformance:${prefix}-id`,
+  `contract-conformance:${prefix}-conformance-path`,
+  `contract-conformance:${prefix}-contract-status`,
+  `contract-conformance:${prefix}-conformance-status`,
+  `contract-conformance:${prefix}-contract-accepted`,
+  `contract-conformance:${prefix}-conformance-accepted`,
+];
+const ACCEPTANCE_RULE_IDS = [
+  "contract-conformance:acceptance-current-contract",
+  "contract-conformance:acceptance-current-conformance",
 ];
 const clone = <T,>(value: T): T => structuredClone(value);
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -115,12 +122,22 @@ function contractMacro(policy: PolicyProjection) {
   return isObject(policy.contract_conformance) ? policy.contract_conformance : null;
 }
 
-function currentRoleDocuments(macro: Record<string, unknown>) {
-  const current = isObject(macro.current) ? macro.current : {};
+function pairDocuments(value: unknown, prefix: "current" | "previous") {
+  const pair = isObject(value) ? value : {};
   return {
-    "current.contract": isObject(current.contract) ? current.contract : {},
-    "current.conformance": isObject(current.conformance) ? current.conformance : {},
-  } satisfies Record<ContractRole, Record<string, unknown>>;
+    [`${prefix}.contract`]: isObject(pair.contract) ? pair.contract : {},
+    [`${prefix}.conformance`]: isObject(pair.conformance) ? pair.conformance : {},
+  } as Record<PairRole, Record<string, unknown>>;
+}
+
+function configuredRoleDocuments(macro: Record<string, unknown>): Partial<Record<ContractRole, Record<string, unknown>>> {
+  const roles: Partial<Record<ContractRole, Record<string, unknown>>> = { ...pairDocuments(macro.current, "current") };
+  if (isObject(macro.previous)) Object.assign(roles, pairDocuments(macro.previous, "previous"));
+  if (isObject(macro.acceptance)) {
+    const acceptance = macro.acceptance;
+    roles.acceptance = isObject(acceptance.document) ? acceptance.document : {};
+  }
+  return roles;
 }
 
 function normalizeDocumentPath(value: unknown): string | null {
@@ -130,7 +147,9 @@ function normalizeDocumentPath(value: unknown): string | null {
 
 function generatedRuleIds(macro: Record<string, unknown>): string[] {
   return [
-    ...GENERATED_RULE_IDS,
+    ...pairRuleIds("current"),
+    ...(isObject(macro.previous) ? pairRuleIds("previous") : []),
+    ...(isObject(macro.acceptance) ? ACCEPTANCE_RULE_IDS : []),
     ...((Array.isArray(macro.required_paths) ? macro.required_paths : []).map((_, index) => `contract-conformance:required-path:${index}`)),
   ];
 }
@@ -159,15 +178,18 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
   if (!isObject(source.contract_conformance)) return [{ field: "contract_conformance", message: "contract_conformance must be an object" }];
 
   const macro = source.contract_conformance, errors: ProfileValidationError[] = [];
-  const roles = currentRoleDocuments(macro), paths = new Map<ContractRole, string>();
-  for (const role of CONTRACT_ROLES) {
-    const definition = roles[role], path = normalizeDocumentPath(definition.path), format = definition.format;
-    if (!path) errors.push({ field: `contract_conformance.current.${role.split(".")[1]}.path`, message: `${role} path must be a canonical repository path` });
+  const roles = configuredRoleDocuments(macro), paths = new Map<ContractRole, string>();
+  for (const [role, definition] of Object.entries(roles) as Array<[ContractRole, Record<string, unknown>]>) {
+    const path = normalizeDocumentPath(definition.path), format = definition.format;
+    if (!path) errors.push({ field: `contract_conformance.${role}.path`, message: `${role} path must be a canonical repository path` });
     else paths.set(role, path);
-    if (format !== "json" && format !== "yaml") errors.push({ field: `contract_conformance.current.${role.split(".")[1]}.format`, message: `${role} format must be json or yaml` });
+    if (format !== "json" && format !== "yaml") errors.push({ field: `contract_conformance.${role}.format`, message: `${role} format must be json or yaml` });
   }
-  if (paths.get("current.contract") && paths.get("current.contract") === paths.get("current.conformance")) {
-    errors.push({ field: "contract_conformance.current", message: "current contract and conformance paths must be distinct" });
+  const pathOwners = new Map<string, ContractRole>();
+  for (const [role, path] of paths) {
+    const previousOwner = pathOwners.get(path);
+    if (previousOwner) errors.push({ field: "contract_conformance", message: `${role} path duplicates ${previousOwner} path "${path}"` });
+    else pathOwners.set(path, role);
   }
 
   const pairFields = isObject(macro.pair_fields) ? macro.pair_fields : {};
@@ -178,10 +200,16 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
   if (typeof acceptedState.status !== "string") errors.push({ field: "contract_conformance.accepted_state.status", message: "accepted_state.status must be a string" });
   if (typeof acceptedState.accepted !== "boolean") errors.push({ field: "contract_conformance.accepted_state.accepted", message: "accepted_state.accepted must be a boolean" });
 
+  if (isObject(macro.acceptance)) {
+    if (typeof macro.acceptance.current_contract_path !== "string") errors.push({ field: "contract_conformance.acceptance.current_contract_path", message: "acceptance.current_contract_path must be a JSON Pointer string" });
+    if (typeof macro.acceptance.current_conformance_path !== "string") errors.push({ field: "contract_conformance.acceptance.current_conformance_path", message: "acceptance.current_conformance_path must be a JSON Pointer string" });
+  }
+
+  const availableRoles = new Set(Object.keys(roles) as ContractRole[]);
   const selectors = Array.isArray(macro.required_paths) ? macro.required_paths : [], selectorKeys = new Set<string>();
   for (const [index, rawSelector] of selectors.entries()) {
     const selector = isObject(rawSelector) ? rawSelector : {}, role = selector.document as ContractRole;
-    if (!CONTRACT_ROLES.has(role)) errors.push({ field: `contract_conformance.required_paths[${index}].document`, message: `required_paths[${index}] references unknown role "${selector.document}"` });
+    if (!availableRoles.has(role)) errors.push({ field: `contract_conformance.required_paths[${index}].document`, message: `required_paths[${index}] references unavailable role "${selector.document}"` });
     const key = `${selector.document}|${selector.pointer}|${selector.projection}`;
     if (selectorKeys.has(key)) errors.push({ field: `contract_conformance.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
     selectorKeys.add(key);
@@ -189,7 +217,7 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
 
   const cochange = stringList(macro.cochange), seenRoles = new Set<string>();
   for (const [index, role] of cochange.entries()) {
-    if (!CONTRACT_ROLES.has(role as ContractRole)) errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange references unknown role "${role}"` });
+    if (!availableRoles.has(role as ContractRole)) errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange references unavailable role "${role}"` });
     if (seenRoles.has(role)) errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
     seenRoles.add(role);
   }
@@ -202,8 +230,9 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
   }
 
   const explicitRelations = isObject(source.document_relations) ? source.document_relations : {}, explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
-  for (const name of Object.values(GENERATED_DOCUMENTS)) if (Object.hasOwn(explicitDocuments, name)) {
-    errors.push({ field: "document_relations.documents", message: `contract_conformance generated document "${name}" collides with explicit document_relations` });
+  for (const role of availableRoles) {
+    const name = GENERATED_DOCUMENTS[role];
+    if (Object.hasOwn(explicitDocuments, name)) errors.push({ field: "document_relations.documents", message: `contract_conformance generated document "${name}" collides with explicit document_relations` });
   }
   const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
   for (const id of generatedRuleIds(macro)) if (explicitRuleIds.has(id)) {
@@ -224,22 +253,34 @@ export function expandContractConformancePolicy(policy: unknown) {
   if (!macro) return base;
   delete base.contract_conformance;
 
-  const roleDefinitions = currentRoleDocuments(macro);
-  const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition.path)!])) as Record<ContractRole, string>;
+  const roleDefinitions = configuredRoleDocuments(macro);
+  const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition!.path)!])) as Record<ContractRole, string>;
   const relations = isObject(base.document_relations) ? clone(base.document_relations) : {}, documents = isObject(relations.documents) ? clone(relations.documents) : {};
   const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [], pairFields = macro.pair_fields as Record<string, string>, acceptedState = macro.accepted_state as { status: string; accepted: boolean };
-  for (const role of CONTRACT_ROLES) {
-    documents[GENERATED_DOCUMENTS[role]] = { path: rolePaths[role], format: roleDefinitions[role].format };
+  for (const [role, definition] of Object.entries(roleDefinitions) as Array<[ContractRole, Record<string, unknown>]>) {
+    documents[GENERATED_DOCUMENTS[role]] = { path: rolePaths[role], format: definition.format };
   }
   const selector = (role: ContractRole, pointer: string, type: "string" | "boolean") => ({ document: GENERATED_DOCUMENTS[role], pointer, type });
-  rules.push(
-    { id: GENERATED_RULE_IDS[0], kind: "scalar_equal", left: selector("current.conformance", pairFields.conformance_contract_id, "string"), right: selector("current.contract", pairFields.contract_id, "string") },
-    { id: GENERATED_RULE_IDS[1], kind: "scalar_equals_literal", source: selector("current.contract", pairFields.contract_conformance_path, "string"), value: rolePaths["current.conformance"] },
-    { id: GENERATED_RULE_IDS[2], kind: "scalar_equals_literal", source: selector("current.contract", pairFields.contract_status, "string"), value: acceptedState.status },
-    { id: GENERATED_RULE_IDS[3], kind: "scalar_equals_literal", source: selector("current.conformance", pairFields.conformance_status, "string"), value: acceptedState.status },
-    { id: GENERATED_RULE_IDS[4], kind: "scalar_equals_literal", source: selector("current.contract", pairFields.contract_accepted, "boolean"), value: acceptedState.accepted },
-    { id: GENERATED_RULE_IDS[5], kind: "scalar_equals_literal", source: selector("current.conformance", pairFields.conformance_accepted, "boolean"), value: acceptedState.accepted },
-  );
+  const addPair = (prefix: "current" | "previous") => {
+    const contractRole = `${prefix}.contract` as PairRole, conformanceRole = `${prefix}.conformance` as PairRole, ids = pairRuleIds(prefix);
+    rules.push(
+      { id: ids[0], kind: "scalar_equal", left: selector(conformanceRole, pairFields.conformance_contract_id, "string"), right: selector(contractRole, pairFields.contract_id, "string") },
+      { id: ids[1], kind: "scalar_equals_literal", source: selector(contractRole, pairFields.contract_conformance_path, "string"), value: rolePaths[conformanceRole] },
+      { id: ids[2], kind: "scalar_equals_literal", source: selector(contractRole, pairFields.contract_status, "string"), value: acceptedState.status },
+      { id: ids[3], kind: "scalar_equals_literal", source: selector(conformanceRole, pairFields.conformance_status, "string"), value: acceptedState.status },
+      { id: ids[4], kind: "scalar_equals_literal", source: selector(contractRole, pairFields.contract_accepted, "boolean"), value: acceptedState.accepted },
+      { id: ids[5], kind: "scalar_equals_literal", source: selector(conformanceRole, pairFields.conformance_accepted, "boolean"), value: acceptedState.accepted },
+    );
+  };
+  addPair("current");
+  if (roleDefinitions["previous.contract"] && roleDefinitions["previous.conformance"]) addPair("previous");
+  if (isObject(macro.acceptance)) {
+    const acceptance = macro.acceptance;
+    rules.push(
+      { id: ACCEPTANCE_RULE_IDS[0], kind: "scalar_equals_literal", source: selector("acceptance", acceptance.current_contract_path as string, "string"), value: rolePaths["current.contract"] },
+      { id: ACCEPTANCE_RULE_IDS[1], kind: "scalar_equals_literal", source: selector("acceptance", acceptance.current_conformance_path as string, "string"), value: rolePaths["current.conformance"] },
+    );
+  }
   for (const [index, rawSelector] of (macro.required_paths as Array<Record<string, unknown>> || []).entries()) {
     const source = rawSelector as { document: ContractRole; pointer: string; projection: "array_items" | "object_values" };
     rules.push({ id: `contract-conformance:required-path:${index}`, kind: "referenced_paths_exist", source: { document: GENERATED_DOCUMENTS[source.document], pointer: source.pointer, projection: source.projection, type: "repository_path_set" } });
