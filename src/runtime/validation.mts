@@ -9,7 +9,7 @@ interface AjvRuntime {
   errors: readonly AjvErrorProjection[] | null;
   validate(schema: unknown, data: unknown): boolean | Promise<unknown>;
 }
-type AjvConstructor = new (options?: { allErrors?: boolean }) => AjvRuntime;
+type AjvConstructor = new (options?: { allErrors?: boolean; allowUnionTypes?: boolean }) => AjvRuntime;
 type AjvSchema = unknown;
 type RuntimePolicyProjection = Parameters<typeof compileChangeProfiles>[0] & { content_rules?: unknown };
 type SemanticGroup = readonly [string, readonly unknown[], (error: unknown) => string];
@@ -18,7 +18,9 @@ interface RuntimeValidationOptions { quiet?: boolean; label?: string; }
 interface QuietOption { quiet?: boolean; }
 
 export const loadJSON = (path: string): unknown => JSON.parse(readFileSync(path, "utf-8"));
-export const createAjv = (): AjvRuntime => new (Ajv as unknown as AjvConstructor)({ allErrors: true });
+// Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
+// разрешаем этот стандартный синтаксис, чтобы валидная policy не писала warning в stderr.
+export const createAjv = (): AjvRuntime => new (Ajv as unknown as AjvConstructor)({ allErrors: true, allowUnionTypes: true });
 export const ajvErrors = (errors: readonly AjvErrorProjection[] | null | undefined): string[] => (errors || []).map((error) => `${error.instancePath || "/"} ${error.message}`);
 export function validate(ajv: AjvRuntime, schema: AjvSchema, data: unknown, label: string, { quiet = false }: QuietOption = {}) {
   const valid = ajv.validate(schema, data);
