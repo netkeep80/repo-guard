@@ -239,6 +239,9 @@
         }
       }
     },
+    "document_relations": {
+      "$ref": "#/definitions/document_relations"
+    },
     "advisory_text_rules": {
       "type": "object",
       "description": "Optional heuristic markdown duplication advisories. These warnings never block the PR in v1.",
@@ -364,6 +367,68 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "minItems": 1
+    },
+    "document_relations": {
+      "type": "object",
+      "required": ["documents", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "documents": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/definitions/document_relation_document" }
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/document_relation_rule" }
+        }
+      }
+    },
+    "document_relation_document": {
+      "type": "object",
+      "required": ["path", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "format": { "type": "string", "enum": ["json", "yaml"] }
+      }
+    },
+    "document_scalar_selector": {
+      "type": "object",
+      "required": ["document", "pointer", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "$ref": "#/definitions/non_empty_string" },
+        "pointer": { "type": "string" },
+        "type": { "type": "string", "enum": ["scalar", "string", "boolean"] }
+      }
+    },
+    "document_relation_rule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["id", "kind", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "scalar_equal" },
+            "left": { "$ref": "#/definitions/document_scalar_selector" },
+            "right": { "$ref": "#/definitions/document_scalar_selector" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "source", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "scalar_equals_literal" },
+            "source": { "$ref": "#/definitions/document_scalar_selector" },
+            "value": { "type": ["string", "number", "boolean", "null"] }
+          }
+        }
+      ]
     },
     "profile_overrides": {
       "type": "object",
