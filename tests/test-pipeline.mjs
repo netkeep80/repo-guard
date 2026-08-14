@@ -162,6 +162,7 @@ console.log("\n--- equivalent command inputs share one result shape ---");
   expectCanonicalEnvelope("check-diff report", checkDiffStyle, "check-diff");
   expectCanonicalEnvelope("check-pr report", checkPrStyle, "check-pr");
   expectCanonicalEnvelope("validate-integration report", validateIntegrationStyle, "validate-integration");
+  expect("check-pr initial validation check stays first", checkPrStyle.ruleResults[0]?.rule, "change-intent");
   expect("equivalent facts keep mode-specific provenance", { mode: checkPrFacts.mode, changeIntentSource: checkPrFacts.changeIntentSource }, { mode: "check-pr", changeIntentSource: "pr body" });
   expect("equivalent facts share checked diff paths", checkPrFacts.derived.changedPaths, checkDiffFacts.derived.changedPaths);
   expect("check-pr style input adds ChangeIntent validation without changing policy check result", checkPrStyle.violations.map((violation) => violation.rule), checkDiffStyle.violations.map((violation) => violation.rule));

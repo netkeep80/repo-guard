@@ -1,3 +1,4 @@
+import type { RepositoryFactsInput } from "../facts/input.mjs";
 import { buildPolicyFacts } from "../facts/input.mjs";
 import { runPolicyChecks } from "../checks/orchestrator.mjs";
 import { buildAnchorDiagnostics } from "../reporting/anchor-diagnostics.mjs";
@@ -8,7 +9,22 @@ import {
   renderEnforcementMode,
 } from "../reporting/renderers.mjs";
 
-export function runPolicyPipeline(input, options = {}) {
+interface InitialPolicyCheck {
+  name: string;
+  check: unknown;
+}
+
+export interface PolicyPipelineInput extends RepositoryFactsInput {
+  mode: string;
+  initialChecks?: readonly InitialPolicyCheck[] | null;
+}
+
+export interface PolicyPipelineOptions {
+  quiet?: boolean;
+  printEnforcement?: boolean;
+}
+
+export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPipelineOptions = {}) {
   const quiet = options.quiet || false;
   if (!quiet && options.printEnforcement !== false) {
     console.log(renderEnforcementMode(input.enforcement));
