@@ -139,10 +139,10 @@ const RANKS = {
   enforcement: { advisory: 0, blocking: 1 },
   count: { changed_only: 0, all_tracked: 1 },
 };
-const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+const array = <T,>(value: T[] | null | undefined): T[] => Array.isArray(value) ? value : [];
 const compare = (relation: StrictnessRelation, value: unknown, metadata: StrictnessMetadata = {}) => ({ relation, value, ...metadata });
 const scalar = (relation: RankRelation, value: number, metadata: StrictnessMetadata): RankStrictness => compare(relation, value, metadata) as RankStrictness;
-const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata): SetStrictness => compare(relation, array(value), metadata) as SetStrictness;
+const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata): SetStrictness => compare(relation, array(value as Array<string | number> | undefined), metadata) as SetStrictness;
 const exact = (value: unknown, metadata: StrictnessMetadata): ExactStrictness => compare("equal_or_incomparable", value, metadata) as ExactStrictness;
 const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("required_entity", true, metadata) as EntityStrictness;
 
@@ -175,7 +175,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     message: (before, after) => `enforcement.mode: ${before} -> ${after}`, removeMessage: `enforcement.mode removed (was ${mode})`,
   }));
 
-  for (const rule of array(policy.size_rules) as SizeRuleProjection[]) {
+  for (const rule of array(policy.size_rules)) {
     const owner = `size:${rule.id}`, pointer = `/size_rules/${rule.id}`;
     add(owner, null, entity({ owner, pointer, removeKind: "size_rule_removed", rule_id: rule.id,
       removeBefore: { present: true, glob: rule.glob, max: rule.max }, removeAfter: { present: false }, removeMessage: `size_rules entry "${rule.id}" removed (glob: ${rule.glob ?? "?"}, max: ${rule.max ?? "?"})` }));
@@ -190,7 +190,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     }));
   }
 
-  for (const workflow of array(policy.integration?.workflows) as IntegrationWorkflowProjection[]) {
+  for (const workflow of array(policy.integration?.workflows)) {
     const owner = `workflow:${workflow.id}`, pointer = `/integration/workflows/${workflow.id}`;
     add(owner, null, entity({ owner, pointer, removeKind: "integration_workflow_removed", workflow_id: workflow.id,
       removeBefore: { present: true, role: workflow.role, path: workflow.path }, removeAfter: { present: false }, removeMessage: `integration.workflows entry "${workflow.id}" removed` }));
@@ -208,7 +208,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   if (policy.change_profiles) add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
   if (policy.integration) add("runtime:integration", { kind: "integration", name: "integration" });
   add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: changeIntent?.surface_debt });
-  array(policy.cochange_rules).forEach((rule) => add(`cochange:${array(policy.cochange_rules).indexOf(rule)}`, { kind: "implies_nonempty", name: "cochange", ...(rule as CochangeRuleProjection) }));
+  array(policy.cochange_rules).forEach((rule, index) => add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }));
   if (changeIntent) {
     add("change-intent:scope", { kind: "scope_paths", name: "change-intent-scope", patterns: changeIntent.scope });
     add("change-intent:must-touch", { kind: "require_paths", name: "must-touch", patterns: changeIntent.must_touch });
@@ -243,13 +243,11 @@ export function compareConstraintPrograms(basePolicy: ConstraintPolicyProjection
     const next = head.get(entry.key);
     if (!next) { if (entry.removeKind) { relaxations.push(relaxation(entry, entry.removeBefore ?? entry.raw ?? entry.value, entry.removeAfter ?? null, entry.removeKind, entry.removeMessage)); changed = true; if (entry.relation === "required_entity") removedOwners.add(entry.key); } continue; }
     if (entry.relation === "lower_stricter" || entry.relation === "higher_stricter") {
-      const nextRank = next as RankStrictness & { key: string }, entryRank = entry as RankStrictness & { key: string };
-      const weaker = entry.relation === "lower_stricter" ? nextRank.value > entryRank.value : nextRank.value < entryRank.value;
-      const stricter = entry.relation === "lower_stricter" ? nextRank.value < entryRank.value : nextRank.value > entryRank.value;
-      if (weaker) relaxations.push(relaxation(entry, entry.raw ?? entryRank.value, next.raw ?? nextRank.value)); tightened ||= stricter; changed ||= nextRank.value !== entryRank.value;
+      const weaker = entry.relation === "lower_stricter" ? next.value as number > entry.value : next.value as number < entry.value;
+      const stricter = entry.relation === "lower_stricter" ? next.value as number < entry.value : next.value as number > entry.value;
+      if (weaker) relaxations.push(relaxation(entry, entry.raw ?? entry.value, next.raw ?? next.value)); tightened ||= stricter; changed ||= next.value !== entry.value;
     } else if (["superset_stricter", "subset_stricter"].includes(entry.relation)) {
-      const entrySet = entry as SetStrictness & { key: string }, nextSet = next as SetStrictness & { key: string };
-      const before = new Set(entrySet.value), after = new Set(nextSet.value), removed = entrySet.value.filter((item) => !after.has(item)), added = nextSet.value.filter((item) => !before.has(item));
+      const before = new Set(entry.value as Array<string | number>), after = new Set(next.value as Array<string | number>), removed = (entry.value as Array<string | number>).filter((item) => !after.has(item)), added = (next.value as Array<string | number>).filter((item) => !before.has(item));
       const weaker = entry.relation === "superset_stricter" ? removed : added;
       for (const item of weaker) relaxations.push(relaxation(entry, item, null, entry.weakenKind, entry.message!(item), { [entry.itemField!]: item }));
       tightened ||= (entry.relation === "superset_stricter" ? added : removed).length > 0; changed ||= removed.length > 0 || added.length > 0;
