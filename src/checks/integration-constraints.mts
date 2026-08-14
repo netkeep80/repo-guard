@@ -1,4 +1,5 @@
 import { compareSets } from "./relation-kernel.mjs";
+import { matchesAny } from "../utils/path-patterns.mjs";
 
 type RefPinning = "any" | "local" | "sha" | "semver" | "tag" | "ref" | string;
 
@@ -62,6 +63,7 @@ interface WorkflowExpectation {
 }
 
 interface WorkflowFact {
+  id: string;
   path: string;
   role?: string;
   expect?: WorkflowExpectation;
@@ -147,6 +149,11 @@ export interface IntegrationCheckEntry {
   };
 }
 
+export interface WorkflowPathCoverageBinding {
+  workflow: string;
+  covers: string[];
+}
+
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const array = <T,>(value: T[] | null | undefined): T[] => Array.isArray(value) ? value : [];
 const lower = (value: unknown): string => String(value || "").toLowerCase();
@@ -193,23 +200,38 @@ const truthy = (value: unknown): boolean => !["", "false", "0", "null"].includes
 const manualClone = (run: unknown): boolean => /\bgit\s+clone\b/i.test(String(run || "")) && /repo-guard/i.test(String(run || ""));
 const tempCli = (run: unknown): boolean => String(run || "").split(/\r?\n/).some((line) => /RUNNER_TEMP|TMPDIR|\/tmp|\btemp\b/i.test(line) && /src\/repo-guard\.mjs|repo-guard\.mjs/i.test(line));
 
+function workflowEventDetails(workflow: WorkflowFact, role: string): string[] {
+  const details: string[] = [], expect = workflow.expect || {}, events = expect.events?.length ? expect.events : ["pull_request"];
+  for (const event of compareSets(events, workflow.triggerEvents, "left_subset").missing) details.push(`${workflow.path}: ${role} workflow missing required event ${event}`);
+  if (!expect.events?.length && !workflow.triggerEvents.includes("pull_request") && !workflow.triggerEvents.includes("pull_request_target")) {
+    details.push(`${workflow.path}: ${role} workflow must run on pull_request or pull_request_target`);
+  }
+  if (expect.event_types?.length) {
+    const event = workflow.triggerEvents.includes("pull_request") ? "pull_request" : workflow.triggerEvents.includes("pull_request_target") ? "pull_request_target" : events[0];
+    const actual = workflow.triggerEventTypes.find((fact) => fact.event === event)?.types || [];
+    for (const type of compareSets(expect.event_types, actual, "left_subset").missing) details.push(`${workflow.path}: ${role} workflow missing required ${event} type ${type}`);
+  }
+  return details;
+}
+
+function ciGateDetails(workflow: WorkflowFact): string[] {
+  const details = workflowEventDetails(workflow, "ci_gate"), expect = workflow.expect || {};
+  const disallowContinueOnError = expect.enforcement === "blocking" || (expect.disallow || []).includes("continue_on_error");
+  if (disallowContinueOnError) for (const fact of workflow.continueOnError || []) if (truthy(fact.value)) {
+    details.push(detail(workflow, fact, "blocking ci_gate step must not set continue-on-error"));
+  }
+  return details;
+}
+
 function workflowDetails(workflow: WorkflowFact): string[] {
   const details: string[] = [], expect = workflow.expect || {};
+  if (workflow.role === "ci_gate") return ciGateDetails(workflow);
   if (workflow.role !== "repo_guard_pr_gate") {
     if (!referencesRepoGuard(workflow)) details.push(`${workflow.path}: workflow does not reference repo-guard via uses or run`);
     return details;
   }
 
-  const events = expect.events?.length ? expect.events : ["pull_request"];
-  for (const event of compareSets(events, workflow.triggerEvents, "left_subset").missing) details.push(`${workflow.path}: repo_guard_pr_gate workflow missing required event ${event}`);
-  if (!expect.events?.length && !workflow.triggerEvents.includes("pull_request") && !workflow.triggerEvents.includes("pull_request_target")) {
-    details.push(`${workflow.path}: repo_guard_pr_gate workflow must run on pull_request or pull_request_target`);
-  }
-  if (expect.event_types?.length) {
-    const event = workflow.triggerEvents.includes("pull_request") ? "pull_request" : "pull_request_target";
-    const actual = workflow.triggerEventTypes.find((fact) => fact.event === event)?.types || [];
-    for (const type of compareSets(expect.event_types, actual, "left_subset").missing) details.push(`${workflow.path}: repo_guard_pr_gate workflow missing required ${event} type ${type}`);
-  }
+  details.push(...workflowEventDetails(workflow, "repo_guard_pr_gate"));
   if (!hasFetchDepthZero(workflow)) details.push(`${workflow.path}: repo_guard_pr_gate workflow should checkout with fetch-depth: 0`);
 
   const actions = repoGuardActions(workflow, expect.action || {});
@@ -242,6 +264,26 @@ function workflowDetails(workflow: WorkflowFact): string[] {
   return details;
 }
 
+export function checkWorkflowPathCoverage(integration: IntegrationFacts, binding: WorkflowPathCoverageBinding, referencedPaths: string[]) {
+  const workflow = array(integration.workflows).find((item) => item.id === binding.workflow);
+  if (!workflow) return {
+    ok: false,
+    message: `evidence workflow "${binding.workflow}" is unavailable in extracted integration facts`,
+    data: { workflow: binding.workflow, covers: binding.covers, referenced_paths: referencedPaths, uncovered_paths: referencedPaths },
+  };
+  if (workflow.expect?.enforcement !== "blocking") return {
+    ok: false,
+    message: `evidence workflow "${binding.workflow}" is not configured as blocking`,
+    data: { workflow: binding.workflow, workflow_role: workflow.role, covers: binding.covers, referenced_paths: referencedPaths, uncovered_paths: [] },
+  };
+  const uncoveredPaths = referencedPaths.filter((path) => !matchesAny(path, binding.covers)).sort();
+  return {
+    ok: uncoveredPaths.length === 0,
+    message: uncoveredPaths.length ? `evidence workflow "${binding.workflow}" does not cover all declared repository paths` : undefined,
+    data: { workflow: binding.workflow, workflow_role: workflow.role, covers: binding.covers, referenced_paths: referencedPaths, uncovered_paths: uncoveredPaths },
+  };
+}
+
 function templateDetails(template: TemplateFact): string[] {
   if (template.present === false && template.optional) return [];
   const details: string[] = [], blocks = template.changeIntentBlocks || [];
@@ -268,7 +310,7 @@ export function integrationConstraintEntries(integration: IntegrationFacts = {})
   const entry = (name: string, details: string[], pass: string, fail: string, hint: string): IntegrationCheckEntry => ({ name, check: details.length ? { ok: false, message: fail, details, hint } : { ok: true, message: pass } });
   return [
     entry("integration-artifacts", artifacts, "All declared integration artifacts were read and parsed", "Integration artifact extraction failed", "Fix missing files, malformed workflow YAML, malformed ChangeIntent blocks, or Markdown fences"),
-    entry("integration-workflows", workflows, "Workflow integration wiring is valid", "Workflow integration wiring has issues", "Compare declared repo-guard workflows with templates/example-workflow.yml"),
+    entry("integration-workflows", workflows, "Workflow integration wiring is valid", "Workflow integration wiring has issues", "Compare declared workflows with their configured integration expectations"),
     entry("integration-templates", templates, "Template integration wiring is valid", "Template integration wiring has issues", "Add repo-guard-yaml or repo-guard-json fenced ChangeIntent blocks to required templates"),
     entry("integration-docs", docs, "Documentation integration wiring is valid", "Documentation integration wiring has issues", "Update declared docs so every must_mention term appears"),
     entry("integration-profiles", profiles, "Profile documentation wiring is valid", "Profile documentation wiring has issues", "Mention each integration profile id in its declared profile document"),
