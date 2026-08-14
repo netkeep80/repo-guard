@@ -1,3 +1,5 @@
+import { normalizeDocumentFact } from "./document-facts.mjs";
+import { matchesAny } from "./utils/path-patterns.mjs";
 const REQUIREMENT_ID = "(?:BR|SR|FR|NFR|CR|IR)-[0-9]{3}";
 const PACKS = {
     "requirements-strict": {
@@ -41,9 +43,23 @@ const OVERRIDE_FIELDS = new Set([
     ...Object.keys(PACKS["requirements-strict"].defaults),
     "changed_requirement_evidence_surfaces", "affected_evidence_surfaces",
 ]);
+const CONTRACT_ROLES = new Set(["current.contract", "current.conformance"]);
+const GENERATED_DOCUMENTS = {
+    "current.contract": "contract-conformance.current.contract",
+    "current.conformance": "contract-conformance.current.conformance",
+};
+const GENERATED_RULE_IDS = [
+    "contract-conformance:current-id",
+    "contract-conformance:current-conformance-path",
+    "contract-conformance:current-contract-status",
+    "contract-conformance:current-conformance-status",
+    "contract-conformance:current-contract-accepted",
+    "contract-conformance:current-conformance-accepted",
+];
 const clone = (value) => structuredClone(value);
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const ref = (value, config) => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
+const stringList = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 function configFor(spec, overrides = {}) {
     const config = clone(spec.defaults);
     for (const [key, value] of Object.entries(overrides))
@@ -62,6 +78,30 @@ function materializePack(spec, overrides) {
     }
     const trace_rules = spec.trace_rules.map((rule) => Object.fromEntries(Object.entries(rule).map(([key, value]) => [key, ref(value, config)])));
     return { anchors: { types }, trace_rules };
+}
+function contractMacro(policy) {
+    return isObject(policy.contract_conformance) ? policy.contract_conformance : null;
+}
+function currentRoleDocuments(macro) {
+    const current = isObject(macro.current) ? macro.current : {};
+    return {
+        "current.contract": isObject(current.contract) ? current.contract : {},
+        "current.conformance": isObject(current.conformance) ? current.conformance : {},
+    };
+}
+function normalizeDocumentPath(value) {
+    try {
+        return normalizeDocumentFact(value, "repository_path");
+    }
+    catch {
+        return null;
+    }
+}
+function generatedRuleIds(macro) {
+    return [
+        ...GENERATED_RULE_IDS,
+        ...((Array.isArray(macro.required_paths) ? macro.required_paths : []).map((_, index) => `contract-conformance:required-path:${index}`)),
+    ];
 }
 export const listBuiltInProfiles = () => Object.keys(PACKS).sort();
 export function compileProfilePolicy(policy) {
@@ -84,6 +124,75 @@ export function compileProfilePolicy(policy) {
     }
     return errors;
 }
+export function compileContractConformancePolicy(policy) {
+    const source = policy;
+    if (source?.contract_conformance === undefined)
+        return [];
+    if (!isObject(source.contract_conformance))
+        return [{ field: "contract_conformance", message: "contract_conformance must be an object" }];
+    const macro = source.contract_conformance, errors = [];
+    const roles = currentRoleDocuments(macro), paths = new Map();
+    for (const role of CONTRACT_ROLES) {
+        const definition = roles[role], path = normalizeDocumentPath(definition.path), format = definition.format;
+        if (!path)
+            errors.push({ field: `contract_conformance.current.${role.split(".")[1]}.path`, message: `${role} path must be a canonical repository path` });
+        else
+            paths.set(role, path);
+        if (format !== "json" && format !== "yaml")
+            errors.push({ field: `contract_conformance.current.${role.split(".")[1]}.format`, message: `${role} format must be json or yaml` });
+    }
+    if (paths.get("current.contract") && paths.get("current.contract") === paths.get("current.conformance")) {
+        errors.push({ field: "contract_conformance.current", message: "current contract and conformance paths must be distinct" });
+    }
+    const pairFields = isObject(macro.pair_fields) ? macro.pair_fields : {};
+    for (const field of ["contract_id", "conformance_contract_id", "contract_conformance_path", "contract_status", "conformance_status", "contract_accepted", "conformance_accepted"]) {
+        if (typeof pairFields[field] !== "string")
+            errors.push({ field: `contract_conformance.pair_fields.${field}`, message: `${field} must be a JSON Pointer string` });
+    }
+    const acceptedState = isObject(macro.accepted_state) ? macro.accepted_state : {};
+    if (typeof acceptedState.status !== "string")
+        errors.push({ field: "contract_conformance.accepted_state.status", message: "accepted_state.status must be a string" });
+    if (typeof acceptedState.accepted !== "boolean")
+        errors.push({ field: "contract_conformance.accepted_state.accepted", message: "accepted_state.accepted must be a boolean" });
+    const selectors = Array.isArray(macro.required_paths) ? macro.required_paths : [], selectorKeys = new Set();
+    for (const [index, rawSelector] of selectors.entries()) {
+        const selector = isObject(rawSelector) ? rawSelector : {}, role = selector.document;
+        if (!CONTRACT_ROLES.has(role))
+            errors.push({ field: `contract_conformance.required_paths[${index}].document`, message: `required_paths[${index}] references unknown role "${selector.document}"` });
+        const key = `${selector.document}|${selector.pointer}|${selector.projection}`;
+        if (selectorKeys.has(key))
+            errors.push({ field: `contract_conformance.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
+        selectorKeys.add(key);
+    }
+    const cochange = stringList(macro.cochange), seenRoles = new Set();
+    for (const [index, role] of cochange.entries()) {
+        if (!CONTRACT_ROLES.has(role))
+            errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange references unknown role "${role}"` });
+        if (seenRoles.has(role))
+            errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
+        seenRoles.add(role);
+    }
+    if (cochange.length < 2)
+        errors.push({ field: "contract_conformance.cochange", message: "cochange must contain at least two distinct roles" });
+    const controlPaths = stringList(macro.control_paths).map((item) => item.trim()).filter(Boolean);
+    if (!controlPaths.length)
+        errors.push({ field: "contract_conformance.control_paths", message: "control_paths must contain at least one non-empty pattern" });
+    for (const [role, path] of paths)
+        if (controlPaths.length && !matchesAny(path, controlPaths)) {
+            errors.push({ field: "contract_conformance.control_paths", message: `control_paths do not cover ${role} path "${path}"` });
+        }
+    const explicitRelations = isObject(source.document_relations) ? source.document_relations : {}, explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
+    for (const name of Object.values(GENERATED_DOCUMENTS))
+        if (Object.hasOwn(explicitDocuments, name)) {
+            errors.push({ field: "document_relations.documents", message: `contract_conformance generated document "${name}" collides with explicit document_relations` });
+        }
+    const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
+    for (const id of generatedRuleIds(macro))
+        if (explicitRuleIds.has(id)) {
+            errors.push({ field: "document_relations.rules", message: `contract_conformance generated rule "${id}" collides with explicit document_relations` });
+        }
+    return errors;
+}
 export function expandPolicyProfile(policy) {
     const base = clone(policy), spec = PACKS[base.profile];
     if (!spec)
@@ -91,7 +200,39 @@ export function expandPolicyProfile(policy) {
     const patch = materializePack(spec, base.profile_overrides || {});
     return { ...base, anchors: base.anchors || patch.anchors, trace_rules: base.trace_rules || patch.trace_rules };
 }
+export function expandContractConformancePolicy(policy) {
+    const base = clone(policy), macro = contractMacro(base);
+    if (!macro)
+        return base;
+    delete base.contract_conformance;
+    const roleDefinitions = currentRoleDocuments(macro);
+    const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition.path)]));
+    const relations = isObject(base.document_relations) ? clone(base.document_relations) : {}, documents = isObject(relations.documents) ? clone(relations.documents) : {};
+    const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [], pairFields = macro.pair_fields, acceptedState = macro.accepted_state;
+    for (const role of CONTRACT_ROLES) {
+        documents[GENERATED_DOCUMENTS[role]] = { path: rolePaths[role], format: roleDefinitions[role].format };
+    }
+    const selector = (role, pointer, type) => ({ document: GENERATED_DOCUMENTS[role], pointer, type });
+    rules.push({ id: GENERATED_RULE_IDS[0], kind: "scalar_equal", left: selector("current.conformance", pairFields.conformance_contract_id, "string"), right: selector("current.contract", pairFields.contract_id, "string") }, { id: GENERATED_RULE_IDS[1], kind: "scalar_equals_literal", source: selector("current.contract", pairFields.contract_conformance_path, "string"), value: rolePaths["current.conformance"] }, { id: GENERATED_RULE_IDS[2], kind: "scalar_equals_literal", source: selector("current.contract", pairFields.contract_status, "string"), value: acceptedState.status }, { id: GENERATED_RULE_IDS[3], kind: "scalar_equals_literal", source: selector("current.conformance", pairFields.conformance_status, "string"), value: acceptedState.status }, { id: GENERATED_RULE_IDS[4], kind: "scalar_equals_literal", source: selector("current.contract", pairFields.contract_accepted, "boolean"), value: acceptedState.accepted }, { id: GENERATED_RULE_IDS[5], kind: "scalar_equals_literal", source: selector("current.conformance", pairFields.conformance_accepted, "boolean"), value: acceptedState.accepted });
+    for (const [index, rawSelector] of (macro.required_paths || []).entries()) {
+        const source = rawSelector;
+        rules.push({ id: `contract-conformance:required-path:${index}`, kind: "referenced_paths_exist", source: { document: GENERATED_DOCUMENTS[source.document], pointer: source.pointer, projection: source.projection, type: "repository_path_set" } });
+    }
+    base.document_relations = { ...relations, documents, rules };
+    const cochange = macro.cochange, cochangeRules = Array.isArray(base.cochange_rules) ? clone(base.cochange_rules) : [];
+    for (const role of cochange)
+        for (const peer of cochange)
+            if (peer !== role)
+                cochangeRules.push({ if_changed: [rolePaths[role]], must_change_any: [rolePaths[peer]] });
+    base.cochange_rules = cochangeRules;
+    const paths = isObject(base.paths) ? clone(base.paths) : {}, governance = stringList(paths.governance_paths), controlPaths = stringList(macro.control_paths);
+    paths.governance_paths = [...new Set([...governance, ...controlPaths])].sort();
+    base.paths = paths;
+    return base;
+}
 export function resolvePolicyProfile(policy) {
-    const errors = compileProfilePolicy(policy);
-    return { ok: !errors.length, policy: errors.length ? clone(policy) : expandPolicyProfile(policy), errors };
+    const errors = [...compileProfilePolicy(policy), ...compileContractConformancePolicy(policy)];
+    if (errors.length)
+        return { ok: false, policy: clone(policy), errors };
+    return { ok: true, policy: expandContractConformancePolicy(expandPolicyProfile(policy)), errors };
 }
