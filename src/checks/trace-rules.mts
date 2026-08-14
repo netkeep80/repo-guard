@@ -108,7 +108,7 @@ function evidence(rule: EvidenceTraceRule, facts: TraceFacts, declared: string[]
 
 export function buildTraceRuleDiagnostics(facts: TraceFacts): TraceDiagnostic[] {
   return (facts.policy.trace_rules || []).map((rule) => {
-    if (rule.kind === "must_resolve") return mustResolve(rule as MustResolveTraceRule, (facts.anchors || {}) as AnchorExtraction);
+    if (rule.kind === "must_resolve") return mustResolve(rule as MustResolveTraceRule, facts.anchors || {} as AnchorExtraction);
     if (rule.kind === "changed_files_require_evidence") return evidence(rule as EvidenceTraceRule, facts);
     if (rule.kind === "declared_anchors_require_evidence") return evidence(rule as EvidenceTraceRule, facts, changeIntentValues(facts.changeIntent, (rule as EvidenceTraceRule).change_intent_field));
     return { id: rule.id, kind: rule.kind, ok: true, stats: {} };
