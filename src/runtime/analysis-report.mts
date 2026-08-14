@@ -10,23 +10,53 @@ const CHECK_FIELDS = new Set([
   "data",
 ]);
 
-function isPlainObject(value) {
+type LooseObject = Record<string, unknown>;
+type CheckInput = LooseObject & {
+  ok?: unknown;
+  advisory?: unknown;
+  message?: unknown;
+  details?: unknown;
+  errors?: unknown;
+  hint?: unknown;
+  data?: unknown;
+};
+type Severity = "pass" | "warning" | "failure";
+type Outcome = "pass" | "warning" | "violation";
+interface NormalizedCheckResult {
+  rule: string;
+  ok: boolean;
+  severity: Severity;
+  details: string[];
+  message?: unknown;
+  hint?: unknown;
+  data?: LooseObject;
+}
+interface AnalysisPresenter {
+  check?: (event: { check: NormalizedCheckResult; mode: unknown; outcome: Outcome }) => void;
+  finish?: (report: unknown) => void;
+}
+interface CollectorOptions {
+  presenter?: AnalysisPresenter | null;
+}
+type EnforcementProjection = LooseObject & { mode?: unknown };
+
+function isPlainObject(value: unknown): value is LooseObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isScalar(value) {
+function isScalar(value: unknown): boolean {
   return value === null || ["string", "number", "boolean"].includes(typeof value);
 }
 
-function formatList(values) {
+function formatList(values: readonly unknown[]): string {
   return values.length > 0 ? values.join(", ") : "(none)";
 }
 
-function compactValue(value) {
+function compactValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(compactValue).filter((item) => item !== undefined);
   if (!isPlainObject(value)) return value;
 
-  const compacted = {};
+  const compacted: LooseObject = {};
   for (const [key, nested] of Object.entries(value)) {
     const clean = compactValue(nested);
     if (clean !== undefined) compacted[key] = clean;
@@ -34,11 +64,11 @@ function compactValue(value) {
   return compacted;
 }
 
-function checkData(check) {
-  if (isPlainObject(check.data)) return check.data;
+function checkData(check: unknown): LooseObject {
+  if (isPlainObject((check as CheckInput).data)) return (check as CheckInput).data as LooseObject;
 
-  const data = {};
-  for (const [key, value] of Object.entries(check || {})) {
+  const data: LooseObject = {};
+  for (const [key, value] of Object.entries((check as LooseObject) || {})) {
     if (CHECK_FIELDS.has(key) || value === undefined) continue;
     const compacted = compactValue(value);
     if (Array.isArray(compacted) && compacted.length === 0) continue;
@@ -48,8 +78,8 @@ function checkData(check) {
   return data;
 }
 
-function dataDetails(data, { includeComplex }) {
-  const details = [];
+function dataDetails(data: LooseObject, { includeComplex }: { includeComplex: boolean }): string[] {
+  const details: string[] = [];
   for (const [key, value] of Object.entries(data)) {
     if (value === undefined || value === null) continue;
     if (isScalar(value)) {
@@ -65,70 +95,70 @@ function dataDetails(data, { includeComplex }) {
   return details;
 }
 
-function asList(value) {
+function asList(value: unknown): string[] {
   if (!value) return [];
   return Array.isArray(value) ? value.map(String) : [String(value)];
 }
 
-export function detailFromCheck(check) {
-  const explicitDetails = asList(check.details);
-  const errors = asList(check.errors);
+export function detailFromCheck(check: unknown): string[] {
+  const explicitDetails = asList((check as CheckInput).details);
+  const errors = asList((check as CheckInput).errors);
   const data = checkData(check);
   const includeComplex = explicitDetails.length === 0 && errors.length === 0;
   return [
-    ...asList(check.message),
+    ...asList((check as CheckInput).message),
     ...dataDetails(data, { includeComplex }),
     ...explicitDetails,
     ...errors,
-    ...asList(check.hint).map((hint) => `hint: ${hint}`),
+    ...asList((check as CheckInput).hint).map((hint) => `hint: ${hint}`),
   ];
 }
 
-function normalizeCheckResult(name, check) {
-  const ok = Boolean(check.ok);
-  const result = {
+function normalizeCheckResult(name: string, check: unknown): NormalizedCheckResult {
+  const ok = Boolean((check as CheckInput).ok);
+  const result: NormalizedCheckResult = {
     rule: name,
     ok,
-    severity: ok ? "pass" : check.advisory ? "warning" : "failure",
+    severity: ok ? "pass" : (check as CheckInput).advisory ? "warning" : "failure",
     details: detailFromCheck(check),
   };
   const data = checkData(check);
 
-  if (check.message) result.message = check.message;
-  if (check.hint) result.hint = check.hint;
+  if ((check as CheckInput).message) result.message = (check as CheckInput).message;
+  if ((check as CheckInput).hint) result.hint = (check as CheckInput).hint;
   if (Object.keys(data).length > 0) result.data = data;
   return result;
 }
 
-function normalizeEnforcement(enforcement) {
+function normalizeEnforcement(enforcement: unknown): EnforcementProjection {
   if (typeof enforcement === "string") return { mode: enforcement };
-  return enforcement || { mode: "blocking" };
+  return (enforcement as EnforcementProjection | null | undefined) || { mode: "blocking" };
 }
 
-export function createAnalysisCollector(enforcementInput, options = {}) {
+export function createAnalysisCollector(enforcementInput: unknown, options: CollectorOptions = {}) {
   const enforcement = normalizeEnforcement(enforcementInput);
   const mode = enforcement.mode;
   const presenter = options.presenter || null;
   let passed = 0;
   let violations = 0;
   let warnings = 0;
-  const ruleResults = [];
-  const violationDetails = [];
-  const warningDetails = [];
-  const hints = [];
+  const ruleResults: NormalizedCheckResult[] = [];
+  const violationDetails: NormalizedCheckResult[] = [];
+  const warningDetails: NormalizedCheckResult[] = [];
+  const hints: Array<{ rule: string; message: unknown }> = [];
 
   return {
-    report(name, check) {
+    report(name: string, check: unknown) {
       const normalized = normalizeCheckResult(name, check);
       ruleResults.push(normalized);
 
-      if (check.ok) {
+      if ((check as CheckInput).ok) {
         passed++;
         presenter?.check?.({ check: normalized, mode, outcome: "pass" });
         return;
       }
 
-      if (check.advisory) {
+      if ((check as CheckInput).advisory) {
         warnings++;
         warningDetails.push(normalized);
         if (normalized.hint) hints.push({ rule: name, message: normalized.hint });
@@ -142,7 +172,7 @@ export function createAnalysisCollector(enforcementInput, options = {}) {
       presenter?.check?.({ check: normalized, mode, outcome: "violation" });
     },
 
-    finish(extra = {}) {
+    finish(extra: LooseObject = {}) {
       const enforcedFailures = mode === "blocking" ? violations : 0;
       const exitCode = enforcedFailures > 0 ? 1 : 0;
       const result = violations > 0 ? "failed" : warnings > 0 ? "passed_with_warnings" : "passed";
