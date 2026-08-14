@@ -1,3 +1,5 @@
+import { normalizeDocumentFact } from "../document-facts.mjs";
+
 type EnforcementMode = "advisory" | "blocking";
 type CountMode = "changed_only" | "all_tracked";
 type RankRelation = "lower_stricter" | "higher_stricter";
@@ -5,6 +7,7 @@ type SetRelation = "superset_stricter" | "subset_stricter";
 type StrictnessRelation = RankRelation | SetRelation | "equal_or_incomparable" | "required_entity";
 type ComparisonRelation = "equal" | "weaker" | "incomparable" | "stricter";
 type DiagnosticValue = string | number | boolean | null | undefined;
+type DocumentScalarType = "scalar" | "string" | "boolean";
 
 interface StrictnessMetadata {
   owner?: string;
@@ -89,6 +92,31 @@ interface CochangeRuleProjection {
   [key: string]: unknown;
 }
 
+interface DocumentDefinitionProjection {
+  path?: unknown;
+  format?: unknown;
+}
+
+interface DocumentScalarSelectorProjection {
+  document?: unknown;
+  pointer?: unknown;
+  type?: unknown;
+}
+
+interface DocumentRelationRuleProjection {
+  id?: unknown;
+  kind?: unknown;
+  left?: unknown;
+  right?: unknown;
+  source?: unknown;
+  value?: unknown;
+}
+
+interface DocumentRelationsProjection {
+  documents?: Record<string, DocumentDefinitionProjection>;
+  rules?: DocumentRelationRuleProjection[];
+}
+
 export interface ConstraintPolicyProjection {
   diff_rules?: DiffRulesProjection;
   paths?: PathsProjection;
@@ -99,6 +127,7 @@ export interface ConstraintPolicyProjection {
   trace_rules?: unknown[];
   change_profiles?: unknown;
   cochange_rules?: CochangeRuleProjection[];
+  document_relations?: DocumentRelationsProjection;
 }
 
 interface ChangeIntentProjection {
@@ -145,6 +174,26 @@ const scalar = (relation: RankRelation, value: number, metadata: StrictnessMetad
 const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata): SetStrictness => compare(relation, array(value as Array<string | number> | undefined), metadata) as SetStrictness;
 const exact = (value: unknown, metadata: StrictnessMetadata): ExactStrictness => compare("equal_or_incomparable", value, metadata) as ExactStrictness;
 const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("required_entity", true, metadata) as EntityStrictness;
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function canonicalDocumentPath(value: unknown): string {
+  try { return normalizeDocumentFact(value, "repository_path") as string; }
+  catch { return typeof value === "string" ? value : String(value ?? ""); }
+}
+
+function compileDocumentSelector(selectorValue: unknown, documents: Record<string, DocumentDefinitionProjection>) {
+  const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
+  return {
+    document: name,
+    path: canonicalDocumentPath(definition.path),
+    format: definition.format,
+    pointer: typeof selector.pointer === "string" ? selector.pointer : "",
+    type: selector.type as DocumentScalarType,
+  };
+}
 
 export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}, changeIntent: ChangeIntentProjection | null = null): ConstraintProgramEntry[] {
   const program: ConstraintProgramEntry[] = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
@@ -202,6 +251,25 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     }));
   }
 
+  const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
+  for (const rule of array(documentRelations?.rules)) {
+    const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
+    const runtimeBase = { name: owner, relation_id: id };
+    let runtime: RuntimeConstraint | null = null, shape: unknown = { kind: rule.kind };
+    if (rule.kind === "scalar_equal") {
+      const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
+      runtime = { ...runtimeBase, kind: "document_scalar_equal", left, right };
+      shape = { kind: rule.kind, left, right };
+    } else if (rule.kind === "scalar_equals_literal") {
+      const source = compileDocumentSelector(rule.source, documents);
+      runtime = { ...runtimeBase, kind: "document_scalar_equals_literal", source, value: rule.value };
+      shape = { kind: rule.kind, source, value: rule.value };
+    }
+    add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
+      removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));
+    add(`${owner}:shape`, null, exact(shape, { owner, pointer, rule_id: id, incomparableMessage: `document_relations rule "${id}" changed semantics` }));
+  }
+
   if (array(policy.size_rules).length) add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
   if (array(policy.registry_rules).length) add("runtime:registry-rules", { kind: "registry_rules", name: "registry-rules", rules: policy.registry_rules });
   if (array(policy.trace_rules).length) add("runtime:trace-rules", { kind: "trace_rules", name: "trace-rules" });
@@ -223,7 +291,7 @@ function canonical(value: unknown): unknown { if (Array.isArray(value)) return v
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
-  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules;
+  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.document_relations;
   if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
   if (copy.integration) { delete copy.integration.workflows; if (!Object.keys(copy.integration).length) delete copy.integration; }
   return copy;
