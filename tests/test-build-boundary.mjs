@@ -103,7 +103,7 @@ console.log("\n--- stale generated dist is rejected ---");
   const sourcePath = resolve(projectRoot, "src/utils/collections.mts");
   const distPath = resolve(projectRoot, "dist/utils/collections.mjs");
   const sourceBefore = readFileSync(sourcePath, "utf-8");
-  const distBefore = readFileSync(distPath);
+  const distBefore = readFileSync(distPath, "utf-8");
   try {
     writeFileSync(sourcePath, `${sourceBefore}\n// stale-dist-fixture\n`);
     const result = spawnSync(process.execPath, [resolve(projectRoot, "scripts/check-dist.mjs")], {
