@@ -12,7 +12,6 @@ import { ajvErrors, createAjv, loadJSON } from "./runtime/validation.mjs";
 type IntegrationCountKey = "workflows" | "templates" | "docs" | "profiles";
 type IntegrationCountProjection = Partial<Record<IntegrationCountKey | "errors", unknown>>;
 type IntegrationPolicyProjection = Parameters<typeof extractIntegration>[0];
-type EnforcementPolicyProjection = NonNullable<Parameters<typeof resolveEnforcementMode>[0]["policy"]>;
 type EnforcementCliValue = Parameters<typeof resolveEnforcementMode>[0]["cliValue"];
 interface IntegrationValidatorRoots {
   packageRoot: string;
@@ -42,7 +41,7 @@ export function createIntegrationAnalysisReport(roots: IntegrationValidatorRoots
   try { schema = loadJSON(schemaPath); }
   catch (error: unknown) { return { fatal: true, message: `ERROR: Cannot read ${schemaPath}: ${(error as Error).message}` }; }
 
-  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: policy as EnforcementPolicyProjection });
+  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy } as Parameters<typeof resolveEnforcementMode>[0]);
   if (!enforcement.ok) return { fatal: true, message: `ERROR: ${enforcement.message}` };
   const quiet = format !== "text";
   if (!quiet) console.log("repo-guard validate-integration\n");
