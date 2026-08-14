@@ -80,7 +80,7 @@ interface NewFileCheckResult {
   hint?: string;
 }
 
-const budget = (actual: number, max: number | undefined, files: string[] | undefined = undefined): BudgetCheck => max === undefined ? { ok: true } : { ok: maxBound(actual, max), actual, limit: max, ...(files ? { files } : {}) };
+function budget(actual: number, max: number | undefined, files: string[] | undefined = undefined): BudgetCheck { return max === undefined ? { ok: true } : { ok: maxBound(actual, max), actual, limit: max, ...(files ? { files } : {}) }; }
 function profileBudgets(files: ParsedDiffFile[], canonicalDocs: string[], limits: BudgetLimits = {}): { docs: BudgetCheck; files: BudgetCheck; lines: BudgetCheck } {
   const added = files.filter((file) => file.status === "added");
   const docs = added.filter((file) => /\.md$/i.test(file.path) && !canonicalDocs.includes(file.path));
@@ -128,13 +128,13 @@ export function checkChangeProfile(files: ParsedDiffFile[], policy: ChangeProfil
   const profile = profiles[changeType];
   if (!profile) return { ok: false, message: `change_type "${changeType}" is not defined in change_profiles`, change_type: changeType, details: [`known change types: ${formatList(Object.keys(profiles).sort())}`], hint: "Define the change type in change_profiles or use one of the configured types." };
 
-  const detected = derived.touchedSurfaces || detectTouchedSurfaces(files, policy.surfaces || {});
+  const detected = derived.touchedSurfaces || detectTouchedSurfaces(files, policy.surfaces);
   const touched = detected.touched_surfaces, required = uniqueSorted(profile.require_surfaces || []), allowed = uniqueSorted(profile.allow_surfaces || []), forbidden = uniqueSorted(profile.forbid_surfaces || []);
   const touchedSet = new Set(touched), usesConstraints = required.length + allowed.length + forbidden.length > 0;
   const hasUnclassified = usesConstraints && detected.unclassified_files.length > 0 && !profile.allow_unclassified_surfaces;
   const missing = required.filter((surface) => !touchedSet.has(surface));
   const violating = uniqueSorted([...(allowed.length ? touched.filter((surface) => !allowed.includes(surface)) : []), ...touched.filter((surface) => forbidden.includes(surface))]);
-  const newFiles = checkProfileNewFiles(files, policy.new_file_classes, profile.new_files, changeType, derived.newFileClasses || null);
+  const newFiles = checkProfileNewFiles(files, policy.new_file_classes, profile.new_files, changeType, derived.newFileClasses);
   const budgets = profileBudgets(files, policy.paths.canonical_docs, profile.budgets);
   const details = [
     ...missing.map((surface) => `required surface ${surface} was not touched by change_profiles["${changeType}"].require_surfaces`),
@@ -144,7 +144,7 @@ export function checkChangeProfile(files: ParsedDiffFile[], policy: ChangeProfil
   if (!budgets.docs.ok) details.push(`new docs ${budgets.docs.actual} exceeds change_profiles["${changeType}"].budgets.max_new_docs ${budgets.docs.limit}; files: ${budgets.docs.files!.join(", ")}`);
   if (!budgets.files.ok) details.push(`new files ${budgets.files.actual} exceeds change_profiles["${changeType}"].budgets.max_new_files ${budgets.files.limit}; files: ${budgets.files.files!.join(", ")}`);
   if (!budgets.lines.ok) details.push(`net added lines ${budgets.lines.actual} exceeds change_profiles["${changeType}"].budgets.max_net_added_lines ${budgets.lines.limit}`);
-  if (!newFiles.ok) details.push(...(newFiles.details || [newFiles.message]).filter((value): value is string => Boolean(value)));
+  if (!newFiles.ok) details.push(...((newFiles.details || [newFiles.message]).filter(Boolean) as string[]));
   const ok = !missing.length && !violating.length && !hasUnclassified && budgets.docs.ok && budgets.files.ok && budgets.lines.ok && newFiles.ok;
   return {
     ok, message: ok ? undefined : `change_type "${changeType}" violated change_profiles`, change_type: changeType,
