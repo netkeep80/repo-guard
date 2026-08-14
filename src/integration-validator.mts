@@ -53,7 +53,7 @@ export function createIntegrationAnalysisReport(roots: IntegrationValidatorRoots
     ? { ok: true, message: "repo-policy.json is valid JSON policy" }
     : { ok: false, message: "repo-policy.json failed schema validation", errors: ajvErrors(ajv.errors), hint: "Fix policy schema errors before relying on integration diagnostics" });
 
-  const declared = count((policy as IntegrationPolicyProjection).integration as IntegrationCountProjection), compileErrors = schemaOk ? compileIntegrationPolicy(policy) : [];
+  const declared = count((policy as IntegrationPolicyProjection).integration as IntegrationCountProjection), compileErrors = schemaOk ? compileIntegrationPolicy(policy as Parameters<typeof compileIntegrationPolicy>[0]) : [];
   if (!(policy as IntegrationPolicyProjection).integration) reporter.report("integration-policy", { ok: false, message: "repo-policy.json has no integration section", hint: "Declare integration.workflows, integration.templates, integration.docs, or integration.profiles" });
   else if (!declared.total) reporter.report("integration-policy", { ok: false, message: "integration section declares no artifacts", hint: "Declare at least one integration workflow, template, doc, or profile" });
   else if (compileErrors.length) reporter.report("integration-policy", { ok: false, message: "Integration policy failed compilation", details: compileErrors.map((error) => error.message), hint: "Fix integration ids and profile references" });
