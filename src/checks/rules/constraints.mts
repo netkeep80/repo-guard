@@ -4,7 +4,7 @@ import { selectPaths } from "../../diff/classification.mjs";
 import { readDocumentFact, type DocumentFactSelector, type DocumentReader } from "../../document-facts.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
-import { integrationConstraintEntries } from "../integration-constraints.mjs";
+import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
 import type { RuleFamily } from "../rule-registry.mjs";
 import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
@@ -39,7 +39,8 @@ type RuntimeConstraintKind =
   | "integration"
   | "document_scalar_equal"
   | "document_scalar_equals_literal"
-  | "document_referenced_paths_exist";
+  | "document_referenced_paths_exist"
+  | "evidence_workflow_path_coverage";
 
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
@@ -53,10 +54,13 @@ interface RuntimeConstraint {
   must_change_any?: string[];
   rules?: unknown;
   relation_id?: string;
+  binding_id?: string;
   left?: DocumentFactSelector;
   right?: DocumentFactSelector;
   source?: DocumentFactSelector;
   value?: unknown;
+  workflow?: string;
+  covers?: string[];
 }
 
 interface ConstraintPolicyProjection {
@@ -187,6 +191,29 @@ function checkDocumentReferencedPathsExist(facts: ConstraintFacts, constraint: R
   };
 }
 
+function checkEvidenceWorkflowPathCoverage(facts: ConstraintFacts, constraint: RuntimeConstraint) {
+  const source = factOperand(facts.documents, constraint.source);
+  if (!source.ok) return {
+    ok: false,
+    message: `evidence binding "${constraint.binding_id}" could not read repository path references`,
+    data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source },
+  };
+  if (!Array.isArray(source.value)) return {
+    ok: false,
+    message: `evidence binding "${constraint.binding_id}" did not produce a repository path set`,
+    data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source },
+  };
+  const coverage = checkWorkflowPathCoverage(
+    facts.integration as Parameters<typeof checkWorkflowPathCoverage>[0],
+    { workflow: constraint.workflow || "", covers: constraint.covers || [] },
+    source.value,
+  );
+  return {
+    ...coverage,
+    data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data },
+  };
+}
+
 export function evaluateConstraintIR(facts: ConstraintFacts, context: ConstraintContext = {}): RuleResult[] {
   const { files, constraints } = compileConstraintIR(facts), results: RuleResult[] = [], cochange: RuntimeConstraint[] = [];
   for (const constraint of constraints) {
@@ -220,6 +247,7 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     } else if (constraint.kind === "document_scalar_equal") check = checkDocumentScalarEqual(facts, constraint);
     else if (constraint.kind === "document_scalar_equals_literal") check = checkDocumentScalarLiteral(facts, constraint);
     else if (constraint.kind === "document_referenced_paths_exist") check = checkDocumentReferencedPathsExist(facts, constraint);
+    else if (constraint.kind === "evidence_workflow_path_coverage") check = checkEvidenceWorkflowPathCoverage(facts, constraint);
     else continue;
     results.push({ name: constraint.name, check });
   }
