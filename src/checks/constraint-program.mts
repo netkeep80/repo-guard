@@ -48,83 +48,26 @@ export interface ConstraintProgramEntry {
 export interface RuntimeProgramConstraint extends RuntimeConstraint { key: string; }
 type StrictnessProgramEntry = StrictnessConstraint & { key: string };
 
-interface DiffRulesProjection {
-  max_new_docs?: number;
-  max_new_files?: number;
-  max_net_added_lines?: number;
-}
-
-interface PathsProjection {
-  forbidden?: unknown;
-  governance_paths?: unknown;
-  operational_paths?: unknown;
-  canonical_docs?: unknown;
-}
-
+interface DiffRulesProjection { max_new_docs?: number; max_new_files?: number; max_net_added_lines?: number; }
+interface PathsProjection { forbidden?: unknown; governance_paths?: unknown; operational_paths?: unknown; canonical_docs?: unknown; }
 interface SizeRuleProjection {
-  id: string;
-  glob?: unknown;
-  max?: number;
-  scope?: unknown;
-  metric?: unknown;
-  applies_to_change_types?: unknown;
-  level?: EnforcementMode;
-  count?: CountMode;
-  ignore?: unknown;
-  max_growth?: number;
+  id: string; glob?: unknown; max?: number; scope?: unknown; metric?: unknown; applies_to_change_types?: unknown;
+  level?: EnforcementMode; count?: CountMode; ignore?: unknown; max_growth?: number;
 }
-
-interface IntegrationWorkflowProjection {
-  id: string;
-  kind?: unknown;
-  path?: unknown;
-  role?: unknown;
-  profiles?: unknown;
-  expect?: { enforcement?: EnforcementMode; [key: string]: unknown };
-}
-
-interface IntegrationProjection {
-  workflows?: IntegrationWorkflowProjection[];
-}
-
-interface CochangeRuleProjection {
-  if_changed?: unknown;
-  must_change_any?: unknown;
-  [key: string]: unknown;
-}
-
-interface DocumentDefinitionProjection {
-  path?: unknown;
-  format?: unknown;
-}
-
-interface DocumentSelectorProjection {
-  document?: unknown;
-  pointer?: unknown;
-  projection?: unknown;
-  type?: unknown;
-}
-
-interface DocumentRelationRuleProjection {
-  id?: unknown;
-  kind?: unknown;
-  left?: unknown;
-  right?: unknown;
-  source?: unknown;
-  value?: unknown;
-}
-
-interface DocumentRelationsProjection {
-  documents?: Record<string, DocumentDefinitionProjection>;
-  rules?: DocumentRelationRuleProjection[];
-}
-
+interface IntegrationWorkflowProjection { id: string; kind?: unknown; path?: unknown; role?: unknown; profiles?: unknown; expect?: { enforcement?: EnforcementMode; [key: string]: unknown }; }
+interface IntegrationProjection { workflows?: IntegrationWorkflowProjection[]; }
+interface CochangeRuleProjection { if_changed?: unknown; must_change_any?: unknown; [key: string]: unknown; }
+interface DocumentDefinitionProjection { path?: unknown; format?: unknown; }
+interface DocumentSelectorProjection { document?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
+interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; left?: unknown; right?: unknown; source?: unknown; value?: unknown; }
+interface DocumentRelationsProjection { documents?: Record<string, DocumentDefinitionProjection>; rules?: DocumentRelationRuleProjection[]; }
 interface EvidenceBindingProjection {
   id?: unknown;
   kind?: unknown;
   source?: DocumentSelectorProjection;
   workflow?: unknown;
   covers?: unknown;
+  target_anchor_type?: unknown;
 }
 
 export interface ConstraintPolicyProjection {
@@ -141,40 +84,14 @@ export interface ConstraintPolicyProjection {
   evidence_bindings?: EvidenceBindingProjection[];
 }
 
-interface ChangeIntentProjection {
-  budgets?: DiffRulesProjection;
-  surface_debt?: unknown;
-  scope?: unknown;
-  must_touch?: unknown;
-  must_not_touch?: unknown;
-}
+interface ChangeIntentProjection { budgets?: DiffRulesProjection; surface_debt?: unknown; scope?: unknown; must_touch?: unknown; must_not_touch?: unknown; }
 
 export interface PolicyRelaxation {
-  kind: string;
-  pointer?: string;
-  before: unknown;
-  after: unknown;
-  message?: string;
-  rule_id?: string;
-  field?: string;
-  workflow_id?: string;
-  evidence_binding_id?: string;
-  [key: string]: unknown;
+  kind: string; pointer?: string; before: unknown; after: unknown; message?: string; rule_id?: string; field?: string;
+  workflow_id?: string; evidence_binding_id?: string; [key: string]: unknown;
 }
-
-export interface PolicyIncomparableChange {
-  kind: "policy_incomparable";
-  pointer?: string;
-  before: unknown;
-  after: unknown;
-  message: string;
-}
-
-export interface ConstraintProgramComparison {
-  relation: ComparisonRelation;
-  relaxations: PolicyRelaxation[];
-  incomparable: PolicyIncomparableChange[];
-}
+export interface PolicyIncomparableChange { kind: "policy_incomparable"; pointer?: string; before: unknown; after: unknown; message: string; }
+export interface ConstraintProgramComparison { relation: ComparisonRelation; relaxations: PolicyRelaxation[]; incomparable: PolicyIncomparableChange[]; }
 
 const RANKS = {
   enforcement: { advisory: 0, blocking: 1 },
@@ -190,12 +107,10 @@ const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("requ
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
-
 function canonicalDocumentPath(value: unknown): string {
   try { return normalizeDocumentFact(value, "repository_path") as string; }
   catch { return typeof value === "string" ? value : String(value ?? ""); }
 }
-
 function compileDocumentSelector(selectorValue: unknown, documents: Record<string, DocumentDefinitionProjection>) {
   const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
   return {
@@ -290,10 +205,15 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   for (const binding of array(policy.evidence_bindings)) {
     const id = String(binding.id ?? ""), owner = `evidence-binding:${id}`, pointer = `/evidence_bindings/${id}`;
     const source = compileDocumentSelector(binding.source, documents);
-    const shape = { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
+    const shape = binding.kind === "anchor_value_coverage"
+      ? { kind: binding.kind, source, target_anchor_type: binding.target_anchor_type }
+      : { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
     const runtime = binding.kind === "workflow_path_coverage" ? {
       kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
       workflow: binding.workflow, covers: array(binding.covers as string[] | undefined),
+    } : binding.kind === "anchor_value_coverage" ? {
+      kind: "evidence_anchor_value_coverage", name: owner, binding_id: id, source,
+      target_anchor_type: binding.target_anchor_type,
     } : null;
     add(owner, runtime, entity({ owner, pointer, removeKind: "evidence_binding_removed", evidence_binding_id: id,
       removeBefore: shape, removeAfter: { present: false }, removeMessage: `evidence binding "${id}" removed` }));
