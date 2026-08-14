@@ -4,30 +4,22 @@ import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import type { RuleFamily } from "../rule-registry.mjs";
 
-interface RegexContentRule {
+interface ContentRule {
   id: string;
-  mode: "added_lines";
+  mode: string;
   glob?: string;
-  forbid_regex: string[];
-}
-
-interface MarkdownLanguageRule {
-  id: string;
-  mode: "markdown_language";
-  glob?: string;
-  language: string;
+  forbid_regex?: string[];
+  language?: string;
   allow_words?: string[];
   max_unapproved_latin_words_per_line?: number;
 }
-
-type ContentRule = RegexContentRule | MarkdownLanguageRule | { id?: string; mode?: string; [key: string]: unknown };
 
 interface RegexViolation {
   kind: "regex";
   rule_id: string;
   file: string;
   line: string;
-  matched_regex: string;
+  matched_regex: string | undefined;
 }
 
 interface LanguageViolation {
@@ -36,7 +28,7 @@ interface LanguageViolation {
   file: string;
   line_number: number;
   line: string;
-  language: string;
+  language: string | undefined;
   unapproved_words: string[];
 }
 
@@ -54,15 +46,15 @@ interface ContentRuleFacts {
   documents: DocumentReader;
 }
 
-function checkRegexRule(files: ParsedDiffFile[], rule: RegexContentRule): RegexViolation[] {
+function checkRegexRule(files: ParsedDiffFile[], rule: ContentRule): RegexViolation[] {
   const violations: RegexViolation[] = [];
-  const regexes = rule.forbid_regex.map((pattern) => new RegExp(pattern));
+  const regexes = rule.forbid_regex!.map((pattern) => new RegExp(pattern));
   for (const file of files) {
     if (!matchesAny(file.path, [rule.glob || "**"])) continue;
     for (const line of file.addedLines || []) {
       regexes.forEach((regex, index) => {
         if (regex.test(line)) violations.push({
-          kind: "regex", rule_id: rule.id, file: file.path, line: line.trim(), matched_regex: rule.forbid_regex[index],
+          kind: "regex", rule_id: rule.id, file: file.path, line: line.trim(), matched_regex: rule.forbid_regex![index],
         });
       });
     }
@@ -70,7 +62,7 @@ function checkRegexRule(files: ParsedDiffFile[], rule: RegexContentRule): RegexV
   return violations;
 }
 
-function markdownLanguageViolations(file: ParsedDiffFile, rule: MarkdownLanguageRule, documents: DocumentReader): LanguageViolation[] {
+function markdownLanguageViolations(file: ParsedDiffFile, rule: ContentRule, documents: DocumentReader): LanguageViolation[] {
   const allowed = new Set(rule.allow_words || []);
   const maxLatin = rule.max_unapproved_latin_words_per_line ?? 1;
   const violations: LanguageViolation[] = [];
@@ -93,11 +85,11 @@ export function checkContentRules(files: ParsedDiffFile[], rules: ContentRule[] 
   const violations: ContentViolation[] = [];
   const documents = options.documents || createDocumentReader(options);
   for (const rule of rules) {
-    if (rule.mode === "added_lines" && "forbid_regex" in rule && Array.isArray(rule.forbid_regex)) violations.push(...checkRegexRule(files, rule as RegexContentRule));
+    if (rule.mode === "added_lines" && rule.forbid_regex) violations.push(...checkRegexRule(files, rule));
     else if (rule.mode === "markdown_language") {
       for (const file of files) {
-        if (file.status !== "deleted" && matchesAny(file.path, [(rule as MarkdownLanguageRule).glob || "**/*.md"])) {
-          violations.push(...markdownLanguageViolations(file, rule as MarkdownLanguageRule, documents));
+        if (file.status !== "deleted" && matchesAny(file.path, [rule.glob || "**/*.md"])) {
+          violations.push(...markdownLanguageViolations(file, rule, documents));
         }
       }
     }
@@ -114,9 +106,8 @@ function formatViolation(violation: ContentViolation): string {
 export const contentRuleFamily: RuleFamily = {
   id: "content-rules",
   evaluate(facts) {
-    const typedFacts = facts as ContentRuleFacts;
-    const violations = checkContentRules(typedFacts.diff.files.checked, typedFacts.policy.content_rules, {
-      repoRoot: typedFacts.repositoryRoot, readFile: typedFacts.readFile, documents: typedFacts.documents,
+    const violations = checkContentRules((facts as ContentRuleFacts).diff.files.checked, (facts as ContentRuleFacts).policy.content_rules, {
+      repoRoot: (facts as ContentRuleFacts).repositoryRoot, readFile: (facts as ContentRuleFacts).readFile, documents: (facts as ContentRuleFacts).documents,
     });
     return violations.length
       ? { name: "content-rules", check: { ok: false, violations, details: violations.map(formatViolation) } }
