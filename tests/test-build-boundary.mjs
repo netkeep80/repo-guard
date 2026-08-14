@@ -48,6 +48,8 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "src/document-facts.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/extractors/anchors.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/extractors/anchors.mjs")), false);
+  assert.equal(existsSync(resolve(projectRoot, "src/extractors/integration.mts")), true);
+  assert.equal(existsSync(resolve(projectRoot, "src/extractors/integration.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/facts/input.mts")), true);
   assert.equal(existsSync(resolve(projectRoot, "src/facts/input.mjs")), false);
   assert.equal(existsSync(resolve(projectRoot, "src/checks/relation-kernel.mts")), true);
@@ -91,6 +93,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "dist/enforcement.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/document-facts.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/extractors/anchors.mjs")), true);
+  assert.equal(existsSync(resolve(projectRoot, "dist/extractors/integration.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/facts/input.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/relation-kernel.mjs")), true);
   assert.equal(existsSync(resolve(projectRoot, "dist/checks/rule-registry.mjs")), true);
