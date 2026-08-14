@@ -137,8 +137,8 @@ function checkEvidence(result: EvidenceDiagnostic) {
     if_changed: result.ifChanged, must_touch_any: result.mustTouchAny, changed_files: result.changedFiles, change_intent_field: result.changeIntentField,
     declared_anchors: result.declaredAnchors, evidence_files: result.evidenceFiles, files: uniqueSorted([...(result.changedFiles || []), ...(result.evidenceFiles || [])]), details };
 }
-export function checkTraceRuleResult(result: TraceDiagnostic) {
-  if (result.kind === "must_resolve") return checkMustResolve(result as MustResolveDiagnostic);
-  if (["changed_files_require_evidence", "declared_anchors_require_evidence"].includes(result.kind)) return checkEvidence(result as EvidenceDiagnostic);
+export function checkTraceRuleResult(result: { id: string; kind: string; [key: string]: unknown }) {
+  if (result.kind === "must_resolve") return checkMustResolve(result as unknown as MustResolveDiagnostic);
+  if (["changed_files_require_evidence", "declared_anchors_require_evidence"].includes(result.kind)) return checkEvidence(result as unknown as EvidenceDiagnostic);
   return { ok: true, trace_rule: result.id, trace_kind: result.kind, details: [] };
 }
