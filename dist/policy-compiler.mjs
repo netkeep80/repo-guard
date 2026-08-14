@@ -87,13 +87,11 @@ export function compileIntegrationPolicy(policy = {}) {
         if (section === "workflows" && entry.role === "ci_gate") {
             const expect = object(entry.expect);
             for (const field of ["action", "mode"])
-                if (expect[field] !== undefined) {
+                if (expect[field] !== undefined)
                     errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
-                }
             for (const disallowed of list(expect.disallow))
-                if (disallowed !== "continue_on_error") {
+                if (disallowed !== "continue_on_error")
                     errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
-                }
         }
         for (const profileId of list(entry.profiles))
             references.push({ section, index, field: "profiles", profileId });
@@ -158,18 +156,21 @@ export function compileDocumentRelationsPolicy(policy = {}) {
         else if (rule.kind === "scalar_equals_literal") {
             useSelector(id, "source", rule.source);
             const selector = object(rule.source);
-            if (!scalarLiteralMatches(selector.type, rule.value)) {
+            if (!scalarLiteralMatches(selector.type, rule.value))
                 errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
-            }
         }
-        else if (rule.kind === "referenced_paths_exist") {
+        else if (rule.kind === "referenced_paths_exist")
             useSelector(id, "source", rule.source);
-        }
+    }
+    // Evidence bindings are first-class consumers of the shared document pool.
+    for (const binding of list(policy.evidence_bindings)) {
+        const document = object(binding.source).document;
+        if (typeof document === "string" && Object.hasOwn(documents, document))
+            usedDocuments.add(document);
     }
     for (const name of Object.keys(documents))
-        if (!usedDocuments.has(name)) {
+        if (!usedDocuments.has(name))
             errors.push({ document: name, message: `document_relations.documents["${name}"] is declared but unused` });
-        }
     return errors;
 }
 export function compileEvidenceBindingsPolicy(policy = {}) {
@@ -183,27 +184,29 @@ export function compileEvidenceBindingsPolicy(policy = {}) {
     for (const workflow of list(object(policy.integration).workflows))
         if (typeof workflow.id === "string" && workflow.id)
             workflows.set(workflow.id, workflow);
+    const anchorTypes = new Set(Object.keys(object(policy.anchors?.types)));
     for (const [index, binding] of bindings.entries()) {
         const id = binding.id;
         if (seenIds.has(id))
             errors.push({ evidence_binding: id, index, message: `evidence_bindings[${index}].id duplicates binding "${id}"` });
         seenIds.add(id);
-        if (binding.kind !== "workflow_path_coverage")
-            continue;
         const source = object(binding.source), document = source.document;
-        if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
+        if (typeof document !== "string" || !Object.hasOwn(documents, document))
             errors.push({ evidence_binding: id, document, message: `evidence binding "${id}" source references unknown document "${document}"` });
+        if (binding.kind === "workflow_path_coverage") {
+            const workflowId = binding.workflow;
+            const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
+            if (!workflow)
+                errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
+            else if (object(workflow.expect).enforcement !== "blocking")
+                errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
+            if (!pathExistenceSelectors.has(documentSelectorKey(source)))
+                errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
         }
-        const workflowId = binding.workflow;
-        const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
-        if (!workflow) {
-            errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
-        }
-        else if (object(workflow.expect).enforcement !== "blocking") {
-            errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
-        }
-        if (!pathExistenceSelectors.has(documentSelectorKey(source))) {
-            errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
+        else if (binding.kind === "anchor_value_coverage") {
+            const target = binding.target_anchor_type;
+            if (typeof target !== "string" || !anchorTypes.has(target))
+                errors.push({ evidence_binding: id, target_anchor_type: target, message: `evidence binding "${id}" references unknown anchor type "${target}"` });
         }
     }
     return errors;
