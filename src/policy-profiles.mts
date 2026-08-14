@@ -1,137 +1,120 @@
+const REQUIREMENT_ID = "(?:BR|SR|FR|NFR|CR|IR)-[0-9]{3}";
+
 const PACKS = {
   "requirements-strict": {
     defaults: {
-      requirement_globs: [
-        "requirements/business/*.json",
-        "requirements/stakeholder/*.json",
-        "requirements/functional/*.json",
-        "requirements/nonfunctional/*.json",
-        "requirements/constraints/*.json",
-        "requirements/interface/*.json",
+      requirement_json_globs: [
+        "requirements/business/*.json", "requirements/stakeholder/*.json", "requirements/functional/*.json",
+        "requirements/nonfunctional/*.json", "requirements/constraints/*.json", "requirements/interface/*.json",
       ],
-      strict_heading_docs: [],
-      evidence_surfaces: ["src/**", "tests/**", "experiments/**", "scripts/**", ".github/workflows/**"],
-      affected_evidence_surfaces: [],
-      implementation_surfaces: ["src/**", "scripts/**", ".github/workflows/**"],
-      verification_surfaces: ["tests/**", "experiments/**", "scripts/**", ".github/workflows/**"],
+      code_reference_globs: [
+        "scripts/**/*.js", "include/**/*.{h,hpp,hh}", "src/**/*.{h,hpp,hh,c,cc,cpp,cxx}",
+        "tests/**/*.{h,hpp,hh,c,cc,cpp,cxx,js,mjs}", "examples/**/*.{h,hpp,hh,c,cc,cpp,cxx,js,mjs}",
+      ],
+      doc_reference_globs: ["*.md", "docs/**/*.md", "requirements/**/*.md", ".github/**/*.md"],
+      strict_heading_docs: ["docs/**/*.md"],
+      evidence_surfaces: ["src/**", "tests/**", "docs/**", "README.md", "requirements/README.md"],
+      implementation_evidence_surfaces: ["include/**", "src/**", "scripts/**", ".github/workflows/**"],
+      verification_evidence_surfaces: ["tests/**", "experiments/**", "scripts/**", ".github/workflows/**"],
     },
     anchors: {
-      requirement_id: { kind: "json_field", globs: "$requirement_globs", field: "id" },
-      code_req_ref: { kind: "regex", globs: ["src/**", "scripts/**"], pattern: "@req\\s+([A-Za-z][A-Za-z0-9_-]*-[0-9]+)" },
-      test_req_ref: { kind: "regex", globs: ["tests/**", "experiments/**"], pattern: "\\[(?:REQ|req):?\\s*([A-Za-z][A-Za-z0-9_-]*-[0-9]+)\\]" },
-      doc_req_ref: { kind: "regex", globs: ["docs/**/*.md", "README.md", "requirements/**/*.md"], pattern: "\\[([A-Za-z][A-Za-z0-9_-]*-[0-9]+)\\]" },
-      doc_heading_req_ref: { kind: "regex", globs: "$strict_heading_docs", pattern: "^#{1,6}\\s+(?:\\[?([A-Za-z][A-Za-z0-9_-]*-[0-9]+)\\]?)(?:\\s|$)" },
+      requirement_id: { kind: "json_field", globs: "$requirement_json_globs", field: "id" },
+      requirement_json_req_ref: { kind: "regex", globs: "$requirement_json_globs", pattern: `"(${REQUIREMENT_ID})"` },
+      code_req_ref: { kind: "regex", globs: "$code_reference_globs", pattern: `(?:@req\\s+|,\\s*)(${REQUIREMENT_ID})` },
+      doc_req_ref: { kind: "regex", globs: "$doc_reference_globs", pattern: `(?:^|[^A-Z0-9])(${REQUIREMENT_ID})(?![0-9])` },
+      doc_heading_req_ref: { kind: "regex", globs: "$strict_heading_docs", pattern: `(?:^|\\n)#{1,6}\\s+[^\\n]*?\\[(${REQUIREMENT_ID})\\]` },
+      doc_heading_without_req_ref: { kind: "regex", globs: "$strict_heading_docs", pattern: `(?:^|\\n)(#{1,6}\\s+(?![^\\n]*\\[${REQUIREMENT_ID}\\])[^\\n]*)` },
     },
     trace_rules: [
-      { id: "code-requirement-refs-resolve", kind: "must_resolve", from_anchor_type: "code_req_ref", to_anchor_type: "requirement_id" },
-      { id: "test-requirement-refs-resolve", kind: "must_resolve", from_anchor_type: "test_req_ref", to_anchor_type: "requirement_id" },
-      { id: "doc-requirement-refs-resolve", kind: "must_resolve", from_anchor_type: "doc_req_ref", to_anchor_type: "requirement_id" },
-      { id: "strict-doc-heading-refs-resolve", kind: "must_resolve", from_anchor_type: "doc_heading_req_ref", to_anchor_type: "requirement_id" },
-      { id: "changed-requirements-need-evidence", kind: "changed_files_require_evidence", if_changed: "$requirement_globs", must_touch_any: "$evidence_surfaces" },
+      { id: "requirement-json-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "requirement_json_req_ref", to_anchor_type: "requirement_id" },
+      { id: "code-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "code_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "doc_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-heading-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "doc_heading_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-headings-must-have-req-ref", kind: "must_resolve", from_anchor_type: "doc_heading_without_req_ref", to_anchor_type: "requirement_id" },
+      { id: "changed-requirements-need-evidence", kind: "changed_files_require_evidence", if_changed: "$requirement_json_globs", must_touch_any: "$changed_requirement_evidence_surfaces" },
       { id: "declared-affected-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.affects", must_touch_any: "$affected_evidence_surfaces" },
-      { id: "declared-implemented-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.implements", must_touch_any: "$implementation_surfaces" },
-      { id: "declared-verified-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.verifies", must_touch_any: "$verification_surfaces" },
+      { id: "declared-implemented-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.implements", must_touch_any: "$implementation_evidence_surfaces" },
+      { id: "declared-verified-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.verifies", must_touch_any: "$verification_evidence_surfaces" },
     ],
   },
-} as const;
+};
 
-type ProfileConfig = Record<string, unknown>;
-interface ProfileAnchorSpec {
-  kind: "json_field" | "regex";
-  globs: readonly string[] | string;
-  field?: string;
-  pattern?: string;
-}
-interface ProfileTraceRule {
-  id: string;
-  kind: string;
-  if_changed?: unknown;
-  must_touch_any?: unknown;
-  [key: string]: unknown;
-}
+type ProfileSource = { kind: string; globs: string | string[]; field?: string; pattern?: string };
+type ProfileRule = Record<string, unknown>;
 interface ProfileSpec {
-  defaults: Readonly<Record<string, readonly string[]>>;
-  anchors: Readonly<Record<string, ProfileAnchorSpec>>;
-  trace_rules: readonly ProfileTraceRule[];
+  defaults: Record<string, string[]>;
+  anchors: Record<string, ProfileSource>;
+  trace_rules: ProfileRule[];
 }
+type ProfileConfig = Record<string, unknown>;
 interface PolicyProjection extends Record<string, unknown> {
-  profile?: unknown;
+  profile?: string;
   profile_overrides?: unknown;
   anchors?: unknown;
   trace_rules?: unknown;
 }
-type ProfileCompileResult =
-  | { ok: true; profile: null; config: null }
-  | { ok: true; profile: string; config: ProfileConfig; spec: ProfileSpec }
-  | { ok: false; error: string };
+interface ProfileValidationError {
+  field: string;
+  profile?: string;
+  message: string;
+}
 
+const OVERRIDE_FIELDS = new Set([
+  ...Object.keys(PACKS["requirements-strict"].defaults),
+  "changed_requirement_evidence_surfaces", "affected_evidence_surfaces",
+]);
 const clone = <T,>(value: T): T => structuredClone(value);
-const isObject = (value: unknown) => value && typeof value === "object" && !Array.isArray(value);
+const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+const ref = (value: unknown, config: ProfileConfig): unknown => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
 
-function configFor(spec: ProfileSpec, overrides: unknown): ProfileConfig {
-  const config = clone(spec.defaults) as ProfileConfig;
-  if (!isObject(overrides)) return config;
-  for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
-    if (!Object.hasOwn(spec.defaults, key)) throw new Error(`unknown profile_overrides key "${key}"`);
-    config[key] = clone(value);
-  }
-  if (!config.affected_evidence_surfaces || !(config.affected_evidence_surfaces as unknown[]).length) config.affected_evidence_surfaces = clone(config.evidence_surfaces);
+function configFor(spec: ProfileSpec, overrides: Record<string, unknown> = {}): ProfileConfig {
+  const config: ProfileConfig = clone(spec.defaults);
+  for (const [key, value] of Object.entries(overrides)) config[key] = clone(value);
+  config.changed_requirement_evidence_surfaces ||= clone(config.evidence_surfaces);
+  config.affected_evidence_surfaces ||= clone(config.evidence_surfaces);
   return config;
 }
 
-function ref(value: unknown, config: ProfileConfig): unknown {
-  if (typeof value === "string" && value.startsWith("$")) return clone(config[value.slice(1)] || []);
-  return clone(value);
-}
-
-function materializeAnchor(spec: ProfileSpec, config: ProfileConfig) {
-  const types: Record<string, { sources: Array<Record<string, unknown>> }> = {};
+function materializePack(spec: ProfileSpec, overrides: Record<string, unknown>) {
+  const config = configFor(spec, overrides), types: Record<string, { sources: Array<Record<string, unknown>> }> = {};
   for (const [name, source] of Object.entries(spec.anchors)) {
     const globs = ref(source.globs, config) as string[];
-    const sources = globs.map((glob) => source.kind === "json_field"
-      ? { kind: "json_field", glob, field: source.field }
-      : { kind: "regex", glob, pattern: source.pattern });
-    if (sources.length) types[name] = { sources };
+    types[name] = { sources: globs.map((glob) => source.kind === "json_field"
+      ? { kind: source.kind, glob, field: source.field }
+      : { kind: source.kind, glob, pattern: source.pattern }) };
   }
-  return { types };
+  const trace_rules = spec.trace_rules.map((rule) => Object.fromEntries(
+    Object.entries(rule).map(([key, value]) => [key, ref(value, config)])
+  ));
+  return { anchors: { types }, trace_rules };
 }
 
-function materializeTraceRule(ruleSpec: ProfileTraceRule, config: ProfileConfig) {
-  const rule = clone(ruleSpec);
-  if (rule.if_changed !== undefined) rule.if_changed = ref(rule.if_changed, config);
-  if (rule.must_touch_any !== undefined) rule.must_touch_any = ref(rule.must_touch_any, config);
-  if (rule.kind === "changed_files_require_evidence" && (!Array.isArray(rule.must_touch_any) || rule.must_touch_any.length === 0)) return null;
-  if (rule.kind === "declared_anchors_require_evidence" && (!Array.isArray(rule.must_touch_any) || rule.must_touch_any.length === 0)) return null;
-  return rule;
-}
+export const listBuiltInProfiles = (): string[] => Object.keys(PACKS).sort();
 
-export function compileProfilePolicy(policy: unknown): ProfileCompileResult {
-  const profile = (policy as PolicyProjection | null | undefined)?.profile as string | undefined;
-  if (!profile) return { ok: true, profile: null, config: null };
-  const spec = (PACKS as unknown as Record<string, ProfileSpec>)[profile];
-  if (!spec) return { ok: false, error: `unknown policy profile "${profile}"` };
-  try {
-    const config = configFor(spec, (policy as PolicyProjection).profile_overrides || {});
-    return { ok: true, profile, config, spec };
-  } catch (error: unknown) {
-    return { ok: false, error: (error as Error).message };
+export function compileProfilePolicy(policy: unknown): ProfileValidationError[] {
+  const errors: ProfileValidationError[] = [], profile = (policy as PolicyProjection | null | undefined)?.profile, overrides = (policy as PolicyProjection | null | undefined)?.profile_overrides;
+  if (overrides !== undefined && !profile) errors.push({ field: "profile_overrides", message: "profile_overrides requires top-level profile" });
+  if (profile !== undefined && !(PACKS as unknown as Record<string, ProfileSpec>)[profile]) errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
+  if (overrides !== undefined) {
+    if (!isObject(overrides)) errors.push({ field: "profile_overrides", message: "profile_overrides must be an object" });
+    else for (const [field, value] of Object.entries(overrides)) {
+      if (!OVERRIDE_FIELDS.has(field)) errors.push({ field: `profile_overrides.${field}`, message: `profile_overrides.${field} is not supported` });
+      else if (!Array.isArray(value) || !value.length || value.some((item) => typeof item !== "string" || !item.trim())) {
+        errors.push({ field: `profile_overrides.${field}`, message: `profile_overrides.${field} must be a non-empty array of non-empty strings` });
+      }
+    }
   }
+  return errors;
 }
 
 export function expandPolicyProfile(policy: unknown) {
-  const compiled = compileProfilePolicy(policy);
-  if (!compiled.ok || !compiled.profile) return compiled.ok ? { ok: true, policy: clone(policy) } : compiled;
-  const base = clone(policy) as PolicyProjection;
-  const { spec, config } = compiled;
-  if (base.anchors === undefined) base.anchors = materializeAnchor(spec, config);
-  if (base.trace_rules === undefined) base.trace_rules = spec.trace_rules.map((rule) => materializeTraceRule(rule, config)).filter(Boolean);
-  return { ok: true, policy: base };
+  const base: PolicyProjection = clone(policy as PolicyProjection), spec = (PACKS as unknown as Record<string, ProfileSpec>)[base.profile as string];
+  if (!spec) return base;
+  const patch = materializePack(spec, (base.profile_overrides as Record<string, unknown>) || {});
+  return { ...base, anchors: base.anchors || patch.anchors, trace_rules: base.trace_rules || patch.trace_rules };
 }
 
 export function resolvePolicyProfile(policy: unknown) {
-  return expandPolicyProfile(policy);
-}
-
-export function listBuiltInProfiles(): string[] {
-  return Object.keys(PACKS).sort();
+  const errors = compileProfilePolicy(policy);
+  return { ok: !errors.length, policy: errors.length ? clone(policy) : expandPolicyProfile(policy), errors };
 }
