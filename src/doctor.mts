@@ -9,15 +9,34 @@ const PASS = "PASS";
 const WARN = "WARN";
 const FAIL = "FAIL";
 
-function check(name, fn) {
+type DoctorStatus = typeof PASS | typeof WARN | typeof FAIL;
+interface DoctorCheck { name: string; status: DoctorStatus; message: string; hint?: string; }
+interface DoctorRoots { repoRoot: string; packageRoot: string; }
+interface PullRequestProjection {
+  number?: unknown;
+  base?: { sha?: unknown } | null;
+  head?: { sha?: unknown } | null;
+}
+interface GitHubEventProjection { pull_request?: PullRequestProjection | null; }
+interface AjvErrorProjection { instancePath?: string; message?: string; }
+interface AjvRuntime {
+  errors: readonly AjvErrorProjection[] | null;
+  validate(schema: unknown, data: unknown): boolean | Promise<unknown>;
+}
+type AjvConstructor = new (options?: { allErrors?: boolean }) => AjvRuntime;
+type EffectivePolicyProjection = NonNullable<Parameters<typeof compileAnchorPolicy>[0]>
+  & NonNullable<Parameters<typeof compileIntegrationPolicy>[0]>
+  & { content_rules?: unknown; profile?: unknown; repository_kind?: unknown; policy_format_version?: unknown };
+
+function check(name: string, fn: () => DoctorCheck): DoctorCheck {
   try {
     return fn();
-  } catch (e) {
-    return { name, status: FAIL, message: e.message, hint: "Unexpected error during check" };
+  } catch (e: unknown) {
+    return { name, status: FAIL, message: (e as Error).message, hint: "Unexpected error during check" };
   }
 }
 
-function checkRepoRoot(repoRoot) {
+function checkRepoRoot(repoRoot: string) {
   return check("repository-root", () => {
     if (!existsSync(repoRoot)) {
       return { name: "repository-root", status: FAIL, message: `Path does not exist: ${repoRoot}`, hint: "Pass a valid path via --repo-root or run from inside a repository" };
@@ -30,7 +49,7 @@ function checkRepoRoot(repoRoot) {
   });
 }
 
-function checkGit(repoRoot) {
+function checkGit(repoRoot: string) {
   return check("git-available", () => {
     try {
       const version = execFileSync("git", ["--version"], { encoding: "utf-8", stdio: "pipe" }).trim();
@@ -45,12 +64,12 @@ function checkGit(repoRoot) {
   });
 }
 
-function checkFetchDepth(repoRoot) {
+function checkFetchDepth(repoRoot: string) {
   return check("fetch-depth", () => {
     try {
       const isShallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], { encoding: "utf-8", cwd: repoRoot, stdio: "pipe" }).trim();
       if (isShallow === "true") {
-        let count;
+        let count: string;
         try {
           count = execFileSync("git", ["rev-list", "--count", "HEAD"], { encoding: "utf-8", cwd: repoRoot, stdio: "pipe" }).trim();
         } catch {
@@ -65,18 +84,18 @@ function checkFetchDepth(repoRoot) {
   });
 }
 
-function checkPolicyDiscovery(repoRoot, packageRoot) {
+function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
   return check("repo-policy.json", () => {
     const policyPath = resolve(repoRoot, "repo-policy.json");
     if (!existsSync(policyPath)) {
       return { name: "repo-policy.json", status: FAIL, message: `Not found at ${policyPath}`, hint: "Create repo-policy.json or run 'repo-guard init' to scaffold one" };
     }
 
-    let policy;
+    let policy: unknown;
     try {
       policy = JSON.parse(readFileSync(policyPath, "utf-8"));
-    } catch (e) {
-      return { name: "repo-policy.json", status: FAIL, message: `Parse error: ${e.message}`, hint: "Fix JSON syntax in repo-policy.json" };
+    } catch (e: unknown) {
+      return { name: "repo-policy.json", status: FAIL, message: `Parse error: ${(e as Error).message}`, hint: "Fix JSON syntax in repo-policy.json" };
     }
 
     const schemaPath = resolve(packageRoot, "schemas/repo-policy.schema.json");
@@ -84,25 +103,25 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
       return { name: "repo-policy.json", status: FAIL, message: "Policy schema not found at package root", hint: "Reinstall repo-guard — schema files are missing" };
     }
 
-    const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
-    const ajv = new Ajv({ allErrors: true });
+    const schema: unknown = JSON.parse(readFileSync(schemaPath, "utf-8"));
+    const ajv = new (Ajv as unknown as AjvConstructor)({ allErrors: true });
     const valid = ajv.validate(schema, policy);
     if (!valid) {
-      const errors = ajv.errors.map(e => `${e.instancePath || "/"} ${e.message}`).join("; ");
-      const integrationErrors = compileIntegrationPolicy(policy);
+      const errors = (ajv.errors as readonly AjvErrorProjection[]).map(e => `${e.instancePath || "/"} ${e.message}`).join("; ");
+      const integrationErrors = compileIntegrationPolicy(policy as Parameters<typeof compileIntegrationPolicy>[0]);
       const integrationDetails = integrationErrors.length > 0
         ? `; Invalid integration policy: ${integrationErrors.map(e => e.message).join("; ")}`
         : "";
       return { name: "repo-policy.json", status: FAIL, message: `Schema validation failed: ${errors}${integrationDetails}`, hint: "Fix the policy to match the schema — see schemas/repo-policy.schema.json" };
     }
 
-    const profileResult = resolvePolicyProfile(policy);
+    const profileResult = resolvePolicyProfile(policy as Parameters<typeof resolvePolicyProfile>[0]);
     if (!profileResult.ok) {
       const details = profileResult.errors.map(e => e.message).join("; ");
       return { name: "repo-policy.json", status: FAIL, message: `Invalid profile policy: ${details}`, hint: "Fix profile and profile_overrides in repo-policy.json" };
     }
 
-    const effectivePolicy = profileResult.policy;
+    const effectivePolicy = profileResult.policy as EffectivePolicyProjection;
 
     const regexErrors = compileForbidRegex(effectivePolicy.content_rules || []);
     if (regexErrors.length > 0) {
@@ -122,8 +141,8 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
       return { name: "repo-policy.json", status: FAIL, message: `Invalid integration policy: ${details}`, hint: "Fix integration ids, kinds, roles, required fields, and profile references in repo-policy.json" };
     }
 
-    const profileSuffix = effectivePolicy.profile ? `, profile ${effectivePolicy.profile}` : "";
-    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind}, format ${effectivePolicy.policy_format_version}${profileSuffix})` };
+    const profileSuffix = effectivePolicy.profile ? `, profile ${effectivePolicy.profile as string}` : "";
+    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind as string}, format ${effectivePolicy.policy_format_version as string}${profileSuffix})` };
   });
 }
 
@@ -138,24 +157,24 @@ function checkEventContext() {
       return { name: "event-context", status: FAIL, message: `GITHUB_EVENT_PATH set but file not found: ${eventPath}`, hint: "The event file should be created by GitHub Actions — check runner configuration" };
     }
 
-    let event;
+    let event: unknown;
     try {
       event = JSON.parse(readFileSync(eventPath, "utf-8"));
-    } catch (e) {
-      return { name: "event-context", status: FAIL, message: `Event file parse error: ${e.message}`, hint: "The event file is corrupt — check runner configuration" };
+    } catch (e: unknown) {
+      return { name: "event-context", status: FAIL, message: `Event file parse error: ${(e as Error).message}`, hint: "The event file is corrupt — check runner configuration" };
     }
 
-    if (!event.pull_request) {
+    if (!(event as GitHubEventProjection).pull_request) {
       return { name: "event-context", status: WARN, message: "Event file present but not a pull_request event", hint: "check-pr requires a pull_request trigger; other triggers are fine for check-diff" };
     }
 
-    const pr = event.pull_request;
+    const pr = (event as GitHubEventProjection).pull_request as PullRequestProjection;
     const hasSHAs = pr.base?.sha && pr.head?.sha;
     if (!hasSHAs) {
       return { name: "event-context", status: FAIL, message: "pull_request event missing base/head SHA", hint: "Ensure the workflow trigger includes the pull_request event with SHA context" };
     }
 
-    return { name: "event-context", status: PASS, message: `PR #${pr.number} (${pr.base.sha.slice(0, 7)}..${pr.head.sha.slice(0, 7)})` };
+    return { name: "event-context", status: PASS, message: `PR #${pr.number} (${(pr.base!.sha as string).slice(0, 7)}..${(pr.head!.sha as string).slice(0, 7)})` };
   });
 }
 
@@ -185,7 +204,7 @@ function checkGhCli() {
   });
 }
 
-function checkWorkflowConfig(repoRoot) {
+function checkWorkflowConfig(repoRoot: string) {
   return check("workflow-config", () => {
     const workflowDir = resolve(repoRoot, ".github/workflows");
     if (!existsSync(workflowDir)) {
@@ -214,7 +233,7 @@ function checkWorkflowConfig(repoRoot) {
       return { name: "workflow-config", status: WARN, message: "No workflow references repo-guard or check-pr", hint: "Add a repo-guard workflow — run 'repo-guard init' or see templates/example-workflow.yml" };
     }
 
-    const issues = [];
+    const issues: string[] = [];
     if (!fetchDepthOk) issues.push("missing 'fetch-depth: 0' (required for full diff)");
     if (!ghTokenOk) issues.push("missing GH_TOKEN/GITHUB_TOKEN env (required for issue fallback)");
 
@@ -226,10 +245,10 @@ function checkWorkflowConfig(repoRoot) {
   });
 }
 
-export function runDoctor(roots) {
+export function runDoctor(roots: DoctorRoots) {
   console.log("repo-guard doctor\n");
 
-  const results = [];
+  const results: DoctorCheck[] = [];
 
   results.push(checkRepoRoot(roots.repoRoot));
   results.push(checkGit(roots.repoRoot));
