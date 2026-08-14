@@ -29,6 +29,11 @@ const scalarLiteral = {
   source: { document: "contract", pointer: "/root", type: "string" },
   value: "∞",
 };
+const referencedPaths = {
+  id: "owners-exist",
+  kind: "referenced_paths_exist",
+  source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+};
 const relationPolicy = (overrides = {}) => ({
   document_relations: { documents: structuredClone(documents), rules: [structuredClone(scalarEqual), structuredClone(scalarLiteral)], ...overrides },
 });
@@ -46,6 +51,15 @@ describe("semantic policy compiler boundary", () => {
 
   it("accepts semantically consistent scalar document relations", () => {
     assert.deepEqual(compileDocumentRelationsPolicy(relationPolicy()), []);
+  });
+
+  it("accepts a referenced path selector as a used document relation", () => {
+    assert.deepEqual(compileDocumentRelationsPolicy({
+      document_relations: {
+        documents: { contract: structuredClone(documents.contract) },
+        rules: [structuredClone(referencedPaths)],
+      },
+    }), []);
   });
 
   it("rejects duplicate ids, unknown references and unused documents", () => {
@@ -87,12 +101,16 @@ describe("document relation public schema boundary", () => {
     { quiet: true },
   );
 
-  it("accepts only the executable R2a scalar relation kinds", () => {
+  it("accepts only executable scalar and referenced-path relation kinds", () => {
     assert.equal(validate(relationPolicy().document_relations).ok, true);
+    assert.equal(validate({
+      documents: { contract: structuredClone(documents.contract) },
+      rules: [structuredClone(referencedPaths)],
+    }).ok, true);
     assert.equal(validate({ documents, rules: [{ ...scalarEqual, kind: "set_equal" }] }).ok, false);
   });
 
-  it("rejects collection projections and unsupported document formats in R2a schema", () => {
+  it("keeps scalar selectors free of collection projections and unsupported document formats", () => {
     assert.equal(validate({
       documents,
       rules: [{ ...scalarEqual, left: { ...scalarEqual.left, projection: "array_items" } }],
@@ -101,5 +119,20 @@ describe("document relation public schema boundary", () => {
       documents: { contract: { path: "contracts/contract.md", format: "markdown" } },
       rules: [{ ...scalarLiteral, source: { ...scalarLiteral.source, document: "contract" } }],
     }).ok, false);
+  });
+
+  it("restricts referenced path selectors to collection projection plus repository_path_set", () => {
+    assert.equal(validate({
+      documents: { contract: structuredClone(documents.contract) },
+      rules: [{ ...structuredClone(referencedPaths), source: { ...referencedPaths.source, projection: "value" } }],
+    }).ok, false);
+    assert.equal(validate({
+      documents: { contract: structuredClone(documents.contract) },
+      rules: [{ ...structuredClone(referencedPaths), source: { ...referencedPaths.source, type: "string_set" } }],
+    }).ok, false);
+    assert.equal(validate({
+      documents: { contract: structuredClone(documents.contract) },
+      rules: [{ ...structuredClone(referencedPaths), source: { ...referencedPaths.source, projection: "array_items" } }],
+    }).ok, true);
   });
 });

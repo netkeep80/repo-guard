@@ -42,6 +42,11 @@ const literalRule = {
   source: { document: "contract", pointer: "/root", type: "string" },
   value: "∞",
 };
+const referencedPathsRule = {
+  id: "owners-exist",
+  kind: "referenced_paths_exist",
+  source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+};
 
 describe("Constraint Program strictness projection", () => {
   const cases = [
@@ -91,6 +96,14 @@ describe("document relation strictness projection", () => {
     assert.ok(delta.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "root-is-infinity"));
   });
 
+  it("treats referenced path relation addition as stricter and removal as weaker", () => {
+    const base = relationPolicy(), head = structuredClone(base);
+    head.document_relations.rules.push(structuredClone(referencedPathsRule));
+    assert.equal(compareConstraintPrograms(base, head).relation, "stricter");
+    const delta = computePolicyDelta(head, base);
+    assert.ok(delta.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "owners-exist"));
+  });
+
   for (const [name, edit] of [
     ["selector", (policy) => { policy.document_relations.rules[0].left.pointer = "/other"; }],
     ["literal", (policy) => { policy.document_relations.rules[1].value = "R"; }],
@@ -104,6 +117,20 @@ describe("document relation strictness projection", () => {
     const comparison = compareConstraintPrograms(base, head);
     assert.equal(comparison.relation, "incomparable");
     assert.ok(comparison.incomparable.some((item) => item.pointer === "/document_relations/rules/contract-id-matches" || item.pointer === "/document_relations/rules/root-is-infinity"));
+  });
+
+  for (const [name, edit] of [
+    ["pointer", (policy) => { policy.document_relations.rules[1].source.pointer = "/other"; }],
+    ["projection", (policy) => { policy.document_relations.rules[1].source.projection = "array_items"; }],
+    ["document path", (policy) => { policy.document_relations.documents.contract.path = "contracts/other.json"; }],
+  ]) it(`treats referenced path ${name} edit as incomparable`, () => {
+    const base = relationPolicy();
+    base.document_relations.rules.push(structuredClone(referencedPathsRule));
+    const head = structuredClone(base);
+    edit(head);
+    const comparison = compareConstraintPrograms(base, head);
+    assert.equal(comparison.relation, "incomparable");
+    assert.ok(comparison.incomparable.some((item) => item.pointer === "/document_relations/rules/owners-exist"));
   });
 });
 

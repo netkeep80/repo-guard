@@ -38,7 +38,8 @@ type RuntimeConstraintKind =
   | "trace_rules"
   | "integration"
   | "document_scalar_equal"
-  | "document_scalar_equals_literal";
+  | "document_scalar_equals_literal"
+  | "document_referenced_paths_exist";
 
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
@@ -157,6 +158,35 @@ function checkDocumentScalarLiteral(facts: ConstraintFacts, constraint: RuntimeC
   return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar value does not match literal`, data };
 }
 
+function checkDocumentReferencedPathsExist(facts: ConstraintFacts, constraint: RuntimeConstraint) {
+  const source = factOperand(facts.documents, constraint.source);
+  if (!source.ok) return {
+    ok: false,
+    message: `document relation "${constraint.relation_id}" could not read repository path references`,
+    data: { kind: "referenced_paths_exist", source },
+  };
+  if (!Array.isArray(source.value)) return {
+    ok: false,
+    message: `document relation "${constraint.relation_id}" did not produce a repository path set`,
+    data: { kind: "referenced_paths_exist", source },
+  };
+
+  const referencedPaths = source.value;
+  if (facts.trackedFiles === undefined) return {
+    ok: false,
+    message: `document relation "${constraint.relation_id}" cannot verify references without tracked repository facts`,
+    data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: [], tracked_repository_available: false },
+  };
+
+  const tracked = new Set(facts.trackedFiles);
+  const missingPaths = referencedPaths.filter((path) => !tracked.has(path)).sort();
+  return {
+    ok: missingPaths.length === 0,
+    message: missingPaths.length ? `document relation "${constraint.relation_id}" references missing repository paths` : undefined,
+    data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: missingPaths },
+  };
+}
+
 export function evaluateConstraintIR(facts: ConstraintFacts, context: ConstraintContext = {}): RuleResult[] {
   const { files, constraints } = compileConstraintIR(facts), results: RuleResult[] = [], cochange: RuntimeConstraint[] = [];
   for (const constraint of constraints) {
@@ -189,6 +219,7 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
       continue;
     } else if (constraint.kind === "document_scalar_equal") check = checkDocumentScalarEqual(facts, constraint);
     else if (constraint.kind === "document_scalar_equals_literal") check = checkDocumentScalarLiteral(facts, constraint);
+    else if (constraint.kind === "document_referenced_paths_exist") check = checkDocumentReferencedPathsExist(facts, constraint);
     else continue;
     results.push({ name: constraint.name, check });
   }

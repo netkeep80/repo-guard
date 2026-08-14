@@ -165,6 +165,8 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
       if (!scalarLiteralMatches(selector.type, rule.value)) {
         errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
       }
+    } else if (rule.kind === "referenced_paths_exist") {
+      useSelector(id, "source", rule.source);
     }
   }
 

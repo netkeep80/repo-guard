@@ -404,6 +404,17 @@
         "type": { "type": "string", "enum": ["scalar", "string", "boolean"] }
       }
     },
+    "document_repository_path_set_selector": {
+      "type": "object",
+      "required": ["document", "pointer", "projection", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "$ref": "#/definitions/non_empty_string" },
+        "pointer": { "type": "string" },
+        "projection": { "type": "string", "enum": ["array_items", "object_values"] },
+        "type": { "const": "repository_path_set" }
+      }
+    },
     "document_relation_rule": {
       "oneOf": [
         {
@@ -426,6 +437,16 @@
             "kind": { "const": "scalar_equals_literal" },
             "source": { "$ref": "#/definitions/document_scalar_selector" },
             "value": { "type": ["string", "number", "boolean", "null"] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "source"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "referenced_paths_exist" },
+            "source": { "$ref": "#/definitions/document_repository_path_set_selector" }
           }
         }
       ]

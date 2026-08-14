@@ -27,6 +27,7 @@ function compileDocumentSelector(selectorValue, documents) {
         path: canonicalDocumentPath(definition.path),
         format: definition.format,
         pointer: typeof selector.pointer === "string" ? selector.pointer : "",
+        projection: selector.projection,
         type: selector.type,
     };
 }
@@ -96,6 +97,11 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
             const source = compileDocumentSelector(rule.source, documents);
             runtime = { ...runtimeBase, kind: "document_scalar_equals_literal", source, value: rule.value };
             shape = { kind: rule.kind, source, value: rule.value };
+        }
+        else if (rule.kind === "referenced_paths_exist") {
+            const source = compileDocumentSelector(rule.source, documents);
+            runtime = { ...runtimeBase, kind: "document_referenced_paths_exist", source };
+            shape = { kind: rule.kind, source };
         }
         add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
             removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));

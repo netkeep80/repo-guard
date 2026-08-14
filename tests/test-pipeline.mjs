@@ -248,5 +248,64 @@ console.log("\n--- scalar document relations execute through Constraint Program 
   expect("wrong scalar type fails closed", typeViolation?.data?.left?.error?.code, "fact_type_mismatch");
 }
 
+console.log("\n--- referenced repository paths execute through Constraint Program ---");
+{
+  const relationPolicy = {
+    ...policy,
+    document_relations: {
+      documents: { contract: { path: "contracts/contract.json", format: "json" } },
+      rules: [
+        {
+          id: "owners-exist",
+          kind: "referenced_paths_exist",
+          source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+        },
+        {
+          id: "gates-exist",
+          kind: "referenced_paths_exist",
+          source: { document: "contract", pointer: "/gates", projection: "array_items", type: "repository_path_set" },
+        },
+      ],
+    },
+  };
+  const contract = {
+    owners: { spec: "./docs/spec.md", verify: "tests/verify.mjs", duplicate: "docs/spec.md" },
+    gates: ["tests/gate.mjs", "docs/spec.md", "tests/gate.mjs"],
+  };
+  const readFile = (path) => path === "contracts/contract.json" ? JSON.stringify(contract) : undefined;
+  const trackedFiles = ["docs/spec.md", "tests/verify.mjs", "tests/gate.mjs"];
+  const passing = runEquivalentInput({ policy: relationPolicy, readFile, trackedFiles });
+  const ownersPass = passing.ruleResults.find((item) => item.rule === "document-relation:owners-exist");
+  const gatesPass = passing.ruleResults.find((item) => item.rule === "document-relation:gates-exist");
+  expect("object_values path references pass", ownersPass?.ok, true);
+  expect("array_items path references pass", gatesPass?.ok, true);
+  expect("repository path set normalizes and deduplicates object values", ownersPass?.data?.referenced_paths, ["docs/spec.md", "tests/verify.mjs"]);
+  expect("repository path set normalizes and deduplicates array items", gatesPass?.data?.referenced_paths, ["docs/spec.md", "tests/gate.mjs"]);
+
+  const missing = runEquivalentInput({ policy: relationPolicy, readFile, trackedFiles: ["docs/spec.md"] });
+  expect("missing object reference fails", missing.violations.find((item) => item.rule === "document-relation:owners-exist")?.data?.missing_paths, ["tests/verify.mjs"]);
+  expect("missing array reference fails", missing.violations.find((item) => item.rule === "document-relation:gates-exist")?.data?.missing_paths, ["tests/gate.mjs"]);
+
+  const invalidContract = { ...contract, gates: ["../escape.mjs"] };
+  const invalid = runEquivalentInput({
+    policy: relationPolicy,
+    readFile: (path) => path === "contracts/contract.json" ? JSON.stringify(invalidContract) : undefined,
+    trackedFiles,
+  });
+  expect("invalid repository path stays a structured R1 failure", invalid.violations.find((item) => item.rule === "document-relation:gates-exist")?.data?.source?.error?.code, "invalid_repository_path");
+
+  const { evaluateConstraintIR } = await import("../dist/checks/rules/constraints.mjs");
+  const { createDocumentReader } = await import("../dist/document-facts.mjs");
+  const noTrackedChecks = evaluateConstraintIR({
+    policy: relationPolicy,
+    diff: { files: { checked: [] } },
+    documents: createDocumentReader({ readFile }),
+    trackedFiles: undefined,
+  });
+  const noTrackedCheck = noTrackedChecks.find((item) => item.name === "document-relation:owners-exist")?.check;
+  expect("missing tracked repository facts fail closed", noTrackedCheck?.ok, false);
+  expect("missing tracked repository facts are explicit", noTrackedCheck?.data?.tracked_repository_available, false);
+}
+
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);

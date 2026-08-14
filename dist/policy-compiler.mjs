@@ -147,6 +147,9 @@ export function compileDocumentRelationsPolicy(policy = {}) {
                 errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
             }
         }
+        else if (rule.kind === "referenced_paths_exist") {
+            useSelector(id, "source", rule.source);
+        }
     }
     for (const name of Object.keys(documents))
         if (!usedDocuments.has(name)) {
