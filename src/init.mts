@@ -136,7 +136,7 @@ export function runInit(roots: InitRoots, args: string[] = []) {
 
   const created: string[] = [], skipped: string[] = [], root = roots.repoRoot;
   writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset as PresetName, enforcement.mode), null, 2)}\n`, created, skipped);
-  writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), workflow(enforcement.mode, refCheck.ref), created, skipped);
+  writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), workflow(enforcement.mode, refCheck.ref as string), created, skipped);
   writeIfAbsent(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), prTemplate(), created, skipped);
   writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-intent.yml"), issueTemplate(), created, skipped);
 
