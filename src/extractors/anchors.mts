@@ -88,8 +88,7 @@ function extractRegexAnchors(anchorType: string, source: AnchorSource, file: str
     let captureGroup = null;
     for (let i = 1; i < match.length; i++) if (match[i] !== undefined) { captureGroup = i; break; }
     const value = captureGroup ? match[captureGroup] : match[0];
-    const captureIndices = captureGroup ? match.indices?.[captureGroup] : undefined;
-    const index = captureIndices ? captureIndices[0] : match.index!;
+    const index = captureGroup && match.indices?.[captureGroup] ? match.indices[captureGroup]![0] : match.index!;
     const position = positionAt(starts, index);
     const instance: AnchorInstance = { anchorType, value: String(value), file, sourceKind: "regex", ...position, raw: match[0] };
     if (captureGroup) instance.captureGroup = captureGroup;
