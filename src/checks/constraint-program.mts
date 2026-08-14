@@ -55,7 +55,6 @@ interface PathsProjection {
   governance_paths?: unknown;
   operational_paths?: unknown;
   canonical_docs?: unknown;
-  [key: string]: unknown;
 }
 
 interface SizeRuleProjection {
@@ -77,19 +76,20 @@ interface IntegrationWorkflowProjection {
   path?: unknown;
   role?: unknown;
   profiles?: unknown;
-  expect?: ({ enforcement?: EnforcementMode } & Record<string, unknown>);
+  expect?: { enforcement?: EnforcementMode; [key: string]: unknown };
 }
 
-interface IntegrationProjection extends Record<string, unknown> {
+interface IntegrationProjection {
   workflows?: IntegrationWorkflowProjection[];
 }
 
-interface CochangeRuleProjection extends Record<string, unknown> {
+interface CochangeRuleProjection {
   if_changed?: unknown;
   must_change_any?: unknown;
+  [key: string]: unknown;
 }
 
-export interface ConstraintPolicyProjection extends Record<string, unknown> {
+export interface ConstraintPolicyProjection {
   diff_rules?: DiffRulesProjection;
   paths?: PathsProjection;
   enforcement?: { mode?: EnforcementMode };
@@ -224,7 +224,7 @@ const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) =
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
   const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules;
-  if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field]; if (!Object.keys(copy.paths).length) delete copy.paths; }
+  if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
   if (copy.integration) { delete copy.integration.workflows; if (!Object.keys(copy.integration).length) delete copy.integration; }
   return copy;
 }
