@@ -11,6 +11,9 @@
     },
     "allow_policy_relaxation": {
       "type": "array", "items": { "type": "string", "pattern": "^/" }, "uniqueItems": true
+    },
+    "allow_atomic_governance_cutover": {
+      "type": "boolean"
     }
   }
 }

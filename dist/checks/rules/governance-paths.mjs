@@ -10,16 +10,27 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
     if (!patterns.length && !governanceChange)
         return { ok: true };
     const touched = files.filter((file) => matchesBoundary(file.path)).map((file) => file.path);
-    const nonGovernance = governanceChange ? files.filter((file) => !matchesBoundary(file.path)).map((file) => file.path) : [];
-    if (!governanceChange && !touched.length)
-        return { ok: true, touched_governance_paths: [] };
     const declared = Array.isArray(governanceGrant?.authorized_governance_paths) ? governanceGrant.authorized_governance_paths : [];
     const sourceTrusted = trusted(trustedAuthorizer), authorized = sourceTrusted ? declared : [];
+    // Mixed files are allowed only for an explicitly trusted atomic cutover.
+    // This does not authorize governance files themselves: those still require
+    // matching authorized_governance_paths below, and ordinary scope/must-not
+    // rules remain independent vetoes.
+    const atomicGovernanceCutover = governanceChange
+        && governanceGrant?.allow_atomic_governance_cutover === true
+        && sourceTrusted;
+    const nonGovernance = governanceChange && !atomicGovernanceCutover
+        ? files.filter((file) => !matchesBoundary(file.path)).map((file) => file.path)
+        : [];
+    if (!governanceChange && !touched.length)
+        return { ok: true, touched_governance_paths: [] };
     const unauthorized = touched.filter((path) => !matchesAny(path, expandGovernancePatterns(authorized)));
     const details = [
         ...nonGovernance.map((path) => `governance ChangeIntent cannot change non-governance path ${path}`),
         ...unauthorized.map((path) => `governance path ${path} changed without matching GovernanceGrant authorization`),
     ];
+    if (atomicGovernanceCutover)
+        details.push("Trusted atomic governance cutover permits scoped non-governance files");
     if (declared.length && !sourceTrusted)
         details.push("GovernanceGrant is ignored because no trusted authorizer was detected");
     const ok = !nonGovernance.length && !unauthorized.length;
@@ -33,8 +44,9 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
         trusted_authorized_governance_paths: authorized,
         unauthorized_paths: unauthorized,
         untrusted_governance_grant_ignored: declared.length > 0 && !sourceTrusted,
+        atomic_governance_cutover: atomicGovernanceCutover,
         details,
-        hint: ok ? undefined : "Use a dedicated governance-only diff and authorize every touched governance path from a trusted linked-issue GovernanceGrant.",
+        hint: ok ? undefined : "Use a dedicated governance-only diff, or a trusted atomic governance cutover, and authorize every touched governance path from a trusted linked-issue GovernanceGrant.",
     };
 }
 export const governancePathsRuleFamily = {
