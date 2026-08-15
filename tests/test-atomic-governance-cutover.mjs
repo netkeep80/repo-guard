@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { checkGovernanceChangeAuthorization } from "../dist/checks/rules/governance-paths.mjs";
 import { checkPolicyRelaxation } from "../dist/checks/rules/policy-delta-rules.mjs";
 
 const file = (path) => ({ path, status: "modified", addedLines: [], deletedLines: [] });
@@ -18,6 +19,7 @@ const BASE = {
 const HEAD = structuredClone(BASE);
 HEAD.size_rules[0].max = 20;
 const FULL_GRANT = {
+  authorized_governance_paths: ["repo-policy.json"],
   allow_policy_relaxation: ["/size_rules/source/max"],
   allow_atomic_governance_cutover: true,
 };
@@ -34,9 +36,20 @@ function check(overrides = {}) {
   });
 }
 
+function checkGovernance(overrides = {}) {
+  return checkGovernanceChangeAuthorization({
+    files: [file("repo-policy.json"), file("src/runtime.mjs")],
+    governancePaths: ["repo-policy.json"],
+    governanceGrant: FULL_GRANT,
+    trustedAuthorizer: TRUSTED,
+    changeIntentType: "governance",
+    ...overrides,
+  });
+}
+
 describe("atomic governance cutover authorization", () => {
   it("keeps mixed policy relaxation blocked without explicit opt-in", () => {
-    const result = check({ governanceGrant: { allow_policy_relaxation: ["/size_rules/source/max"] } });
+    const result = check({ governanceGrant: { authorized_governance_paths: ["repo-policy.json"], allow_policy_relaxation: ["/size_rules/source/max"] } });
     assert.equal(result.ok, false);
     assert.ok(result.blocked_reasons.includes("policy_relaxation_mixed_with_non_governance_changes"));
   });
@@ -78,10 +91,38 @@ describe("atomic governance cutover authorization", () => {
   it("does not change the ordinary trusted governance-only path", () => {
     const result = check({
       changedFiles: [file("repo-policy.json")],
-      governanceGrant: { allow_policy_relaxation: ["/size_rules/source/max"] },
+      governanceGrant: { authorized_governance_paths: ["repo-policy.json"], allow_policy_relaxation: ["/size_rules/source/max"] },
     });
     assert.equal(result.ok, true);
     assert.equal(result.governance_only, true);
     assert.equal(result.atomic_governance_cutover, false);
+  });
+
+  it("keeps ordinary governance ChangeIntent mixed paths blocked without atomic opt-in", () => {
+    const result = checkGovernance({ governanceGrant: { authorized_governance_paths: ["repo-policy.json"] } });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.non_governance_paths, ["src/runtime.mjs"]);
+  });
+
+  it("allows scoped mixed paths for a trusted atomic cutover while still authorizing governance paths", () => {
+    const result = checkGovernance();
+    assert.equal(result.ok, true);
+    assert.equal(result.atomic_governance_cutover, true);
+    assert.deepEqual(result.non_governance_paths, []);
+    assert.deepEqual(result.unauthorized_paths, []);
+  });
+
+  it("does not let atomic mode waive governance-path authorization", () => {
+    const result = checkGovernance({ governanceGrant: { ...FULL_GRANT, authorized_governance_paths: ["other-policy.json"] } });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unauthorized_paths, ["repo-policy.json"]);
+  });
+
+  it("does not let an untrusted atomic grant permit mixed paths", () => {
+    const result = checkGovernance({ trustedAuthorizer: UNTRUSTED });
+    assert.equal(result.ok, false);
+    assert.equal(result.atomic_governance_cutover, false);
+    assert.deepEqual(result.non_governance_paths, ["src/runtime.mjs"]);
+    assert.deepEqual(result.unauthorized_paths, ["repo-policy.json"]);
   });
 });
