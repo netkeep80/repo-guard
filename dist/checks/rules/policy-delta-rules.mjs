@@ -70,22 +70,33 @@ export function checkPolicyRelaxation({ basePolicy, headPolicy, changedFiles, tr
     if (!grant.ok)
         reasons.push(grant.reason);
     const governanceOnly = !classified.protectedFiles.length && !classified.otherFiles.length && classified.governanceFiles.length > 0;
-    if (!governanceOnly)
+    // Atomic cutover is deliberately narrower than a generic policy bypass: it
+    // only removes the mixed-diff veto after trust, full pointer coverage and a
+    // governance ChangeIntent have all been proven independently.
+    const atomicGovernanceCutover = governanceGrant?.allow_atomic_governance_cutover === true
+        && classified.governanceFiles.length > 0
+        && authorizer.trusted
+        && grant.ok
+        && changeIntentType === "governance";
+    if (!governanceOnly && !atomicGovernanceCutover)
         reasons.push("policy_relaxation_mixed_with_non_governance_changes");
     if (changeIntentType && changeIntentType !== "governance")
         reasons.push("change_intent_type_is_not_governance");
     const details = relaxations.map((item) => `- ${item.pointer}: ${item.message}`);
     if (!governanceOnly && classified.protectedFiles.length)
         details.push(`Mixed with protected-surface changes: ${classified.protectedFiles.slice(0, 10).join(", ")}`);
+    if (atomicGovernanceCutover)
+        details.push("Atomic governance cutover explicitly authorized by trusted GovernanceGrant");
     if (authorizer.reasons.length)
         details.push(`trusted_authorizer: ${authorizer.reasons.join(", ")}`);
     const ok = !reasons.length;
     return {
         ok, message: ok ? undefined : "PR attempts to relax trusted repository policy", policy_relaxations: relaxations,
-        details, blocked_reasons: reasons, governance_only: governanceOnly, protected_files: classified.protectedFiles,
-        governance_files: classified.governanceFiles, other_files: classified.otherFiles, protected_patterns: classified.protectedPatterns,
+        details, blocked_reasons: reasons, governance_only: governanceOnly, atomic_governance_cutover: atomicGovernanceCutover,
+        protected_files: classified.protectedFiles, governance_files: classified.governanceFiles,
+        other_files: classified.otherFiles, protected_patterns: classified.protectedPatterns,
         trusted_authorizer: authorizer,
-        hint: ok ? undefined : "Policy relaxation requires a dedicated governance change and a trusted linked-issue GovernanceGrant covering every relaxed pointer.",
+        hint: ok ? undefined : "Policy relaxation requires a dedicated governance change or an explicitly authorized atomic governance cutover, plus a trusted GovernanceGrant covering every relaxed pointer.",
     };
 }
 export const policyRelaxationRuleFamily = {
