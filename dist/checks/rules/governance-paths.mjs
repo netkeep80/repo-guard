@@ -12,6 +12,10 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
     const touched = files.filter((file) => matchesBoundary(file.path)).map((file) => file.path);
     const declared = Array.isArray(governanceGrant?.authorized_governance_paths) ? governanceGrant.authorized_governance_paths : [];
     const sourceTrusted = trusted(trustedAuthorizer), authorized = sourceTrusted ? declared : [];
+    // Mixed files are allowed only for an explicitly trusted atomic cutover.
+    // This does not authorize governance files themselves: those still require
+    // matching authorized_governance_paths below, and ordinary scope/must-not
+    // rules remain independent vetoes.
     const atomicGovernanceCutover = governanceChange
         && governanceGrant?.allow_atomic_governance_cutover === true
         && sourceTrusted;
