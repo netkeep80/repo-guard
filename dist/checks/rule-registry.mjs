@@ -1,3 +1,6 @@
+function isExecutionPhase(value) {
+    return value === "transaction" || value === "state" || value === "both";
+}
 function assertRuleFamily(family) {
     if (!family || typeof family !== "object") {
         throw new TypeError("rule family must be an object");
@@ -5,9 +8,26 @@ function assertRuleFamily(family) {
     if (!family.id || typeof family.id !== "string") {
         throw new TypeError("rule family requires a string id");
     }
+    if (!isExecutionPhase(family.phase)) {
+        throw new TypeError(`rule family "${family.id}" requires phase transaction, state, or both`);
+    }
     if (typeof family.evaluate !== "function") {
         throw new TypeError(`rule family "${family.id}" requires an evaluate function`);
     }
+}
+function requestedExecutionPhase(context) {
+    if (!context || typeof context !== "object" || !("executionPhase" in context))
+        return "both";
+    const phase = context.executionPhase;
+    if (phase === undefined)
+        return "both";
+    if (!isExecutionPhase(phase)) {
+        throw new TypeError("execution phase must be transaction, state, or both");
+    }
+    return phase;
+}
+function appliesToExecutionPhase(family, requested) {
+    return requested === "both" || family.phase === "both" || family.phase === requested;
 }
 function normalizeRuleEntries(family, entries) {
     const list = Array.isArray(entries) ? entries : [entries];
@@ -41,7 +61,10 @@ export function createRuleRegistry() {
             return families.map((family) => family.id);
         },
         evaluate(facts, context = {}) {
+            const executionPhase = requestedExecutionPhase(context);
             return families.flatMap((family) => {
+                if (!appliesToExecutionPhase(family, executionPhase))
+                    return [];
                 if (family.applies && !family.applies(facts, context))
                     return [];
                 return normalizeRuleEntries(family, family.evaluate(facts, context));
