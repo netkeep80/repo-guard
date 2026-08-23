@@ -20,6 +20,10 @@ function hasName(entries, expected) {
   return entries.some((entry) => entry.name === expected);
 }
 
+function namedCheck(entries, expected) {
+  return entries.find((entry) => entry.name === expected)?.check;
+}
+
 const registry = createRuleRegistry();
 registry.register({
   id: "transaction-family",
@@ -147,6 +151,67 @@ expect("state constraints keep registry state rule", hasName(stateConstraints, "
 expect("state constraints exclude diff budget", hasName(stateConstraints, "max-new-files"), false);
 expect("state constraints exclude surface debt", hasName(stateConstraints, "surface-debt"), false);
 expect("state constraints exclude cochange transaction summary", hasName(stateConstraints, "cochange-rules"), false);
+
+const sizeFacts = {
+  repositoryRoot: process.cwd(),
+  trackedFiles: ["src/existing.mjs", "src/new.mjs"],
+  policy: {
+    paths: {
+      forbidden: [],
+      canonical_docs: [],
+      operational_paths: [],
+    },
+    size_rules: [
+      {
+        id: "state-absolute",
+        scope: "directory",
+        metric: "files",
+        glob: "src/**",
+        max: 1,
+      },
+      {
+        id: "transaction-changed",
+        scope: "directory",
+        metric: "files",
+        glob: "src/**",
+        max: 0,
+        count: "changed_only",
+      },
+      {
+        id: "mixed-growth",
+        scope: "directory",
+        metric: "files",
+        glob: "src/**",
+        max: 2,
+        max_growth: 0,
+      },
+    ],
+  },
+  changeIntent: null,
+  diff: {
+    files: {
+      checked: [
+        {
+          path: "src/new.mjs",
+          status: "added",
+          addedLines: ["export const value = 1;"],
+          deletedLines: [],
+        },
+      ],
+    },
+  },
+};
+
+const stateSize = namedCheck(evaluateConstraintIR(sizeFacts, { executionPhase: "state" }), "size-rules");
+const transactionSize = namedCheck(evaluateConstraintIR(sizeFacts, { executionPhase: "transaction" }), "size-rules");
+
+expect("state size rules keep absolute repository invariant", stateSize.failed_rules.includes("state-absolute"), true);
+expect("state size rules exclude changed-only invariant", stateSize.failed_rules.includes("transaction-changed"), false);
+expect("state size rules strip growth facet from mixed invariant", stateSize.growth.length, 0);
+expect("transaction size rules exclude pure absolute repository invariant", transactionSize.failed_rules.includes("state-absolute"), false);
+expect("transaction size rules keep changed-only invariant", transactionSize.failed_rules.includes("transaction-changed"), true);
+expect("transaction size rules keep growth facet from mixed invariant", transactionSize.failed_rules.includes("mixed-growth"), true);
+expect("transaction size rules report mixed growth", transactionSize.growth.some((item) => item.ruleId === "mixed-growth"), true);
 
 console.log(`\n${failures === 0 ? "All execution phase tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
