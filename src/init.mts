@@ -46,7 +46,7 @@ function parallelIntegration(mode: string, ref: string) {
           action: { uses: ACTION, ref_pinning },
           mode: "portable-coordinator",
           enforcement: "blocking",
-          permissions: { contents: "write", "pull-requests": "write" },
+          permissions: { contents: "write", "pull-requests": "write", checks: "read" },
           token_env: ["GH_TOKEN"],
         },
       },
@@ -121,6 +121,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: read
 jobs:
   integrate:
     runs-on: ubuntu-latest
