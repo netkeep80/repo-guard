@@ -40,6 +40,22 @@ function parseRuntimeJson(text, label) {
         throw new Error(`malformed_github_response: ${label}: ${message}`);
     }
 }
+function parseIncludedGitHubResponse(output) {
+    const separator = output.match(/\r?\n\r?\n/);
+    if (separator === null || separator.index === undefined) {
+        throw new Error("malformed_github_response: mutation response is missing HTTP headers");
+    }
+    const headers = output.slice(0, separator.index);
+    const statusMatch = headers.match(/^HTTP\/\S+\s+(\d{3})(?:\s|$)/m);
+    if (statusMatch === null) {
+        throw new Error("malformed_github_response: mutation response is missing HTTP status");
+    }
+    const bodyText = output.slice(separator.index + separator[0].length).trim();
+    return {
+        status: Number(statusMatch[1]),
+        body: bodyText.length === 0 ? null : parseRuntimeJson(bodyText, "mutation response body"),
+    };
+}
 function normalizeInventoryItem(value) {
     if (!isObject(value) || value.mergeable !== undefined)
         return value;
@@ -117,6 +133,22 @@ function createCandidateReader(repository, run) {
                 runs,
             },
         };
+    };
+}
+function createMutationTransport(run) {
+    return {
+        async request(request) {
+            const args = [
+                "api",
+                request.path.replace(/^\/+/, ""),
+                "--method", request.method,
+                "--include",
+            ];
+            for (const [key, value] of Object.entries(request.body)) {
+                args.push("--raw-field", `${key}=${value}`);
+            }
+            return parseIncludedGitHubResponse(run("gh", args));
+        },
     };
 }
 function renderText(evidence) {
@@ -222,6 +254,8 @@ export async function runPortableCoordinatorCommand(_roots, args, env = process.
         ?? createReadyInventoryReader(parsed.value.repository, run);
     const readCandidate = dependencies.readCandidate
         ?? createCandidateReader(parsed.value.repository, run);
+    const mutationTransport = dependencies.mutationTransport
+        ?? createMutationTransport(run);
     const evidence = await runTrustedPortableCoordinator({
         repository: parsed.value.repository,
         readyLabel: parsed.value.readyLabel,
@@ -229,7 +263,7 @@ export async function runPortableCoordinatorCommand(_roots, args, env = process.
         requiredChecks: parsed.value.requiredChecks,
         readReadyInventory,
         readCandidate,
-        mutationTransport: dependencies.mutationTransport,
+        mutationTransport,
     });
     const output = parsed.value.format === "json"
         ? JSON.stringify(evidence)
