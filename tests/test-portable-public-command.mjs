@@ -95,4 +95,35 @@ assert.deepEqual(JSON.parse(output[0]), {
   result: null,
 });
 
+const runtimeCalls = [];
+const runtimeOutput = [];
+const runtimeIdleExit = await runPortableCoordinatorCommand(
+  {},
+  [
+    "--repository", "netkeep80/example",
+    "--ready-label", "repo-guard:ready",
+    "--merge-method", "squash",
+    "--transaction-check", "tx",
+    "--state-check", "state",
+    "--format", "json",
+  ],
+  {},
+  {
+    run: (command, args) => {
+      runtimeCalls.push([command, args]);
+      if (command === "gh" && args.join(" ") === "api repos/netkeep80/example/pulls?state=open&per_page=100 --paginate --slurp") {
+        return "[[]]";
+      }
+      throw new Error(`unexpected runtime command: ${command} ${args.join(" ")}`);
+    },
+    writeOutput: (text) => runtimeOutput.push(text),
+  },
+);
+assert.equal(runtimeIdleExit, 0, "default GitHub runtime can complete an empty READY inventory pass");
+assert.deepEqual(runtimeCalls, [[
+  "gh",
+  ["api", "repos/netkeep80/example/pulls?state=open&per_page=100", "--paginate", "--slurp"],
+]], "default GitHub runtime uses one complete read-only paginated PR inventory request");
+assert.equal(JSON.parse(runtimeOutput[0]).kind, "idle");
+
 console.log("Portable public coordinator trusted CLI parsing/runtime composition contract passed.");
