@@ -349,6 +349,56 @@ assert.deepEqual(mutationEvidence.result, {
   rereadRequired: true,
 });
 
+let conflictCalls = 0;
+const conflictOutput = [];
+const conflictExit = await runPortableCoordinatorCommand(
+  {},
+  [
+    "--repository", "netkeep80/example",
+    "--ready-label", "repo-guard:ready",
+    "--merge-method", "squash",
+    "--transaction-check", "tx",
+    "--state-check", "state",
+    "--format", "json",
+  ],
+  {},
+  {
+    readReadyInventory: async () => ({ complete: true, pages: [[mutationPr]] }),
+    readCandidate: async () => ({
+      currentMainSha: mutationMainSha,
+      pullRequest: mutationPr,
+      compare: {
+        mainSha: mutationMainSha,
+        headSha: mutationHeadSha,
+        status: "behind",
+      },
+      checkRuns: {
+        complete: true,
+        headSha: mutationHeadSha,
+        runs: [
+          { name: "tx", head_sha: mutationHeadSha, status: "completed", conclusion: "success" },
+          { name: "state", head_sha: mutationHeadSha, status: "completed", conclusion: "success" },
+        ],
+      },
+    }),
+    run: () => {
+      conflictCalls++;
+      const error = new Error("gh api returned 409");
+      error.stdout = "HTTP/2 409 Conflict\ncontent-type: application/json\n\n{\"message\":\"branch moved\"}";
+      throw error;
+    },
+    writeOutput: (text) => conflictOutput.push(text),
+  },
+);
+assert.equal(conflictExit, 1, "a canonical GitHub update conflict remains a non-zero coordinator result");
+assert.equal(conflictCalls, 1, "the default mutation transport performs exactly one GitHub mutation attempt");
+const conflictEvidence = JSON.parse(conflictOutput[0]);
+assert.deepEqual(conflictEvidence.result, {
+  ok: false,
+  error: "conflict",
+  message: "update-branch conflicts with current repository state: branch moved",
+}, "non-zero gh output is recovered as an HTTP response for the canonical writer");
+
 const fakeGhDir = mkdtempSync(join(tmpdir(), "repo-guard-p4c-gh-"));
 const fakeGhPath = join(fakeGhDir, "gh");
 writeFileSync(fakeGhPath, `#!/usr/bin/env node
