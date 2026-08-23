@@ -1,4 +1,5 @@
 import { createRuleRegistry } from "../dist/checks/rule-registry.mjs";
+import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 
 let failures = 0;
 
@@ -13,6 +14,10 @@ function expect(label, actual, expected) {
 
 function names(entries) {
   return entries.map((entry) => entry.name).join(",");
+}
+
+function hasName(entries, expected) {
+  return entries.some((entry) => entry.name === expected);
 }
 
 const registry = createRuleRegistry();
@@ -83,6 +88,65 @@ expect(
   unknownPhaseError.includes("phase"),
   true
 );
+
+const documentContent = new Map([
+  ["left.json", JSON.stringify({ items: ["src/a.mjs"] })],
+  ["right.json", JSON.stringify({ items: ["src/a.mjs"] })],
+]);
+const constraintFacts = {
+  repositoryRoot: process.cwd(),
+  trackedFiles: [...documentContent.keys(), "src/new.mjs"],
+  readFile: (path) => documentContent.get(path),
+  policy: {
+    paths: {
+      forbidden: ["secrets/**"],
+      canonical_docs: [],
+      operational_paths: [],
+    },
+    diff_rules: {
+      max_new_files: 0,
+    },
+    registry_rules: [
+      {
+        id: "state-registry",
+        kind: "equal",
+        left: { type: "json_array", file: "left.json", json_pointer: "/items" },
+        right: { type: "json_array", file: "right.json", json_pointer: "/items" },
+      },
+    ],
+  },
+  changeIntent: null,
+  diff: {
+    files: {
+      checked: [
+        {
+          path: "src/new.mjs",
+          status: "added",
+          addedLines: ["export const value = 1;"],
+          deletedLines: [],
+        },
+      ],
+    },
+  },
+};
+
+const legacyConstraints = evaluateConstraintIR(constraintFacts);
+const explicitBothConstraints = evaluateConstraintIR(constraintFacts, { executionPhase: "both" });
+const transactionConstraints = evaluateConstraintIR(constraintFacts, { executionPhase: "transaction" });
+const stateConstraints = evaluateConstraintIR(constraintFacts, { executionPhase: "state" });
+
+expect(
+  "explicit both keeps constraint evaluation byte-order compatible with legacy",
+  names(explicitBothConstraints),
+  names(legacyConstraints)
+);
+expect("transaction constraints keep diff budget", hasName(transactionConstraints, "max-new-files"), true);
+expect("transaction constraints keep surface debt", hasName(transactionConstraints, "surface-debt"), true);
+expect("transaction constraints exclude registry state rule", hasName(transactionConstraints, "registry-rules"), false);
+expect("state constraints keep registry state rule", hasName(stateConstraints, "registry-rules"), true);
+expect("state constraints exclude diff budget", hasName(stateConstraints, "max-new-files"), false);
+expect("state constraints exclude surface debt", hasName(stateConstraints, "surface-debt"), false);
+expect("state constraints exclude cochange transaction summary", hasName(stateConstraints, "cochange-rules"), false);
 
 console.log(`\n${failures === 0 ? "All execution phase tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
