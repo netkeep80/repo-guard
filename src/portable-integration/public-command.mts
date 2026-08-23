@@ -20,7 +20,9 @@ type Success = {
     format: OutputFormat;
   };
 };
+type RunCommand = (command: string, args: string[]) => string;
 type RuntimeDependencies = {
+  run?: RunCommand;
   readReadyInventory?: () => Promise<unknown>;
   readCandidate?: (prNumber: number) => Promise<unknown>;
   mutationTransport?: unknown;
@@ -49,6 +51,30 @@ function normalizeChecks(values: string[]): RequiredCheck[] {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseRuntimeJson(text: string, label: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`malformed_github_response: ${label}: ${message}`);
+  }
+}
+
+function createReadyInventoryReader(repository: string, run: RunCommand | undefined) {
+  if (run === undefined) return undefined;
+  return async () => {
+    const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
+    const pages = parseRuntimeJson(
+      run("gh", ["api", endpoint, "--paginate", "--slurp"]),
+      endpoint,
+    );
+    if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+      throw new Error("malformed_github_response: PR inventory pagination must be an array of pages");
+    }
+    return { complete: true, pages };
+  };
 }
 
 function renderText(evidence: TrustedPortableCoordinatorEvidence): string {
@@ -163,13 +189,18 @@ export async function runPortableCoordinatorCommand(
   const parsed = parsePortableCoordinatorArgs(args, env);
   if (!parsed.ok) throw new Error(`${parsed.error}: ${parsed.message}`);
 
+  const readReadyInventory = dependencies.readReadyInventory
+    ?? createReadyInventoryReader(parsed.value.repository, dependencies.run);
+  const readCandidate = dependencies.readCandidate
+    ?? (async () => { throw new Error("candidate GitHub runtime is not wired"); });
+
   const evidence = await runTrustedPortableCoordinator({
     repository: parsed.value.repository,
     readyLabel: parsed.value.readyLabel,
     mergeMethod: parsed.value.mergeMethod,
     requiredChecks: parsed.value.requiredChecks,
-    readReadyInventory: dependencies.readReadyInventory,
-    readCandidate: dependencies.readCandidate,
+    readReadyInventory,
+    readCandidate,
     mutationTransport: dependencies.mutationTransport,
   });
 
