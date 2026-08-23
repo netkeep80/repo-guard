@@ -132,6 +132,8 @@ console.log("\n--- parallel doctor composes canonical repository and control-pla
   const text = renderParallelDoctorReport(report, "text");
   assert.match(text, /repo-guard doctor --parallel portable/);
   assert.match(text, /READY/);
+  assert.match(text, /transaction workflow: \.github\/workflows\/ci\.yml/);
+  assert.match(text, /provider workflow: \.github\/workflows\/parallel\.yml/);
   assert.match(text, /target branch: main/);
   assert.match(text, /required checks: CI \/ validate/);
 }
