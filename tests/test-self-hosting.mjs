@@ -82,12 +82,17 @@ describe("derived test inventory", () => {
 });
 
 describe("derived capability inventory", () => {
-  it("derives commands from the CLI registry and finds real evidence", () => {
+  it("derives commands from the CLI registry and finds real evidence or an explicit exception", () => {
     const corpus = `${workflowText}\n${testFiles.join("\n")}\n${read(".github/PULL_REQUEST_TEMPLATE.md")}`;
     for (const command of COMMANDS) {
       if (command === "validate") assert.match(workflowText, /Validate repo-policy\.json/);
       else if (command === "init") assert.ok(testFiles.includes("test-init.mjs"));
-      else assert.ok(corpus.includes(command), `no self-hosting evidence for command ${command}`);
+      else if (!corpus.includes(command)) {
+        assert.ok(hasException(`command:${command}`), `no self-hosting evidence or exception for command ${command}`);
+      }
+    }
+    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("command:"))) {
+      assert.ok(COMMANDS.includes(id.slice(8)), `stale command exception ${id}`);
     }
   });
 
