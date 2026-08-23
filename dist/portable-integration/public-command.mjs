@@ -16,6 +16,27 @@ function normalizeChecks(values) {
 function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function parseRuntimeJson(text, label) {
+    try {
+        return JSON.parse(text);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`malformed_github_response: ${label}: ${message}`);
+    }
+}
+function createReadyInventoryReader(repository, run) {
+    if (run === undefined)
+        return undefined;
+    return async () => {
+        const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
+        const pages = parseRuntimeJson(run("gh", ["api", endpoint, "--paginate", "--slurp"]), endpoint);
+        if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
+            throw new Error("malformed_github_response: PR inventory pagination must be an array of pages");
+        }
+        return { complete: true, pages };
+    };
+}
 function renderText(evidence) {
     const lines = [
         "repo-guard portable-coordinator",
@@ -114,13 +135,17 @@ export async function runPortableCoordinatorCommand(_roots, args, env = process.
     const parsed = parsePortableCoordinatorArgs(args, env);
     if (!parsed.ok)
         throw new Error(`${parsed.error}: ${parsed.message}`);
+    const readReadyInventory = dependencies.readReadyInventory
+        ?? createReadyInventoryReader(parsed.value.repository, dependencies.run);
+    const readCandidate = dependencies.readCandidate
+        ?? (async () => { throw new Error("candidate GitHub runtime is not wired"); });
     const evidence = await runTrustedPortableCoordinator({
         repository: parsed.value.repository,
         readyLabel: parsed.value.readyLabel,
         mergeMethod: parsed.value.mergeMethod,
         requiredChecks: parsed.value.requiredChecks,
-        readReadyInventory: dependencies.readReadyInventory,
-        readCandidate: dependencies.readCandidate,
+        readReadyInventory,
+        readCandidate,
         mutationTransport: dependencies.mutationTransport,
     });
     const output = parsed.value.format === "json"
