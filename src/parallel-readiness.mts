@@ -117,7 +117,6 @@ function workflowPath(workflow: WorkflowFact | undefined): string | null {
 function hasEvent(workflow: WorkflowFact, event: string): boolean {
   return array(workflow.triggerEvents).includes(event);
 }
-
 function hasEventType(workflow: WorkflowFact, event: string, type: string): boolean {
   return array(workflow.triggerEventTypes).some((fact) => {
     if (!isObject(fact)) return false;
@@ -266,9 +265,12 @@ export function evaluateParallelReadiness(input: ParallelReadinessInput): Parall
   const providerWorkflow = input.provider === "portable"
     ? all.find((workflow) => workflow.role === "repo_guard_portable_coordinator")
     : all.find((workflow) => workflow.role === "repo_guard_merge_group_gate");
+  const hasNativeProvider = all.some((workflow) => workflow.role === "repo_guard_merge_group_gate");
+  const hasPortableProvider = all.some((workflow) => workflow.role === "repo_guard_portable_coordinator");
 
   if (!isObject(input.integrationFacts)) add(blockers, "invalid_integration_facts", "repository", "integration facts must be an object");
   else if (array((input.integrationFacts as IntegrationFactsInput).errors).length > 0) add(blockers, "integration_extraction_failed", "repository", "integration extraction contains errors");
+  if (hasNativeProvider && hasPortableProvider) add(blockers, "provider_role_conflict", "repository", "parallel provider roles must not declare both native merge-group gate and portable coordinator");
 
   checkTransaction(transaction, blockers);
   if (input.provider === "portable") checkPortable(transaction, providerWorkflow, blockers);

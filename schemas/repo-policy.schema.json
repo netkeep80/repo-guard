@@ -678,7 +678,7 @@
         "path": { "$ref": "#/definitions/non_empty_string" },
         "role": {
           "type": "string",
-          "enum": ["repo_guard_advisory", "repo_guard_policy_validation", "repo_guard_pr_gate", "ci_gate"],
+          "enum": ["repo_guard_advisory", "repo_guard_policy_validation", "repo_guard_pr_gate", "repo_guard_merge_group_gate", "repo_guard_portable_coordinator", "ci_gate"],
           "description": "Supported integration role for this workflow."
         },
         "expect": { "$ref": "#/definitions/integration_workflow_expectation" },
@@ -695,7 +695,7 @@
         "action": { "$ref": "#/definitions/integration_workflow_action_expectation" },
         "mode": {
           "type": "string",
-          "enum": ["check-pr", "check-diff"]
+          "enum": ["check-pr", "check-diff", "check-merge-group", "portable-coordinator"]
         },
         "enforcement": {
           "type": "string",
