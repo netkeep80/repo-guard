@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { runCli } from "../dist/repo-guard.mjs";
+import { COMMANDS, runCli } from "../dist/repo-guard.mjs";
+
+assert.equal(COMMANDS.includes("portable-coordinator"), true, "public CLI exposes portable-coordinator command");
 
 const originalError = console.error, errors = [];
 console.error = (...args) => errors.push(args.join(" "));
