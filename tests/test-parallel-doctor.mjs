@@ -50,6 +50,13 @@ console.log("\n--- doctor --parallel requires an explicit provider value ---");
   expectNotIncludes("parallel option is not rejected as unknown", result.stderr, "Unknown option for doctor: --parallel");
 }
 
+console.log("\n--- doctor --parallel rejects unsupported providers ---");
+{
+  const result = run(["doctor", "--parallel", "bogus"]);
+  expect("unsupported provider exits non-zero", result.code, 1);
+  expectIncludes("unsupported provider is explicit", result.stderr, "Unsupported parallel provider: bogus");
+}
+
 console.log("\n=========================");
 if (failures > 0) {
   console.error(`${failures} test(s) FAILED`);
