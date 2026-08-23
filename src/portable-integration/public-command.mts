@@ -84,6 +84,13 @@ function parseRuntimeJson(text: string, label: string): unknown {
   }
 }
 
+function processErrorOutput(error: unknown): string | null {
+  if (!isObject(error) || typeof error.stdout !== "string" || error.stdout.length === 0) {
+    return null;
+  }
+  return error.stdout;
+}
+
 function parseIncludedGitHubResponse(output: string): { status: number; body: unknown } {
   const separator = output.match(/\r?\n\r?\n/);
   if (separator === null || separator.index === undefined) {
@@ -217,7 +224,16 @@ function createMutationTransport(run: RunCommand) {
       for (const [key, value] of Object.entries(request.body)) {
         args.push("--raw-field", `${key}=${value}`);
       }
-      return parseIncludedGitHubResponse(run("gh", args));
+
+      let output: string;
+      try {
+        output = run("gh", args);
+      } catch (error) {
+        const recovered = processErrorOutput(error);
+        if (recovered === null) throw error;
+        output = recovered;
+      }
+      return parseIncludedGitHubResponse(output);
     },
   };
 }
