@@ -129,6 +129,48 @@ assert.deepEqual(runtimeCalls, [[
 ]], "injected GitHub runtime uses one complete read-only paginated PR inventory request");
 assert.equal(JSON.parse(runtimeOutput[0]).kind, "idle");
 
+const mainSha = "1111111111111111111111111111111111111111";
+const headSha = "2222222222222222222222222222222222222222";
+let realisticCandidateReads = 0;
+const realisticOutput = [];
+const realisticExit = await runPortableCoordinatorCommand(
+  {},
+  [
+    "--repository", "netkeep80/example",
+    "--ready-label", "repo-guard:ready",
+    "--merge-method", "squash",
+    "--transaction-check", "tx",
+    "--state-check", "state",
+    "--format", "json",
+  ],
+  {},
+  {
+    run: (command, args) => {
+      if (command === "gh" && args.join(" ") === "api repos/netkeep80/example/pulls?state=open&per_page=100 --paginate --slurp") {
+        return JSON.stringify([[
+          {
+            number: 7,
+            draft: false,
+            base: { ref: "main", sha: mainSha },
+            head: { ref: "feature", sha: headSha, repo: { full_name: "netkeep80/example" } },
+            labels: [{ name: "repo-guard:ready" }],
+          },
+        ]]);
+      }
+      throw new Error(`unexpected realistic inventory command: ${command} ${args.join(" ")}`);
+    },
+    readCandidate: async (prNumber) => {
+      realisticCandidateReads++;
+      assert.equal(prNumber, 7);
+      throw new Error("candidate sentinel after inventory normalization");
+    },
+    writeOutput: (text) => realisticOutput.push(text),
+  },
+);
+assert.equal(realisticExit, 1, "candidate sentinel remains fail-closed");
+assert.equal(realisticCandidateReads, 1, "GitHub list payload without mergeable reaches candidate loading");
+assert.equal(JSON.parse(realisticOutput[0]).error, "candidate_load_error");
+
 const fakeGhDir = mkdtempSync(join(tmpdir(), "repo-guard-p4c-gh-"));
 const fakeGhPath = join(fakeGhDir, "gh");
 writeFileSync(fakeGhPath, `#!/usr/bin/env node
