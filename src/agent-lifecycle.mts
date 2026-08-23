@@ -95,9 +95,11 @@ function normalizeFacts(input: unknown): AgentLifecycleFacts | AgentLifecycleRes
   if (!isPositiveInteger(input.pr)) return invalid("pr must be a positive integer");
   if (!isSha(input.base_sha) || !isSha(input.head_sha)) return invalid("base_sha and head_sha must be exact 40-character SHAs");
 
-  for (const field of ["branch_behind", "merged", "queued", "integrating", "merge_conflict"] as const) {
-    if (typeof input[field] !== "boolean") return invalid(`${field} must be boolean`);
-  }
+  if (typeof input.branch_behind !== "boolean") return invalid("branch_behind must be boolean");
+  if (typeof input.merged !== "boolean") return invalid("merged must be boolean");
+  if (typeof input.queued !== "boolean") return invalid("queued must be boolean");
+  if (typeof input.integrating !== "boolean") return invalid("integrating must be boolean");
+  if (typeof input.merge_conflict !== "boolean") return invalid("merge_conflict must be boolean");
   if (!isGateStatus(input.transaction_status) || !isGateStatus(input.state_status)) {
     return invalid("transaction_status and state_status must be finite gate states");
   }
