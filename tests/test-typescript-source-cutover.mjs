@@ -33,7 +33,7 @@ describe("strict TypeScript source cutover", () => {
   });
 
   it("keeps the built CLI command inventory explicit", () => {
-    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "check-merge-group", "status", "init", "doctor", "portable-coordinator", "validate-integration"]);
+    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "check-merge-group", "status", "init", "migrate", "doctor", "portable-coordinator", "validate-integration"]);
   });
 
   it("keeps the privileged portable coordinator on the trusted execFile control-plane boundary", () => {
