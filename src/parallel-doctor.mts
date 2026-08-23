@@ -154,12 +154,16 @@ export function renderParallelDoctorReport(report: ParallelDoctorReport, format:
   if (format === "json") return JSON.stringify(report, null, 2);
   if (format !== "text") throw new Error(`Unsupported parallel doctor format: ${format as string}`);
 
+  const transactionWorkflow = report.evidence.repository.transactionWorkflow ?? "unknown";
+  const providerWorkflow = report.evidence.repository.providerWorkflow ?? "unknown";
   const targetBranch = report.evidence.control_plane.targetBranch ?? "unknown";
   const requiredChecks = report.evidence.control_plane.requiredChecks?.join(", ") ?? "unknown";
   const lines = [
     `repo-guard doctor --parallel ${report.provider}`,
     "",
     report.ready ? "READY" : "NOT READY",
+    `transaction workflow: ${transactionWorkflow}`,
+    `provider workflow: ${providerWorkflow}`,
     `target branch: ${targetBranch}`,
     `required checks: ${requiredChecks}`,
   ];
