@@ -41,7 +41,7 @@ function basePolicy() {
     registry_rules: [
       {
         id: "merge-group-state",
-        kind: "equal",
+        kind: "set_equality",
         left: { type: "json_array", file: "left.json", json_pointer: "/items" },
         right: { type: "json_array", file: "right.json", json_pointer: "/items" },
       },
