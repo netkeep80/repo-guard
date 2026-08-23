@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   parsePortableCoordinatorArgs,
   runPortableCoordinatorCommand,
@@ -119,11 +122,44 @@ const runtimeIdleExit = await runPortableCoordinatorCommand(
     writeOutput: (text) => runtimeOutput.push(text),
   },
 );
-assert.equal(runtimeIdleExit, 0, "default GitHub runtime can complete an empty READY inventory pass");
+assert.equal(runtimeIdleExit, 0, "injected GitHub runtime can complete an empty READY inventory pass");
 assert.deepEqual(runtimeCalls, [[
   "gh",
   ["api", "repos/netkeep80/example/pulls?state=open&per_page=100", "--paginate", "--slurp"],
-]], "default GitHub runtime uses one complete read-only paginated PR inventory request");
+]], "injected GitHub runtime uses one complete read-only paginated PR inventory request");
 assert.equal(JSON.parse(runtimeOutput[0]).kind, "idle");
+
+const fakeGhDir = mkdtempSync(join(tmpdir(), "repo-guard-p4c-gh-"));
+const fakeGhPath = join(fakeGhDir, "gh");
+writeFileSync(fakeGhPath, `#!/usr/bin/env node
+const expected = ["api", "repos/netkeep80/example/pulls?state=open&per_page=100", "--paginate", "--slurp"];
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(73);
+process.stdout.write("[[]]");
+`);
+chmodSync(fakeGhPath, 0o755);
+const originalPath = process.env.PATH;
+const defaultOutput = [];
+try {
+  process.env.PATH = `${fakeGhDir}:${originalPath ?? ""}`;
+  const defaultExit = await runPortableCoordinatorCommand(
+    {},
+    [
+      "--repository", "netkeep80/example",
+      "--ready-label", "repo-guard:ready",
+      "--merge-method", "squash",
+      "--transaction-check", "tx",
+      "--state-check", "state",
+      "--format", "json",
+    ],
+    {},
+    { writeOutput: (text) => defaultOutput.push(text) },
+  );
+  assert.equal(defaultExit, 0, "default runtime executes gh directly and completes an empty inventory pass");
+  assert.equal(JSON.parse(defaultOutput[0]).kind, "idle");
+} finally {
+  if (originalPath === undefined) delete process.env.PATH;
+  else process.env.PATH = originalPath;
+  rmSync(fakeGhDir, { recursive: true, force: true });
+}
 
 console.log("Portable public coordinator trusted CLI parsing/runtime composition contract passed.");
