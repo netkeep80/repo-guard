@@ -1,4 +1,5 @@
 import { createRuleRegistry } from "../dist/checks/rule-registry.mjs";
+import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
@@ -23,6 +24,10 @@ function hasName(entries, expected) {
 
 function namedCheck(entries, expected) {
   return entries.find((entry) => entry.name === expected)?.check;
+}
+
+function familyPhase(id) {
+  return defaultRuleFamilies.find((family) => family.id === id)?.phase;
 }
 
 const registry = createRuleRegistry();
@@ -93,10 +98,12 @@ expect(
   unknownPhaseError.includes("phase"),
   true
 );
+expect("governance authorization remains transaction-only", familyPhase("governance-paths"), "transaction");
+expect("policy relaxation authorization remains transaction-only", familyPhase("policy-delta"), "transaction");
 
 const documentContent = new Map([
   ["left.json", JSON.stringify({ items: ["src/a.mjs"] })],
-  ["right.json", JSON.stringify({ items: ["src/a.mjs"] })],
+  ["right.json", JSON.stringify({ items: ["src/b.mjs"] })],
 ]);
 const constraintFacts = {
   repositoryRoot: process.cwd(),
@@ -149,6 +156,7 @@ expect("transaction constraints keep diff budget", hasName(transactionConstraint
 expect("transaction constraints keep surface debt", hasName(transactionConstraints, "surface-debt"), true);
 expect("transaction constraints exclude registry state rule", hasName(transactionConstraints, "registry-rules"), false);
 expect("state constraints keep registry state rule", hasName(stateConstraints, "registry-rules"), true);
+expect("state constraints detect broken registry invariant", namedCheck(stateConstraints, "registry-rules").ok, false);
 expect("state constraints exclude diff budget", hasName(stateConstraints, "max-new-files"), false);
 expect("state constraints exclude surface debt", hasName(stateConstraints, "surface-debt"), false);
 expect("state constraints exclude cochange transaction summary", hasName(stateConstraints, "cochange-rules"), false);
