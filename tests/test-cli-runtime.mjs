@@ -78,7 +78,7 @@ assert.deepEqual(mergeCalls, [[
   ],
 ]], "public mutation transport preserves exact merge head and merge method without a shell");
 const mergeEvidence = JSON.parse(mergeOutput[0]);
-assert.equal(mergeEvidence.decision, "merge");
+assert.equal(mergeEvidence.decision, "merge_exact_head");
 assert.equal(mergeEvidence.mutation, "merge");
 assert.deepEqual(mergeEvidence.result, {
   ok: true,
