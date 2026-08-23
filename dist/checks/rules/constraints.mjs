@@ -8,6 +8,37 @@ import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
+const CONSTRAINT_PHASES = {
+    max_metric: "transaction",
+    surface_debt: "transaction",
+    scope_paths: "transaction",
+    require_paths: "transaction",
+    forbid_paths: "transaction",
+    implies_nonempty: "transaction",
+    size_rules: "both",
+    registry_rules: "state",
+    change_profile: "transaction",
+    trace_rules: "transaction",
+    integration: "state",
+    document_scalar_equal: "state",
+    document_scalar_equals_literal: "state",
+    document_referenced_paths_exist: "state",
+    evidence_workflow_path_coverage: "state",
+    evidence_anchor_value_coverage: "state",
+};
+function requestedExecutionPhase(context) {
+    const phase = context.executionPhase ?? "both";
+    if (phase !== "transaction" && phase !== "state" && phase !== "both") {
+        throw new TypeError("execution phase must be transaction, state, or both");
+    }
+    return phase;
+}
+function constraintAppliesToPhase(constraint, requested) {
+    const phase = CONSTRAINT_PHASES[constraint.kind];
+    if (!phase)
+        throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
+    return requested === "both" || phase === "both" || phase === requested;
+}
 function budget(selected, max) {
     if (max === undefined)
         return { ok: true };
@@ -148,8 +179,11 @@ function checkEvidenceAnchorValueCoverage(facts, constraint) {
     };
 }
 export function evaluateConstraintIR(facts, context = {}) {
+    const executionPhase = requestedExecutionPhase(context);
     const { files, constraints } = compileConstraintIR(facts), results = [], cochange = [];
     for (const constraint of constraints) {
+        if (!constraintAppliesToPhase(constraint, executionPhase))
+            continue;
         let check;
         if (constraint.kind === "max_metric")
             check = evaluateMetric(files, constraint, facts.policy);
@@ -206,10 +240,12 @@ export function evaluateConstraintIR(facts, context = {}) {
         else if (constraint.kind === "evidence_anchor_value_coverage")
             check = checkEvidenceAnchorValueCoverage(facts, constraint);
         else
-            continue;
+            throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);
         results.push({ name: constraint.name, check });
     }
-    results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed.join(",")} -> ${item.must_change_any.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));
+    if (executionPhase !== "state") {
+        results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed.join(",")} -> ${item.must_change_any.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));
+    }
     return results;
 }
 export const constraintRuleFamily = { id: "constraints", evaluate: (facts, context) => evaluateConstraintIR(facts, context) };
