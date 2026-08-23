@@ -275,6 +275,80 @@ assert.deepEqual(JSON.parse(candidateOutput[0]), {
   result: null,
 });
 
+const mutationMainSha = "3333333333333333333333333333333333333333";
+const mutationOldMainSha = "0000000000000000000000000000000000000000";
+const mutationHeadSha = "4444444444444444444444444444444444444444";
+const mutationCalls = [];
+const mutationOutput = [];
+const mutationPr = {
+  number: 7,
+  draft: false,
+  mergeable: true,
+  base: { ref: "main", sha: mutationOldMainSha },
+  head: { ref: "feature", sha: mutationHeadSha, repo: { full_name: "netkeep80/example" } },
+  labels: [{ name: "repo-guard:ready" }],
+};
+const mutationExit = await runPortableCoordinatorCommand(
+  {},
+  [
+    "--repository", "netkeep80/example",
+    "--ready-label", "repo-guard:ready",
+    "--merge-method", "squash",
+    "--transaction-check", "tx",
+    "--state-check", "state",
+    "--format", "json",
+  ],
+  {},
+  {
+    readReadyInventory: async () => ({ complete: true, pages: [[mutationPr]] }),
+    readCandidate: async (prNumber) => {
+      assert.equal(prNumber, 7);
+      return {
+        currentMainSha: mutationMainSha,
+        pullRequest: mutationPr,
+        compare: {
+          mainSha: mutationMainSha,
+          headSha: mutationHeadSha,
+          status: "behind",
+        },
+        checkRuns: {
+          complete: true,
+          headSha: mutationHeadSha,
+          runs: [
+            { name: "tx", head_sha: mutationHeadSha, status: "completed", conclusion: "success" },
+            { name: "state", head_sha: mutationHeadSha, status: "completed", conclusion: "success" },
+          ],
+        },
+      };
+    },
+    run: (command, args) => {
+      mutationCalls.push([command, args]);
+      return "HTTP/2 202 Accepted\ncontent-type: application/json\n\n{\"message\":\"scheduled\"}";
+    },
+    writeOutput: (text) => mutationOutput.push(text),
+  },
+);
+assert.equal(mutationExit, 0, "default mutation transport accepts the canonical exact-head refresh");
+assert.deepEqual(mutationCalls, [[
+  "gh",
+  [
+    "api",
+    "repos/netkeep80/example/pulls/7/update-branch",
+    "--method", "PUT",
+    "--include",
+    "--raw-field", `expected_head_sha=${mutationHeadSha}`,
+  ],
+]], "default mutation transport preserves the exact update-branch request without a shell");
+const mutationEvidence = JSON.parse(mutationOutput[0]);
+assert.equal(mutationEvidence.decision, "refresh_branch");
+assert.equal(mutationEvidence.mutation, "refresh_branch");
+assert.deepEqual(mutationEvidence.result, {
+  ok: true,
+  kind: "update_accepted",
+  expectedHeadSha: mutationHeadSha,
+  rereadRequired: true,
+});
+
 const fakeGhDir = mkdtempSync(join(tmpdir(), "repo-guard-p4c-gh-"));
 const fakeGhPath = join(fakeGhDir, "gh");
 writeFileSync(fakeGhPath, `#!/usr/bin/env node
