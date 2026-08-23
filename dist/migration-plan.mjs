@@ -9,6 +9,9 @@ const IMMUTABLE_REF = /^(?:[0-9a-f]{40}|v\d+\.\d+\.\d+)$/i;
 function providerPath(provider) {
     return provider === "portable" ? PORTABLE : NATIVE;
 }
+function oppositeProviderPath(provider) {
+    return provider === "portable" ? NATIVE : PORTABLE;
+}
 function externalSteps(provider) {
     return provider === "portable"
         ? [
@@ -72,6 +75,14 @@ export function planParallelMigration(input) {
         return { provider: input.provider, actionRef: input.actionRef, readyToApply: false, files: [], blockers, external: externalSteps(input.provider) };
     }
     const path = providerPath(input.provider);
+    const oppositePath = oppositeProviderPath(input.provider);
+    if (input.files[oppositePath] !== null && input.files[oppositePath] !== undefined) {
+        blockers.push({
+            id: "provider_conflict",
+            path: oppositePath,
+            message: `${oppositePath} already exists; refusing to switch or combine parallel providers automatically.`,
+        });
+    }
     const files = [
         planProviderFile(path, input.files[path], known.target[path], blockers),
         planKnownFile(TRANSACTION, input.files[TRANSACTION], known.legacy[TRANSACTION], known.target[TRANSACTION], blockers),
