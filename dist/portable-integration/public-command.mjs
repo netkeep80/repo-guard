@@ -1,3 +1,4 @@
+import { runTrustedPortableCoordinator, } from "./trusted-command.mjs";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const MERGE_METHODS = new Set(["merge", "squash", "rebase"]);
 const FORMATS = new Set(["text", "json"]);
@@ -11,6 +12,36 @@ function nonEmpty(value) {
 }
 function normalizeChecks(values) {
     return [...new Set(values)].sort().map((name) => ({ name }));
+}
+function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function renderText(evidence) {
+    const lines = [
+        "repo-guard portable-coordinator",
+        `provider: ${evidence.provider}`,
+        `kind: ${evidence.kind}`,
+        `repository: ${evidence.repository ?? "unknown"}`,
+        `main_sha: ${evidence.main_sha ?? "unknown"}`,
+        `pr: ${evidence.pr ?? "none"}`,
+        `head_sha: ${evidence.head_sha ?? "unknown"}`,
+        `decision: ${evidence.decision ?? "none"}`,
+        `mutation: ${evidence.mutation}`,
+    ];
+    if (evidence.reason !== null)
+        lines.push(`reason: ${evidence.reason}`);
+    if (evidence.error !== undefined)
+        lines.push(`error: ${evidence.error}`);
+    if (evidence.message !== undefined)
+        lines.push(`message: ${evidence.message}`);
+    return lines.join("\n");
+}
+function exitCode(evidence) {
+    if (evidence.error !== undefined)
+        return 1;
+    if (isObject(evidence.result) && evidence.result.ok === false)
+        return 1;
+    return 0;
 }
 export function parsePortableCoordinatorArgs(args, env = process.env) {
     const singletons = new Map();
@@ -79,9 +110,22 @@ export function parsePortableCoordinatorArgs(args, env = process.env) {
         },
     };
 }
-export async function runPortableCoordinatorCommand(_roots, args, env = process.env) {
+export async function runPortableCoordinatorCommand(_roots, args, env = process.env, dependencies = {}) {
     const parsed = parsePortableCoordinatorArgs(args, env);
     if (!parsed.ok)
         throw new Error(`${parsed.error}: ${parsed.message}`);
-    throw new Error("portable coordinator runtime is not wired");
+    const evidence = await runTrustedPortableCoordinator({
+        repository: parsed.value.repository,
+        readyLabel: parsed.value.readyLabel,
+        mergeMethod: parsed.value.mergeMethod,
+        requiredChecks: parsed.value.requiredChecks,
+        readReadyInventory: dependencies.readReadyInventory,
+        readCandidate: dependencies.readCandidate,
+        mutationTransport: dependencies.mutationTransport,
+    });
+    const output = parsed.value.format === "json"
+        ? JSON.stringify(evidence)
+        : renderText(evidence);
+    (dependencies.writeOutput ?? console.log)(output);
+    return exitCode(evidence);
 }
