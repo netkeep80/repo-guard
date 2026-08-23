@@ -5,7 +5,7 @@ import { readDocumentFact, type DocumentFactSelector, type DocumentReader } from
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
-import type { RuleFamily } from "../rule-registry.mjs";
+import type { ExecutionPhase, RuleFamily } from "../rule-registry.mjs";
 import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
@@ -76,9 +76,45 @@ interface ConstraintFacts {
   integration?: unknown;
   anchors?: { byType?: Record<string, AnchorEvidenceInstance[]> };
 }
-interface ConstraintContext { anchorDiagnostics?: { traceRuleResults?: Array<{ id: string; [key: string]: unknown }> }; }
+interface ConstraintContext {
+  executionPhase?: ExecutionPhase;
+  anchorDiagnostics?: { traceRuleResults?: Array<{ id: string; [key: string]: unknown }> };
+}
 interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
+
+const CONSTRAINT_PHASES: Record<RuntimeConstraintKind, ExecutionPhase> = {
+  max_metric: "transaction",
+  surface_debt: "transaction",
+  scope_paths: "transaction",
+  require_paths: "transaction",
+  forbid_paths: "transaction",
+  implies_nonempty: "transaction",
+  size_rules: "both",
+  registry_rules: "state",
+  change_profile: "transaction",
+  trace_rules: "transaction",
+  integration: "state",
+  document_scalar_equal: "state",
+  document_scalar_equals_literal: "state",
+  document_referenced_paths_exist: "state",
+  evidence_workflow_path_coverage: "state",
+  evidence_anchor_value_coverage: "state",
+};
+
+function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
+  const phase = context.executionPhase ?? "both";
+  if (phase !== "transaction" && phase !== "state" && phase !== "both") {
+    throw new TypeError("execution phase must be transaction, state, or both");
+  }
+  return phase;
+}
+
+function constraintAppliesToPhase(constraint: RuntimeConstraint, requested: ExecutionPhase): boolean {
+  const phase = CONSTRAINT_PHASES[constraint.kind];
+  if (!phase) throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
+  return requested === "both" || phase === "both" || phase === requested;
+}
 
 function budget(selected: ParsedDiffFile[], max: number | undefined): BudgetResult {
   if (max === undefined) return { ok: true };
@@ -195,8 +231,10 @@ function checkEvidenceAnchorValueCoverage(facts: ConstraintFacts, constraint: Ru
 }
 
 export function evaluateConstraintIR(facts: ConstraintFacts, context: ConstraintContext = {}): RuleResult[] {
+  const executionPhase = requestedExecutionPhase(context);
   const { files, constraints } = compileConstraintIR(facts), results: RuleResult[] = [], cochange: RuntimeConstraint[] = [];
   for (const constraint of constraints) {
+    if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
     let check: unknown;
     if (constraint.kind === "max_metric") check = evaluateMetric(files, constraint, facts.policy);
     else if (constraint.kind === "surface_debt") check = checkSurfaceDebt(files, constraint.debt);
@@ -229,10 +267,12 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     else if (constraint.kind === "document_referenced_paths_exist") check = checkDocumentReferencedPathsExist(facts, constraint);
     else if (constraint.kind === "evidence_workflow_path_coverage") check = checkEvidenceWorkflowPathCoverage(facts, constraint);
     else if (constraint.kind === "evidence_anchor_value_coverage") check = checkEvidenceAnchorValueCoverage(facts, constraint);
-    else continue;
+    else throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
     results.push({ name: constraint.name, check });
   }
-  results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed!.join(",")} -> ${item.must_change_any!.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));
+  if (executionPhase !== "state") {
+    results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed!.join(",")} -> ${item.must_change_any!.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));
+  }
   return results;
 }
 
