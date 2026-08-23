@@ -24,6 +24,25 @@ describe("repo-guard init", () => {
     assert.equal(policy.repository_kind, "application"); assert.equal(policy.enforcement.mode, "blocking"); assert.equal(validate(policy), true);
   });
 
+  it("generates a portable parallel scaffold with canonical integration contracts", () => {
+    const dir = temp(), result = runInit(dir, ["--parallel", "portable"]);
+    assert.equal(result.status, 0);
+    const coordinatorPath = ".github/workflows/repo-guard-portable-coordinator.yml";
+    assert.equal(existsSync(join(dir, coordinatorPath)), true);
+    const policy = JSON.parse(readFileSync(join(dir, "repo-policy.json"), "utf-8"));
+    assert.equal(validate(policy), true, JSON.stringify(validate.errors));
+    assert.deepEqual(policy.integration?.workflows?.map(({ path, role, expect }) => ({ path, role, mode: expect?.mode })), [
+      { path: ".github/workflows/repo-guard.yml", role: "repo_guard_pr_gate", mode: "check-pr" },
+      { path: coordinatorPath, role: "repo_guard_portable_coordinator", mode: "portable-coordinator" },
+    ]);
+    const coordinator = readFileSync(join(dir, coordinatorPath), "utf-8");
+    assert.match(coordinator, /workflow_dispatch/);
+    assert.match(coordinator, new RegExp(`netkeep80/repo-guard@${immutableSha}`));
+    assert.match(coordinator, /mode: portable-coordinator/);
+    assert.doesNotMatch(coordinator, /actions\/checkout/);
+    assert.doesNotMatch(coordinator, /npm (?:test|run)/);
+  });
+
   for (const preset of ["application", "library", "tooling", "documentation"]) it(`generates valid ${preset} preset`, () => {
     const dir = temp(), result = runInit(dir, ["--preset", preset, "--mode", "advisory"]);
     assert.equal(result.status, 0);
