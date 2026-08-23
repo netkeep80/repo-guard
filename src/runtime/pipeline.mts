@@ -1,6 +1,7 @@
 import type { RepositoryFactsInput } from "../facts/input.mjs";
 import { buildPolicyFacts } from "../facts/input.mjs";
 import { runPolicyChecks } from "../checks/orchestrator.mjs";
+import type { ExecutionPhase } from "../checks/rule-registry.mjs";
 import { buildAnchorDiagnostics } from "../reporting/anchor-diagnostics.mjs";
 import { createAnalysisCollector } from "./analysis-report.mjs";
 import {
@@ -24,6 +25,7 @@ export interface PolicyPipelineOptions {
   printEnforcement?: boolean;
   ruleNamePrefix?: string;
   excludeRuleFamilies?: readonly string[];
+  executionPhase?: ExecutionPhase;
 }
 
 export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPipelineOptions = {}) {
@@ -54,7 +56,11 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
   const anchorDiagnostics = buildAnchorDiagnostics(facts);
   // Префикс меняет только diagnostic namespace; вычисление остаётся в одном canonical
   // pipeline и одном RuleRegistry, чтобы base/head не получили разные semantics engines.
-  runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies });
+  runPolicyChecks(facts, { report }, {
+    anchorDiagnostics,
+    excludeFamilies: options.excludeRuleFamilies,
+    executionPhase: options.executionPhase,
+  });
 
   return reporter.finish({
     command: input.mode,
@@ -64,6 +70,7 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
       checkedFiles: facts.diff.files.checked.length,
       skippedOperationalFiles: facts.diagnostics.skippedOperationalFiles,
     },
+    ...(options.executionPhase ? { executionPhase: options.executionPhase } : {}),
     ...anchorDiagnostics,
   });
 }
