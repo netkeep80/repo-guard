@@ -10,6 +10,7 @@ const cases = [
   [["check-diff", "--base"], /--base requires a value/], [["check-diff", "--change-intent"], /--change-intent requires a value/],
   [["check-diff", "--contract", "legacy.json"], /Unknown option for check-diff/], [["check-pr", "extra"], /Unexpected argument for check-pr/],
   [["validate", "one.json", "two.json"], /Unexpected argument for validate/], [["init", "--bogus"], /Unknown option for init/],
+  [["portable-coordinator", "--repository", "not-a-repo", "--ready-label", "ready", "--merge-method", "merge", "--transaction-check", "tx", "--state-check", "state"], /malformed_repository/],
 ];
 try {
   for (const [args, pattern] of cases) {
