@@ -84,6 +84,23 @@ function integration(provider, options = {}) {
   });
 }
 
+function mixedIntegration() {
+  const transaction = workflow("transaction", ".github/workflows/transaction.yml", "repo_guard_pr_gate", "check-pr", ["pull_request"]);
+  const state = workflow("state", ".github/workflows/state.yml", "repo_guard_merge_group_gate", "check-merge-group", ["merge_group"], { event_types: ["checks_requested"] });
+  const coordinator = workflow("coordinator", ".github/workflows/coordinator.yml", "repo_guard_portable_coordinator", "portable-coordinator", ["workflow_dispatch"]);
+  const policy = { integration: { workflows: [transaction, state, coordinator] } };
+  const files = {
+    ".github/workflows/transaction.yml": transactionYaml(),
+    ".github/workflows/state.yml": nativeYaml(),
+    ".github/workflows/coordinator.yml": portableYaml(),
+  };
+  return extractIntegration(policy, {
+    repoRoot: "/tmp/repo",
+    trackedFiles: Object.keys(files),
+    readFile: readFixture(files),
+  });
+}
+
 function parallelPolicy(role, mode) {
   return {
     ...validPolicy,
@@ -238,6 +255,12 @@ for (const [role, mode] of [
   const check = workflowConstraint("portable", { unsafeRun: true });
   assert.equal(check.ok, false);
   assert.ok(constraintDetails(check).some((detail) => detail.includes("coordinator_project_execution_forbidden")), "portable repository blocker id must be surfaced by the Constraint Program");
+}
+
+{
+  const check = integrationConstraintEntries(mixedIntegration()).find((item) => item.name === "integration-workflows")?.check;
+  assert.equal(check?.ok, false);
+  assert.ok(constraintDetails(check).some((detail) => detail.includes("provider_role_conflict")), "declaring both parallel provider roles must fail closed");
 }
 
 console.log("All parallel readiness tests passed");
