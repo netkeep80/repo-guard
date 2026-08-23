@@ -39,6 +39,23 @@ function constraintAppliesToPhase(constraint, requested) {
         throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
     return requested === "both" || phase === "both" || phase === requested;
 }
+function projectSizeRules(rules, requested) {
+    if (requested === "both")
+        return rules;
+    return rules.flatMap((rule) => {
+        const transactionBound = rule.count === "changed_only" || rule.applies_to_change_types !== undefined;
+        if (requested === "state") {
+            if (transactionBound || rule.max === undefined)
+                return [];
+            return [{ ...rule, max_growth: undefined }];
+        }
+        if (transactionBound)
+            return [rule];
+        if (rule.max_growth === undefined)
+            return [];
+        return [{ ...rule, max: undefined }];
+    });
+}
 function budget(selected, max) {
     if (max === undefined)
         return { ok: true };
@@ -207,7 +224,10 @@ export function evaluateConstraintIR(facts, context = {}) {
             continue;
         }
         else if (constraint.kind === "size_rules") {
-            const result = checkSizeRules(files, constraint.rules, {
+            const rules = projectSizeRules(constraint.rules, executionPhase);
+            if (!rules.length)
+                continue;
+            const result = checkSizeRules(files, rules, {
                 repoRoot: facts.repositoryRoot, trackedFiles: facts.trackedFiles, readFile: facts.readFile,
                 ignorePatterns: facts.policy.paths.operational_paths, changeType: facts.changeIntent?.change_type,
             });
