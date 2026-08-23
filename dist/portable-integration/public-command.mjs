@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { runTrustedPortableCoordinator, } from "./trusted-command.mjs";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const MERGE_METHODS = new Set(["merge", "squash", "rebase"]);
@@ -16,6 +17,13 @@ function normalizeChecks(values) {
 function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function defaultRun(command, args) {
+    return execFileSync(command, args, {
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 30000,
+    });
+}
 function parseRuntimeJson(text, label) {
     try {
         return JSON.parse(text);
@@ -26,8 +34,6 @@ function parseRuntimeJson(text, label) {
     }
 }
 function createReadyInventoryReader(repository, run) {
-    if (run === undefined)
-        return undefined;
     return async () => {
         const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
         const pages = parseRuntimeJson(run("gh", ["api", endpoint, "--paginate", "--slurp"]), endpoint);
@@ -135,8 +141,9 @@ export async function runPortableCoordinatorCommand(_roots, args, env = process.
     const parsed = parsePortableCoordinatorArgs(args, env);
     if (!parsed.ok)
         throw new Error(`${parsed.error}: ${parsed.message}`);
+    const run = dependencies.run ?? defaultRun;
     const readReadyInventory = dependencies.readReadyInventory
-        ?? createReadyInventoryReader(parsed.value.repository, dependencies.run);
+        ?? createReadyInventoryReader(parsed.value.repository, run);
     const readCandidate = dependencies.readCandidate
         ?? (async () => { throw new Error("candidate GitHub runtime is not wired"); });
     const evidence = await runTrustedPortableCoordinator({
