@@ -53,4 +53,39 @@ describe("strict TypeScript source cutover", () => {
     assert.doesNotMatch(source, /\b(?:branch protection|ruleset|bypass|admin)\b/i);
     assert.doesNotMatch(source, /from\s+"\.\/portable-integration\/(?:planner|coordinator-loop)\.mjs"/);
   });
+
+  it("wires portable-coordinator Action inputs through a trusted shell-safe array", () => {
+    const action = readFileSync(resolve(root, "action.yml"), "utf-8");
+
+    for (const input of ["repository", "ready-label", "merge-method", "transaction-checks", "state-checks", "format"]) {
+      assert.match(action, new RegExp(`\\n  ${input}:\\n`), `Action exposes ${input}`);
+    }
+    assert.match(action, /portable-coordinator/);
+
+    for (const [envName, input] of [
+      ["INPUT_MODE", "mode"],
+      ["INPUT_REPOSITORY", "repository"],
+      ["INPUT_READY_LABEL", "ready-label"],
+      ["INPUT_MERGE_METHOD", "merge-method"],
+      ["INPUT_TRANSACTION_CHECKS", "transaction-checks"],
+      ["INPUT_STATE_CHECKS", "state-checks"],
+      ["INPUT_FORMAT", "format"],
+    ]) {
+      assert.match(action, new RegExp(`${envName}: \\$\\{\\{ inputs\\.${input} \\}\\}`));
+    }
+
+    assert.match(action, /if \[ "\$INPUT_MODE" = "portable-coordinator" \]; then/);
+    assert.match(action, /CMD=\(node "\$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs" portable-coordinator\)/);
+    assert.match(action, /CMD\+=\(--repository "\$INPUT_REPOSITORY"\)/);
+    assert.match(action, /CMD\+=\(--ready-label "\$INPUT_READY_LABEL"\)/);
+    assert.match(action, /CMD\+=\(--merge-method "\$INPUT_MERGE_METHOD"\)/);
+    assert.match(action, /CMD\+=\(--format "\$INPUT_FORMAT"\)/);
+    assert.match(action, /CMD\+=\(--transaction-check "\$CHECK"\)/);
+    assert.match(action, /done <<< "\$INPUT_TRANSACTION_CHECKS"/);
+    assert.match(action, /CMD\+=\(--state-check "\$CHECK"\)/);
+    assert.match(action, /done <<< "\$INPUT_STATE_CHECKS"/);
+    assert.match(action, /OUTPUT=\$\("\$\{CMD\[@\]\}" 2>&1\)/);
+
+    assert.match(action, /CMD="\$CMD --repo-root \$REPO_ROOT"/, "legacy Action branch remains present");
+  });
 });
