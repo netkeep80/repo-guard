@@ -71,6 +71,11 @@ function parseRuntimeJson(text: string, label: string): unknown {
   }
 }
 
+function normalizeInventoryItem(value: unknown): unknown {
+  if (!isObject(value) || value.mergeable !== undefined) return value;
+  return { ...value, mergeable: null };
+}
+
 function createReadyInventoryReader(repository: string, run: RunCommand) {
   return async () => {
     const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
@@ -81,7 +86,10 @@ function createReadyInventoryReader(repository: string, run: RunCommand) {
     if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
       throw new Error("malformed_github_response: PR inventory pagination must be an array of pages");
     }
-    return { complete: true, pages };
+    return {
+      complete: true,
+      pages: pages.map((page) => (page as unknown[]).map(normalizeInventoryItem)),
+    };
   };
 }
 
