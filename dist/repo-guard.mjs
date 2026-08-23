@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runParallelDoctor } from "./parallel-doctor.mjs";
+import { runPortableCoordinatorCommand } from "./portable-integration/public-command.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(__dirname, "..");
 const valueOptions = (...names) => Object.fromEntries(names.map((name) => [name, true]));
@@ -38,6 +39,10 @@ const COMMAND_SPECS = {
             : args.includes("--parallel")
                 ? runParallelDoctor(roots, args)
                 : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
+    },
+    "portable-coordinator": {
+        options: valueOptions("--repository", "--ready-label", "--merge-method", "--transaction-check", "--state-check", "--format"), positionals: 0,
+        run: (roots, args) => runPortableCoordinatorCommand(roots, args),
     },
     "validate-integration": {
         options: valueOptions("--format"), positionals: 0,

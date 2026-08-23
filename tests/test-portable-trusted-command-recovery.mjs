@@ -286,7 +286,7 @@ console.log("\n--- trusted portable coordinator recovery/security contract ---")
   }
   expect("trusted command delegates all mutations to guarded write adapter", source.includes("createGitHubWriteAdapter"), true);
   expect("trusted command reuses canonical GitHub read normalizers", source.includes("normalizeGitHubReadyInventory") && source.includes("normalizeGitHubCandidate"), true);
-  expect("portable trusted command is not a public CLI command", COMMANDS.some((command) => command.includes("portable")), false);
+  expect("portable trusted coordinator is exposed as an explicit public CLI command", COMMANDS.includes("portable-coordinator"), true);
 }
 
 console.log(`\n${failures === 0 ? "All trusted portable recovery/security tests passed" : `${failures} test(s) failed`}`);

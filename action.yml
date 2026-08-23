@@ -10,8 +10,9 @@ inputs:
   mode:
     description: >
       Command mode. Use `check-pr` to validate a pull request against policy
-      and ChangeIntent (requires GitHub Actions PR event context). Use `check-diff`
-      to validate a local diff between two refs.
+      and ChangeIntent (requires GitHub Actions PR event context), `check-diff`
+      to validate a local diff between two refs, or `portable-coordinator` to
+      run the trusted portable integration coordinator.
     required: false
     default: "check-pr"
 
@@ -51,6 +52,44 @@ inputs:
     required: false
     default: ""
 
+  repository:
+    description: >
+      Trusted repository identity (`owner/name`) for `mode: portable-coordinator`.
+      If empty, the coordinator may use trusted `GITHUB_REPOSITORY`.
+    required: false
+    default: ""
+
+  ready-label:
+    description: "Trusted READY label for `mode: portable-coordinator`."
+    required: false
+    default: ""
+
+  merge-method:
+    description: >
+      Merge method for `mode: portable-coordinator`: `merge`, `squash`, or
+      `rebase`.
+    required: false
+    default: ""
+
+  transaction-checks:
+    description: >
+      Required transaction check names for `mode: portable-coordinator`, one
+      check name per line.
+    required: false
+    default: ""
+
+  state-checks:
+    description: >
+      Required state check names for `mode: portable-coordinator`, one check
+      name per line.
+    required: false
+    default: ""
+
+  format:
+    description: "Portable coordinator evidence format: `text` or `json`."
+    required: false
+    default: "text"
+
   node-version:
     description: "Node.js version to use when running repo-guard."
     required: false
@@ -88,47 +127,82 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ env.GH_TOKEN }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_READY_LABEL: ${{ inputs.ready-label }}
+        INPUT_MERGE_METHOD: ${{ inputs.merge-method }}
+        INPUT_TRANSACTION_CHECKS: ${{ inputs.transaction-checks }}
+        INPUT_STATE_CHECKS: ${{ inputs.state-checks }}
+        INPUT_FORMAT: ${{ inputs.format }}
       run: |
         set +e
 
-        # Always run the checked, generated runtime shipped with the Action.
-        BIN="node ${GITHUB_ACTION_PATH}/dist/repo-guard.mjs"
+        if [ "$INPUT_MODE" = "portable-coordinator" ]; then
+          # Privileged coordinator inputs stay data: build argv as a Bash array.
+          CMD=(node "${GITHUB_ACTION_PATH}/dist/repo-guard.mjs" portable-coordinator)
 
-        # Build the command
-        CMD="$BIN"
-
-        # Append --repo-root if provided; fall back to GITHUB_WORKSPACE
-        REPO_ROOT="${{ inputs.repo-root }}"
-        if [ -z "$REPO_ROOT" ]; then
-          REPO_ROOT="${GITHUB_WORKSPACE:-$PWD}"
-        fi
-        CMD="$CMD --repo-root $REPO_ROOT"
-
-        # Append enforcement behavior and command mode / sub-command
-        ENFORCEMENT="${{ inputs.enforcement }}"
-        if [ -n "$ENFORCEMENT" ]; then
-          CMD="$CMD --enforcement $ENFORCEMENT"
-        fi
-
-        MODE="${{ inputs.mode }}"
-        CMD="$CMD $MODE"
-
-        # Append check-diff specific flags
-        if [ "$MODE" = "check-diff" ]; then
-          if [ -n "${{ inputs.base }}" ]; then
-            CMD="$CMD --base ${{ inputs.base }}"
+          if [ -n "$INPUT_REPOSITORY" ]; then
+            CMD+=(--repository "$INPUT_REPOSITORY")
           fi
-          if [ -n "${{ inputs.head }}" ]; then
-            CMD="$CMD --head ${{ inputs.head }}"
-          fi
-          if [ -n "${{ inputs.change-intent }}" ]; then
-            CMD="$CMD --change-intent ${{ inputs.change-intent }}"
-          fi
-        fi
+          CMD+=(--ready-label "$INPUT_READY_LABEL")
+          CMD+=(--merge-method "$INPUT_MERGE_METHOD")
+          CMD+=(--format "$INPUT_FORMAT")
 
-        echo "Running: $CMD"
-        OUTPUT=$($CMD 2>&1)
-        EXIT_CODE=$?
+          while IFS= read -r CHECK; do
+            if [ -n "$CHECK" ]; then
+              CMD+=(--transaction-check "$CHECK")
+            fi
+          done <<< "$INPUT_TRANSACTION_CHECKS"
+
+          while IFS= read -r CHECK; do
+            if [ -n "$CHECK" ]; then
+              CMD+=(--state-check "$CHECK")
+            fi
+          done <<< "$INPUT_STATE_CHECKS"
+
+          echo "Running portable coordinator"
+          OUTPUT=$("${CMD[@]}" 2>&1)
+          EXIT_CODE=$?
+        else
+          # Always run the checked, generated runtime shipped with the Action.
+          BIN="node ${GITHUB_ACTION_PATH}/dist/repo-guard.mjs"
+
+          # Build the command
+          CMD="$BIN"
+
+          # Append --repo-root if provided; fall back to GITHUB_WORKSPACE
+          REPO_ROOT="${{ inputs.repo-root }}"
+          if [ -z "$REPO_ROOT" ]; then
+            REPO_ROOT="${GITHUB_WORKSPACE:-$PWD}"
+          fi
+          CMD="$CMD --repo-root $REPO_ROOT"
+
+          # Append enforcement behavior and command mode / sub-command
+          ENFORCEMENT="${{ inputs.enforcement }}"
+          if [ -n "$ENFORCEMENT" ]; then
+            CMD="$CMD --enforcement $ENFORCEMENT"
+          fi
+
+          MODE="${{ inputs.mode }}"
+          CMD="$CMD $MODE"
+
+          # Append check-diff specific flags
+          if [ "$MODE" = "check-diff" ]; then
+            if [ -n "${{ inputs.base }}" ]; then
+              CMD="$CMD --base ${{ inputs.base }}"
+            fi
+            if [ -n "${{ inputs.head }}" ]; then
+              CMD="$CMD --head ${{ inputs.head }}"
+            fi
+            if [ -n "${{ inputs.change-intent }}" ]; then
+              CMD="$CMD --change-intent ${{ inputs.change-intent }}"
+            fi
+          fi
+
+          echo "Running: $CMD"
+          OUTPUT=$($CMD 2>&1)
+          EXIT_CODE=$?
+        fi
 
         echo "$OUTPUT"
 
