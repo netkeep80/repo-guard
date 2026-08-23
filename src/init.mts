@@ -14,11 +14,50 @@ const PRESETS = {
 
 type PresetName = keyof typeof PRESETS;
 type EnforcementInput = Parameters<typeof normalizeEnforcementMode>[0];
+type ParallelProvider = "portable";
 interface InitRoots { packageRoot: string; repoRoot: string; enforcementMode?: EnforcementInput; }
 
-function buildPolicy(name: PresetName, mode: string) {
+function parallelIntegration(mode: string, ref: string) {
+  const ref_pinning = FULL_SHA.test(ref) ? "sha" : "tag";
+  return {
+    workflows: [
+      {
+        id: "repo-guard-pr-gate",
+        kind: "github_actions",
+        path: ".github/workflows/repo-guard.yml",
+        role: "repo_guard_pr_gate",
+        expect: {
+          events: ["pull_request"],
+          event_types: ["opened", "synchronize", "reopened", "ready_for_review"],
+          action: { uses: ACTION, ref_pinning },
+          mode: "check-pr",
+          enforcement: mode,
+          permissions: { contents: "read", "pull-requests": "read", issues: "read" },
+          token_env: ["GH_TOKEN"],
+        },
+      },
+      {
+        id: "repo-guard-portable-coordinator",
+        kind: "github_actions",
+        path: ".github/workflows/repo-guard-portable-coordinator.yml",
+        role: "repo_guard_portable_coordinator",
+        expect: {
+          events: ["workflow_dispatch"],
+          action: { uses: ACTION, ref_pinning },
+          mode: "portable-coordinator",
+          enforcement: "blocking",
+          permissions: { contents: "write", "pull-requests": "write" },
+          token_env: ["GH_TOKEN"],
+        },
+      },
+    ],
+  };
+}
+
+function buildPolicy(name: PresetName, mode: string, parallel: ParallelProvider | null = null, ref: string | null = null) {
   const [repository_kind, forbidden, canonical_docs, diff_rules, cochange_rules] = PRESETS[name];
-  return { policy_format_version: "0.3.0", repository_kind, enforcement: { mode }, paths: { forbidden, canonical_docs, governance_paths: ["repo-policy.json"] }, diff_rules, content_rules: [], cochange_rules };
+  const policy = { policy_format_version: "0.3.0", repository_kind, enforcement: { mode }, paths: { forbidden, canonical_docs, governance_paths: ["repo-policy.json"] }, diff_rules, content_rules: [], cochange_rules };
+  return parallel === "portable" && ref ? { ...policy, integration: parallelIntegration(mode, ref) } : policy;
 }
 function packageVersion(packageRoot: string): string {
   const version = (JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf-8")) as { version?: unknown }).version;
@@ -52,6 +91,53 @@ jobs:
       - name: Проверить политику репозитория
         uses: ${ACTION}@${ref}
         with: { mode: check-pr, enforcement: ${mode} }
+        env:
+          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+`;
+const parallelTransactionWorkflow = (mode: string, ref: string) => `name: Проверка политики repo-guard
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+jobs:
+  policy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Проверить политику репозитория
+        uses: ${ACTION}@${ref}
+        with: { mode: check-pr, enforcement: ${mode} }
+        env:
+          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+`;
+const portableCoordinatorWorkflow = (ref: string) => `name: Portable coordinator repo-guard
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Интегрировать один READY-кандидат
+        uses: ${ACTION}@${ref}
+        with:
+          mode: portable-coordinator
+          enforcement: blocking
+          repository: \${{ github.repository }}
+          ready-label: repo-guard:ready
+          merge-method: squash
+          transaction-checks: |
+            policy-check
+          state-checks: |
+            policy-check
+          format: json
         env:
           GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `;
@@ -115,14 +201,19 @@ function writeIfAbsent(path: string, content: string, created: string[], skipped
   if (existsSync(path)) return skipped.push(path);
   mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content, "utf-8"); created.push(path);
 }
-const usage = `Usage: repo-guard init --action-ref <40-char-sha|vX.Y.Z> [--preset <preset>] [--mode <mode>]\nPresets: application, library, tooling, documentation`;
+const usage = `Usage: repo-guard init --action-ref <40-char-sha|vX.Y.Z> [--preset <preset>] [--mode <mode>] [--parallel portable]\nPresets: application, library, tooling, documentation`;
 
 export function runInit(roots: InitRoots, args: string[] = []) {
-  let preset = "application", mode: EnforcementInput = roots.enforcementMode || "enforce", actionRef: unknown = null;
+  let preset = "application", mode: EnforcementInput = roots.enforcementMode || "enforce", actionRef: unknown = null, parallel: ParallelProvider | null = null;
   for (let i = 0; i < args.length; i++) {
-    if (["--preset", "--mode", "--enforcement", "--action-ref"].includes(args[i]) && args[i + 1]) {
+    if (["--preset", "--mode", "--enforcement", "--action-ref", "--parallel"].includes(args[i]) && args[i + 1]) {
       const option = args[i], value = args[++i];
-      if (option === "--preset") preset = value; else if (option === "--action-ref") actionRef = value; else mode = value;
+      if (option === "--preset") preset = value;
+      else if (option === "--action-ref") actionRef = value;
+      else if (option === "--parallel") {
+        if (value !== "portable") { console.error(`Unknown parallel provider: ${value}\n${usage}`); return 1; }
+        parallel = value;
+      } else mode = value;
     } else if (args[i] === "--help") { console.log(usage); return 0; }
     else { console.error(`Unknown option for init: ${args[i]}\n${usage}`); return 1; }
   }
@@ -134,13 +225,14 @@ export function runInit(roots: InitRoots, args: string[] = []) {
   catch (error: unknown) { console.error((error as Error).message); return 1; }
   if (!refCheck.ok) { console.error(refCheck.message); return 1; }
 
-  const created: string[] = [], skipped: string[] = [], root = roots.repoRoot;
-  writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset as PresetName, enforcement.mode), null, 2)}\n`, created, skipped);
-  writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), workflow(enforcement.mode, refCheck.ref as string), created, skipped);
+  const created: string[] = [], skipped: string[] = [], root = roots.repoRoot, ref = refCheck.ref as string;
+  writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset as PresetName, enforcement.mode, parallel, ref), null, 2)}\n`, created, skipped);
+  writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), parallel === "portable" ? parallelTransactionWorkflow(enforcement.mode, ref) : workflow(enforcement.mode, ref), created, skipped);
+  if (parallel === "portable") writeIfAbsent(resolve(root, ".github/workflows/repo-guard-portable-coordinator.yml"), portableCoordinatorWorkflow(ref), created, skipped);
   writeIfAbsent(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), prTemplate(), created, skipped);
   writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-intent.yml"), issueTemplate(), created, skipped);
 
-  console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcement.mode}, action-ref: ${refCheck.ref})`);
+  console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcement.mode}, action-ref: ${ref}${parallel ? `, parallel: ${parallel}` : ""})`);
   if (created.length) console.log(`Created:\n${created.map((path) => `  ${relative(root, path)}`).join("\n")}`);
   if (skipped.length) console.log(`Skipped (already exist):\n${skipped.map((path) => `  ${relative(root, path)}`).join("\n")}`);
   return 0;
