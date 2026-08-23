@@ -1,8 +1,16 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import Ajv from "ajv";
+import { integrationConstraintEntries } from "../dist/checks/integration-constraints.mjs";
 import { extractIntegration } from "../dist/extractors/integration.mjs";
 import { evaluateParallelReadiness } from "../dist/parallel-readiness.mjs";
 
 const immutableSha = "0123456789abcdef0123456789abcdef01234567";
+const projectRoot = resolve(new URL("..", import.meta.url).pathname);
+const schema = JSON.parse(readFileSync(resolve(projectRoot, "schemas/repo-policy.schema.json"), "utf-8"));
+const validPolicy = JSON.parse(readFileSync(resolve(projectRoot, "tests/fixtures/valid-policy.json"), "utf-8"));
+const validatePolicy = new Ajv({ allErrors: true }).compile(schema);
 
 function readFixture(files) {
   return (path) => {
@@ -32,7 +40,8 @@ function transactionYaml(ref = immutableSha) {
     "name: transaction", "on:", "  pull_request:", "    types: [opened, synchronize, reopened, ready_for_review]",
     "permissions:", "  contents: read", "  pull-requests: read", "jobs:", "  validate:", "    runs-on: ubuntu-latest", "    steps:",
     "      - uses: actions/checkout@v6", "        with:", "          fetch-depth: 0",
-    `      - uses: netkeep80/repo-guard@${ref}`, "        with:", "          mode: check-pr", "          enforcement: blocking", "",
+    `      - uses: netkeep80/repo-guard@${ref}`, "        with:", "          mode: check-pr", "          enforcement: blocking",
+    "        env:", "          GH_TOKEN: ${{ github.token }}", "",
   ].join("\n");
 }
 
@@ -73,6 +82,31 @@ function integration(provider, options = {}) {
     trackedFiles: Object.keys(files),
     readFile: readFixture(files),
   });
+}
+
+function parallelPolicy(role, mode) {
+  return {
+    ...validPolicy,
+    integration: {
+      workflows: [{
+        id: "parallel-gate",
+        kind: "github_actions",
+        path: ".github/workflows/parallel.yml",
+        role,
+        expect: { mode },
+      }],
+    },
+  };
+}
+
+function workflowConstraint(provider, options = {}) {
+  const entry = integrationConstraintEntries(integration(provider, options)).find((item) => item.name === "integration-workflows");
+  assert.ok(entry, "integration-workflows constraint entry must exist");
+  return entry.check;
+}
+
+function constraintDetails(check) {
+  return Array.isArray(check.details) ? check.details : [];
 }
 
 const commonControl = {
@@ -174,6 +208,36 @@ function ids(report) {
     controlPlaneFacts: { ...commonControl, mergeQueueEnabled: true },
   });
   assert.ok(ids(report).includes("missing_native_state_gate"));
+}
+
+for (const [role, mode] of [
+  ["repo_guard_merge_group_gate", "check-merge-group"],
+  ["repo_guard_portable_coordinator", "portable-coordinator"],
+]) {
+  const ok = validatePolicy(parallelPolicy(role, mode));
+  assert.equal(ok, true, `${role}/${mode} must be public schema-valid: ${JSON.stringify(validatePolicy.errors)}`);
+}
+
+{
+  const check = workflowConstraint("github_merge_queue");
+  assert.equal(check.ok, true, `native repository facts must satisfy integration constraints: ${JSON.stringify(check.details)}`);
+}
+
+{
+  const check = workflowConstraint("github_merge_queue", { mergeGroup: false });
+  assert.equal(check.ok, false);
+  assert.ok(constraintDetails(check).some((detail) => detail.includes("missing_merge_group_event")), "native repository blocker id must be surfaced by the Constraint Program");
+}
+
+{
+  const check = workflowConstraint("portable");
+  assert.equal(check.ok, true, `portable repository facts must satisfy integration constraints: ${JSON.stringify(check.details)}`);
+}
+
+{
+  const check = workflowConstraint("portable", { unsafeRun: true });
+  assert.equal(check.ok, false);
+  assert.ok(constraintDetails(check).some((detail) => detail.includes("coordinator_project_execution_forbidden")), "portable repository blocker id must be surfaced by the Constraint Program");
 }
 
 console.log("All parallel readiness tests passed");
