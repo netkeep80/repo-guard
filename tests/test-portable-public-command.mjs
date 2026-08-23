@@ -171,6 +171,110 @@ assert.equal(realisticExit, 1, "candidate sentinel remains fail-closed");
 assert.equal(realisticCandidateReads, 1, "GitHub list payload without mergeable reaches candidate loading");
 assert.equal(JSON.parse(realisticOutput[0]).error, "candidate_load_error");
 
+const candidateCalls = [];
+const candidateOutput = [];
+let candidateMutations = 0;
+const candidateWaitExit = await runPortableCoordinatorCommand(
+  {},
+  [
+    "--repository", "netkeep80/example",
+    "--ready-label", "repo-guard:ready",
+    "--merge-method", "squash",
+    "--transaction-check", "tx",
+    "--state-check", "state",
+    "--format", "json",
+  ],
+  {},
+  {
+    run: (command, args) => {
+      candidateCalls.push([command, args]);
+      const invocation = `${command} ${args.join(" ")}`;
+      if (invocation === "gh api repos/netkeep80/example/pulls?state=open&per_page=100 --paginate --slurp") {
+        return JSON.stringify([[
+          {
+            number: 7,
+            draft: false,
+            base: { ref: "main", sha: mainSha },
+            head: { ref: "feature", sha: headSha, repo: { full_name: "netkeep80/example" } },
+            labels: [{ name: "repo-guard:ready" }],
+          },
+        ]]);
+      }
+      if (invocation === "gh api repos/netkeep80/example") {
+        return JSON.stringify({ default_branch: "main" });
+      }
+      if (invocation === "gh api repos/netkeep80/example/branches/main") {
+        return JSON.stringify({ commit: { sha: mainSha } });
+      }
+      if (invocation === "gh api repos/netkeep80/example/pulls/7") {
+        return JSON.stringify({
+          number: 7,
+          draft: false,
+          mergeable: true,
+          base: { ref: "main", sha: mainSha },
+          head: { ref: "feature", sha: headSha, repo: { full_name: "netkeep80/example" } },
+          labels: [{ name: "repo-guard:ready" }],
+        });
+      }
+      if (invocation === `gh api repos/netkeep80/example/compare/${mainSha}...${headSha}`) {
+        return JSON.stringify({ status: "ahead" });
+      }
+      if (invocation === `gh api repos/netkeep80/example/commits/${headSha}/check-runs?filter=latest&per_page=100 --paginate --slurp`) {
+        return JSON.stringify([
+          {
+            total_count: 2,
+            check_runs: [{
+              name: "tx",
+              head_sha: headSha,
+              status: "completed",
+              conclusion: "success",
+            }],
+          },
+          {
+            total_count: 2,
+            check_runs: [{
+              name: "state",
+              head_sha: headSha,
+              status: "in_progress",
+              conclusion: null,
+            }],
+          },
+        ]);
+      }
+      throw new Error(`unexpected candidate runtime command: ${invocation}`);
+    },
+    mutationTransport: {
+      request: async () => {
+        candidateMutations++;
+        throw new Error("pending candidate must not mutate");
+      },
+    },
+    writeOutput: (text) => candidateOutput.push(text),
+  },
+);
+assert.equal(candidateWaitExit, 0, "default candidate reader keeps pending exact-head candidate as a non-error wait");
+assert.deepEqual(candidateCalls, [
+  ["gh", ["api", "repos/netkeep80/example/pulls?state=open&per_page=100", "--paginate", "--slurp"]],
+  ["gh", ["api", "repos/netkeep80/example"]],
+  ["gh", ["api", "repos/netkeep80/example/branches/main"]],
+  ["gh", ["api", "repos/netkeep80/example/pulls/7"]],
+  ["gh", ["api", `repos/netkeep80/example/compare/${mainSha}...${headSha}`]],
+  ["gh", ["api", `repos/netkeep80/example/commits/${headSha}/check-runs?filter=latest&per_page=100`, "--paginate", "--slurp"]],
+], "default candidate reader resolves default branch, exact main, PR head, compare, and complete check pages in order");
+assert.equal(candidateMutations, 0, "pending exact-head candidate performs no writes");
+assert.deepEqual(JSON.parse(candidateOutput[0]), {
+  provider: "portable",
+  kind: "observed",
+  repository: "netkeep80/example",
+  main_sha: mainSha,
+  pr: 7,
+  head_sha: headSha,
+  decision: "wait_for_checks",
+  reason: "checks_pending",
+  mutation: "none",
+  result: null,
+});
+
 const fakeGhDir = mkdtempSync(join(tmpdir(), "repo-guard-p4c-gh-"));
 const fakeGhPath = join(fakeGhDir, "gh");
 writeFileSync(fakeGhPath, `#!/usr/bin/env node
