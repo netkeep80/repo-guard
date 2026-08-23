@@ -121,10 +121,12 @@ describe("provider-neutral agent lifecycle", () => {
     }
   });
 
-  it("maps merged PRs to the terminal state", () => {
-    const status = value({ merged: true });
-    assert.equal(status.state, "merged");
-    assert.equal(status.next_action, "none");
+  it("maps merged PRs to the terminal state even if repository readiness later becomes unknown", () => {
+    for (const configuration_status of ["ready", "unknown"]) {
+      const status = value({ merged: true, configuration_status });
+      assert.equal(status.state, "merged");
+      assert.equal(status.next_action, "none");
+    }
   });
 
   it("preserves legacy freshness diagnostics without changing parallel semantics", () => {
