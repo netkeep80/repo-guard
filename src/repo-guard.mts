@@ -3,6 +3,7 @@
 import { realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runParallelDoctor } from "./parallel-doctor.mjs";
 
 interface CliRoots {
   packageRoot: string;
@@ -50,7 +51,9 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     options: { "--integration": false, ...valueOptions("--format", "--parallel") }, positionals: 0,
     run: async (roots, args) => args.includes("--integration")
       ? (await import("./integration-validator.mjs")).runValidateIntegration(roots, args)
-      : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
+      : args.includes("--parallel")
+        ? runParallelDoctor(roots, args)
+        : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
   },
   "validate-integration": {
     options: valueOptions("--format"), positionals: 0,
