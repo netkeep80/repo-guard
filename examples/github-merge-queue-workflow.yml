@@ -1,0 +1,39 @@
+name: repo-guard native merge queue
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  repo-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Replace the ref below with the immutable 40-hex SHA accepted for your rollout.
+      - name: Validate PR transaction
+        if: github.event_name == 'pull_request'
+        uses: netkeep80/repo-guard@REPLACE_WITH_EXACT_REPO_GUARD_SHA
+        with:
+          mode: check-pr
+          enforcement: blocking
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate exact merge-group state
+        if: github.event_name == 'merge_group'
+        uses: netkeep80/repo-guard@REPLACE_WITH_EXACT_REPO_GUARD_SHA
+        with:
+          mode: check-merge-group
+          enforcement: blocking
+
+# Project CI remains a separate required check and should also listen to merge_group.

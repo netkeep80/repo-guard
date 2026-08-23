@@ -32,7 +32,7 @@ describe("strict TypeScript source cutover", () => {
     assert.deepEqual(tsconfig.include, ["src/**/*.mts"]);
   });
 
-  it("keeps the built CLI command inventory unchanged", () => {
-    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "init", "doctor", "validate-integration"]);
+  it("keeps the built CLI command inventory explicit", () => {
+    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "check-merge-group", "init", "doctor", "validate-integration"]);
   });
 });
