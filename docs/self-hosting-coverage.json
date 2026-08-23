@@ -5,6 +5,7 @@
     "rule:advisory-text-rules": "Репозиторий намеренно не хранит дублирующий Markdown ради проверки эвристики похожих документов.",
     "rule:anchor-extraction": "В repo-guard нет собственных requirement anchors; механизм покрывается специализированными тестами.",
     "profile:requirements-strict": "Data-driven policy pack требует канонические requirements/*.json; добавлять фиктивные требования ради dogfooding нельзя.",
-    "change-intent-format:repo-guard-json": "YAML является канонической собственной формой; второй JSON-блок в шаблоне был бы искусственным покрытием, формат проверяется тестами parser-а."
+    "change-intent-format:repo-guard-json": "YAML является канонической собственной формой; второй JSON-блок в шаблоне был бы искусственным покрытием, формат проверяется тестами parser-а.",
+    "command:check-merge-group": "Native GitHub Merge Queue недоступна для user-owned repo-guard; команда проверяется изолированными merge-group fixtures, а реальный parallel self-hosting выполняется через portable backend в #311."
   }
 }
