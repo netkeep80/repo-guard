@@ -223,6 +223,19 @@ body:
         \`\`\`
     validations: { required: false }
 `;
+export function renderInitScaffold({ preset, mode, actionRef, parallel = null }) {
+    const rendered = {
+        "repo-policy.json": `${JSON.stringify(buildPolicy(preset, mode, parallel, actionRef), null, 2)}\n`,
+        ".github/workflows/repo-guard.yml": parallel ? parallelTransactionWorkflow(mode, actionRef) : workflow(mode, actionRef),
+    };
+    if (parallel === "portable")
+        rendered[".github/workflows/repo-guard-portable-coordinator.yml"] = portableCoordinatorWorkflow(actionRef);
+    if (parallel === "github_merge_queue")
+        rendered[".github/workflows/repo-guard-merge-group.yml"] = nativeMergeGroupWorkflow(actionRef);
+    rendered[".github/PULL_REQUEST_TEMPLATE.md"] = prTemplate();
+    rendered[".github/ISSUE_TEMPLATE/change-intent.yml"] = issueTemplate();
+    return rendered;
+}
 function writeIfAbsent(path, content, created, skipped) {
     if (existsSync(path))
         return skipped.push(path);
@@ -281,14 +294,9 @@ export function runInit(roots, args = []) {
         return 1;
     }
     const created = [], skipped = [], root = roots.repoRoot, ref = refCheck.ref;
-    writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset, enforcement.mode, parallel, ref), null, 2)}\n`, created, skipped);
-    writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), parallel ? parallelTransactionWorkflow(enforcement.mode, ref) : workflow(enforcement.mode, ref), created, skipped);
-    if (parallel === "portable")
-        writeIfAbsent(resolve(root, ".github/workflows/repo-guard-portable-coordinator.yml"), portableCoordinatorWorkflow(ref), created, skipped);
-    if (parallel === "github_merge_queue")
-        writeIfAbsent(resolve(root, ".github/workflows/repo-guard-merge-group.yml"), nativeMergeGroupWorkflow(ref), created, skipped);
-    writeIfAbsent(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), prTemplate(), created, skipped);
-    writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-intent.yml"), issueTemplate(), created, skipped);
+    const rendered = renderInitScaffold({ preset: preset, mode: enforcement.mode, actionRef: ref, parallel });
+    for (const [path, content] of Object.entries(rendered))
+        writeIfAbsent(resolve(root, path), content, created, skipped);
     console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcement.mode}, action-ref: ${ref}${parallel ? `, parallel: ${parallel}` : ""})`);
     if (created.length)
         console.log(`Created:\n${created.map((path) => `  ${relative(root, path)}`).join("\n")}`);
