@@ -39,6 +39,10 @@ const COMMAND_SPECS = {
                 ? runParallelDoctor(roots, args)
                 : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
     },
+    "portable-coordinator": {
+        options: valueOptions("--repository", "--ready-label", "--merge-method", "--transaction-check", "--state-check", "--format"), positionals: 0,
+        run: async () => { throw new Error("portable coordinator runtime is not wired"); },
+    },
     "validate-integration": {
         options: valueOptions("--format"), positionals: 0,
         run: async (roots, args) => (await import("./integration-validator.mjs")).runValidateIntegration(roots, args),
