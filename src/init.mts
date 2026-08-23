@@ -12,10 +12,11 @@ const PRESETS = {
   documentation: ["documentation", [], ["README.md"], { max_new_docs: 10, max_new_files: 20 }, []],
 } as const;
 
-type PresetName = keyof typeof PRESETS;
+export type PresetName = keyof typeof PRESETS;
 type EnforcementInput = Parameters<typeof normalizeEnforcementMode>[0];
-type ParallelProvider = "portable" | "github_merge_queue";
+export type ParallelProvider = "portable" | "github_merge_queue";
 interface InitRoots { packageRoot: string; repoRoot: string; enforcementMode?: EnforcementInput; }
+export interface RenderInitScaffoldInput { preset: PresetName; mode: string; actionRef: string; parallel?: ParallelProvider | null; }
 
 function parallelIntegration(provider: ParallelProvider, mode: string, ref: string) {
   const ref_pinning = FULL_SHA.test(ref) ? "sha" : "tag";
@@ -226,6 +227,19 @@ body:
         \`\`\`
     validations: { required: false }
 `;
+
+export function renderInitScaffold({ preset, mode, actionRef, parallel = null }: RenderInitScaffoldInput): Record<string, string> {
+  const rendered: Record<string, string> = {
+    "repo-policy.json": `${JSON.stringify(buildPolicy(preset, mode, parallel, actionRef), null, 2)}\n`,
+    ".github/workflows/repo-guard.yml": parallel ? parallelTransactionWorkflow(mode, actionRef) : workflow(mode, actionRef),
+  };
+  if (parallel === "portable") rendered[".github/workflows/repo-guard-portable-coordinator.yml"] = portableCoordinatorWorkflow(actionRef);
+  if (parallel === "github_merge_queue") rendered[".github/workflows/repo-guard-merge-group.yml"] = nativeMergeGroupWorkflow(actionRef);
+  rendered[".github/PULL_REQUEST_TEMPLATE.md"] = prTemplate();
+  rendered[".github/ISSUE_TEMPLATE/change-intent.yml"] = issueTemplate();
+  return rendered;
+}
+
 function writeIfAbsent(path: string, content: string, created: string[], skipped: string[]) {
   if (existsSync(path)) return skipped.push(path);
   mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content, "utf-8"); created.push(path);
@@ -255,12 +269,8 @@ export function runInit(roots: InitRoots, args: string[] = []) {
   if (!refCheck.ok) { console.error(refCheck.message); return 1; }
 
   const created: string[] = [], skipped: string[] = [], root = roots.repoRoot, ref = refCheck.ref as string;
-  writeIfAbsent(resolve(root, "repo-policy.json"), `${JSON.stringify(buildPolicy(preset as PresetName, enforcement.mode, parallel, ref), null, 2)}\n`, created, skipped);
-  writeIfAbsent(resolve(root, ".github/workflows/repo-guard.yml"), parallel ? parallelTransactionWorkflow(enforcement.mode, ref) : workflow(enforcement.mode, ref), created, skipped);
-  if (parallel === "portable") writeIfAbsent(resolve(root, ".github/workflows/repo-guard-portable-coordinator.yml"), portableCoordinatorWorkflow(ref), created, skipped);
-  if (parallel === "github_merge_queue") writeIfAbsent(resolve(root, ".github/workflows/repo-guard-merge-group.yml"), nativeMergeGroupWorkflow(ref), created, skipped);
-  writeIfAbsent(resolve(root, ".github/PULL_REQUEST_TEMPLATE.md"), prTemplate(), created, skipped);
-  writeIfAbsent(resolve(root, ".github/ISSUE_TEMPLATE/change-intent.yml"), issueTemplate(), created, skipped);
+  const rendered = renderInitScaffold({ preset: preset as PresetName, mode: enforcement.mode, actionRef: ref, parallel });
+  for (const [path, content] of Object.entries(rendered)) writeIfAbsent(resolve(root, path), content, created, skipped);
 
   console.log(`repo-guard init (preset: ${preset}, enforcement: ${enforcement.mode}, action-ref: ${ref}${parallel ? `, parallel: ${parallel}` : ""})`);
   if (created.length) console.log(`Created:\n${created.map((path) => `  ${relative(root, path)}`).join("\n")}`);
