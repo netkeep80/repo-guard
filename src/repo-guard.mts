@@ -39,8 +39,8 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     run: async (roots, args) => (await import("./github-merge-group.mjs")).runCheckMergeGroup(roots, args),
   },
   status: {
-    options: {}, positionals: 0,
-    run: async () => 1,
+    options: valueOptions("--input", "--format"), positionals: 0,
+    run: async (roots, args) => (await import("./status.mjs")).runStatus(roots, args),
   },
   init: {
     options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0,
