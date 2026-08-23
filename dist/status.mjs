@@ -1,4 +1,4 @@
-import { projectAgentLifecycle } from "./agent-lifecycle.mjs";
+import { projectAgentLifecycle, } from "./agent-lifecycle.mjs";
 const value = (args, name) => {
     const index = args.indexOf(name);
     return index < 0 ? null : args[index + 1];
