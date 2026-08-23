@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   parsePortableCoordinatorArgs,
+  runPortableCoordinatorCommand,
 } from "../dist/portable-integration/public-command.mjs";
 
 const explicit = parsePortableCoordinatorArgs([
@@ -54,4 +55,44 @@ for (const [label, args, env, error] of [
   assert.equal(result.ok ? null : result.error, error, label);
 }
 
-console.log("Portable public coordinator trusted CLI parsing contract passed.");
+const output = [];
+let candidateReads = 0;
+let mutations = 0;
+const idleExit = await runPortableCoordinatorCommand(
+  {},
+  [
+    "--repository", "netkeep80/example",
+    "--ready-label", "repo-guard:ready",
+    "--merge-method", "squash",
+    "--transaction-check", "tx",
+    "--state-check", "state",
+    "--format", "json",
+  ],
+  {},
+  {
+    readReadyInventory: async () => ({ complete: true, pages: [[]] }),
+    readCandidate: async () => { candidateReads++; throw new Error("idle runtime must not read a candidate"); },
+    mutationTransport: {
+      request: async () => { mutations++; throw new Error("idle runtime must not mutate"); },
+    },
+    writeOutput: (text) => output.push(text),
+  },
+);
+assert.equal(idleExit, 0, "complete empty READY inventory is a successful idle pass");
+assert.equal(candidateReads, 0, "idle runtime performs no candidate reads");
+assert.equal(mutations, 0, "idle runtime performs no mutations");
+assert.equal(output.length, 1, "idle runtime emits one deterministic evidence document");
+assert.deepEqual(JSON.parse(output[0]), {
+  provider: "portable",
+  kind: "idle",
+  repository: "netkeep80/example",
+  main_sha: null,
+  pr: null,
+  head_sha: null,
+  decision: null,
+  reason: null,
+  mutation: "none",
+  result: null,
+});
+
+console.log("Portable public coordinator trusted CLI parsing/runtime composition contract passed.");
