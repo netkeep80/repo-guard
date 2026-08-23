@@ -1,5 +1,6 @@
 import { createRuleRegistry } from "../dist/checks/rule-registry.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
+import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 let failures = 0;
 
@@ -212,6 +213,65 @@ expect("transaction size rules exclude pure absolute repository invariant", tran
 expect("transaction size rules keep changed-only invariant", transactionSize.failed_rules.includes("transaction-changed"), true);
 expect("transaction size rules keep growth facet from mixed invariant", transactionSize.failed_rules.includes("mixed-growth"), true);
 expect("transaction size rules report mixed growth", transactionSize.growth.some((item) => item.ruleId === "mixed-growth"), true);
+
+const pipelineFiles = new Map([
+  ["left.json", JSON.stringify({ items: ["src/a.mjs"] })],
+  ["right.json", JSON.stringify({ items: ["src/a.mjs"] })],
+]);
+const pipelineInput = {
+  mode: "check-diff",
+  repositoryRoot: "/tmp/repo-guard-phase-pipeline",
+  policy: {
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: {
+      forbidden: [],
+      canonical_docs: [],
+      operational_paths: [],
+      governance_paths: [],
+    },
+    diff_rules: { max_new_files: 0 },
+    registry_rules: [
+      {
+        id: "pipeline-state-registry",
+        kind: "equal",
+        left: { type: "json_array", file: "left.json", json_pointer: "/items" },
+        right: { type: "json_array", file: "right.json", json_pointer: "/items" },
+      },
+    ],
+    content_rules: [],
+    cochange_rules: [],
+  },
+  changeIntent: null,
+  changeIntentSource: "none",
+  enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+  diffText: [
+    "diff --git a/src/new.mjs b/src/new.mjs",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/src/new.mjs",
+    "+export const value = 1;",
+  ].join("\n"),
+  trackedFiles: ["left.json", "right.json", "src/new.mjs"],
+  readFile: (path) => pipelineFiles.get(path),
+};
+
+const legacyPipeline = runPolicyPipeline(pipelineInput, { quiet: true });
+const statePipeline = runPolicyPipeline(pipelineInput, { quiet: true, executionPhase: "state" });
+const transactionPipeline = runPolicyPipeline(pipelineInput, { quiet: true, executionPhase: "transaction" });
+const legacyPipelineRules = legacyPipeline.ruleResults.map((entry) => entry.rule);
+const statePipelineRules = statePipeline.ruleResults.map((entry) => entry.rule);
+const transactionPipelineRules = transactionPipeline.ruleResults.map((entry) => entry.rule);
+
+expect("legacy pipeline report keeps old machine shape", Object.prototype.hasOwnProperty.call(legacyPipeline, "executionPhase"), false);
+expect("state pipeline reports explicit execution phase", statePipeline.executionPhase, "state");
+expect("transaction pipeline reports explicit execution phase", transactionPipeline.executionPhase, "transaction");
+expect("legacy pipeline still executes transaction rule", legacyPipelineRules.includes("max-new-files"), true);
+expect("legacy pipeline still executes state rule", legacyPipelineRules.includes("registry-rules"), true);
+expect("state pipeline excludes transaction rule", statePipelineRules.includes("max-new-files"), false);
+expect("state pipeline executes state rule without ChangeIntent", statePipelineRules.includes("registry-rules"), true);
+expect("transaction pipeline executes transaction rule", transactionPipelineRules.includes("max-new-files"), true);
+expect("transaction pipeline excludes state rule", transactionPipelineRules.includes("registry-rules"), false);
 
 console.log(`\n${failures === 0 ? "All execution phase tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
