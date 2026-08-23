@@ -19,7 +19,7 @@ export interface ParallelMigrationFilePlan {
 }
 
 export interface ParallelMigrationBlocker {
-  id: "custom_file" | "unknown_scaffold" | "invalid_action_ref";
+  id: "custom_file" | "unknown_scaffold" | "invalid_action_ref" | "provider_conflict";
   path?: string;
   message: string;
 }
@@ -48,6 +48,10 @@ const IMMUTABLE_REF = /^(?:[0-9a-f]{40}|v\d+\.\d+\.\d+)$/i;
 
 function providerPath(provider: ParallelMigrationProvider) {
   return provider === "portable" ? PORTABLE : NATIVE;
+}
+
+function oppositeProviderPath(provider: ParallelMigrationProvider) {
+  return provider === "portable" ? NATIVE : PORTABLE;
 }
 
 function externalSteps(provider: ParallelMigrationProvider): ParallelMigrationExternalStep[] {
@@ -129,6 +133,15 @@ export function planParallelMigration(input: ParallelMigrationInput): ParallelMi
   }
 
   const path = providerPath(input.provider);
+  const oppositePath = oppositeProviderPath(input.provider);
+  if (input.files[oppositePath] !== null && input.files[oppositePath] !== undefined) {
+    blockers.push({
+      id: "provider_conflict",
+      path: oppositePath,
+      message: `${oppositePath} already exists; refusing to switch or combine parallel providers automatically.`,
+    });
+  }
+
   const files = [
     planProviderFile(path, input.files[path], known.target[path], blockers),
     planKnownFile(TRANSACTION, input.files[TRANSACTION], known.legacy[TRANSACTION], known.target[TRANSACTION], blockers),

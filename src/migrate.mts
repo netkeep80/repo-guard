@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { validateExplicitActionRef } from "./init.mjs";
+import { applyParallelMigration, type MigrationFileAdapter } from "./migration-apply.mjs";
 import { planParallelMigration, type ParallelMigrationProvider } from "./migration-plan.mjs";
 
 interface MigrateRoots {
@@ -9,6 +10,20 @@ interface MigrateRoots {
 }
 
 type OutputFormat = "summary" | "json";
+type MigrateMode = "dry-run" | "apply";
+
+interface MigrationOutput {
+  command: "migrate";
+  mode: MigrateMode;
+  provider: ParallelMigrationProvider;
+  actionRef: string;
+  readyToApply: boolean;
+  files: Array<{ path: string; action: string }>;
+  blockers: Array<{ id: string; path?: string; message: string }>;
+  external: Array<{ id: string; message: string }>;
+  applied?: boolean;
+  writes?: string[];
+}
 
 const POLICY = "repo-policy.json";
 const TRANSACTION = ".github/workflows/repo-guard.yml";
@@ -16,7 +31,7 @@ const PORTABLE = ".github/workflows/repo-guard-portable-coordinator.yml";
 const NATIVE = ".github/workflows/repo-guard-merge-group.yml";
 const PROVIDERS = new Set<ParallelMigrationProvider>(["portable", "github_merge_queue"]);
 const FORMATS = new Set<OutputFormat>(["summary", "json"]);
-const usage = "Usage: repo-guard migrate --parallel <portable|github_merge_queue> --action-ref <40-char-sha|vX.Y.Z> --dry-run [--format <summary|json>]";
+const usage = "Usage: repo-guard migrate --parallel <portable|github_merge_queue> --action-ref <40-char-sha|vX.Y.Z> (--dry-run|--apply) [--format <summary|json>]";
 
 function packageVersion(packageRoot: string) {
   const parsed = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8")) as { version?: unknown };
@@ -29,7 +44,34 @@ function readOptional(repoRoot: string, path: string) {
   return existsSync(target) ? readFileSync(target, "utf8") : null;
 }
 
-function renderSummary(payload: ReturnType<typeof migrationPayload>) {
+function migrationSnapshot(repoRoot: string) {
+  return {
+    [POLICY]: readOptional(repoRoot, POLICY),
+    [TRANSACTION]: readOptional(repoRoot, TRANSACTION),
+    [PORTABLE]: readOptional(repoRoot, PORTABLE),
+    [NATIVE]: readOptional(repoRoot, NATIVE),
+  };
+}
+
+function filesystemAdapter(repoRoot: string): MigrationFileAdapter {
+  return {
+    read: (path) => readOptional(repoRoot, path),
+    create(path, content) {
+      const target = resolve(repoRoot, path);
+      if (existsSync(target)) throw new Error(`${path} changed after migration preflight; refusing to overwrite it.`);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, { encoding: "utf8", flag: "wx" });
+    },
+    replace(path, expectedBefore, content) {
+      const target = resolve(repoRoot, path);
+      const current = readOptional(repoRoot, path);
+      if (current !== expectedBefore) throw new Error(`${path} changed after migration preflight; refusing to overwrite it.`);
+      writeFileSync(target, content, "utf8");
+    },
+  };
+}
+
+function renderSummary(payload: MigrationOutput) {
   const lines = [
     `repo-guard migrate (${payload.mode})`,
     `provider: ${payload.provider}`,
@@ -38,6 +80,8 @@ function renderSummary(payload: ReturnType<typeof migrationPayload>) {
     "files:",
     ...payload.files.map(({ action, path }) => `  ${action}: ${path}`),
   ];
+  if (payload.applied !== undefined) lines.push(`applied: ${payload.applied ? "yes" : "no"}`);
+  if (payload.writes?.length) lines.push("writes:", ...payload.writes.map((path) => `  ${path}`));
   if (payload.blockers.length) {
     lines.push("blockers:", ...payload.blockers.map(({ id, path, message }) => `  ${id}${path ? ` (${path})` : ""}: ${message}`));
   }
@@ -47,8 +91,8 @@ function renderSummary(payload: ReturnType<typeof migrationPayload>) {
   return lines.join("\n");
 }
 
-function migrationPayload(plan: ReturnType<typeof planParallelMigration>) {
-  return { command: "migrate" as const, mode: "dry-run" as const, ...plan };
+function printPayload(payload: MigrationOutput, format: OutputFormat) {
+  console.log(format === "json" ? JSON.stringify(payload, null, 2) : renderSummary(payload));
 }
 
 export function runMigrate(roots: MigrateRoots, args: string[] = []) {
@@ -56,11 +100,13 @@ export function runMigrate(roots: MigrateRoots, args: string[] = []) {
   let actionRef: string | null = null;
   let format: OutputFormat = "summary";
   let dryRun = false;
+  let apply = false;
 
   for (let i = 0; i < args.length; i++) {
     const option = args[i];
-    if (option === "--dry-run") {
-      dryRun = true;
+    if (option === "--dry-run" || option === "--apply") {
+      if (option === "--dry-run") dryRun = true;
+      else apply = true;
       continue;
     }
     if (["--parallel", "--action-ref", "--format"].includes(option)) {
@@ -94,8 +140,8 @@ export function runMigrate(roots: MigrateRoots, args: string[] = []) {
     return 1;
   }
 
-  if (!dryRun) {
-    console.error(`migrate is read-only in this release slice; pass --dry-run\n${usage}`);
+  if (dryRun === apply) {
+    console.error(`migrate requires exactly one of --dry-run or --apply\n${usage}`);
     return 1;
   }
   if (!provider) {
@@ -118,18 +164,25 @@ export function runMigrate(roots: MigrateRoots, args: string[] = []) {
     console.error(refCheck.message);
     return 1;
   }
+  const immutableRef = refCheck.ref as string;
 
-  const providerPath = provider === "portable" ? PORTABLE : NATIVE;
-  const plan = planParallelMigration({
+  if (dryRun) {
+    const plan = planParallelMigration({
+      provider,
+      actionRef: immutableRef,
+      files: migrationSnapshot(roots.repoRoot),
+    });
+    const payload: MigrationOutput = { command: "migrate", mode: "dry-run", ...plan };
+    printPayload(payload, format);
+    return plan.readyToApply ? 0 : 1;
+  }
+
+  const result = applyParallelMigration({
     provider,
-    actionRef: refCheck.ref as string,
-    files: {
-      [POLICY]: readOptional(roots.repoRoot, POLICY),
-      [TRANSACTION]: readOptional(roots.repoRoot, TRANSACTION),
-      [providerPath]: readOptional(roots.repoRoot, providerPath),
-    },
+    actionRef: immutableRef,
+    io: filesystemAdapter(roots.repoRoot),
   });
-  const payload = migrationPayload(plan);
-  console.log(format === "json" ? JSON.stringify(payload, null, 2) : renderSummary(payload));
-  return plan.readyToApply ? 0 : 1;
+  const payload: MigrationOutput = { command: "migrate", mode: "apply", ...result };
+  printPayload(payload, format);
+  return result.applied && result.readyToApply ? 0 : 1;
 }
