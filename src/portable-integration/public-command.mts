@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   runTrustedPortableCoordinator,
   type TrustedPortableCoordinatorEvidence,
@@ -53,6 +54,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function defaultRun(command: string, args: string[]): string {
+  return execFileSync(command, args, {
+    encoding: "utf-8",
+    stdio: "pipe",
+    timeout: 30000,
+  });
+}
+
 function parseRuntimeJson(text: string, label: string): unknown {
   try {
     return JSON.parse(text);
@@ -62,8 +71,7 @@ function parseRuntimeJson(text: string, label: string): unknown {
   }
 }
 
-function createReadyInventoryReader(repository: string, run: RunCommand | undefined) {
-  if (run === undefined) return undefined;
+function createReadyInventoryReader(repository: string, run: RunCommand) {
   return async () => {
     const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
     const pages = parseRuntimeJson(
@@ -189,8 +197,9 @@ export async function runPortableCoordinatorCommand(
   const parsed = parsePortableCoordinatorArgs(args, env);
   if (!parsed.ok) throw new Error(`${parsed.error}: ${parsed.message}`);
 
+  const run = dependencies.run ?? defaultRun;
   const readReadyInventory = dependencies.readReadyInventory
-    ?? createReadyInventoryReader(parsed.value.repository, dependencies.run);
+    ?? createReadyInventoryReader(parsed.value.repository, run);
   const readCandidate = dependencies.readCandidate
     ?? (async () => { throw new Error("candidate GitHub runtime is not wired"); });
 
