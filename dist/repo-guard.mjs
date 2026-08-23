@@ -22,6 +22,10 @@ const COMMAND_SPECS = {
         options: valueOptions("--format"), positionals: 0,
         run: async (roots, args) => (await import("./github-merge-group.mjs")).runCheckMergeGroup(roots, args),
     },
+    status: {
+        options: {}, positionals: 0,
+        run: async () => 1,
+    },
     init: {
         options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0,
         run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
