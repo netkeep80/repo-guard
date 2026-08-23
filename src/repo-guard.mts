@@ -45,7 +45,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     run: async (roots, args) => (await import("./status.mjs")).runStatus(roots, args),
   },
   init: {
-    options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0,
+    options: { ...valueOptions("--preset", "--mode", "--action-ref", "--parallel"), "--help": false }, positionals: 0,
     run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
   },
   doctor: {
