@@ -47,7 +47,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
   },
   doctor: {
-    options: { "--integration": false, ...valueOptions("--format") }, positionals: 0,
+    options: { "--integration": false, ...valueOptions("--format", "--parallel") }, positionals: 0,
     run: async (roots, args) => args.includes("--integration")
       ? (await import("./integration-validator.mjs")).runValidateIntegration(roots, args)
       : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
