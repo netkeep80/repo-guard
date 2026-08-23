@@ -98,11 +98,11 @@ export function projectAgentLifecycle(input) {
     if ("ok" in normalized)
         return normalized;
     const facts = normalized;
-    if (facts.configuration_status !== "ready") {
-        return projection(facts, "misconfigured", "configure_repository");
-    }
     if (facts.merged) {
         return projection(facts, "merged", "none");
+    }
+    if (facts.configuration_status !== "ready") {
+        return projection(facts, "misconfigured", "configure_repository");
     }
     if (facts.merge_conflict) {
         return projection(facts, "fix_conflict", "fix_pr");
