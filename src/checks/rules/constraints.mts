@@ -116,6 +116,20 @@ function constraintAppliesToPhase(constraint: RuntimeConstraint, requested: Exec
   return requested === "both" || phase === "both" || phase === requested;
 }
 
+function projectSizeRules(rules: SizeRule[], requested: ExecutionPhase): SizeRule[] {
+  if (requested === "both") return rules;
+  return rules.flatMap((rule) => {
+    const transactionBound = rule.count === "changed_only" || rule.applies_to_change_types !== undefined;
+    if (requested === "state") {
+      if (transactionBound || rule.max === undefined) return [];
+      return [{ ...rule, max_growth: undefined }];
+    }
+    if (transactionBound) return [rule];
+    if (rule.max_growth === undefined) return [];
+    return [{ ...rule, max: undefined }];
+  });
+}
+
 function budget(selected: ParsedDiffFile[], max: number | undefined): BudgetResult {
   if (max === undefined) return { ok: true };
   return { ok: selected.length <= max, actual: selected.length, limit: max, files: selected.map((file) => file.path) };
@@ -247,7 +261,9 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
       if (selectPaths(files, constraint.if_changed!).length && !selectPaths(files, constraint.must_change_any!).length) cochange.push(constraint);
       continue;
     } else if (constraint.kind === "size_rules") {
-      const result = checkSizeRules(files, constraint.rules as SizeRule[], {
+      const rules = projectSizeRules(constraint.rules as SizeRule[], executionPhase);
+      if (!rules.length) continue;
+      const result = checkSizeRules(files, rules, {
         repoRoot: facts.repositoryRoot, trackedFiles: facts.trackedFiles, readFile: facts.readFile,
         ignorePatterns: facts.policy.paths.operational_paths, changeType: facts.changeIntent?.change_type,
       });
