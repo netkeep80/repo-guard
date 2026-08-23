@@ -27,7 +27,11 @@ export function runPolicyPipeline(input, options = {}) {
     const anchorDiagnostics = buildAnchorDiagnostics(facts);
     // Префикс меняет только diagnostic namespace; вычисление остаётся в одном canonical
     // pipeline и одном RuleRegistry, чтобы base/head не получили разные semantics engines.
-    runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies });
+    runPolicyChecks(facts, { report }, {
+        anchorDiagnostics,
+        excludeFamilies: options.excludeRuleFamilies,
+        executionPhase: options.executionPhase,
+    });
     return reporter.finish({
         command: input.mode,
         repositoryRoot: facts.repositoryRoot,
@@ -36,6 +40,7 @@ export function runPolicyPipeline(input, options = {}) {
             checkedFiles: facts.diff.files.checked.length,
             skippedOperationalFiles: facts.diagnostics.skippedOperationalFiles,
         },
+        ...(options.executionPhase ? { executionPhase: options.executionPhase } : {}),
         ...anchorDiagnostics,
     });
 }
