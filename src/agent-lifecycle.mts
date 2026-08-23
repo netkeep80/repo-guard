@@ -1,0 +1,181 @@
+export const AGENT_LIFECYCLE_STATES = [
+  "fix_pr",
+  "ready_for_integration",
+  "queued",
+  "integrating",
+  "blocked_ci",
+  "fix_conflict",
+  "misconfigured",
+  "merged",
+] as const;
+
+export const AGENT_NEXT_ACTIONS = [
+  "fix_pr",
+  "enqueue",
+  "wait",
+  "inspect_failure",
+  "configure_repository",
+  "none",
+] as const;
+
+export type AgentLifecycleState = typeof AGENT_LIFECYCLE_STATES[number];
+export type AgentNextAction = typeof AGENT_NEXT_ACTIONS[number];
+export type AgentLifecycleProvider = "legacy" | "portable" | "github_merge_queue";
+export type AgentProtocolMode = "legacy" | "parallel";
+export type AgentConfigurationStatus = "ready" | "misconfigured" | "unknown";
+export type AgentGateStatus = "success" | "pending" | "failure" | "missing";
+
+export interface AgentLifecycleFacts {
+  provider: AgentLifecycleProvider;
+  configuration_status: AgentConfigurationStatus;
+  pr: number;
+  base_sha: string;
+  head_sha: string;
+  branch_behind: boolean;
+  merged: boolean;
+  queued: boolean;
+  integrating: boolean;
+  merge_conflict: boolean;
+  transaction_status: AgentGateStatus;
+  state_status: AgentGateStatus;
+}
+
+export interface AgentLifecycleProjection {
+  state: AgentLifecycleState;
+  next_action: AgentNextAction;
+  protocol: AgentProtocolMode;
+  provider: AgentLifecycleProvider;
+  pr: number;
+  base_sha: string;
+  head_sha: string;
+  branch_behind: boolean;
+  requires_agent_branch_update: boolean;
+}
+
+export type AgentLifecycleResult =
+  | { ok: true; value: AgentLifecycleProjection }
+  | { ok: false; error: string; message: string };
+
+type LooseObject = Record<string, unknown>;
+
+const SHA = /^[0-9a-f]{40}$/i;
+
+function isObject(value: unknown): value is LooseObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isProvider(value: unknown): value is AgentLifecycleProvider {
+  return value === "legacy" || value === "portable" || value === "github_merge_queue";
+}
+
+function isConfigurationStatus(value: unknown): value is AgentConfigurationStatus {
+  return value === "ready" || value === "misconfigured" || value === "unknown";
+}
+
+function isGateStatus(value: unknown): value is AgentGateStatus {
+  return value === "success" || value === "pending" || value === "failure" || value === "missing";
+}
+
+function isSha(value: unknown): value is string {
+  return typeof value === "string" && SHA.test(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function invalid(message: string): AgentLifecycleResult {
+  return { ok: false, error: "malformed_lifecycle_facts", message };
+}
+
+function normalizeFacts(input: unknown): AgentLifecycleFacts | AgentLifecycleResult {
+  if (!isObject(input)) return invalid("lifecycle facts must be an object");
+  if (!isProvider(input.provider)) return invalid("provider must be legacy, portable, or github_merge_queue");
+  if (!isConfigurationStatus(input.configuration_status)) return invalid("configuration_status is missing or unknown");
+  if (!isPositiveInteger(input.pr)) return invalid("pr must be a positive integer");
+  if (!isSha(input.base_sha) || !isSha(input.head_sha)) return invalid("base_sha and head_sha must be exact 40-character SHAs");
+
+  if (typeof input.branch_behind !== "boolean") return invalid("branch_behind must be boolean");
+  if (typeof input.merged !== "boolean") return invalid("merged must be boolean");
+  if (typeof input.queued !== "boolean") return invalid("queued must be boolean");
+  if (typeof input.integrating !== "boolean") return invalid("integrating must be boolean");
+  if (typeof input.merge_conflict !== "boolean") return invalid("merge_conflict must be boolean");
+  if (!isGateStatus(input.transaction_status) || !isGateStatus(input.state_status)) {
+    return invalid("transaction_status and state_status must be finite gate states");
+  }
+
+  return {
+    provider: input.provider,
+    configuration_status: input.configuration_status,
+    pr: input.pr,
+    base_sha: input.base_sha,
+    head_sha: input.head_sha,
+    branch_behind: input.branch_behind,
+    merged: input.merged,
+    queued: input.queued,
+    integrating: input.integrating,
+    merge_conflict: input.merge_conflict,
+    transaction_status: input.transaction_status,
+    state_status: input.state_status,
+  };
+}
+
+function projection(
+  facts: AgentLifecycleFacts,
+  state: AgentLifecycleState,
+  next_action: AgentNextAction,
+  requires_agent_branch_update = false,
+): AgentLifecycleResult {
+  return {
+    ok: true,
+    value: {
+      state,
+      next_action,
+      protocol: facts.provider === "legacy" ? "legacy" : "parallel",
+      provider: facts.provider,
+      pr: facts.pr,
+      base_sha: facts.base_sha,
+      head_sha: facts.head_sha,
+      branch_behind: facts.branch_behind,
+      requires_agent_branch_update,
+    },
+  };
+}
+
+export function projectAgentLifecycle(input: unknown): AgentLifecycleResult {
+  const normalized = normalizeFacts(input);
+  if ("ok" in normalized) return normalized;
+  const facts = normalized;
+
+  if (facts.merged) {
+    return projection(facts, "merged", "none");
+  }
+  if (facts.configuration_status !== "ready") {
+    return projection(facts, "misconfigured", "configure_repository");
+  }
+  if (facts.merge_conflict) {
+    return projection(facts, "fix_conflict", "fix_pr");
+  }
+  if (facts.transaction_status === "failure") {
+    return projection(facts, "fix_pr", "fix_pr");
+  }
+  if (facts.state_status === "failure") {
+    return projection(facts, "blocked_ci", "inspect_failure");
+  }
+  if (facts.transaction_status === "missing" || facts.state_status === "missing") {
+    return projection(facts, "blocked_ci", "inspect_failure");
+  }
+  if (facts.integrating) {
+    return projection(facts, "integrating", "wait");
+  }
+  if (facts.queued) {
+    return projection(facts, "queued", "wait");
+  }
+  if (facts.transaction_status === "pending" || facts.state_status === "pending") {
+    return projection(facts, "blocked_ci", "wait");
+  }
+  if (facts.provider === "legacy" && facts.branch_behind) {
+    return projection(facts, "fix_pr", "fix_pr", true);
+  }
+  return projection(facts, "ready_for_integration", "enqueue");
+}
