@@ -35,4 +35,22 @@ describe("strict TypeScript source cutover", () => {
   it("keeps the built CLI command inventory explicit", () => {
     assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "check-merge-group", "status", "init", "doctor", "portable-coordinator", "validate-integration"]);
   });
+
+  it("keeps the privileged portable coordinator on the trusted execFile control-plane boundary", () => {
+    const source = readFileSync(resolve(root, "src/portable-integration/public-command.mts"), "utf-8");
+
+    assert.match(source, /import \{ execFileSync \} from "node:child_process";/);
+    assert.match(source, /runTrustedPortableCoordinator\(\{/);
+    assert.match(source, /run\("gh", \["api",/);
+
+    assert.doesNotMatch(source, /\bexecSync\b/);
+    assert.doesNotMatch(source, /\b(?:exec|spawn|spawnSync)\s*\(/);
+    assert.doesNotMatch(source, /shell\s*:\s*true/);
+    assert.doesNotMatch(source, /run\("git"/);
+    assert.doesNotMatch(source, /git\s+(?:remote|merge|rebase|push)\b/);
+    assert.doesNotMatch(source, /actions\/checkout/);
+    assert.doesNotMatch(source, /npm\s+(?:test|run)\b/);
+    assert.doesNotMatch(source, /\b(?:branch protection|ruleset|bypass|admin)\b/i);
+    assert.doesNotMatch(source, /from\s+"\.\/portable-integration\/(?:planner|coordinator-loop)\.mjs"/);
+  });
 });
