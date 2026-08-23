@@ -33,6 +33,7 @@ type RuntimeDependencies = {
 export type PortableCoordinatorArgsResult = Failure | Success;
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const EXACT_SHA = /^[0-9a-f]{40}$/i;
 const MERGE_METHODS = new Set<MergeMethod>(["merge", "squash", "rebase"]);
 const FORMATS = new Set<OutputFormat>(["text", "json"]);
 const SINGLETON_OPTIONS = new Set(["--repository", "--ready-label", "--merge-method", "--format"]);
@@ -52,6 +53,13 @@ function normalizeChecks(values: string[]): RequiredCheck[] {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactSha(value: unknown, label: string): string {
+  if (typeof value !== "string" || !EXACT_SHA.test(value)) {
+    throw new Error(`malformed_github_response: ${label} must be an exact commit SHA`);
+  }
+  return value;
 }
 
 function defaultRun(command: string, args: string[]): string {
@@ -89,6 +97,88 @@ function createReadyInventoryReader(repository: string, run: RunCommand) {
     return {
       complete: true,
       pages: pages.map((page) => (page as unknown[]).map(normalizeInventoryItem)),
+    };
+  };
+}
+
+function createCandidateReader(repository: string, run: RunCommand) {
+  return async (prNumber: number) => {
+    const repositoryEndpoint = `repos/${repository}`;
+    const metadata = parseRuntimeJson(
+      run("gh", ["api", repositoryEndpoint]),
+      repositoryEndpoint,
+    );
+    if (!isObject(metadata) || typeof metadata.default_branch !== "string" || metadata.default_branch.length === 0) {
+      throw new Error("malformed_github_response: repository default_branch is required");
+    }
+
+    const branchEndpoint = `repos/${repository}/branches/${encodeURIComponent(metadata.default_branch)}`;
+    const branch = parseRuntimeJson(
+      run("gh", ["api", branchEndpoint]),
+      branchEndpoint,
+    );
+    if (!isObject(branch) || !isObject(branch.commit)) {
+      throw new Error("malformed_github_response: default branch commit is required");
+    }
+    const currentMainSha = exactSha(branch.commit.sha, "default branch commit sha");
+
+    const pullEndpoint = `repos/${repository}/pulls/${prNumber}`;
+    const pullRequest = parseRuntimeJson(
+      run("gh", ["api", pullEndpoint]),
+      pullEndpoint,
+    );
+    if (!isObject(pullRequest) || !isObject(pullRequest.head)) {
+      throw new Error("malformed_github_response: pull request head is required");
+    }
+    const headSha = exactSha(pullRequest.head.sha, "pull request head sha");
+
+    const compareEndpoint = `repos/${repository}/compare/${currentMainSha}...${headSha}`;
+    const comparison = parseRuntimeJson(
+      run("gh", ["api", compareEndpoint]),
+      compareEndpoint,
+    );
+    if (!isObject(comparison)) {
+      throw new Error("malformed_github_response: compare response must be an object");
+    }
+
+    const checksEndpoint = `repos/${repository}/commits/${headSha}/check-runs?filter=latest&per_page=100`;
+    const checkPages = parseRuntimeJson(
+      run("gh", ["api", checksEndpoint, "--paginate", "--slurp"]),
+      checksEndpoint,
+    );
+    if (!Array.isArray(checkPages) || checkPages.length === 0) {
+      throw new Error("malformed_github_response: check-runs pagination must be a non-empty array of pages");
+    }
+
+    let totalCount: number | null = null;
+    const runs: unknown[] = [];
+    for (const page of checkPages) {
+      if (!isObject(page) || !Number.isInteger(page.total_count) || (page.total_count as number) < 0 || !Array.isArray(page.check_runs)) {
+        throw new Error("malformed_github_response: each check-runs page requires total_count and check_runs");
+      }
+      if (totalCount === null) totalCount = page.total_count as number;
+      else if (page.total_count !== totalCount) {
+        throw new Error("malformed_github_response: check-runs pages disagree on total_count");
+      }
+      runs.push(...page.check_runs);
+    }
+    if (runs.length !== totalCount) {
+      throw new Error("incomplete_github_response: check-runs pagination is incomplete");
+    }
+
+    return {
+      currentMainSha,
+      pullRequest,
+      compare: {
+        mainSha: currentMainSha,
+        headSha,
+        status: comparison.status,
+      },
+      checkRuns: {
+        complete: true,
+        headSha,
+        runs,
+      },
     };
   };
 }
@@ -209,7 +299,7 @@ export async function runPortableCoordinatorCommand(
   const readReadyInventory = dependencies.readReadyInventory
     ?? createReadyInventoryReader(parsed.value.repository, run);
   const readCandidate = dependencies.readCandidate
-    ?? (async () => { throw new Error("candidate GitHub runtime is not wired"); });
+    ?? createCandidateReader(parsed.value.repository, run);
 
   const evidence = await runTrustedPortableCoordinator({
     repository: parsed.value.repository,
