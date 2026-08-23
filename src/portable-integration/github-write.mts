@@ -101,18 +101,24 @@ function responseMessage(body: unknown): string {
 }
 
 function validateCommonInput(input: unknown): Failure | {
-  repository: string;
-  prNumber: number;
-  expectedHeadSha: string;
+  ok: true;
+  value: {
+    repository: string;
+    prNumber: number;
+    expectedHeadSha: string;
+  };
 } {
   if (!isRecord(input)) return fail("invalid_input", "mutation input must be an object");
   if (!isRepository(input.repository)) return fail("invalid_input", "repository must be owner/name");
   if (!isPositiveInteger(input.prNumber)) return fail("invalid_input", "PR number must be a positive integer");
   if (!isSha(input.expectedHeadSha)) return fail("invalid_input", "expected head must be an exact 40-character SHA");
   return {
-    repository: input.repository,
-    prNumber: input.prNumber,
-    expectedHeadSha: input.expectedHeadSha,
+    ok: true,
+    value: {
+      repository: input.repository,
+      prNumber: input.prNumber,
+      expectedHeadSha: input.expectedHeadSha,
+    },
   };
 }
 
@@ -122,15 +128,16 @@ export function createGitHubWriteAdapter(transportInput: unknown) {
   return {
     async updateBranch(input: unknown): Promise<GitHubUpdateBranchResult> {
       const common = validateCommonInput(input);
-      if ("ok" in common && common.ok === false) return common;
+      if (!common.ok) return common;
+      const valid = common.value;
       if (transport === null) return fail("invalid_transport", "write transport must expose an async request function");
 
       let rawResponse: unknown;
       try {
         rawResponse = await transport.request({
           method: "PUT",
-          path: `/repos/${common.repository}/pulls/${common.prNumber}/update-branch`,
-          body: { expected_head_sha: common.expectedHeadSha },
+          path: `/repos/${valid.repository}/pulls/${valid.prNumber}/update-branch`,
+          body: { expected_head_sha: valid.expectedHeadSha },
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -144,14 +151,15 @@ export function createGitHubWriteAdapter(transportInput: unknown) {
       return {
         ok: true,
         kind: "update_accepted",
-        expectedHeadSha: common.expectedHeadSha,
+        expectedHeadSha: valid.expectedHeadSha,
         rereadRequired: true,
       };
     },
 
     async mergeExactHead(input: unknown): Promise<GitHubMergeExactHeadResult> {
       const common = validateCommonInput(input);
-      if ("ok" in common && common.ok === false) return common;
+      if (!common.ok) return common;
+      const valid = common.value;
       if (!isRecord(input) || !isMergeMethod(input.mergeMethod))
         return fail("invalid_input", "merge method must be merge, squash, or rebase");
       if (transport === null) return fail("invalid_transport", "write transport must expose an async request function");
@@ -160,9 +168,9 @@ export function createGitHubWriteAdapter(transportInput: unknown) {
       try {
         rawResponse = await transport.request({
           method: "PUT",
-          path: `/repos/${common.repository}/pulls/${common.prNumber}/merge`,
+          path: `/repos/${valid.repository}/pulls/${valid.prNumber}/merge`,
           body: {
-            sha: common.expectedHeadSha,
+            sha: valid.expectedHeadSha,
             merge_method: input.mergeMethod,
           },
         });
@@ -182,7 +190,7 @@ export function createGitHubWriteAdapter(transportInput: unknown) {
       return {
         ok: true,
         kind: "merged",
-        expectedHeadSha: common.expectedHeadSha,
+        expectedHeadSha: valid.expectedHeadSha,
         mergeSha: response.body.sha,
         mergeMethod: input.mergeMethod,
       };
