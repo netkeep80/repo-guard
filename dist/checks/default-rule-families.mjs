@@ -5,13 +5,16 @@ import { contentRuleFamily } from "./rules/content-rules.mjs";
 import { governancePathsRuleFamily } from "./rules/governance-paths.mjs";
 import { policyRelaxationRuleFamily } from "./rules/policy-delta-rules.mjs";
 import { createRuleRegistry } from "./rule-registry.mjs";
+function withPhase(family, phase) {
+    return { ...family, phase };
+}
 export const defaultRuleFamilies = [
-    constraintRuleFamily,
-    governancePathsRuleFamily,
-    policyRelaxationRuleFamily,
-    advisoryTextRuleFamily,
-    anchorExtractionRuleFamily,
-    contentRuleFamily,
+    withPhase(constraintRuleFamily, "both"),
+    withPhase(governancePathsRuleFamily, "transaction"),
+    withPhase(policyRelaxationRuleFamily, "transaction"),
+    withPhase(advisoryTextRuleFamily, "transaction"),
+    withPhase(anchorExtractionRuleFamily, "both"),
+    withPhase(contentRuleFamily, "transaction"),
 ];
 export function createDefaultRuleRegistry() {
     const registry = createRuleRegistry();
