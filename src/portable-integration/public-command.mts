@@ -114,3 +114,13 @@ export function parsePortableCoordinatorArgs(
     },
   };
 }
+
+export async function runPortableCoordinatorCommand(
+  _roots: unknown,
+  args: string[],
+  env: Record<string, string | undefined> = process.env,
+): Promise<number> {
+  const parsed = parsePortableCoordinatorArgs(args, env);
+  if (!parsed.ok) throw new Error(`${parsed.error}: ${parsed.message}`);
+  throw new Error("portable coordinator runtime is not wired");
+}
