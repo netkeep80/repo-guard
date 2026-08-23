@@ -35,10 +35,13 @@ describe("repo-guard init", () => {
       { path: ".github/workflows/repo-guard.yml", role: "repo_guard_pr_gate", mode: "check-pr" },
       { path: coordinatorPath, role: "repo_guard_portable_coordinator", mode: "portable-coordinator" },
     ]);
+    const coordinatorContract = policy.integration.workflows.find(({ role }) => role === "repo_guard_portable_coordinator");
+    assert.equal(coordinatorContract.expect.permissions.checks, "read");
     const coordinator = readFileSync(join(dir, coordinatorPath), "utf-8");
     assert.match(coordinator, /workflow_dispatch/);
     assert.match(coordinator, new RegExp(`netkeep80/repo-guard@${immutableSha}`));
     assert.match(coordinator, /mode: portable-coordinator/);
+    assert.match(coordinator, /^\s*checks: read$/m);
     assert.doesNotMatch(coordinator, /actions\/checkout/);
     assert.doesNotMatch(coordinator, /npm (?:test|run)/);
   });
