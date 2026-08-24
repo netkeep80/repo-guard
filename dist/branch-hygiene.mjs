@@ -150,10 +150,11 @@ export function analyzeBranchHygiene(input) {
     };
 }
 export function planMergedBranchDeletion(input) {
+    const rereadValid = isRecord(input) && (input.rereadBranch === null
+        || (isRecord(input.rereadBranch) && isNonEmptyString(input.rereadBranch.name) && isSha(input.rereadBranch.sha)));
     if (!isRecord(input) || !isNonEmptyString(input.branchName) || !isPositiveInteger(input.prNumber)
-        || !isSha(input.expectedHeadSha) || !isRecord(input.rereadBranch)
-        || !isNonEmptyString(input.rereadBranch.name) || !isSha(input.rereadBranch.sha)) {
-        return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread");
+        || !isSha(input.expectedHeadSha) || !rereadValid) {
+        return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread or confirmed absence");
     }
     const analysis = analyzeBranchHygiene(input.facts);
     if (!analysis.ok)
@@ -161,6 +162,15 @@ export function planMergedBranchDeletion(input) {
     const merged = analysis.mergedPullRequestHeadsStillPresent.find((head) => head.number === input.prNumber && head.name === input.branchName && head.sha === input.expectedHeadSha);
     if (merged === undefined) {
         return fail("deletion_not_authorized", "branch is not an exact merged same-repository residue in the current hygiene snapshot");
+    }
+    if (input.rereadBranch === null) {
+        return {
+            ok: true,
+            kind: "already_absent",
+            branchName: input.branchName,
+            prNumber: input.prNumber,
+            expectedHeadSha: input.expectedHeadSha,
+        };
     }
     if (input.rereadBranch.name !== input.branchName || input.rereadBranch.sha !== input.expectedHeadSha) {
         return fail("stale_head", "fresh branch reread no longer matches the expected merged head");
