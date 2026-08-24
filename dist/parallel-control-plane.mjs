@@ -72,7 +72,7 @@ function classicBypassAllowances(value) {
         return false;
     return complete ? true : null;
 }
-function parseClassic(envelope) {
+function parseClassic(envelope, repositoryOwnerType) {
     if (!envelope.complete || !envelope.protected || !envelope.data) {
         return {
             active: false,
@@ -131,10 +131,11 @@ function parseClassic(envelope) {
     }
     const requiredChecksEnforced = checks.length > 0;
     const active = pullRequestRequired || requiredChecksEnforced;
+    const actorBypassKnownAbsent = allowances === true || (allowances === null && repositoryOwnerType === "User");
     let noBypass = null;
     if (active && allowances === false)
         noBypass = false;
-    else if (active && pullRequestRequired && allowances === true && adminsProtected === true)
+    else if (active && pullRequestRequired && actorBypassKnownAbsent && adminsProtected === true)
         noBypass = true;
     return {
         active,
@@ -283,6 +284,13 @@ export function normalizeGitHubControlPlane(input) {
     if (input.defaultBranch !== null && (typeof input.defaultBranch !== "string" || input.defaultBranch.length === 0)) {
         return fail("invalid_default_branch", "defaultBranch must be a non-empty string or null");
     }
+    let repositoryOwnerType = null;
+    if (input.repositoryOwnerType !== undefined && input.repositoryOwnerType !== null) {
+        if (input.repositoryOwnerType !== "User" && input.repositoryOwnerType !== "Organization") {
+            return fail("invalid_repository_owner_type", "repositoryOwnerType must be User, Organization, or null");
+        }
+        repositoryOwnerType = input.repositoryOwnerType;
+    }
     const branchProtection = readBranchProtection(input.branchProtection);
     if ("ok" in branchProtection)
         return branchProtection;
@@ -292,7 +300,7 @@ export function normalizeGitHubControlPlane(input) {
     const rulesets = readInventory(input.rulesets, "rulesets", "items");
     if ("ok" in rulesets)
         return rulesets;
-    const classic = parseClassic(branchProtection);
+    const classic = parseClassic(branchProtection, repositoryOwnerType);
     if ("ok" in classic)
         return classic;
     const rules = parseActiveRules(activeRules);
