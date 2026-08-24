@@ -3,6 +3,7 @@ import { readGitHubControlPlane } from "../dist/github-control-plane.mjs";
 
 const MAIN = "1111111111111111111111111111111111111111";
 const HEAD = "2222222222222222222222222222222222222222";
+const FORK = "3333333333333333333333333333333333333333";
 
 function commandError(stderr, status = 1) {
   const error = new Error(stderr);
@@ -27,10 +28,28 @@ function run(command, args) {
       [{ name: "main", commit: { sha: MAIN }, protected: true }],
       [{ name: "feature/work", commit: { sha: HEAD }, protected: false }],
     ],
+    "repos/netkeep80/example/pulls?state=open&per_page=100": [
+      [{
+        number: 7,
+        head: {
+          ref: "feature/work",
+          sha: HEAD,
+          repo: { full_name: "netkeep80/example" },
+        },
+      }],
+      [{
+        number: 8,
+        head: {
+          ref: "fork-work",
+          sha: FORK,
+          repo: { full_name: "contributor/example" },
+        },
+      }],
+    ],
   };
-  if (endpoint === "repos/netkeep80/example/branches?per_page=100") {
-    assert.equal(args.includes("--paginate"), true, "branch inventory must request every page");
-    assert.equal(args.includes("--slurp"), true, "branch inventory must preserve pagination completeness");
+  if (endpoint === "repos/netkeep80/example/branches?per_page=100" || endpoint === "repos/netkeep80/example/pulls?state=open&per_page=100") {
+    assert.equal(args.includes("--paginate"), true, `${endpoint} must request every page`);
+    assert.equal(args.includes("--slurp"), true, `${endpoint} must preserve pagination completeness`);
   }
   const value = fixtures[endpoint];
   if (value instanceof Error) throw value;
@@ -59,5 +78,11 @@ assert.deepEqual(result.branchInventory, {
     { name: "feature/work", sha: HEAD, protected: false },
   ],
 });
+assert.deepEqual(result.openSameRepositoryPullRequestHeads, {
+  complete: true,
+  items: [
+    { number: 7, name: "feature/work", sha: HEAD },
+  ],
+}, "fork PR heads must not become ownership facts for branches in the base repository");
 
 console.log("Branch hygiene control-plane fact tests passed");
