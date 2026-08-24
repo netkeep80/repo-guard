@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
-import { analyzeBranchHygiene } from "../dist/branch-hygiene.mjs";
+import * as branchHygiene from "../dist/branch-hygiene.mjs";
 
+const { analyzeBranchHygiene } = branchHygiene;
 const sha = (digit) => digit.repeat(40);
 const MAIN = sha("1");
 const PAGES = sha("2");
@@ -85,5 +86,25 @@ const missingDefault = analyzeBranchHygiene({
 });
 assert.equal(missingDefault.ok, false);
 assert.equal(missingDefault.error, "default_branch_missing");
+
+assert.equal(
+  typeof branchHygiene.planMergedBranchDeletion,
+  "function",
+  "merged branch cleanup requires an explicit planner before any mutation",
+);
+const deletionPlan = branchHygiene.planMergedBranchDeletion?.({
+  facts: input,
+  branchName: "feature/merged",
+  prNumber: 10,
+  expectedHeadSha: MERGED,
+  rereadBranch: { name: "feature/merged", sha: MERGED },
+});
+assert.deepEqual(deletionPlan, {
+  ok: true,
+  kind: "delete_merged_branch",
+  branchName: "feature/merged",
+  prNumber: 10,
+  expectedHeadSha: MERGED,
+});
 
 console.log("Branch hygiene analysis tests passed");
