@@ -1,0 +1,31 @@
+name: Portable coordinator repo-guard
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Интегрировать один READY-кандидат
+        uses: netkeep80/repo-guard@f9aae6f6de54b434f7645494637e10f64d4e7577
+        with:
+          mode: portable-coordinator
+          enforcement: blocking
+          repository: ${{ github.repository }}
+          ready-label: repo-guard:ready
+          merge-method: squash
+          transaction-checks: |
+            validate
+            smoke-pack
+          state-checks: |
+            validate
+            smoke-pack
+          format: json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
