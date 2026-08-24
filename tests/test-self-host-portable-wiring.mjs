@@ -74,7 +74,7 @@ describe("P6a portable self-host repository wiring", () => {
     const step = workflow.jobs?.validate?.steps?.find((item) => item.run === "npx repo-guard doctor --parallel portable");
 
     assert.ok(step, "self CI must execute doctor --parallel portable");
-    assert.equal(step.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+    assert.equal(step.env?.GH_TOKEN, "${{ secrets.REPO_GUARD_CONTROL_PLANE_TOKEN }}");
   });
 
   it("is repository-ready when the separate portable control-plane facts are green", () => {
