@@ -33,6 +33,17 @@ type BranchInventoryEnvelope = {
   items: BranchFact[] | null;
 };
 
+type OpenSameRepositoryPullRequestHeadFact = {
+  number: number;
+  name: string;
+  sha: string;
+};
+
+type OpenSameRepositoryPullRequestHeadsEnvelope = {
+  complete: boolean;
+  items: OpenSameRepositoryPullRequestHeadFact[] | null;
+};
+
 export type GitHubControlPlaneReadResult = Failure | {
   ok: true;
   provider: ParallelReadinessProvider;
@@ -41,6 +52,7 @@ export type GitHubControlPlaneReadResult = Failure | {
   defaultBranch: string;
   deleteBranchOnMerge: boolean | null;
   branchInventory: BranchInventoryEnvelope | null;
+  openSameRepositoryPullRequestHeads: OpenSameRepositoryPullRequestHeadsEnvelope | null;
   branchProtection: BranchProtectionEnvelope;
   activeBranchRules: ActiveBranchRulesEnvelope;
   rulesets: RulesetsEnvelope;
@@ -207,6 +219,37 @@ function readBranchInventory(run: RunCommand, repoRoot: string, repository: stri
   return { complete: true, items };
 }
 
+function readOpenSameRepositoryPullRequestHeads(
+  run: RunCommand,
+  repoRoot: string,
+  repository: string,
+  errors: AdapterError[],
+): OpenSameRepositoryPullRequestHeadsEnvelope {
+  const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
+  const response = apiJson(run, repoRoot, endpoint, ["--paginate", "--slurp"]);
+  if (!response.ok) {
+    errors.push({ id: "open_pr_head_inventory_api_error", message: response.message });
+    return { complete: false, items: null };
+  }
+  if (!Array.isArray(response.value) || !response.value.every(Array.isArray)) {
+    errors.push({ id: "open_pr_head_inventory_api_error", message: "open PR head inventory must be a complete paginated array" });
+    return { complete: false, items: null };
+  }
+
+  const items: OpenSameRepositoryPullRequestHeadFact[] = [];
+  for (const value of (response.value as unknown[][]).flat()) {
+    if (!isRecord(value) || !Number.isInteger(value.number) || (value.number as number) <= 0 || !isRecord(value.head)
+      || typeof value.head.ref !== "string" || value.head.ref.length === 0 || typeof value.head.sha !== "string"
+      || !SHA.test(value.head.sha) || !isRecord(value.head.repo) || typeof value.head.repo.full_name !== "string") {
+      errors.push({ id: "open_pr_head_inventory_api_error", message: "open PR head inventory contains a malformed PR fact" });
+      return { complete: false, items: null };
+    }
+    if (value.head.repo.full_name !== repository) continue;
+    items.push({ number: value.number as number, name: value.head.ref, sha: value.head.sha });
+  }
+  return { complete: true, items };
+}
+
 function repositoryOwnerType(metadata: Record<string, unknown>): RepositoryOwnerType | null {
   const owner = metadata.owner;
   if (!isRecord(owner)) return null;
@@ -237,6 +280,9 @@ export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneRead
   const deleteOnMerge = deleteBranchOnMerge(metadata.value);
   const errors: AdapterError[] = [];
   const branchInventory = input.includeBranchHygiene === true ? readBranchInventory(run, input.repoRoot, repository, errors) : null;
+  const openSameRepositoryPullRequestHeads = input.includeBranchHygiene === true
+    ? readOpenSameRepositoryPullRequestHeads(run, input.repoRoot, repository, errors)
+    : null;
   const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
   const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
   const rulesets = readRulesets(run, input.repoRoot, repository, activeBranchRules, errors);
@@ -249,6 +295,7 @@ export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneRead
     defaultBranch,
     deleteBranchOnMerge: deleteOnMerge,
     branchInventory,
+    openSameRepositoryPullRequestHeads,
     branchProtection,
     activeBranchRules,
     rulesets,
