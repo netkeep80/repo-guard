@@ -15,7 +15,17 @@ function input(overrides = {}) {
   };
 }
 
-function classicProtection({ bypass = false, duplicateChecks = false } = {}) {
+function classicProtection({ bypass = false, duplicateChecks = false, omitBypassAllowances = false } = {}) {
+  const reviews = {
+    required_approving_review_count: 0,
+  };
+  if (!omitBypassAllowances) {
+    reviews.bypass_pull_request_allowances = {
+      users: bypass ? [{ login: "release-bot" }] : [],
+      teams: [],
+      apps: [],
+    };
+  }
   return {
     complete: true,
     protected: true,
@@ -25,14 +35,7 @@ function classicProtection({ bypass = false, duplicateChecks = false } = {}) {
         contexts: ["CI / validate", ...(duplicateChecks ? ["CI / validate"] : [])],
         checks: [{ context: "CI / smoke-pack", app_id: null }],
       },
-      required_pull_request_reviews: {
-        required_approving_review_count: 0,
-        bypass_pull_request_allowances: {
-          users: bypass ? [{ login: "release-bot" }] : [],
-          teams: [],
-          apps: [],
-        },
-      },
+      required_pull_request_reviews: reviews,
       enforce_admins: { enabled: true },
     },
   };
@@ -91,6 +94,32 @@ function rulesetEvidence({ mergeQueue = false, bypass = false } = {}) {
     noBypass: true,
     mergeQueueEnabled: false,
   });
+}
+
+{
+  const result = normalizeGitHubControlPlane(input({
+    repositoryOwnerType: "User",
+    branchProtection: classicProtection({ omitBypassAllowances: true }),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.facts.noBypass, true, "user-owned classic protection has no configurable actor bypass surface");
+}
+
+{
+  const result = normalizeGitHubControlPlane(input({
+    repositoryOwnerType: "Organization",
+    branchProtection: classicProtection({ omitBypassAllowances: true }),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.facts.noBypass, null, "organization-owned incomplete bypass evidence must remain fail-closed");
+}
+
+{
+  const result = normalizeGitHubControlPlane(input({
+    branchProtection: classicProtection({ omitBypassAllowances: true }),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.facts.noBypass, null, "unknown owner type must remain fail-closed");
 }
 
 {
@@ -176,6 +205,7 @@ for (const malformed of [
   input({ provider: "legacy" }),
   input({ repository: "not-a-repository" }),
   input({ defaultBranch: 7 }),
+  input({ repositoryOwnerType: "Enterprise" }),
   input({ branchProtection: { complete: true, protected: true } }),
   input({ activeBranchRules: { complete: true, rules: "bad" } }),
   input({ rulesets: { complete: true, items: "bad" } }),

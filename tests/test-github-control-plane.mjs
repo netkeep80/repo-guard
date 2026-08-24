@@ -45,7 +45,7 @@ function read(fixtures, overrides = {}) {
 {
   const { result, calls } = read({
     api: {
-      "repos/netkeep80/example": { default_branch: "main" },
+      "repos/netkeep80/example": { default_branch: "main", owner: { type: "User" } },
       "repos/netkeep80/example/branches/main/protection": commandError("Branch not protected (HTTP 404)"),
       "repos/netkeep80/example/rules/branches/main": [[]],
     },
@@ -53,11 +53,36 @@ function read(fixtures, overrides = {}) {
   assert.equal(result.ok, true);
   assert.equal(result.repository, "netkeep80/example");
   assert.equal(result.defaultBranch, "main");
+  assert.equal(result.repositoryOwnerType, "User");
   assert.deepEqual(result.branchProtection, { complete: true, protected: false, data: null });
   assert.deepEqual(result.activeBranchRules, { complete: true, rules: [] });
   assert.deepEqual(result.rulesets, { complete: true, items: [] });
   assert.deepEqual(result.errors, []);
   assert.equal(calls.every((call) => call.command === "gh"), true);
+}
+
+{
+  const { result } = read({
+    api: {
+      "repos/netkeep80/example": { default_branch: "main", owner: { type: "Organization" } },
+      "repos/netkeep80/example/branches/main/protection": commandError("Branch not protected (HTTP 404)"),
+      "repos/netkeep80/example/rules/branches/main": [[]],
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.repositoryOwnerType, "Organization");
+}
+
+{
+  const { result } = read({
+    api: {
+      "repos/netkeep80/example": { default_branch: "main" },
+      "repos/netkeep80/example/branches/main/protection": commandError("Branch not protected (HTTP 404)"),
+      "repos/netkeep80/example/rules/branches/main": [[]],
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.repositoryOwnerType, null, "missing owner type must remain unknown and fail closed downstream");
 }
 
 {
@@ -68,12 +93,13 @@ function read(fixtures, overrides = {}) {
   };
   const { result } = read({
     api: {
-      "repos/netkeep80/example": { default_branch: "main" },
+      "repos/netkeep80/example": { default_branch: "main", owner: { type: "User" } },
       "repos/netkeep80/example/branches/main/protection": protection,
       "repos/netkeep80/example/rules/branches/main": [[]],
     },
   });
   assert.equal(result.ok, true);
+  assert.equal(result.repositoryOwnerType, "User");
   assert.deepEqual(result.branchProtection, { complete: true, protected: true, data: protection });
 }
 
@@ -92,13 +118,14 @@ function read(fixtures, overrides = {}) {
   const detail = { id: 41, enforcement: "active", bypass_actors: [] };
   const { result } = read({
     api: {
-      "repos/netkeep80/example": { default_branch: "main" },
+      "repos/netkeep80/example": { default_branch: "main", owner: { type: "Organization" } },
       "repos/netkeep80/example/branches/main/protection": commandError("Branch not protected (HTTP 404)"),
       "repos/netkeep80/example/rules/branches/main": [activeRules],
       "repos/netkeep80/example/rulesets/41": detail,
     },
   });
   assert.equal(result.ok, true);
+  assert.equal(result.repositoryOwnerType, "Organization");
   assert.deepEqual(result.activeBranchRules, { complete: true, rules: activeRules });
   assert.deepEqual(result.rulesets, { complete: true, items: [detail] });
 }
@@ -106,12 +133,13 @@ function read(fixtures, overrides = {}) {
 {
   const { result } = read({
     api: {
-      "repos/netkeep80/example": { default_branch: "main" },
+      "repos/netkeep80/example": { default_branch: "main", owner: { type: "User" } },
       "repos/netkeep80/example/branches/main/protection": commandError("Resource not accessible by integration (HTTP 403)"),
       "repos/netkeep80/example/rules/branches/main": commandError("Resource not accessible by integration (HTTP 403)"),
     },
   });
   assert.equal(result.ok, true);
+  assert.equal(result.repositoryOwnerType, "User");
   assert.deepEqual(result.branchProtection, { complete: false, protected: null, data: null });
   assert.deepEqual(result.activeBranchRules, { complete: false, rules: null });
   assert.deepEqual(result.rulesets, { complete: false, items: null });
@@ -123,7 +151,7 @@ function read(fixtures, overrides = {}) {
   const fake = fakeRunner({
     gitOrigin: "git@github.com:netkeep80/example.git\n",
     api: {
-      "repos/netkeep80/example": { default_branch: "main" },
+      "repos/netkeep80/example": { default_branch: "main", owner: { type: "User" } },
       "repos/netkeep80/example/branches/main/protection": commandError("Branch not protected (HTTP 404)"),
       "repos/netkeep80/example/rules/branches/main": [[]],
     },
@@ -131,6 +159,7 @@ function read(fixtures, overrides = {}) {
   const result = readGitHubControlPlane({ repoRoot: "/repo", provider: "portable", env: {}, run: fake.run });
   assert.equal(result.ok, true);
   assert.equal(result.repository, "netkeep80/example");
+  assert.equal(result.repositoryOwnerType, "User");
   assert.deepEqual(fake.calls[0], { command: "git", args: ["remote", "get-url", "origin"] });
 }
 

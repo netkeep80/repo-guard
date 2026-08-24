@@ -128,6 +128,12 @@ function readRulesets(run, repoRoot, repository, activeRules, errors) {
     }
     return { complete, items: complete ? items : items };
 }
+function repositoryOwnerType(metadata) {
+    const owner = metadata.owner;
+    if (!isRecord(owner))
+        return null;
+    return owner.type === "User" || owner.type === "Organization" ? owner.type : null;
+}
 export function readGitHubControlPlane(input) {
     if (input.provider !== "portable" && input.provider !== "github_merge_queue") {
         return fail("invalid_provider", "provider must be portable or github_merge_queue");
@@ -146,6 +152,7 @@ export function readGitHubControlPlane(input) {
         return fail("repository_metadata_malformed", "repository metadata must contain default_branch");
     }
     const defaultBranch = metadata.value.default_branch;
+    const ownerType = repositoryOwnerType(metadata.value);
     const errors = [];
     const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
     const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
@@ -154,6 +161,7 @@ export function readGitHubControlPlane(input) {
         ok: true,
         provider: input.provider,
         repository,
+        repositoryOwnerType: ownerType,
         defaultBranch,
         branchProtection,
         activeBranchRules,

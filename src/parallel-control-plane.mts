@@ -2,6 +2,7 @@ import type { ParallelControlPlaneFacts, ParallelReadinessProvider } from "./par
 
 type Failure = { ok: false; error: string; message: string };
 type KnownBoolean = boolean | null;
+type RepositoryOwnerType = "User" | "Organization";
 
 export interface NormalizedParallelControlPlaneFacts extends ParallelControlPlaneFacts {
   targetBranch: string | null;
@@ -130,7 +131,7 @@ function classicBypassAllowances(value: unknown): KnownBoolean | Failure {
   return complete ? true : null;
 }
 
-function parseClassic(envelope: BranchProtectionEnvelope): ProtectionFacts | Failure {
+function parseClassic(envelope: BranchProtectionEnvelope, repositoryOwnerType: RepositoryOwnerType | null): ProtectionFacts | Failure {
   if (!envelope.complete || !envelope.protected || !envelope.data) {
     return {
       active: false,
@@ -189,9 +190,10 @@ function parseClassic(envelope: BranchProtectionEnvelope): ProtectionFacts | Fai
 
   const requiredChecksEnforced = checks.length > 0;
   const active = pullRequestRequired || requiredChecksEnforced;
+  const actorBypassKnownAbsent = allowances === true || (allowances === null && repositoryOwnerType === "User");
   let noBypass: KnownBoolean = null;
   if (active && allowances === false) noBypass = false;
-  else if (active && pullRequestRequired && allowances === true && adminsProtected === true) noBypass = true;
+  else if (active && pullRequestRequired && actorBypassKnownAbsent && adminsProtected === true) noBypass = true;
 
   return {
     active,
@@ -338,6 +340,13 @@ export function normalizeGitHubControlPlane(input: unknown): ParallelControlPlan
   if (input.defaultBranch !== null && (typeof input.defaultBranch !== "string" || input.defaultBranch.length === 0)) {
     return fail("invalid_default_branch", "defaultBranch must be a non-empty string or null");
   }
+  let repositoryOwnerType: RepositoryOwnerType | null = null;
+  if (input.repositoryOwnerType !== undefined && input.repositoryOwnerType !== null) {
+    if (input.repositoryOwnerType !== "User" && input.repositoryOwnerType !== "Organization") {
+      return fail("invalid_repository_owner_type", "repositoryOwnerType must be User, Organization, or null");
+    }
+    repositoryOwnerType = input.repositoryOwnerType;
+  }
 
   const branchProtection = readBranchProtection(input.branchProtection);
   if ("ok" in branchProtection) return branchProtection;
@@ -346,7 +355,7 @@ export function normalizeGitHubControlPlane(input: unknown): ParallelControlPlan
   const rulesets = readInventory(input.rulesets, "rulesets", "items");
   if ("ok" in rulesets) return rulesets;
 
-  const classic = parseClassic(branchProtection);
+  const classic = parseClassic(branchProtection, repositoryOwnerType);
   if ("ok" in classic) return classic;
   const rules = parseActiveRules(activeRules);
   if ("ok" in rules) return rules;

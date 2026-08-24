@@ -4,6 +4,7 @@ import type { ParallelReadinessProvider } from "./parallel-readiness.mjs";
 type Failure = { ok: false; error: string; message: string };
 type AdapterError = { id: string; message: string };
 type RunCommand = (command: string, args: string[], options?: { cwd?: string }) => string;
+type RepositoryOwnerType = "User" | "Organization";
 
 type BranchProtectionEnvelope = {
   complete: boolean;
@@ -25,6 +26,7 @@ export type GitHubControlPlaneReadResult = Failure | {
   ok: true;
   provider: ParallelReadinessProvider;
   repository: string;
+  repositoryOwnerType: RepositoryOwnerType | null;
   defaultBranch: string;
   branchProtection: BranchProtectionEnvelope;
   activeBranchRules: ActiveBranchRulesEnvelope;
@@ -166,6 +168,12 @@ function readRulesets(run: RunCommand, repoRoot: string, repository: string, act
   return { complete, items: complete ? items : items };
 }
 
+function repositoryOwnerType(metadata: Record<string, unknown>): RepositoryOwnerType | null {
+  const owner = metadata.owner;
+  if (!isRecord(owner)) return null;
+  return owner.type === "User" || owner.type === "Organization" ? owner.type : null;
+}
+
 export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneReadResult {
   if (input.provider !== "portable" && input.provider !== "github_merge_queue") {
     return fail("invalid_provider", "provider must be portable or github_merge_queue");
@@ -182,6 +190,7 @@ export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneRead
     return fail("repository_metadata_malformed", "repository metadata must contain default_branch");
   }
   const defaultBranch = metadata.value.default_branch;
+  const ownerType = repositoryOwnerType(metadata.value);
   const errors: AdapterError[] = [];
   const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
   const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
@@ -191,6 +200,7 @@ export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneRead
     ok: true,
     provider: input.provider,
     repository,
+    repositoryOwnerType: ownerType,
     defaultBranch,
     branchProtection,
     activeBranchRules,
