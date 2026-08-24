@@ -52,6 +52,8 @@ type Success = {
   deleteBranchOnMergeDrift: DeleteBranchOnMergeDrift;
 };
 
+type RereadBranchFact = { name: string; sha: string };
+
 const SHA = /^[0-9a-f]{40}$/i;
 const OWNERSHIP_STATES = new Set<OwnershipState>(["live", "handoff", "stale_candidate"]);
 
@@ -73,6 +75,12 @@ function isSha(value: unknown): value is string {
 
 function isPositiveInteger(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) > 0;
+}
+
+function normalizeRereadBranch(value: unknown): RereadBranchFact | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value) || !isNonEmptyString(value.name) || !isSha(value.sha)) return undefined;
+  return { name: value.name, sha: value.sha };
 }
 
 function normalizeBranchEnvelope(value: unknown): Envelope<BranchFact> | null {
@@ -212,10 +220,12 @@ export function analyzeBranchHygiene(input: unknown): Failure | Success {
 }
 
 export function planMergedBranchDeletion(input: unknown) {
-  const rereadValid = isRecord(input) && (input.rereadBranch === null
-    || (isRecord(input.rereadBranch) && isNonEmptyString(input.rereadBranch.name) && isSha(input.rereadBranch.sha)));
   if (!isRecord(input) || !isNonEmptyString(input.branchName) || !isPositiveInteger(input.prNumber)
-    || !isSha(input.expectedHeadSha) || !rereadValid) {
+    || !isSha(input.expectedHeadSha)) {
+    return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread or confirmed absence");
+  }
+  const rereadBranch = normalizeRereadBranch(input.rereadBranch);
+  if (rereadBranch === undefined) {
     return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread or confirmed absence");
   }
 
@@ -227,7 +237,7 @@ export function planMergedBranchDeletion(input: unknown) {
   if (merged === undefined) {
     return fail("deletion_not_authorized", "branch is not an exact merged same-repository residue in the current hygiene snapshot");
   }
-  if (input.rereadBranch === null) {
+  if (rereadBranch === null) {
     return {
       ok: true as const,
       kind: "already_absent" as const,
@@ -236,7 +246,7 @@ export function planMergedBranchDeletion(input: unknown) {
       expectedHeadSha: input.expectedHeadSha,
     };
   }
-  if (input.rereadBranch.name !== input.branchName || input.rereadBranch.sha !== input.expectedHeadSha) {
+  if (rereadBranch.name !== input.branchName || rereadBranch.sha !== input.expectedHeadSha) {
     return fail("stale_head", "fresh branch reread no longer matches the expected merged head");
   }
 
