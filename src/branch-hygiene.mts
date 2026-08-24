@@ -210,3 +210,31 @@ export function analyzeBranchHygiene(input: unknown): Failure | Success {
     deleteBranchOnMergeDrift: deleteBranchOnMergeDrift(input.deleteBranchOnMerge, mergedPullRequestHeadsStillPresent.length),
   };
 }
+
+export function planMergedBranchDeletion(input: unknown) {
+  if (!isRecord(input) || !isNonEmptyString(input.branchName) || !isPositiveInteger(input.prNumber)
+    || !isSha(input.expectedHeadSha) || !isRecord(input.rereadBranch)
+    || !isNonEmptyString(input.rereadBranch.name) || !isSha(input.rereadBranch.sha)) {
+    return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread");
+  }
+
+  const analysis = analyzeBranchHygiene(input.facts);
+  if (!analysis.ok) return analysis;
+
+  const merged = analysis.mergedPullRequestHeadsStillPresent.find((head) =>
+    head.number === input.prNumber && head.name === input.branchName && head.sha === input.expectedHeadSha);
+  if (merged === undefined) {
+    return fail("deletion_not_authorized", "branch is not an exact merged same-repository residue in the current hygiene snapshot");
+  }
+  if (input.rereadBranch.name !== input.branchName || input.rereadBranch.sha !== input.expectedHeadSha) {
+    return fail("stale_head", "fresh branch reread no longer matches the expected merged head");
+  }
+
+  return {
+    ok: true as const,
+    kind: "delete_merged_branch" as const,
+    branchName: input.branchName,
+    prNumber: input.prNumber,
+    expectedHeadSha: input.expectedHeadSha,
+  };
+}
