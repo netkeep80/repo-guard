@@ -28,6 +28,7 @@ function controlPlaneProjection(provider, controlPlaneRead) {
     const normalized = normalizeGitHubControlPlane({
         provider,
         repository: controlPlaneRead.repository,
+        repositoryOwnerType: controlPlaneRead.repositoryOwnerType,
         defaultBranch: controlPlaneRead.defaultBranch,
         branchProtection: controlPlaneRead.branchProtection,
         activeBranchRules: controlPlaneRead.activeBranchRules,
