@@ -29,6 +29,27 @@
           "summary": true,
           "disallow": ["continue_on_error", "manual_clone", "direct_temp_cli_execution"]
         }
+      },
+      {
+        "id": "repo-guard-portable-coordinator",
+        "kind": "github_actions",
+        "path": ".github/workflows/repo-guard-portable-coordinator.yml",
+        "role": "repo_guard_portable_coordinator",
+        "expect": {
+          "events": ["workflow_dispatch"],
+          "action": {
+            "uses": "netkeep80/repo-guard",
+            "ref_pinning": "sha"
+          },
+          "mode": "portable-coordinator",
+          "enforcement": "blocking",
+          "permissions": {
+            "contents": "write",
+            "pull-requests": "write",
+            "checks": "read"
+          },
+          "token_env": ["GH_TOKEN"]
+        }
       }
     ],
     "templates": [
