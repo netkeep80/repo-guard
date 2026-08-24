@@ -28,6 +28,7 @@ export type GitHubControlPlaneReadResult = Failure | {
   repository: string;
   repositoryOwnerType: RepositoryOwnerType | null;
   defaultBranch: string;
+  deleteBranchOnMerge: boolean | null;
   branchProtection: BranchProtectionEnvelope;
   activeBranchRules: ActiveBranchRulesEnvelope;
   rulesets: RulesetsEnvelope;
@@ -174,6 +175,10 @@ function repositoryOwnerType(metadata: Record<string, unknown>): RepositoryOwner
   return owner.type === "User" || owner.type === "Organization" ? owner.type : null;
 }
 
+function deleteBranchOnMerge(metadata: Record<string, unknown>): boolean | null {
+  return typeof metadata.delete_branch_on_merge === "boolean" ? metadata.delete_branch_on_merge : null;
+}
+
 export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneReadResult {
   if (input.provider !== "portable" && input.provider !== "github_merge_queue") {
     return fail("invalid_provider", "provider must be portable or github_merge_queue");
@@ -191,6 +196,7 @@ export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneRead
   }
   const defaultBranch = metadata.value.default_branch;
   const ownerType = repositoryOwnerType(metadata.value);
+  const deleteOnMerge = deleteBranchOnMerge(metadata.value);
   const errors: AdapterError[] = [];
   const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
   const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
@@ -202,6 +208,7 @@ export function readGitHubControlPlane(input: ReadInput): GitHubControlPlaneRead
     repository,
     repositoryOwnerType: ownerType,
     defaultBranch,
+    deleteBranchOnMerge: deleteOnMerge,
     branchProtection,
     activeBranchRules,
     rulesets,
