@@ -1,15 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { validateExplicitActionRef } from "./init.mjs";
-import { applyParallelMigration } from "./migration-apply.mjs";
-import { planParallelMigration } from "./migration-plan.mjs";
+import { applyParallelMigration, applyParallelRollback } from "./migration-apply.mjs";
+import { planParallelMigration, planParallelRollback } from "./migration-plan.mjs";
 const POLICY = "repo-policy.json";
 const TRANSACTION = ".github/workflows/repo-guard.yml";
 const PORTABLE = ".github/workflows/repo-guard-portable-coordinator.yml";
 const NATIVE = ".github/workflows/repo-guard-merge-group.yml";
 const PROVIDERS = new Set(["portable", "github_merge_queue"]);
 const FORMATS = new Set(["summary", "json"]);
-const usage = "Usage: repo-guard migrate --parallel <portable|github_merge_queue> --action-ref <40-char-sha|vX.Y.Z> (--dry-run|--apply) [--format <summary|json>]";
+const usage = "Usage: repo-guard migrate --parallel <portable|github_merge_queue> --action-ref <40-char-sha|vX.Y.Z> [--rollback] (--dry-run|--apply) [--format <summary|json>]";
 function packageVersion(packageRoot) {
     const parsed = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8"));
     if (typeof parsed.version !== "string" || !parsed.version)
@@ -45,11 +45,19 @@ function filesystemAdapter(repoRoot) {
                 throw new Error(`${path} changed after migration preflight; refusing to overwrite it.`);
             writeFileSync(target, content, "utf8");
         },
+        delete(path, expectedBefore) {
+            const target = resolve(repoRoot, path);
+            const current = readOptional(repoRoot, path);
+            if (current !== expectedBefore)
+                throw new Error(`${path} changed after migration preflight; refusing to delete it.`);
+            rmSync(target);
+        },
     };
 }
 function renderSummary(payload) {
     const lines = [
         `repo-guard migrate (${payload.mode})`,
+        ...(payload.operation ? [`operation: ${payload.operation}`] : []),
         `provider: ${payload.provider}`,
         `action-ref: ${payload.actionRef}`,
         `ready-to-apply: ${payload.readyToApply ? "yes" : "no"}`,
@@ -77,13 +85,16 @@ export function runMigrate(roots, args = []) {
     let format = "summary";
     let dryRun = false;
     let apply = false;
+    let rollback = false;
     for (let i = 0; i < args.length; i++) {
         const option = args[i];
-        if (option === "--dry-run" || option === "--apply") {
+        if (option === "--dry-run" || option === "--apply" || option === "--rollback") {
             if (option === "--dry-run")
                 dryRun = true;
-            else
+            else if (option === "--apply")
                 apply = true;
+            else
+                rollback = true;
             continue;
         }
         if (["--parallel", "--action-ref", "--format"].includes(option)) {
@@ -144,21 +155,27 @@ export function runMigrate(roots, args = []) {
     }
     const immutableRef = refCheck.ref;
     if (dryRun) {
-        const plan = planParallelMigration({
+        const planner = rollback ? planParallelRollback : planParallelMigration;
+        const plan = planner({
             provider,
             actionRef: immutableRef,
             files: migrationSnapshot(roots.repoRoot),
         });
-        const payload = { command: "migrate", mode: "dry-run", ...plan };
+        const payload = rollback
+            ? { command: "migrate", mode: "dry-run", operation: "rollback", ...plan }
+            : { command: "migrate", mode: "dry-run", ...plan };
         printPayload(payload, format);
         return plan.readyToApply ? 0 : 1;
     }
-    const result = applyParallelMigration({
+    const applier = rollback ? applyParallelRollback : applyParallelMigration;
+    const result = applier({
         provider,
         actionRef: immutableRef,
         io: filesystemAdapter(roots.repoRoot),
     });
-    const payload = { command: "migrate", mode: "apply", ...result };
+    const payload = rollback
+        ? { command: "migrate", mode: "apply", operation: "rollback", ...result }
+        : { command: "migrate", mode: "apply", ...result };
     printPayload(payload, format);
     return result.applied && result.readyToApply ? 0 : 1;
 }
