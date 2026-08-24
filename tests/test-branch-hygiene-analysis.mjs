@@ -107,4 +107,19 @@ assert.deepEqual(deletionPlan, {
   expectedHeadSha: MERGED,
 });
 
+const alreadyAbsentPlan = branchHygiene.planMergedBranchDeletion?.({
+  facts: input,
+  branchName: "feature/merged",
+  prNumber: 10,
+  expectedHeadSha: MERGED,
+  rereadBranch: null,
+});
+assert.deepEqual(alreadyAbsentPlan, {
+  ok: true,
+  kind: "already_absent",
+  branchName: "feature/merged",
+  prNumber: 10,
+  expectedHeadSha: MERGED,
+});
+
 console.log("Branch hygiene analysis tests passed");
