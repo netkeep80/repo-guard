@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const SHA = /^[0-9a-f]{40}$/i;
 const PARALLEL_RULE_TYPES = new Set(["pull_request", "required_status_checks", "merge_queue"]);
 function fail(error, message) {
     return { ok: false, error, message };
@@ -128,6 +129,28 @@ function readRulesets(run, repoRoot, repository, activeRules, errors) {
     }
     return { complete, items: complete ? items : items };
 }
+function readBranchInventory(run, repoRoot, repository, errors) {
+    const endpoint = `repos/${repository}/branches?per_page=100`;
+    const response = apiJson(run, repoRoot, endpoint, ["--paginate", "--slurp"]);
+    if (!response.ok) {
+        errors.push({ id: "branch_inventory_api_error", message: response.message });
+        return { complete: false, items: null };
+    }
+    if (!Array.isArray(response.value) || !response.value.every(Array.isArray)) {
+        errors.push({ id: "branch_inventory_api_error", message: "branch inventory must be a complete paginated array" });
+        return { complete: false, items: null };
+    }
+    const items = [];
+    for (const value of response.value.flat()) {
+        if (!isRecord(value) || typeof value.name !== "string" || value.name.length === 0 || !isRecord(value.commit)
+            || typeof value.commit.sha !== "string" || !SHA.test(value.commit.sha) || typeof value.protected !== "boolean") {
+            errors.push({ id: "branch_inventory_api_error", message: "branch inventory contains a malformed branch fact" });
+            return { complete: false, items: null };
+        }
+        items.push({ name: value.name, sha: value.commit.sha, protected: value.protected });
+    }
+    return { complete: true, items };
+}
 function repositoryOwnerType(metadata) {
     const owner = metadata.owner;
     if (!isRecord(owner))
@@ -158,6 +181,7 @@ export function readGitHubControlPlane(input) {
     const ownerType = repositoryOwnerType(metadata.value);
     const deleteOnMerge = deleteBranchOnMerge(metadata.value);
     const errors = [];
+    const branchInventory = input.includeBranchHygiene === true ? readBranchInventory(run, input.repoRoot, repository, errors) : null;
     const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
     const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
     const rulesets = readRulesets(run, input.repoRoot, repository, activeBranchRules, errors);
@@ -168,6 +192,7 @@ export function readGitHubControlPlane(input) {
         repositoryOwnerType: ownerType,
         defaultBranch,
         deleteBranchOnMerge: deleteOnMerge,
+        branchInventory,
         branchProtection,
         activeBranchRules,
         rulesets,
