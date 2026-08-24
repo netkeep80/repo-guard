@@ -15,6 +15,13 @@ function isSha(value) {
 function isPositiveInteger(value) {
     return Number.isInteger(value) && value > 0;
 }
+function normalizeRereadBranch(value) {
+    if (value === null)
+        return null;
+    if (!isRecord(value) || !isNonEmptyString(value.name) || !isSha(value.sha))
+        return undefined;
+    return { name: value.name, sha: value.sha };
+}
 function normalizeBranchEnvelope(value) {
     if (!isRecord(value) || value.complete !== true || !Array.isArray(value.items))
         return null;
@@ -150,10 +157,12 @@ export function analyzeBranchHygiene(input) {
     };
 }
 export function planMergedBranchDeletion(input) {
-    const rereadValid = isRecord(input) && (input.rereadBranch === null
-        || (isRecord(input.rereadBranch) && isNonEmptyString(input.rereadBranch.name) && isSha(input.rereadBranch.sha)));
     if (!isRecord(input) || !isNonEmptyString(input.branchName) || !isPositiveInteger(input.prNumber)
-        || !isSha(input.expectedHeadSha) || !rereadValid) {
+        || !isSha(input.expectedHeadSha)) {
+        return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread or confirmed absence");
+    }
+    const rereadBranch = normalizeRereadBranch(input.rereadBranch);
+    if (rereadBranch === undefined) {
         return fail("invalid_deletion_evidence", "deletion planning requires branch, PR, expected head SHA and a fresh branch reread or confirmed absence");
     }
     const analysis = analyzeBranchHygiene(input.facts);
@@ -163,7 +172,7 @@ export function planMergedBranchDeletion(input) {
     if (merged === undefined) {
         return fail("deletion_not_authorized", "branch is not an exact merged same-repository residue in the current hygiene snapshot");
     }
-    if (input.rereadBranch === null) {
+    if (rereadBranch === null) {
         return {
             ok: true,
             kind: "already_absent",
@@ -172,7 +181,7 @@ export function planMergedBranchDeletion(input) {
             expectedHeadSha: input.expectedHeadSha,
         };
     }
-    if (input.rereadBranch.name !== input.branchName || input.rereadBranch.sha !== input.expectedHeadSha) {
+    if (rereadBranch.name !== input.branchName || rereadBranch.sha !== input.expectedHeadSha) {
         return fail("stale_head", "fresh branch reread no longer matches the expected merged head");
     }
     return {
