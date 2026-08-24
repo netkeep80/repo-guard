@@ -252,6 +252,57 @@ async function run() {
   }
 
   {
+    const calls = [];
+    const adapter = createGitHubWriteAdapter({
+      request: async (request) => {
+        calls.push(request);
+        return {
+          status: 200,
+          body: { ref: "refs/heads/feature/work", object: { sha: MERGE, type: "commit" } },
+        };
+      },
+    });
+    const result = await adapter.deleteMergedBranchExact({
+      repository: REPO,
+      kind: "delete_merged_branch",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("moved branch is rejected as stale", result.error, "stale_head");
+    expect("moved branch never reaches DELETE", calls, [
+      { method: "GET", path: "/repos/netkeep80/repo-guard/git/ref/heads/feature/work" },
+    ]);
+  }
+
+  {
+    const calls = [];
+    const adapter = createGitHubWriteAdapter({
+      request: async (request) => {
+        calls.push(request);
+        return { status: 404, body: { message: "Reference does not exist" } };
+      },
+    });
+    const result = await adapter.deleteMergedBranchExact({
+      repository: REPO,
+      kind: "delete_merged_branch",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("branch already absent at fresh reread is idempotent", result, {
+      ok: true,
+      kind: "already_absent",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("already absent branch never reaches DELETE", calls, [
+      { method: "GET", path: "/repos/netkeep80/repo-guard/git/ref/heads/feature/work" },
+    ]);
+  }
+
+  {
     const adapter = createGitHubWriteAdapter({
       request: async () => {
         throw new Error("network unavailable");
