@@ -1,4 +1,4 @@
-import { planParallelMigration, } from "./migration-plan.mjs";
+import { planParallelMigration, planParallelRollback, } from "./migration-plan.mjs";
 const POLICY = "repo-policy.json";
 const TRANSACTION = ".github/workflows/repo-guard.yml";
 const PORTABLE = ".github/workflows/repo-guard-portable-coordinator.yml";
@@ -7,9 +7,9 @@ const MIGRATION_PATHS = [PORTABLE, NATIVE, TRANSACTION, POLICY];
 function snapshot(io) {
     return Object.fromEntries(MIGRATION_PATHS.map((path) => [path, io.read(path)]));
 }
-export function applyParallelMigration(input) {
+function applyPlannedMigration(input, planner) {
     const before = snapshot(input.io);
-    const plan = planParallelMigration({
+    const plan = planner({
         provider: input.provider,
         actionRef: input.actionRef,
         files: before,
@@ -38,16 +38,35 @@ export function applyParallelMigration(input) {
         if (file.action === "unchanged")
             continue;
         if (file.action === "create") {
+            if (typeof file.after !== "string")
+                throw new Error(`Invariant violation: create has no content for ${file.path}`);
             input.io.create(file.path, file.after);
             writes.push(file.path);
             continue;
         }
         if (file.action === "replace") {
+            if (typeof file.before !== "string" || typeof file.after !== "string") {
+                throw new Error(`Invariant violation: replace content is incomplete for ${file.path}`);
+            }
             input.io.replace(file.path, file.before, file.after);
+            writes.push(file.path);
+            continue;
+        }
+        if (file.action === "delete") {
+            if (typeof file.before !== "string" || !input.io.delete) {
+                throw new Error(`Invariant violation: delete precondition is incomplete for ${file.path}`);
+            }
+            input.io.delete(file.path, file.before);
             writes.push(file.path);
             continue;
         }
         throw new Error(`Invariant violation: blocked migration action reached apply for ${file.path}`);
     }
     return { ...plan, applied: true, writes };
+}
+export function applyParallelMigration(input) {
+    return applyPlannedMigration(input, planParallelMigration);
+}
+export function applyParallelRollback(input) {
+    return applyPlannedMigration(input, planParallelRollback);
 }
