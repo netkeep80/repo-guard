@@ -134,6 +134,9 @@ function repositoryOwnerType(metadata) {
         return null;
     return owner.type === "User" || owner.type === "Organization" ? owner.type : null;
 }
+function deleteBranchOnMerge(metadata) {
+    return typeof metadata.delete_branch_on_merge === "boolean" ? metadata.delete_branch_on_merge : null;
+}
 export function readGitHubControlPlane(input) {
     if (input.provider !== "portable" && input.provider !== "github_merge_queue") {
         return fail("invalid_provider", "provider must be portable or github_merge_queue");
@@ -153,6 +156,7 @@ export function readGitHubControlPlane(input) {
     }
     const defaultBranch = metadata.value.default_branch;
     const ownerType = repositoryOwnerType(metadata.value);
+    const deleteOnMerge = deleteBranchOnMerge(metadata.value);
     const errors = [];
     const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
     const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
@@ -163,6 +167,7 @@ export function readGitHubControlPlane(input) {
         repository,
         repositoryOwnerType: ownerType,
         defaultBranch,
+        deleteBranchOnMerge: deleteOnMerge,
         branchProtection,
         activeBranchRules,
         rulesets,
