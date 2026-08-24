@@ -8,6 +8,7 @@ import { evaluateParallelReadiness } from "../dist/parallel-readiness.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const coordinatorPath = ".github/workflows/repo-guard-portable-coordinator.yml";
+const selfCiPath = ".github/workflows/ci.yml";
 const acceptedSelfPin = "f9aae6f6de54b434f7645494637e10f64d4e7577";
 const read = (path) => readFileSync(resolve(projectRoot, path), "utf8");
 const policy = JSON.parse(read("repo-policy.json"));
@@ -27,7 +28,7 @@ describe("P6a portable self-host repository wiring", () => {
     const coordinator = policy.integration.workflows.find((item) => item.role === "repo_guard_portable_coordinator");
 
     assert.ok(transaction, "existing self PR gate must remain declared");
-    assert.equal(transaction.path, ".github/workflows/ci.yml");
+    assert.equal(transaction.path, selfCiPath);
     assert.ok(coordinator, "portable self-host coordinator must be declared");
     assert.equal(coordinator.path, coordinatorPath);
     assert.deepEqual(coordinator.expect, {
@@ -68,6 +69,14 @@ describe("P6a portable self-host repository wiring", () => {
     assert.equal(workflow.jobs.integrate.steps.some((item) => typeof item.run === "string"), false);
   });
 
+  it("executes canonical portable readiness against real GitHub facts in self CI", () => {
+    const workflow = parseYaml(read(selfCiPath));
+    const step = workflow.jobs?.validate?.steps?.find((item) => item.run === "npx repo-guard doctor --parallel portable");
+
+    assert.ok(step, "self CI must execute doctor --parallel portable");
+    assert.equal(step.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+  });
+
   it("is repository-ready when the separate portable control-plane facts are green", () => {
     assert.equal(existsSync(resolve(projectRoot, coordinatorPath)), true, "portable coordinator workflow must exist before readiness evaluation");
     const integrationFacts = extractIntegration(policy, {
@@ -90,7 +99,7 @@ describe("P6a portable self-host repository wiring", () => {
 
     assert.equal(report.ready, true, JSON.stringify(report.blockers));
     assert.deepEqual(report.blockers, []);
-    assert.equal(report.evidence.repository.transactionWorkflow, ".github/workflows/ci.yml");
+    assert.equal(report.evidence.repository.transactionWorkflow, selfCiPath);
     assert.equal(report.evidence.repository.providerWorkflow, coordinatorPath);
   });
 });
