@@ -75,6 +75,7 @@ function readyControlPlaneRead() {
     ok: true,
     provider: "portable",
     repository: "netkeep80/example",
+    repositoryOwnerType: "User",
     defaultBranch: "main",
     branchProtection: {
       complete: true,
@@ -82,6 +83,28 @@ function readyControlPlaneRead() {
       data: {
         required_status_checks: { strict: true, contexts: ["CI / validate"], checks: [] },
         required_pull_request_reviews: { bypass_pull_request_allowances: { users: [], teams: [], apps: [] } },
+        enforce_admins: { enabled: true },
+      },
+    },
+    activeBranchRules: { complete: true, rules: [] },
+    rulesets: { complete: true, items: [] },
+    errors: [],
+  };
+}
+
+function incompleteClassicControlPlaneRead(repositoryOwnerType) {
+  return {
+    ok: true,
+    provider: "portable",
+    repository: "netkeep80/example",
+    ...(repositoryOwnerType === undefined ? {} : { repositoryOwnerType }),
+    defaultBranch: "main",
+    branchProtection: {
+      complete: true,
+      protected: true,
+      data: {
+        required_status_checks: { strict: true, contexts: ["CI / validate"], checks: [] },
+        required_pull_request_reviews: { required_approving_review_count: 0 },
         enforce_admins: { enabled: true },
       },
     },
@@ -136,6 +159,30 @@ console.log("\n--- parallel doctor composes canonical repository and control-pla
   assert.match(text, /provider workflow: \.github\/workflows\/parallel\.yml/);
   assert.match(text, /target branch: main/);
   assert.match(text, /required checks: CI \/ validate/);
+}
+
+console.log("\n--- user-owned classic protection preserves trusted owner type through doctor projection ---");
+{
+  const report = createParallelDoctorReport({
+    provider: "portable",
+    integrationFacts: readyIntegrationFacts(),
+    integrationValid: true,
+    controlPlaneRead: incompleteClassicControlPlaneRead("User"),
+  });
+  assert.equal(report.ready, true, JSON.stringify(report.blockers));
+  assert.deepEqual(report.blockers, []);
+}
+
+console.log("\n--- incomplete classic bypass evidence without trusted owner type stays fail-closed ---");
+{
+  const report = createParallelDoctorReport({
+    provider: "portable",
+    integrationFacts: readyIntegrationFacts(),
+    integrationValid: true,
+    controlPlaneRead: incompleteClassicControlPlaneRead(undefined),
+  });
+  assert.equal(report.ready, false);
+  assert.ok(report.blockers.some((item) => item.id === "unknown_bypass_state" && item.source === "control_plane"));
 }
 
 console.log("\n--- parallel doctor fails closed when GitHub control-plane read fails ---");
