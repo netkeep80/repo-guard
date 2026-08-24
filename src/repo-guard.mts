@@ -49,7 +49,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
   },
   migrate: {
-    options: { ...valueOptions("--parallel", "--action-ref", "--format"), "--dry-run": false, "--apply": false, "--help": false }, positionals: 0,
+    options: { ...valueOptions("--parallel", "--action-ref", "--format"), "--dry-run": false, "--apply": false, "--rollback": false, "--help": false }, positionals: 0,
     run: async (roots, args) => (await import("./migrate.mjs")).runMigrate(roots, args),
   },
   doctor: {
