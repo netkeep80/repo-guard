@@ -43,6 +43,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Run P6b3 wiring contract test
+        run: node --test tests/test-self-host-portable-wiring.mjs
+
       - name: Probe branch protection GraphQL visibility
         run: >-
           gh api graphql
