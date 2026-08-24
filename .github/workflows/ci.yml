@@ -43,6 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Run portable readiness diagnostics on self
+        run: npx repo-guard doctor --parallel portable
+        env:
+          GH_TOKEN: ${{ secrets.REPO_GUARD_CONTROL_PLANE_TOKEN }}
+
       - name: Run discovered test suite
         run: npm test
         env:
