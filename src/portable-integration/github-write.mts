@@ -49,9 +49,17 @@ type DeleteSuccess = {
   expectedHeadSha: string;
 };
 
+type AlreadyAbsentSuccess = {
+  ok: true;
+  kind: "already_absent";
+  branchName: string;
+  prNumber: number;
+  expectedHeadSha: string;
+};
+
 export type GitHubUpdateBranchResult = Failure | UpdateSuccess;
 export type GitHubMergeExactHeadResult = Failure | MergeSuccess;
-export type GitHubDeleteMergedBranchResult = Failure | DeleteSuccess;
+export type GitHubDeleteMergedBranchResult = Failure | DeleteSuccess | AlreadyAbsentSuccess;
 
 const SHA = /^[0-9a-f]{40}$/i;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -237,6 +245,15 @@ export function createGitHubWriteAdapter(transportInput: unknown) {
 
       const read = normalizeResponse(rawRead);
       if (read === null) return fail("malformed_response", "branch reread transport returned a malformed response");
+      if (read.status === 404) {
+        return {
+          ok: true,
+          kind: "already_absent",
+          branchName,
+          prNumber: valid.prNumber,
+          expectedHeadSha: valid.expectedHeadSha,
+        };
+      }
       if (read.status !== 200) return fail("unexpected_response", `branch reread returned unexpected HTTP ${read.status}${responseMessage(read.body)}`);
       if (!isRecord(read.body) || read.body.ref !== `refs/heads/${branchName}` || !isRecord(read.body.object) || !isSha(read.body.object.sha))
         return fail("malformed_response", "branch reread must contain the exact ref and commit SHA");
