@@ -181,6 +181,15 @@ export function createGitHubWriteAdapter(transportInput) {
             const read = normalizeResponse(rawRead);
             if (read === null)
                 return fail("malformed_response", "branch reread transport returned a malformed response");
+            if (read.status === 404) {
+                return {
+                    ok: true,
+                    kind: "already_absent",
+                    branchName,
+                    prNumber: valid.prNumber,
+                    expectedHeadSha: valid.expectedHeadSha,
+                };
+            }
             if (read.status !== 200)
                 return fail("unexpected_response", `branch reread returned unexpected HTTP ${read.status}${responseMessage(read.body)}`);
             if (!isRecord(read.body) || read.body.ref !== `refs/heads/${branchName}` || !isRecord(read.body.object) || !isSha(read.body.object.sha))
