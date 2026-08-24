@@ -1,6 +1,9 @@
 import {
   planParallelMigration,
+  planParallelRollback,
   type ParallelMigrationBlocker,
+  type ParallelMigrationInput,
+  type ParallelMigrationPlan,
   type ParallelMigrationProvider,
 } from "./migration-plan.mjs";
 
@@ -8,6 +11,7 @@ export interface MigrationFileAdapter {
   read(path: string): string | null | undefined;
   create(path: string, content: string): void;
   replace(path: string, expectedBefore: string, content: string): void;
+  delete?(path: string, expectedBefore: string): void;
 }
 
 export interface ApplyParallelMigrationInput {
@@ -28,13 +32,15 @@ const PORTABLE = ".github/workflows/repo-guard-portable-coordinator.yml";
 const NATIVE = ".github/workflows/repo-guard-merge-group.yml";
 const MIGRATION_PATHS = [PORTABLE, NATIVE, TRANSACTION, POLICY] as const;
 
+type Planner = (input: ParallelMigrationInput) => ParallelMigrationPlan;
+
 function snapshot(io: MigrationFileAdapter) {
   return Object.fromEntries(MIGRATION_PATHS.map((path) => [path, io.read(path)]));
 }
 
-export function applyParallelMigration(input: ApplyParallelMigrationInput) {
+function applyPlannedMigration(input: ApplyParallelMigrationInput, planner: Planner) {
   const before = snapshot(input.io);
-  const plan = planParallelMigration({
+  const plan = planner({
     provider: input.provider,
     actionRef: input.actionRef,
     files: before,
@@ -65,12 +71,24 @@ export function applyParallelMigration(input: ApplyParallelMigrationInput) {
   for (const file of plan.files) {
     if (file.action === "unchanged") continue;
     if (file.action === "create") {
+      if (typeof file.after !== "string") throw new Error(`Invariant violation: create has no content for ${file.path}`);
       input.io.create(file.path, file.after);
       writes.push(file.path);
       continue;
     }
     if (file.action === "replace") {
-      input.io.replace(file.path, file.before as string, file.after);
+      if (typeof file.before !== "string" || typeof file.after !== "string") {
+        throw new Error(`Invariant violation: replace content is incomplete for ${file.path}`);
+      }
+      input.io.replace(file.path, file.before, file.after);
+      writes.push(file.path);
+      continue;
+    }
+    if (file.action === "delete") {
+      if (typeof file.before !== "string" || !input.io.delete) {
+        throw new Error(`Invariant violation: delete precondition is incomplete for ${file.path}`);
+      }
+      input.io.delete(file.path, file.before);
       writes.push(file.path);
       continue;
     }
@@ -78,4 +96,12 @@ export function applyParallelMigration(input: ApplyParallelMigrationInput) {
   }
 
   return { ...plan, applied: true as const, writes };
+}
+
+export function applyParallelMigration(input: ApplyParallelMigrationInput) {
+  return applyPlannedMigration(input, planParallelMigration);
+}
+
+export function applyParallelRollback(input: ApplyParallelMigrationInput) {
+  return applyPlannedMigration(input, planParallelRollback);
 }
