@@ -19,6 +19,23 @@ function isPositiveInteger(value) {
 function isMergeMethod(value) {
     return typeof value === "string" && MERGE_METHODS.has(value);
 }
+function isBranchRefName(value) {
+    if (typeof value !== "string" || value.length === 0)
+        return false;
+    if (value === "@" || value.startsWith("-") || value.startsWith("/") || value.endsWith("/")
+        || value.includes("//") || value.includes("..") || value.includes("@{") || value.endsWith("."))
+        return false;
+    for (const component of value.split("/")) {
+        if (component.length === 0 || component.startsWith(".") || component.endsWith(".lock"))
+            return false;
+    }
+    for (const character of value) {
+        const code = character.charCodeAt(0);
+        if (code <= 0x20 || code === 0x7f || "~^:?*[\\".includes(character))
+            return false;
+    }
+    return true;
+}
 function encodeBranchPath(value) {
     return value.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
@@ -161,8 +178,8 @@ export function createGitHubWriteAdapter(transportInput) {
             if (!common.ok)
                 return common;
             const valid = common.value;
-            if (!isRecord(input) || input.kind !== "delete_merged_branch" || typeof input.branchName !== "string" || input.branchName.length === 0)
-                return fail("invalid_input", "branch deletion requires planner kind delete_merged_branch and a branch name");
+            if (!isRecord(input) || input.kind !== "delete_merged_branch" || !isBranchRefName(input.branchName))
+                return fail("invalid_input", "branch deletion requires planner kind delete_merged_branch and a valid branch name");
             if (transport === null)
                 return fail("invalid_transport", "write transport must expose an async request function");
             const branchName = input.branchName;
