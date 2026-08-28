@@ -1,8 +1,13 @@
-type GitHubMutationRequest = {
-  method: "PUT";
-  path: string;
-  body: Record<string, string>;
-};
+type GitHubMutationRequest =
+  | {
+    method: "PUT";
+    path: string;
+    body: Record<string, string>;
+  }
+  | {
+    method: "GET" | "DELETE";
+    path: string;
+  };
 
 type GitHubMutationResponse = {
   status: number;
@@ -36,8 +41,25 @@ type MergeSuccess = {
   mergeMethod: MergeMethod;
 };
 
+type DeleteSuccess = {
+  ok: true;
+  kind: "deleted";
+  branchName: string;
+  prNumber: number;
+  expectedHeadSha: string;
+};
+
+type AlreadyAbsentSuccess = {
+  ok: true;
+  kind: "already_absent";
+  branchName: string;
+  prNumber: number;
+  expectedHeadSha: string;
+};
+
 export type GitHubUpdateBranchResult = Failure | UpdateSuccess;
 export type GitHubMergeExactHeadResult = Failure | MergeSuccess;
+export type GitHubDeleteMergedBranchResult = Failure | DeleteSuccess | AlreadyAbsentSuccess;
 
 const SHA = /^[0-9a-f]{40}$/i;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -65,6 +87,27 @@ function isPositiveInteger(value: unknown): value is number {
 
 function isMergeMethod(value: unknown): value is MergeMethod {
   return typeof value === "string" && MERGE_METHODS.has(value as MergeMethod);
+}
+
+function isBranchRefName(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  if (value === "@" || value.startsWith("-") || value.startsWith("/") || value.endsWith("/")
+    || value.includes("//") || value.includes("..") || value.includes("@{") || value.endsWith(".")) return false;
+
+  for (const component of value.split("/")) {
+    if (component.length === 0 || component.startsWith(".") || component.endsWith(".lock")) return false;
+  }
+
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x20 || code === 0x7f || "~^:?*[\\".includes(character)) return false;
+  }
+
+  return true;
+}
+
+function encodeBranchPath(value: string): string {
+  return value.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 
 function normalizeTransport(input: unknown): GitHubMutationTransport | null {
@@ -193,6 +236,68 @@ export function createGitHubWriteAdapter(transportInput: unknown) {
         expectedHeadSha: valid.expectedHeadSha,
         mergeSha: response.body.sha,
         mergeMethod: input.mergeMethod,
+      };
+    },
+
+    async deleteMergedBranchExact(input: unknown): Promise<GitHubDeleteMergedBranchResult> {
+      const common = validateCommonInput(input);
+      if (!common.ok) return common;
+      const valid = common.value;
+      if (!isRecord(input) || input.kind !== "delete_merged_branch" || !isBranchRefName(input.branchName))
+        return fail("invalid_input", "branch deletion requires planner kind delete_merged_branch and a valid branch name");
+      if (transport === null) return fail("invalid_transport", "write transport must expose an async request function");
+
+      const branchName = input.branchName;
+      const encodedBranch = encodeBranchPath(branchName);
+      let rawRead: unknown;
+      try {
+        rawRead = await transport.request({
+          method: "GET",
+          path: `/repos/${valid.repository}/git/ref/heads/${encodedBranch}`,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return fail("transport_error", `branch reread transport failed: ${message}`);
+      }
+
+      const read = normalizeResponse(rawRead);
+      if (read === null) return fail("malformed_response", "branch reread transport returned a malformed response");
+      if (read.status === 404) {
+        return {
+          ok: true,
+          kind: "already_absent",
+          branchName,
+          prNumber: valid.prNumber,
+          expectedHeadSha: valid.expectedHeadSha,
+        };
+      }
+      if (read.status !== 200) return fail("unexpected_response", `branch reread returned unexpected HTTP ${read.status}${responseMessage(read.body)}`);
+      if (!isRecord(read.body) || read.body.ref !== `refs/heads/${branchName}` || !isRecord(read.body.object) || !isSha(read.body.object.sha))
+        return fail("malformed_response", "branch reread must contain the exact ref and commit SHA");
+      if (read.body.object.sha !== valid.expectedHeadSha)
+        return fail("stale_head", "branch moved after merged-head evidence was collected");
+
+      let rawDelete: unknown;
+      try {
+        rawDelete = await transport.request({
+          method: "DELETE",
+          path: `/repos/${valid.repository}/git/refs/heads/${encodedBranch}`,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return fail("transport_error", `branch delete transport failed: ${message}`);
+      }
+
+      const deletion = normalizeResponse(rawDelete);
+      if (deletion === null) return fail("malformed_response", "branch delete transport returned a malformed response");
+      if (deletion.status !== 204) return fail("unexpected_response", `branch delete returned unexpected HTTP ${deletion.status}${responseMessage(deletion.body)}`);
+
+      return {
+        ok: true,
+        kind: "deleted",
+        branchName,
+        prNumber: valid.prNumber,
+        expectedHeadSha: valid.expectedHeadSha,
       };
     },
   };

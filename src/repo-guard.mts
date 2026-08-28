@@ -53,7 +53,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     run: async (roots, args) => (await import("./migrate.mjs")).runMigrate(roots, args),
   },
   doctor: {
-    options: { "--integration": false, ...valueOptions("--format", "--parallel") }, positionals: 0,
+    options: { "--integration": false, ...valueOptions("--format", "--parallel", "--persistent-branch") }, positionals: 0,
     run: async (roots, args) => args.includes("--integration")
       ? (await import("./integration-validator.mjs")).runValidateIntegration(roots, args)
       : args.includes("--parallel")

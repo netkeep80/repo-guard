@@ -7,6 +7,14 @@ const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const cli = resolve(projectRoot, "dist/repo-guard.mjs");
 let failures = 0;
 
+const MAIN = "1111111111111111111111111111111111111111";
+const OPEN = "2222222222222222222222222222222222222222";
+const OWNED = "3333333333333333333333333333333333333333";
+const MERGED = "4444444444444444444444444444444444444444";
+const ORPHAN = "5555555555555555555555555555555555555555";
+const PUBLISH = "6666666666666666666666666666666666666666";
+const RELEASE = "7777777777777777777777777777777777777777";
+
 function expect(label, actual, expected) {
   const passed = actual === expected;
   console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
@@ -92,6 +100,33 @@ function readyControlPlaneRead() {
   };
 }
 
+function branchAwareControlPlaneRead() {
+  return {
+    ...readyControlPlaneRead(),
+    deleteBranchOnMerge: false,
+    branchInventory: {
+      complete: true,
+      items: [
+        { name: "main", sha: MAIN, protected: true },
+        { name: "gh-pages", sha: PUBLISH, protected: false },
+        { name: "release/stable", sha: RELEASE, protected: false },
+        { name: "feature/open", sha: OPEN, protected: false },
+        { name: "agent/owned", sha: OWNED, protected: false },
+        { name: "feature/merged", sha: MERGED, protected: false },
+        { name: "feature/orphan", sha: ORPHAN, protected: false },
+      ],
+    },
+    openSameRepositoryPullRequestHeads: {
+      complete: true,
+      items: [{ number: 7, name: "feature/open", sha: OPEN }],
+    },
+    mergedSameRepositoryPullRequestHeads: {
+      complete: true,
+      items: [{ number: 6, name: "feature/merged", sha: MERGED }],
+    },
+  };
+}
+
 function incompleteClassicControlPlaneRead(repositoryOwnerType) {
   return {
     ok: true,
@@ -129,6 +164,14 @@ console.log("\n--- doctor --parallel rejects unsupported providers ---");
   expectIncludes("unsupported provider is explicit", result.stderr, "Unsupported parallel provider: bogus");
 }
 
+console.log("\n--- doctor --parallel accepts explicit persistent branch refs ---");
+{
+  const result = run(["doctor", "--parallel", "bogus", "--persistent-branch", "gh-pages"]);
+  expect("unsupported provider still exits non-zero", result.code, 1);
+  expectIncludes("provider validation remains authoritative", result.stderr, "Unsupported parallel provider: bogus");
+  expectNotIncludes("persistent branch option is accepted by CLI parser", result.stderr, "Unknown option for doctor: --persistent-branch");
+}
+
 console.log("\n--- parallel doctor composes canonical repository and control-plane readiness ---");
 {
   const report = createParallelDoctorReport({
@@ -159,6 +202,52 @@ console.log("\n--- parallel doctor composes canonical repository and control-pla
   assert.match(text, /provider workflow: \.github\/workflows\/parallel\.yml/);
   assert.match(text, /target branch: main/);
   assert.match(text, /required checks: CI \/ validate/);
+}
+
+console.log("\n--- branch hygiene is a machine-readable advisory diagnostic with explicit exemptions ---");
+{
+  const report = createParallelDoctorReport({
+    provider: "portable",
+    integrationFacts: readyIntegrationFacts(),
+    integrationValid: true,
+    controlPlaneRead: branchAwareControlPlaneRead(),
+    persistentBranches: ["gh-pages", "release/stable"],
+    durableOwnership: {
+      complete: true,
+      items: [{ name: "agent/owned", state: "handoff" }],
+    },
+  });
+
+  assert.equal(report.ready, true, "advisory branch hygiene must not silently change parallel readiness");
+  assert.deepEqual(report.diagnostics.branchHygiene, {
+    ok: true,
+    persistentBranches: [
+      { name: "gh-pages", sha: PUBLISH, protected: false },
+      { name: "main", sha: MAIN, protected: true },
+      { name: "release/stable", sha: RELEASE, protected: false },
+    ],
+    activePullRequestHeads: [{ number: 7, name: "feature/open", sha: OPEN }],
+    ownedPrePullRequestBranches: [{ name: "agent/owned", sha: OWNED, state: "handoff" }],
+    staleOwnershipBranches: [],
+    orphanCandidates: [
+      { name: "feature/merged", sha: MERGED, protected: false },
+      { name: "feature/orphan", sha: ORPHAN, protected: false },
+    ],
+    mergedPullRequestHeadsStillPresent: [{ number: 6, name: "feature/merged", sha: MERGED }],
+    deleteBranchOnMergeDrift: { state: "disabled", residualMergedBranchCount: 1 },
+  });
+
+  const json = JSON.parse(renderParallelDoctorReport(report, "json"));
+  assert.equal(json.diagnostics.branchHygiene.ok, true);
+  assert.equal(json.diagnostics.branchHygiene.deleteBranchOnMergeDrift.state, "disabled");
+  assert.equal(json.diagnostics.branchHygiene.orphanCandidates.length, 2);
+
+  const text = renderParallelDoctorReport(report, "text");
+  assert.match(text, /branch hygiene: advisory/);
+  assert.match(text, /persistent branches: gh-pages, main, release\/stable/);
+  assert.match(text, /merged PR heads still present: feature\/merged/);
+  assert.match(text, /orphan candidates: feature\/merged, feature\/orphan/);
+  assert.match(text, /delete_branch_on_merge: disabled/);
 }
 
 console.log("\n--- user-owned classic protection preserves trusted owner type through doctor projection ---");

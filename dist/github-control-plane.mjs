@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const SHA = /^[0-9a-f]{40}$/i;
 const PARALLEL_RULE_TYPES = new Set(["pull_request", "required_status_checks", "merge_queue"]);
 function fail(error, message) {
     return { ok: false, error, message };
@@ -128,11 +129,101 @@ function readRulesets(run, repoRoot, repository, activeRules, errors) {
     }
     return { complete, items: complete ? items : items };
 }
+function readBranchInventory(run, repoRoot, repository, errors) {
+    const endpoint = `repos/${repository}/branches?per_page=100`;
+    const response = apiJson(run, repoRoot, endpoint, ["--paginate", "--slurp"]);
+    if (!response.ok) {
+        errors.push({ id: "branch_inventory_api_error", message: response.message });
+        return { complete: false, items: null };
+    }
+    if (!Array.isArray(response.value) || !response.value.every(Array.isArray)) {
+        errors.push({ id: "branch_inventory_api_error", message: "branch inventory must be a complete paginated array" });
+        return { complete: false, items: null };
+    }
+    const items = [];
+    for (const value of response.value.flat()) {
+        if (!isRecord(value) || typeof value.name !== "string" || value.name.length === 0 || !isRecord(value.commit)
+            || typeof value.commit.sha !== "string" || !SHA.test(value.commit.sha) || typeof value.protected !== "boolean") {
+            errors.push({ id: "branch_inventory_api_error", message: "branch inventory contains a malformed branch fact" });
+            return { complete: false, items: null };
+        }
+        items.push({ name: value.name, sha: value.commit.sha, protected: value.protected });
+    }
+    return { complete: true, items };
+}
+function readOpenSameRepositoryPullRequestHeads(run, repoRoot, repository, errors) {
+    const endpoint = `repos/${repository}/pulls?state=open&per_page=100`;
+    const response = apiJson(run, repoRoot, endpoint, ["--paginate", "--slurp"]);
+    if (!response.ok) {
+        errors.push({ id: "open_pr_head_inventory_api_error", message: response.message });
+        return { complete: false, items: null };
+    }
+    if (!Array.isArray(response.value) || !response.value.every(Array.isArray)) {
+        errors.push({ id: "open_pr_head_inventory_api_error", message: "open PR head inventory must be a complete paginated array" });
+        return { complete: false, items: null };
+    }
+    const items = [];
+    for (const value of response.value.flat()) {
+        if (!isRecord(value) || !Number.isInteger(value.number) || value.number <= 0 || !isRecord(value.head)
+            || typeof value.head.ref !== "string" || value.head.ref.length === 0 || typeof value.head.sha !== "string"
+            || !SHA.test(value.head.sha) || !isRecord(value.head.repo) || typeof value.head.repo.full_name !== "string") {
+            errors.push({ id: "open_pr_head_inventory_api_error", message: "open PR head inventory contains a malformed PR fact" });
+            return { complete: false, items: null };
+        }
+        if (value.head.repo.full_name !== repository)
+            continue;
+        items.push({ number: value.number, name: value.head.ref, sha: value.head.sha });
+    }
+    return { complete: true, items };
+}
+function readMergedSameRepositoryPullRequestHeads(run, repoRoot, repository, errors) {
+    const endpoint = `repos/${repository}/pulls?state=closed&per_page=100`;
+    const response = apiJson(run, repoRoot, endpoint, ["--paginate", "--slurp"]);
+    if (!response.ok) {
+        errors.push({ id: "merged_pr_head_inventory_api_error", message: response.message });
+        return { complete: false, items: null };
+    }
+    if (!Array.isArray(response.value) || !response.value.every(Array.isArray)) {
+        errors.push({ id: "merged_pr_head_inventory_api_error", message: "merged PR head inventory must be a complete paginated array" });
+        return { complete: false, items: null };
+    }
+    const items = [];
+    for (const value of response.value.flat()) {
+        if (!isRecord(value) || !Number.isInteger(value.number) || value.number <= 0
+            || !(value.merged_at === null || (typeof value.merged_at === "string" && value.merged_at.length > 0))) {
+            errors.push({ id: "merged_pr_head_inventory_api_error", message: "merged PR head inventory contains a malformed PR state" });
+            return { complete: false, items: null };
+        }
+        if (value.merged_at === null)
+            continue;
+        if (!isRecord(value.head)) {
+            errors.push({ id: "merged_pr_head_inventory_api_error", message: "merged PR head inventory contains a malformed merged PR head" });
+            return { complete: false, items: null };
+        }
+        if (value.head.repo === null)
+            continue;
+        if (!isRecord(value.head.repo) || typeof value.head.repo.full_name !== "string") {
+            errors.push({ id: "merged_pr_head_inventory_api_error", message: "merged PR head inventory contains a malformed head repository" });
+            return { complete: false, items: null };
+        }
+        if (value.head.repo.full_name !== repository)
+            continue;
+        if (typeof value.head.ref !== "string" || value.head.ref.length === 0 || typeof value.head.sha !== "string" || !SHA.test(value.head.sha)) {
+            errors.push({ id: "merged_pr_head_inventory_api_error", message: "merged same-repository PR head must contain an exact branch and SHA" });
+            return { complete: false, items: null };
+        }
+        items.push({ number: value.number, name: value.head.ref, sha: value.head.sha });
+    }
+    return { complete: true, items };
+}
 function repositoryOwnerType(metadata) {
     const owner = metadata.owner;
     if (!isRecord(owner))
         return null;
     return owner.type === "User" || owner.type === "Organization" ? owner.type : null;
+}
+function deleteBranchOnMerge(metadata) {
+    return typeof metadata.delete_branch_on_merge === "boolean" ? metadata.delete_branch_on_merge : null;
 }
 export function readGitHubControlPlane(input) {
     if (input.provider !== "portable" && input.provider !== "github_merge_queue") {
@@ -153,7 +244,15 @@ export function readGitHubControlPlane(input) {
     }
     const defaultBranch = metadata.value.default_branch;
     const ownerType = repositoryOwnerType(metadata.value);
+    const deleteOnMerge = deleteBranchOnMerge(metadata.value);
     const errors = [];
+    const branchInventory = input.includeBranchHygiene === true ? readBranchInventory(run, input.repoRoot, repository, errors) : null;
+    const openSameRepositoryPullRequestHeads = input.includeBranchHygiene === true
+        ? readOpenSameRepositoryPullRequestHeads(run, input.repoRoot, repository, errors)
+        : null;
+    const mergedSameRepositoryPullRequestHeads = input.includeBranchHygiene === true
+        ? readMergedSameRepositoryPullRequestHeads(run, input.repoRoot, repository, errors)
+        : null;
     const branchProtection = readBranchProtection(run, input.repoRoot, repository, defaultBranch, errors);
     const activeBranchRules = readActiveRules(run, input.repoRoot, repository, defaultBranch, errors);
     const rulesets = readRulesets(run, input.repoRoot, repository, activeBranchRules, errors);
@@ -163,6 +262,10 @@ export function readGitHubControlPlane(input) {
         repository,
         repositoryOwnerType: ownerType,
         defaultBranch,
+        deleteBranchOnMerge: deleteOnMerge,
+        branchInventory,
+        openSameRepositoryPullRequestHeads,
+        mergedSameRepositoryPullRequestHeads,
         branchProtection,
         activeBranchRules,
         rulesets,

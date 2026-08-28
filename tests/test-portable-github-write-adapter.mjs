@@ -217,6 +217,92 @@ async function run() {
   }
 
   {
+    const calls = [];
+    const adapter = createGitHubWriteAdapter({
+      request: async (request) => {
+        calls.push(request);
+        if (request.method === "GET") {
+          return {
+            status: 200,
+            body: { ref: "refs/heads/feature/work", object: { sha: HEAD, type: "commit" } },
+          };
+        }
+        if (request.method === "DELETE") return { status: 204, body: null };
+        throw new Error(`unexpected method ${request.method}`);
+      },
+    });
+    const result = await adapter.deleteMergedBranchExact({
+      repository: REPO,
+      kind: "delete_merged_branch",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("merged branch deletion rereads exact ref before mutation", calls, [
+      { method: "GET", path: "/repos/netkeep80/repo-guard/git/ref/heads/feature/work" },
+      { method: "DELETE", path: "/repos/netkeep80/repo-guard/git/refs/heads/feature/work" },
+    ]);
+    expect("successful exact branch delete returns typed evidence", result, {
+      ok: true,
+      kind: "deleted",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+  }
+
+  {
+    const calls = [];
+    const adapter = createGitHubWriteAdapter({
+      request: async (request) => {
+        calls.push(request);
+        return {
+          status: 200,
+          body: { ref: "refs/heads/feature/work", object: { sha: MERGE, type: "commit" } },
+        };
+      },
+    });
+    const result = await adapter.deleteMergedBranchExact({
+      repository: REPO,
+      kind: "delete_merged_branch",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("moved branch is rejected as stale", result.error, "stale_head");
+    expect("moved branch never reaches DELETE", calls, [
+      { method: "GET", path: "/repos/netkeep80/repo-guard/git/ref/heads/feature/work" },
+    ]);
+  }
+
+  {
+    const calls = [];
+    const adapter = createGitHubWriteAdapter({
+      request: async (request) => {
+        calls.push(request);
+        return { status: 404, body: { message: "Reference does not exist" } };
+      },
+    });
+    const result = await adapter.deleteMergedBranchExact({
+      repository: REPO,
+      kind: "delete_merged_branch",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("branch already absent at fresh reread is idempotent", result, {
+      ok: true,
+      kind: "already_absent",
+      branchName: "feature/work",
+      prNumber: 42,
+      expectedHeadSha: HEAD,
+    });
+    expect("already absent branch never reaches DELETE", calls, [
+      { method: "GET", path: "/repos/netkeep80/repo-guard/git/ref/heads/feature/work" },
+    ]);
+  }
+
+  {
     const adapter = createGitHubWriteAdapter({
       request: async () => {
         throw new Error("network unavailable");

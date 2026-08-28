@@ -1,5 +1,6 @@
 import type { GitHubControlPlaneReadResult } from "./github-control-plane.mjs";
 import { readGitHubControlPlane } from "./github-control-plane.mjs";
+import { analyzeBranchHygiene } from "./branch-hygiene.mjs";
 import { createIntegrationAnalysisReport } from "./integration-validator.mjs";
 import type { ParallelControlPlaneNormalizationResult } from "./parallel-control-plane.mjs";
 import { normalizeGitHubControlPlane } from "./parallel-control-plane.mjs";
@@ -15,6 +16,7 @@ const PARALLEL_FORMATS = new Set(["text", "json"]);
 
 type ParallelDoctorRoots = Parameters<typeof createIntegrationAnalysisReport>[0];
 type ParallelDoctorFormat = "text" | "json";
+type BranchHygieneDiagnostic = ReturnType<typeof analyzeBranchHygiene> | null;
 
 type ControlPlaneDiagnostic = {
   repository: string | null;
@@ -30,6 +32,7 @@ export interface ParallelDoctorReport extends ParallelReadinessReport {
     integrationValid: boolean;
     integrationMessage: string | null;
     controlPlane: ControlPlaneDiagnostic;
+    branchHygiene: BranchHygieneDiagnostic;
   };
 }
 
@@ -39,6 +42,8 @@ interface CreateParallelDoctorReportInput {
   integrationValid: boolean;
   integrationMessage?: string | null;
   controlPlaneRead: GitHubControlPlaneReadResult;
+  persistentBranches?: string[];
+  durableOwnership?: unknown;
 }
 
 interface IntegrationReportProjection {
@@ -51,6 +56,14 @@ interface IntegrationReportProjection {
 function option(args: readonly string[], name: string, fallback: string): string {
   const index = args.indexOf(name);
   return index < 0 ? fallback : args[index + 1] ?? fallback;
+}
+
+function options(args: readonly string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === name && args[index + 1] !== undefined) values.push(args[index + 1]);
+  }
+  return values;
 }
 
 function addBlocker(blockers: ParallelReadinessBlocker[], blocker: ParallelReadinessBlocker): void {
@@ -110,6 +123,21 @@ function controlPlaneProjection(
       };
 }
 
+function branchHygieneProjection(input: CreateParallelDoctorReportInput): BranchHygieneDiagnostic {
+  const read = input.controlPlaneRead;
+  if (!read.ok || read.branchInventory == null || read.openSameRepositoryPullRequestHeads == null
+    || read.mergedSameRepositoryPullRequestHeads == null) return null;
+  return analyzeBranchHygiene({
+    defaultBranch: read.defaultBranch,
+    deleteBranchOnMerge: read.deleteBranchOnMerge,
+    branchInventory: read.branchInventory,
+    openSameRepositoryPullRequestHeads: read.openSameRepositoryPullRequestHeads,
+    mergedSameRepositoryPullRequestHeads: read.mergedSameRepositoryPullRequestHeads,
+    persistentBranches: input.persistentBranches ?? [],
+    durableOwnership: input.durableOwnership,
+  });
+}
+
 export function parseParallelProvider(args: string[]): ParallelReadinessProvider {
   const index = args.indexOf("--parallel");
   if (index < 0) throw new Error("--parallel requires a value");
@@ -147,6 +175,7 @@ export function createParallelDoctorReport(input: CreateParallelDoctorReportInpu
       integrationValid: input.integrationValid,
       integrationMessage: input.integrationMessage ?? null,
       controlPlane: controlPlane.diagnostic,
+      branchHygiene: branchHygieneProjection(input),
     },
   };
 }
@@ -172,6 +201,18 @@ export function renderParallelDoctorReport(report: ParallelDoctorReport, format:
     lines.push("blockers:");
     for (const blocker of report.blockers) lines.push(`  - ${blocker.source}/${blocker.id}: ${blocker.message}`);
   }
+  const branchHygiene = report.diagnostics.branchHygiene;
+  if (branchHygiene) {
+    if (branchHygiene.ok) {
+      lines.push("branch hygiene: advisory");
+      lines.push(`persistent branches: ${branchHygiene.persistentBranches.map((branch) => branch.name).join(", ") || "none"}`);
+      lines.push(`merged PR heads still present: ${branchHygiene.mergedPullRequestHeadsStillPresent.map((head) => head.name).join(", ") || "none"}`);
+      lines.push(`orphan candidates: ${branchHygiene.orphanCandidates.map((branch) => branch.name).join(", ") || "none"}`);
+      lines.push(`delete_branch_on_merge: ${branchHygiene.deleteBranchOnMergeDrift.state}`);
+    } else {
+      lines.push(`branch hygiene: unavailable (${branchHygiene.error}: ${branchHygiene.message})`);
+    }
+  }
   const diagnosticErrors = report.diagnostics.controlPlane.adapterErrors;
   if (diagnosticErrors.length > 0) {
     lines.push("control-plane adapter errors:");
@@ -194,13 +235,14 @@ export async function runParallelDoctor(roots: ParallelDoctorRoots, args: string
   const integrationValid = integrationReport.fatal !== true && integrationReport.exitCode === 0;
   const integrationFacts = integrationReport.integration ?? {};
   const integrationMessage = integrationReport.fatal ? integrationReport.message ?? "integration analysis failed" : null;
-  const controlPlaneRead = readGitHubControlPlane({ repoRoot: roots.repoRoot, provider });
+  const controlPlaneRead = readGitHubControlPlane({ repoRoot: roots.repoRoot, provider, includeBranchHygiene: true });
   const report = createParallelDoctorReport({
     provider,
     integrationFacts,
     integrationValid,
     integrationMessage,
     controlPlaneRead,
+    persistentBranches: options(args, "--persistent-branch"),
   });
   console.log(renderParallelDoctorReport(report, format as ParallelDoctorFormat));
   return report.ready ? 0 : 1;
