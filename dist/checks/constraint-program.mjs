@@ -3,6 +3,13 @@ const RANKS = {
     enforcement: { advisory: 0, blocking: 1 },
     count: { changed_only: 0, all_tracked: 1 },
 };
+const CONTRACT_CONFORMANCE_DOCUMENT_ROLES = new Map([
+    ["contract-conformance.current.contract", "current.contract"],
+    ["contract-conformance.current.conformance", "current.conformance"],
+    ["contract-conformance.previous.contract", "previous.contract"],
+    ["contract-conformance.previous.conformance", "previous.conformance"],
+    ["contract-conformance.acceptance", "acceptance"],
+]);
 const array = (value) => Array.isArray(value) ? value : [];
 const compare = (relation, value, metadata = {}) => ({ relation, value, ...metadata });
 const scalar = (relation, value, metadata) => compare(relation, value, metadata);
@@ -30,6 +37,43 @@ function compileDocumentSelector(selectorValue, documents) {
         projection: selector.projection,
         type: selector.type,
     };
+}
+function contractConformanceRolesByPath(documents) {
+    const roles = new Map();
+    for (const [document, role] of CONTRACT_CONFORMANCE_DOCUMENT_ROLES) {
+        const definition = documents[document];
+        if (definition?.path !== undefined)
+            roles.set(canonicalDocumentPath(definition.path), role);
+    }
+    return roles;
+}
+function cochangeRoleEdge(rule, rolesByPath) {
+    if (Object.keys(rule).some((field) => field !== "if_changed" && field !== "must_change_any"))
+        return null;
+    const changed = array(rule.if_changed), required = array(rule.must_change_any);
+    if (changed.length !== 1 || required.length !== 1)
+        return null;
+    const from = rolesByPath.get(canonicalDocumentPath(changed[0])), to = rolesByPath.get(canonicalDocumentPath(required[0]));
+    return from && to && from !== to ? { from, to } : null;
+}
+function generatedContractConformanceCochange(rules, documents) {
+    const rolesByPath = contractConformanceRolesByPath(documents), roleCount = rolesByPath.size;
+    for (let count = 2; count <= roleCount; count++) {
+        const edgeCount = count * (count - 1);
+        if (edgeCount > rules.length)
+            continue;
+        const start = rules.length - edgeCount, edges = rules.slice(start).map((rule) => cochangeRoleEdge(rule, rolesByPath));
+        if (edges.some((edge) => edge === null))
+            continue;
+        const typed = edges, order = [...new Set(typed.map((edge) => edge.from))];
+        if (order.length !== count)
+            continue;
+        const expected = order.flatMap((from) => order.filter((to) => to !== from).map((to) => ({ from, to })));
+        if (expected.some((edge, index) => edge.from !== typed[index].from || edge.to !== typed[index].to))
+            continue;
+        return new Map(typed.map((edge, offset) => [start + offset, edge]));
+    }
+    return new Map();
 }
 export function compileConstraintProgram(policy = {}, changeIntent = null) {
     const program = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
@@ -144,7 +188,14 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
     if (policy.integration)
         add("runtime:integration", { kind: "integration", name: "integration" });
     add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: changeIntent?.surface_debt });
-    array(policy.cochange_rules).forEach((rule, index) => add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }));
+    const cochangeRules = array(policy.cochange_rules), generatedCochange = generatedContractConformanceCochange(cochangeRules, documents);
+    cochangeRules.forEach((rule, index) => {
+        const generated = generatedCochange.get(index), shape = generated ? { source: "contract_conformance.cochange", ...generated } : rule, pointer = `/cochange_rules/${index}`;
+        add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }, exact(shape, {
+            pointer, removeKind: "cochange_rule_removed", removeBefore: shape, removeAfter: { present: false }, removeMessage: `cochange_rules[${index}] removed`,
+            incomparableMessage: generated ? `contract_conformance.cochange generated edge ${generated.from} -> ${generated.to} changed semantics` : `cochange_rules[${index}] changed semantics`,
+        }));
+    });
     if (changeIntent) {
         add("change-intent:scope", { kind: "scope_paths", name: "change-intent-scope", patterns: changeIntent.scope });
         add("change-intent:must-touch", { kind: "require_paths", name: "must-touch", patterns: changeIntent.must_touch });
@@ -164,6 +215,7 @@ function unknownProjection(policy = {}) {
     delete copy.enforcement;
     delete copy.diff_rules;
     delete copy.size_rules;
+    delete copy.cochange_rules;
     delete copy.document_relations;
     delete copy.evidence_bindings;
     if (copy.paths) {
