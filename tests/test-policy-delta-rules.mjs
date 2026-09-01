@@ -267,7 +267,7 @@ describe("contract/conformance macro strictness", () => {
     const adoption = compareConstraintPrograms(baseline, resolved.policy);
     assert.notEqual(adoption.relation, "equal");
     assert.notEqual(adoption.relation, "weaker");
-    assert.ok(adoption.incomparable.every((item) => !JSON.stringify(item).includes("contract_conformance")));
+    assert.ok(adoption.incomparable.every((item) => item.pointer !== "/" && !item.pointer?.startsWith("/contract_conformance")));
 
     const removal = compareConstraintPrograms(resolved.policy, baseline);
     assert.equal(removal.relation, "weaker");
@@ -300,7 +300,7 @@ describe("contract/conformance macro strictness", () => {
     const currentOnly = resolvePolicyProfile(macroPolicy()).policy;
     const historyComparison = compareConstraintPrograms(currentOnly, resolved.policy);
     assert.notEqual(historyComparison.relation, "weaker");
-    assert.ok(historyComparison.incomparable.every((item) => !JSON.stringify(item).includes("contract_conformance")));
+    assert.ok(historyComparison.incomparable.every((item) => item.pointer !== "/" && !item.pointer?.startsWith("/contract_conformance")));
   });
 
   it("represents the anum_docs v0.6/v0.7 acceptance topology without domain fields", () => {
