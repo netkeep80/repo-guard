@@ -50,6 +50,7 @@ const EXACT_SHA = /^[0-9a-f]{40}$/i;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
 const object = (value: unknown): LooseObject => value && typeof value === "object" && !Array.isArray(value) ? value as LooseObject : {};
 const array = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+const asPipelinePolicy = (policy: RuntimePolicy): Parameters<typeof runPolicyPipeline>[0]["policy"] => policy as unknown as Parameters<typeof runPolicyPipeline>[0]["policy"];
 
 function resolveAtomicIntegrationTransition(basePolicy: RuntimePolicy, headPolicy: RuntimePolicy, diffText: string): AtomicIntegrationTransition | null {
   const patched = structuredClone(basePolicy) as RuntimePolicy;
@@ -234,7 +235,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     if (baseOnlyHasIntegrationMismatch && proposedProbe.violationCount === 0) {
       const transitionResult = runPolicyPipeline({
         ...baseInput,
-        policy: transition.policy,
+        policy: asPipelinePolicy(transition.policy),
         initialChecks: [
           ...initialChecks,
           {
