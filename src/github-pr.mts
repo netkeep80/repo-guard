@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
 import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
+import { parseDiff } from "./diff/parser.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
@@ -14,6 +15,7 @@ type CheckPrRoots = Parameters<typeof loadPolicyRuntime>[0] & {
   enforcementMode?: Parameters<typeof resolveEnforcementMode>[0]["cliValue"];
 };
 type GovernanceGrantResult = ReturnType<typeof extractGovernanceGrant>;
+type LooseObject = Record<string, unknown>;
 
 interface GitHubRefProjection { sha?: unknown; ref?: unknown; }
 interface GitHubPullRequestProjection {
@@ -40,9 +42,56 @@ type PRChangeIntentFacts =
   | ({ ok: true; changeIntent: unknown; changeIntentSource: "pr body" | "linked issue" } & PRFactsCommon)
   | ({ ok: false; error: string; message: string; changeIntentSource: "pr body" | "none" } & PRFactsCommon);
 interface InitialCheck { name: string; check: unknown; }
+interface AtomicRefTransition { id: string; path: string; from: string; to: string; }
+interface AtomicIntegrationTransition { policy: RuntimePolicy; transitions: AtomicRefTransition[]; }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
+const EXACT_SHA = /^[0-9a-f]{40}$/i;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
+const object = (value: unknown): LooseObject => value && typeof value === "object" && !Array.isArray(value) ? value as LooseObject : {};
+const array = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+const asPipelinePolicy = (policy: RuntimePolicy): Parameters<typeof runPolicyPipeline>[0]["policy"] => policy as unknown as Parameters<typeof runPolicyPipeline>[0]["policy"];
+
+function resolveAtomicIntegrationTransition(basePolicy: RuntimePolicy, headPolicy: RuntimePolicy, diffText: string): AtomicIntegrationTransition | null {
+  const patched = structuredClone(basePolicy) as RuntimePolicy;
+  const baseIntegration = object(object(patched).integration), headIntegration = object(object(headPolicy).integration);
+  const baseWorkflows = array<LooseObject>(baseIntegration.workflows), headWorkflows = array<LooseObject>(headIntegration.workflows);
+  if (baseWorkflows.length !== headWorkflows.length) return null;
+
+  const headById = new Map<string, LooseObject>();
+  for (const workflow of headWorkflows) {
+    if (typeof workflow.id !== "string" || headById.has(workflow.id)) return null;
+    headById.set(workflow.id, workflow);
+  }
+
+  const transitions: AtomicRefTransition[] = [];
+  for (const workflow of baseWorkflows) {
+    if (typeof workflow.id !== "string") return null;
+    const headWorkflow = headById.get(workflow.id);
+    if (!headWorkflow) return null;
+    if (isDeepStrictEqual(workflow, headWorkflow)) continue;
+    if (workflow.role !== "repo_guard_pr_gate" || headWorkflow.role !== "repo_guard_pr_gate" || typeof workflow.path !== "string" || workflow.path !== headWorkflow.path) return null;
+    const baseAction = object(object(workflow.expect).action), headAction = object(object(headWorkflow.expect).action);
+    const from = baseAction.ref, to = headAction.ref;
+    if (baseAction.uses !== headAction.uses || baseAction.ref_pinning !== "sha" || headAction.ref_pinning !== "sha" || typeof from !== "string" || typeof to !== "string" || !EXACT_SHA.test(from) || !EXACT_SHA.test(to) || from === to) return null;
+    baseAction.ref = to;
+    transitions.push({ id: workflow.id, path: workflow.path, from, to });
+  }
+
+  if (!transitions.length || !isDeepStrictEqual(patched, headPolicy)) return null;
+  const changedPaths = new Set(parseDiff(diffText).map((file) => file.path));
+  const expectedPaths = new Set(["repo-policy.json", ...transitions.map((transition) => transition.path)]);
+  if (changedPaths.size !== expectedPaths.size || [...expectedPaths].some((path) => !changedPaths.has(path))) return null;
+  return { policy: patched, transitions };
+}
+
+function atomicCutoverRequested(changeIntent: unknown, governanceGrant: unknown): boolean {
+  const grant = object(governanceGrant);
+  return object(changeIntent).change_type === "governance"
+    && grant.allow_atomic_governance_cutover === true
+    && !array<string>(grant.allow_policy_relaxation).includes("/");
+}
+
 export function loadGitHubEvent(): GitHubEventResult {
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventPath) return { ok: false, error: "no_event", message: "GITHUB_EVENT_PATH not set; not running in GitHub Actions" };
@@ -157,27 +206,56 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
   if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber }); } catch {}
 
-  const baseResult = runPolicyPipeline({
+  const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
-  } as Parameters<typeof runPolicyPipeline>[0]);
-  if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy)) return baseResult.exitCode;
+  } as Parameters<typeof runPolicyPipeline>[0];
+  if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy)) return runPolicyPipeline(baseInput).exitCode;
 
   const proposedEnforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: headRuntime.policy } as Parameters<typeof resolveEnforcementMode>[0]);
   if (!proposedEnforcement.ok) { console.error(`ERROR: proposed policy enforcement: ${proposedEnforcement.message}`); return 1; }
-
-  // Head policy — только дополнительный veto. Governance authorization и policy-delta уже
-  // проверены trusted base pass и намеренно не могут быть переопределены самим head policy.
-  console.log("\nProposed policy differs from trusted base; checking head runtime policy as an additional veto.");
-  const proposedResult = runPolicyPipeline({
+  const proposedInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
     enforcement: proposedEnforcement, diffText, initialChecks: [],
-  } as Parameters<typeof runPolicyPipeline>[0], {
+  } as Parameters<typeof runPolicyPipeline>[0];
+  const proposedOptions = {
     printEnforcement: false,
     ruleNamePrefix: "proposed-policy:",
     excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES,
-  });
+  } as const;
 
+  const transition = atomicCutoverRequested(changeIntent, governanceGrant)
+    ? resolveAtomicIntegrationTransition(basePolicy, headRuntime.policy, diffText)
+    : null;
+  if (transition) {
+    const baseProbe = runPolicyPipeline(baseInput, { quiet: true });
+    const proposedProbe = runPolicyPipeline(proposedInput, { ...proposedOptions, quiet: true });
+    const baseOnlyHasIntegrationMismatch = baseProbe.violationCount === 1 && baseProbe.violations[0]?.rule === "integration-workflows";
+    if (baseOnlyHasIntegrationMismatch && proposedProbe.violationCount === 0) {
+      const transitionResult = runPolicyPipeline({
+        ...baseInput,
+        policy: asPipelinePolicy(transition.policy),
+        initialChecks: [
+          ...initialChecks,
+          {
+            name: "trusted-atomic-integration-cutover",
+            check: {
+              ok: true,
+              message: "Trusted atomic exact Action ref transition accepted",
+              details: transition.transitions.map((item) => `${item.path}: ${item.from} -> ${item.to}`),
+            },
+          },
+        ],
+      });
+      console.log("\nProposed policy differs from trusted base; checking head runtime policy as an additional veto.");
+      const proposedResult = runPolicyPipeline(proposedInput, proposedOptions);
+      return Math.max(transitionResult.exitCode, proposedResult.exitCode);
+    }
+  }
+
+  const baseResult = runPolicyPipeline(baseInput);
+  console.log("\nProposed policy differs from trusted base; checking head runtime policy as an additional veto.");
+  const proposedResult = runPolicyPipeline(proposedInput, proposedOptions);
   return Math.max(baseResult.exitCode, proposedResult.exitCode);
 }
