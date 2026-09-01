@@ -18,6 +18,7 @@ interface StrictnessMetadata {
   field?: string;
   rule_id?: string;
   workflow_id?: string;
+  integration_doc_id?: string;
   evidence_binding_id?: string;
   raw?: DiagnosticValue;
   removeBefore?: unknown;
@@ -55,7 +56,8 @@ interface SizeRuleProjection {
   level?: EnforcementMode; count?: CountMode; ignore?: unknown; max_growth?: number;
 }
 interface IntegrationWorkflowProjection { id: string; kind?: unknown; path?: unknown; role?: unknown; profiles?: unknown; expect?: { enforcement?: EnforcementMode; [key: string]: unknown }; }
-interface IntegrationProjection { workflows?: IntegrationWorkflowProjection[]; }
+interface IntegrationDocProjection { id: string; must_reference_files?: unknown; [key: string]: unknown; }
+interface IntegrationProjection { workflows?: IntegrationWorkflowProjection[]; docs?: IntegrationDocProjection[]; [key: string]: unknown; }
 interface CochangeRuleProjection { if_changed?: unknown; must_change_any?: unknown; [key: string]: unknown; }
 interface DocumentDefinitionProjection { path?: unknown; format?: unknown; }
 interface DocumentSelectorProjection { document?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
@@ -88,7 +90,7 @@ interface ChangeIntentProjection { budgets?: DiffRulesProjection; surface_debt?:
 
 export interface PolicyRelaxation {
   kind: string; pointer?: string; before: unknown; after: unknown; message?: string; rule_id?: string; field?: string;
-  workflow_id?: string; evidence_binding_id?: string; [key: string]: unknown;
+  workflow_id?: string; integration_doc_id?: string; evidence_binding_id?: string; [key: string]: unknown;
 }
 export interface PolicyIncomparableChange { kind: "policy_incomparable"; pointer?: string; before: unknown; after: unknown; message: string; }
 export interface ConstraintProgramComparison { relation: ComparisonRelation; relaxations: PolicyRelaxation[]; incomparable: PolicyIncomparableChange[]; }
@@ -179,6 +181,16 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     }));
   }
 
+  for (const doc of array(policy.integration?.docs)) {
+    const id = String(doc.id ?? ""), owner = `integration-doc:${id}`, pointer = `/integration/docs/${id}`;
+    add(owner, null, entity({ owner, pointer, removeKind: "integration_doc_removed", integration_doc_id: id,
+      removeBefore: { present: true, must_reference_files: array(doc.must_reference_files as string[] | undefined) }, removeAfter: { present: false }, removeMessage: `integration.docs entry "${id}" removed` }));
+    add(`${owner}:must_reference_files`, null, set("superset_stricter", doc.must_reference_files, {
+      owner, pointer: `${pointer}/must_reference_files`, weakenKind: "integration_doc_required_file_removed", itemField: "file", integration_doc_id: id,
+      message: (item) => `integration.docs[${id}].must_reference_files removed: ${item}`,
+    }));
+  }
+
   const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
   for (const rule of array(documentRelations?.rules)) {
     const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
@@ -243,11 +255,15 @@ const clone = <T,>(value: T): T | undefined => value === undefined ? undefined :
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
   const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.document_relations; delete copy.evidence_bindings;
   if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
-  if (copy.integration) { delete copy.integration.workflows; if (!Object.keys(copy.integration).length) delete copy.integration; }
+  if (copy.integration) {
+    delete copy.integration.workflows;
+    if (copy.integration.docs) copy.integration.docs = copy.integration.docs.map((doc) => { const unknownDoc = { ...doc }; delete unknownDoc.must_reference_files; return unknownDoc; });
+    if (!Object.keys(copy.integration).length) delete copy.integration;
+  }
   return copy;
 }
 const relaxation = (entry: StrictnessProgramEntry, before: unknown, after: unknown = null, kind = entry.weakenKind as string, message: string | null = null, extra: Record<string, unknown> = {}): PolicyRelaxation => ({
-  kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
+  kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), ...(entry.integration_doc_id ? { integration_doc_id: entry.integration_doc_id } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
   message: message || entry.message?.(before as string | number, after as string | number) || entry.removeMessage, ...extra,
 });
 const incomparable = (entry: StrictnessProgramEntry, before: unknown, after: unknown): PolicyIncomparableChange => ({ kind: "policy_incomparable", pointer: entry.pointer, before, after, message: entry.incomparableMessage || `policy constraint ${entry.key} changed with no proven monotonic ordering` });
