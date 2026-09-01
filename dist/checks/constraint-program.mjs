@@ -83,6 +83,15 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
                 message: (a, b) => `integration.workflows[${workflow.id}].expect.enforcement: ${a} -> ${b}`, removeMessage: `integration.workflows[${workflow.id}].expect.enforcement removed (was ${enforcement})`,
             }));
     }
+    for (const doc of array(policy.integration?.docs)) {
+        const id = String(doc.id ?? ""), owner = `integration-doc:${id}`, pointer = `/integration/docs/${id}`;
+        add(owner, null, entity({ owner, pointer, removeKind: "integration_doc_removed", integration_doc_id: id,
+            removeBefore: { present: true, must_reference_files: array(doc.must_reference_files) }, removeAfter: { present: false }, removeMessage: `integration.docs entry "${id}" removed` }));
+        add(`${owner}:must_reference_files`, null, set("superset_stricter", doc.must_reference_files, {
+            owner, pointer: `${pointer}/must_reference_files`, weakenKind: "integration_doc_required_file_removed", itemField: "file", integration_doc_id: id,
+            message: (item) => `integration.docs[${id}].must_reference_files removed: ${item}`,
+        }));
+    }
     const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
     for (const rule of array(documentRelations?.rules)) {
         const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
@@ -165,13 +174,15 @@ function unknownProjection(policy = {}) {
     }
     if (copy.integration) {
         delete copy.integration.workflows;
+        if (copy.integration.docs)
+            copy.integration.docs = copy.integration.docs.map((doc) => { const unknownDoc = { ...doc }; delete unknownDoc.must_reference_files; return unknownDoc; });
         if (!Object.keys(copy.integration).length)
             delete copy.integration;
     }
     return copy;
 }
 const relaxation = (entry, before, after = null, kind = entry.weakenKind, message = null, extra = {}) => ({
-    kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
+    kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.workflow_id ? { workflow_id: entry.workflow_id } : {}), ...(entry.integration_doc_id ? { integration_doc_id: entry.integration_doc_id } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
     message: message || entry.message?.(before, after) || entry.removeMessage, ...extra,
 });
 const incomparable = (entry, before, after) => ({ kind: "policy_incomparable", pointer: entry.pointer, before, after, message: entry.incomparableMessage || `policy constraint ${entry.key} changed with no proven monotonic ordering` });
