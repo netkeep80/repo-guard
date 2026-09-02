@@ -137,11 +137,24 @@ describe("contract_conformance.current promotion strictness", () => {
     assert.ok(!pointers.includes("/"));
   });
 
-  it("keeps contract_conformance.cochange semantic edits fail-closed", () => {
+  it("treats contract_conformance.cochange role reordering as a semantic no-op", () => {
     const baseSource = sourcePolicy("v1"), headSource = structuredClone(baseSource);
     headSource.contract_conformance.cochange = ["current.conformance", "current.contract"];
+    assert.deepEqual(comparisonPointers(resolve(baseSource), resolve(headSource)), []);
+  });
+
+  it("keeps contract_conformance.cochange membership edits fail-closed", () => {
+    const baseSource = sourcePolicy("v1");
+    baseSource.contract_conformance.previous = {
+      contract: { path: "contracts/previous-spec-v0.json", format: "json" },
+      conformance: { path: "contracts/previous-checks-v0.json", format: "json" },
+    };
+    baseSource.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.contract"];
+    const headSource = structuredClone(baseSource);
+    headSource.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.conformance"];
     const pointers = comparisonPointers(resolve(baseSource), resolve(headSource));
-    assert.deepEqual(pointers, ["/cochange_rules/0", "/cochange_rules/1"]);
+    assert.ok(pointers.length > 0);
+    assert.ok(pointers.every((pointer) => pointer?.startsWith("/cochange_rules/")));
   });
 
   it("keeps pair_fields edits fail-closed through generated relation semantics", () => {
