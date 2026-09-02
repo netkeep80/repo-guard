@@ -280,8 +280,14 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   const cochangeRules = array(policy.cochange_rules), generatedCochange = generatedContractConformanceCochange(cochangeRules, documents);
   cochangeRules.forEach((rule, index) => {
     const generated = generatedCochange.get(index), shape = generated ? { source: "contract_conformance.cochange", ...generated } : rule, pointer = `/cochange_rules/${index}`;
-    add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule }, exact(shape, {
-      pointer, removeKind: "cochange_rule_removed", removeBefore: shape, removeAfter: { present: false }, removeMessage: `cochange_rules[${index}] removed`,
+    const owner = generated ? `cochange-policy:contract-conformance:${generated.from}->${generated.to}` : `cochange-policy:${index}`;
+    add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule });
+    add(owner, null, entity({
+      owner, pointer, removeKind: "cochange_rule_removed", removeBefore: shape, removeAfter: { present: false },
+      removeMessage: generated ? `contract_conformance.cochange generated edge ${generated.from} -> ${generated.to} removed` : `cochange_rules[${index}] removed`,
+    }));
+    add(`${owner}:shape`, null, exact(shape, {
+      owner, pointer,
       incomparableMessage: generated ? `contract_conformance.cochange generated edge ${generated.from} -> ${generated.to} changed semantics` : `cochange_rules[${index}] changed semantics`,
     }));
   });
