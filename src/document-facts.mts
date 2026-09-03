@@ -60,7 +60,7 @@ export interface DocumentReader {
   yaml(path: string): unknown;
 }
 
-export type DocumentProjection = "value" | "array_items" | "object_values";
+export type DocumentProjection = "value" | "array_items" | "object_values" | "object_keys";
 export type DocumentFactType = "scalar" | "string" | "boolean" | "string_set" | "repository_path" | "repository_path_set";
 export type DocumentScalar = string | number | boolean | null;
 export type NormalizedDocumentFact = DocumentScalar | string[];
@@ -166,7 +166,7 @@ export function resolveJsonPointer(data: unknown, pointer: string): unknown {
 
 export function projectDocumentValue(data: unknown, pointer: string): unknown;
 export function projectDocumentValue(data: unknown, pointer: string, projection: "value"): unknown;
-export function projectDocumentValue(data: unknown, pointer: string, projection: "array_items" | "object_values"): unknown[];
+export function projectDocumentValue(data: unknown, pointer: string, projection: "array_items" | "object_values" | "object_keys"): unknown[];
 export function projectDocumentValue(data: unknown, pointer: string, projection: DocumentProjection): unknown | unknown[];
 export function projectDocumentValue(data: unknown, pointer: string, projection: DocumentProjection = "value"): unknown | unknown[] {
   const selected = resolveJsonPointer(data, pointer);
@@ -182,6 +182,12 @@ export function projectDocumentValue(data: unknown, pointer: string, projection:
       failDocumentFact("projection_type_mismatch", `document projection "object_values" requires an object at json_pointer "${pointer}"`, pointer);
     }
     return Object.values(selected as Record<string, unknown>);
+  }
+  if (projection === "object_keys") {
+    if (selected === null || typeof selected !== "object" || Array.isArray(selected)) {
+      failDocumentFact("projection_type_mismatch", `document projection "object_keys" requires an object at json_pointer "${pointer}"`, pointer);
+    }
+    return Object.keys(selected as Record<string, unknown>);
   }
   const exhaustive: never = projection;
   return failDocumentFact("projection_type_mismatch", `unsupported document projection "${String(exhaustive)}"`, pointer);
