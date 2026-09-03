@@ -48,28 +48,28 @@ function traceabilityPolicy() {
     ...basePolicy,
     document_relations: {
       documents: {
-        traceability: { path: "traceability/mts-v0.11.json", format: "json" },
-        contract: { path: "contracts/mts-contract-v0.11.json", format: "json" },
-        conformance: { path: "contracts/mts-conformance-v0.11.json", format: "json" },
+        traceability: { path: "fixtures/traceability.json", format: "json" },
+        specification: { path: "fixtures/specification.json", format: "json" },
+        evidence: { path: "fixtures/evidence.json", format: "json" },
       },
       rules: [
         {
-          id: "invariant-ids-match",
+          id: "obligation-ids-match",
           kind: "set_equal",
-          left: { document: "traceability", pointer: "/invariants", projection: "object_keys", type: "string_set" },
-          right: { document: "contract", pointer: "/requiredSemanticLaws", projection: "object_keys", type: "string_set" },
+          left: { document: "traceability", pointer: "/obligations", projection: "object_keys", type: "string_set" },
+          right: { document: "specification", pointer: "/requirements", projection: "object_keys", type: "string_set" },
         },
         {
-          id: "alpha-positive-known",
+          id: "alpha-cases-known",
           kind: "set_subset",
-          left: { document: "traceability", pointer: "/invariants/alpha/positive", projection: "array_items", type: "string_set" },
-          right: { document: "conformance", pointer: "/requiredGenesisVectors", projection: "array_items", type: "string_set" },
+          left: { document: "traceability", pointer: "/obligations/alpha/positiveCases", projection: "array_items", type: "string_set" },
+          right: { document: "evidence", pointer: "/caseIds", projection: "array_items", type: "string_set" },
         },
         {
-          id: "alpha-contract-pointer-resolves",
+          id: "alpha-spec-pointer-resolves",
           kind: "referenced_pointer_exists",
-          source: { document: "traceability", pointer: "/invariants/alpha/contractPointer", type: "string" },
-          target_document: "contract",
+          source: { document: "traceability", pointer: "/obligations/alpha/specPointer", type: "string" },
+          target_document: "specification",
         },
       ],
     },
@@ -78,37 +78,37 @@ function traceabilityPolicy() {
 
 function traceabilityFiles(overrides = {}) {
   const traceability = {
-    invariants: {
+    obligations: {
       alpha: {
-        contractPointer: "/requiredSemanticLaws/alpha",
-        positive: ["genesis-alpha"],
+        specPointer: "/requirements/alpha",
+        positiveCases: ["case-alpha"],
       },
     },
   };
-  const contract = {
-    requiredSemanticLaws: {
-      alpha: { description: "alpha law" },
+  const specification = {
+    requirements: {
+      alpha: { description: "alpha requirement" },
     },
   };
-  const conformance = {
-    requiredGenesisVectors: ["genesis-alpha", "genesis-extra"],
+  const evidence = {
+    caseIds: ["case-alpha", "case-extra"],
   };
   return {
-    "traceability/mts-v0.11.json": JSON.stringify(overrides.traceability ?? traceability),
-    "contracts/mts-contract-v0.11.json": JSON.stringify(overrides.contract ?? contract),
-    "contracts/mts-conformance-v0.11.json": JSON.stringify(overrides.conformance ?? conformance),
+    "fixtures/traceability.json": JSON.stringify(overrides.traceability ?? traceability),
+    "fixtures/specification.json": JSON.stringify(overrides.specification ?? specification),
+    "fixtures/evidence.json": JSON.stringify(overrides.evidence ?? evidence),
   };
 }
 
-it("projects object keys for invariant identity coverage", () => {
+it("projects object keys for stable identity coverage", () => {
   const document = {
-    invariants: {
-      beta: { contractPointer: "/laws/beta" },
-      alpha: { contractPointer: "/laws/alpha" },
+    obligations: {
+      beta: { specPointer: "/requirements/beta" },
+      alpha: { specPointer: "/requirements/alpha" },
     },
   };
 
-  const keys = projectDocumentValue(document, "/invariants", "object_keys");
+  const keys = projectDocumentValue(document, "/obligations", "object_keys");
 
   assert.deepEqual(keys, ["beta", "alpha"]);
   assert.deepEqual(normalizeDocumentFact(keys, "string_set"), ["alpha", "beta"]);
@@ -116,7 +116,7 @@ it("projects object keys for invariant identity coverage", () => {
 
 it("fails closed when object_keys targets a non-object", () => {
   assert.throws(
-    () => projectDocumentValue({ invariants: ["alpha"] }, "/invariants", "object_keys"),
+    () => projectDocumentValue({ obligations: ["alpha"] }, "/obligations", "object_keys"),
     /requires an object/,
   );
 });
@@ -124,48 +124,122 @@ it("fails closed when object_keys targets a non-object", () => {
 it("executes set equality, subset and referenced-pointer relations through the canonical pipeline", () => {
   const result = runTraceability(traceabilityPolicy(), traceabilityFiles());
 
-  assert.equal(result.ruleResults.find((item) => item.rule === "document-relation:invariant-ids-match")?.ok, true);
-  assert.equal(result.ruleResults.find((item) => item.rule === "document-relation:alpha-positive-known")?.ok, true);
-  assert.equal(result.ruleResults.find((item) => item.rule === "document-relation:alpha-contract-pointer-resolves")?.ok, true);
+  assert.equal(result.ruleResults.find((item) => item.rule === "document-relation:obligation-ids-match")?.ok, true);
+  assert.equal(result.ruleResults.find((item) => item.rule === "document-relation:alpha-cases-known")?.ok, true);
+  assert.equal(result.ruleResults.find((item) => item.rule === "document-relation:alpha-spec-pointer-resolves")?.ok, true);
+});
+
+it("normalizes set order and duplicates deterministically", () => {
+  const files = traceabilityFiles({
+    traceability: {
+      obligations: {
+        alpha: {
+          specPointer: "/requirements/alpha",
+          positiveCases: ["case-b", "case-alpha", "case-b"],
+        },
+      },
+    },
+    evidence: { caseIds: ["case-alpha", "case-b", "case-alpha"] },
+  });
+  const result = runTraceability(traceabilityPolicy(), files);
+  const relation = result.ruleResults.find((item) => item.rule === "document-relation:alpha-cases-known");
+
+  assert.equal(relation?.ok, true);
+  assert.deepEqual(relation?.data?.left?.value, ["case-alpha", "case-b"]);
+  assert.deepEqual(relation?.data?.right?.value, ["case-alpha", "case-b"]);
 });
 
 it("reports exact missing set members", () => {
   const files = traceabilityFiles({
     traceability: {
-      invariants: {
+      obligations: {
         alpha: {
-          contractPointer: "/requiredSemanticLaws/alpha",
-          positive: ["genesis-alpha", "unknown-vector"],
+          specPointer: "/requirements/alpha",
+          positiveCases: ["case-alpha", "case-unknown"],
         },
       },
     },
   });
   const result = runTraceability(traceabilityPolicy(), files);
-  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-positive-known");
+  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-cases-known");
 
   assert.equal(Boolean(violation), true);
-  assert.deepEqual(violation?.data?.missing_values, ["unknown-vector"]);
+  assert.deepEqual(violation?.data?.missing_values, ["case-unknown"]);
+});
+
+it("fails closed when a set selector has the wrong collection shape", () => {
+  const files = traceabilityFiles({
+    traceability: {
+      obligations: {
+        alpha: {
+          specPointer: "/requirements/alpha",
+          positiveCases: "case-alpha",
+        },
+      },
+    },
+  });
+  const result = runTraceability(traceabilityPolicy(), files);
+  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-cases-known");
+
+  assert.equal(Boolean(violation), true);
+  assert.equal(violation?.data?.left?.error?.code, "projection_type_mismatch");
 });
 
 it("fails closed when a referenced JSON Pointer is dangling", () => {
   const files = traceabilityFiles({
     traceability: {
-      invariants: {
+      obligations: {
         alpha: {
-          contractPointer: "/requiredSemanticLaws/missing",
-          positive: ["genesis-alpha"],
+          specPointer: "/requirements/missing",
+          positiveCases: ["case-alpha"],
         },
       },
     },
   });
   const result = runTraceability(traceabilityPolicy(), files);
-  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-contract-pointer-resolves");
+  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-spec-pointer-resolves");
 
   assert.equal(Boolean(violation), true);
   assert.equal(violation?.data?.target?.error?.code, "missing_pointer_segment");
 });
 
-it("accepts the synthetic traceability policy through the public schema and semantic compiler", () => {
+it("fails closed when a referenced JSON Pointer is malformed", () => {
+  const files = traceabilityFiles({
+    traceability: {
+      obligations: {
+        alpha: {
+          specPointer: "/requirements/~2invalid",
+          positiveCases: ["case-alpha"],
+        },
+      },
+    },
+  });
+  const result = runTraceability(traceabilityPolicy(), files);
+  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-spec-pointer-resolves");
+
+  assert.equal(Boolean(violation), true);
+  assert.equal(violation?.data?.target?.error?.code, "malformed_pointer");
+});
+
+it("fails closed when the referenced-pointer source value is not a string", () => {
+  const files = traceabilityFiles({
+    traceability: {
+      obligations: {
+        alpha: {
+          specPointer: ["/requirements/alpha"],
+          positiveCases: ["case-alpha"],
+        },
+      },
+    },
+  });
+  const result = runTraceability(traceabilityPolicy(), files);
+  const violation = result.violations.find((item) => item.rule === "document-relation:alpha-spec-pointer-resolves");
+
+  assert.equal(Boolean(violation), true);
+  assert.equal(violation?.data?.source?.error?.code, "fact_type_mismatch");
+});
+
+it("accepts a synthetic non-domain traceability policy through the public schema and semantic compiler", () => {
   const policy = traceabilityPolicy();
   const loaded = loadPolicyRuntimeFromObject(
     { packageRoot: projectRoot, repoRoot: projectRoot },
@@ -187,7 +261,7 @@ it("semantic compilation rejects an unknown referenced-pointer target document",
 
 it("public schema keeps traceability relations narrow and non-executable", () => {
   const executable = traceabilityPolicy();
-  executable.document_relations.rules[1].command = "pytest";
+  executable.document_relations.rules[1].command = "run-tests";
   assert.equal(loadPolicyRuntimeFromObject(
     { packageRoot: projectRoot, repoRoot: projectRoot }, executable, { quiet: true },
   ).ok, false);
@@ -202,7 +276,7 @@ it("public schema keeps traceability relations narrow and non-executable", () =>
 it("keeps new traceability relations monotonic under the existing Constraint Program model", () => {
   const full = traceabilityPolicy();
   const withoutSubset = structuredClone(full);
-  withoutSubset.document_relations.rules = withoutSubset.document_relations.rules.filter((rule) => rule.id !== "alpha-positive-known");
+  withoutSubset.document_relations.rules = withoutSubset.document_relations.rules.filter((rule) => rule.id !== "alpha-cases-known");
 
   const added = compareConstraintPrograms(withoutSubset, full);
   assert.equal(added.relation, "stricter");
@@ -210,11 +284,11 @@ it("keeps new traceability relations monotonic under the existing Constraint Pro
 
   const removed = compareConstraintPrograms(full, withoutSubset);
   assert.equal(removed.relation, "weaker");
-  assert.ok(removed.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "alpha-positive-known"));
+  assert.ok(removed.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "alpha-cases-known"));
 
   const retargeted = structuredClone(full);
-  retargeted.document_relations.rules.find((rule) => rule.id === "alpha-contract-pointer-resolves").target_document = "conformance";
+  retargeted.document_relations.rules.find((rule) => rule.id === "alpha-spec-pointer-resolves").target_document = "evidence";
   const edited = compareConstraintPrograms(full, retargeted);
   assert.equal(edited.relation, "incomparable");
-  assert.ok(edited.incomparable.some((item) => item.pointer === "/document_relations/rules/alpha-contract-pointer-resolves"));
+  assert.ok(edited.incomparable.some((item) => item.pointer === "/document_relations/rules/alpha-spec-pointer-resolves"));
 });
