@@ -63,7 +63,7 @@ interface CochangeRuleProjection { if_changed?: unknown; must_change_any?: unkno
 interface CochangeRoleEdge { from: ContractConformanceRole; to: ContractConformanceRole; }
 interface DocumentDefinitionProjection { path?: unknown; format?: unknown; }
 interface DocumentSelectorProjection { document?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
-interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; left?: unknown; right?: unknown; source?: unknown; value?: unknown; }
+interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; left?: unknown; right?: unknown; source?: unknown; value?: unknown; target_document?: unknown; }
 interface DocumentRelationsProjection { documents?: Record<string, DocumentDefinitionProjection>; rules?: DocumentRelationRuleProjection[]; }
 interface EvidenceBindingProjection {
   id?: unknown;
@@ -132,6 +132,10 @@ function compileDocumentSelector(selectorValue: unknown, documents: Record<strin
     projection: selector.projection,
     type: selector.type as DocumentFactType,
   };
+}
+function compileDocumentTarget(documentValue: unknown, documents: Record<string, DocumentDefinitionProjection>) {
+  const document = typeof documentValue === "string" ? documentValue : "", definition = documents[document] || {};
+  return { document, path: canonicalDocumentPath(definition.path), format: definition.format };
 }
 function contractConformanceRolesByPath(documents: Record<string, DocumentDefinitionProjection>): Map<string, ContractConformanceRole> {
   const roles = new Map<string, ContractConformanceRole>();
@@ -247,6 +251,14 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
       const source = compileDocumentSelector(rule.source, documents);
       runtime = { ...runtimeBase, kind: "document_referenced_paths_exist", source };
       shape = { kind: rule.kind, source };
+    } else if (rule.kind === "set_equal" || rule.kind === "set_subset") {
+      const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
+      runtime = { ...runtimeBase, kind: rule.kind === "set_equal" ? "document_set_equal" : "document_set_subset", left, right };
+      shape = { kind: rule.kind, left, right };
+    } else if (rule.kind === "referenced_pointer_exists") {
+      const source = compileDocumentSelector(rule.source, documents), target = compileDocumentTarget(rule.target_document, documents);
+      runtime = { ...runtimeBase, kind: "document_referenced_pointer_exists", source, target };
+      shape = { kind: rule.kind, source, target };
     }
     add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
       removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));
