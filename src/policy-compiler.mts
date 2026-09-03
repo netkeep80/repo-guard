@@ -128,24 +128,32 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
   const section = object(policy.document_relations), documents = object(section.documents), rules = list<LooseObject>(section.rules);
   const errors: SemanticDiagnostic[] = [], seenRuleIds = new Set<unknown>(), usedDocuments = new Set<string>();
   for (const [name, rawDefinition] of Object.entries(documents)) normalizeDeclaredDocumentPath(name, object(rawDefinition), errors);
-  const useSelector = (ruleId: unknown, field: string, rawSelector: unknown) => {
-    const selector = object(rawSelector), document = selector.document;
+  const useDocument = (ruleId: unknown, field: string, document: unknown) => {
     if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
       errors.push({ rule_id: ruleId, field, document, message: `document_relations rule "${ruleId}" ${field} references unknown document "${document}"` });
       return;
     }
     usedDocuments.add(document);
   };
+  const useSelector = (ruleId: unknown, field: string, rawSelector: unknown) => {
+    useDocument(ruleId, field, object(rawSelector).document);
+  };
   for (const [index, rule] of rules.entries()) {
     const id = rule.id;
     if (seenRuleIds.has(id)) errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
     seenRuleIds.add(id);
-    if (rule.kind === "scalar_equal") { useSelector(id, "left", rule.left); useSelector(id, "right", rule.right); }
-    else if (rule.kind === "scalar_equals_literal") {
+    if (rule.kind === "scalar_equal" || rule.kind === "set_equal" || rule.kind === "set_subset") {
+      useSelector(id, "left", rule.left);
+      useSelector(id, "right", rule.right);
+    } else if (rule.kind === "scalar_equals_literal") {
       useSelector(id, "source", rule.source);
       const selector = object(rule.source);
       if (!scalarLiteralMatches(selector.type, rule.value)) errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
     } else if (rule.kind === "referenced_paths_exist") useSelector(id, "source", rule.source);
+    else if (rule.kind === "referenced_pointer_exists") {
+      useSelector(id, "source", rule.source);
+      useDocument(id, "target_document", rule.target_document);
+    }
   }
   // Evidence bindings are first-class consumers of the shared document pool.
   for (const binding of list<LooseObject>(policy.evidence_bindings)) {
