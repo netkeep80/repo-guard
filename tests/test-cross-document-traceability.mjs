@@ -1,6 +1,7 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
+import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import {
   normalizeDocumentFact,
   projectDocumentValue,
@@ -196,4 +197,24 @@ it("public schema keeps traceability relations narrow and non-executable", () =>
   assert.equal(loadPolicyRuntimeFromObject(
     { packageRoot: projectRoot, repoRoot: projectRoot }, wrongPointerSource, { quiet: true },
   ).ok, false);
+});
+
+it("keeps new traceability relations monotonic under the existing Constraint Program model", () => {
+  const full = traceabilityPolicy();
+  const withoutSubset = structuredClone(full);
+  withoutSubset.document_relations.rules = withoutSubset.document_relations.rules.filter((rule) => rule.id !== "alpha-positive-known");
+
+  const added = compareConstraintPrograms(withoutSubset, full);
+  assert.equal(added.relation, "stricter");
+  assert.deepEqual(added.relaxations, []);
+
+  const removed = compareConstraintPrograms(full, withoutSubset);
+  assert.equal(removed.relation, "weaker");
+  assert.ok(removed.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "alpha-positive-known"));
+
+  const retargeted = structuredClone(full);
+  retargeted.document_relations.rules.find((rule) => rule.id === "alpha-contract-pointer-resolves").target_document = "conformance";
+  const edited = compareConstraintPrograms(full, retargeted);
+  assert.equal(edited.relation, "incomparable");
+  assert.ok(edited.incomparable.some((item) => item.pointer === "/document_relations/rules/alpha-contract-pointer-resolves"));
 });
