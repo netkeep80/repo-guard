@@ -1,9 +1,10 @@
 import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { selectPaths } from "../../diff/classification.mjs";
-import { readDocumentFact } from "../../document-facts.mjs";
+import { DocumentFactFailure, readDocumentFact, resolveJsonPointer } from "../../document-facts.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
+import { compareSets } from "../relation-kernel.mjs";
 import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
@@ -23,6 +24,9 @@ const CONSTRAINT_PHASES = {
     document_scalar_equal: "state",
     document_scalar_equals_literal: "state",
     document_referenced_paths_exist: "state",
+    document_set_equal: "state",
+    document_set_subset: "state",
+    document_referenced_pointer_exists: "state",
     evidence_workflow_path_coverage: "state",
     evidence_anchor_value_coverage: "state",
 };
@@ -152,6 +156,45 @@ function checkDocumentReferencedPathsExist(facts, constraint) {
     const missingPaths = referencedPaths.filter((path) => !tracked.has(path)).sort();
     return { ok: missingPaths.length === 0, message: missingPaths.length ? `document relation "${constraint.relation_id}" references missing repository paths` : undefined, data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: missingPaths } };
 }
+function checkDocumentSetRelation(facts, constraint, relation) {
+    const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
+    const kind = relation === "equal" ? "set_equal" : "set_subset";
+    if (!left.ok || !right.ok)
+        return { ok: false, message: `document relation "${constraint.relation_id}" could not read string-set operands`, data: { kind, left, right } };
+    if (!Array.isArray(left.value) || !Array.isArray(right.value))
+        return { ok: false, message: `document relation "${constraint.relation_id}" did not produce string sets`, data: { kind, left, right } };
+    const compared = compareSets(left.value, right.value, relation);
+    return {
+        ok: compared.ok,
+        message: compared.ok ? undefined : `document relation "${constraint.relation_id}" failed ${kind}`,
+        data: { kind, left, right, missing_values: compared.missing, extra_values: compared.extra },
+    };
+}
+function pointerTargetError(error, pointer) {
+    if (error instanceof DocumentFactFailure)
+        return { code: error.code, pointer: error.pointer, ...(error.segment === undefined ? {} : { segment: error.segment }), message: error.message };
+    const message = error instanceof Error ? error.message : String(error);
+    return { code: "document_read_error", pointer, message: String(message || "document read failed").replace(/\s+/g, " ").trim() };
+}
+function readReferencedPointerTarget(reader, target, pointer) {
+    if (!reader || !target?.path)
+        return { ok: false, error: { code: "document_read_error", pointer, message: "document reader or target document is unavailable" } };
+    try {
+        const document = target.format === "yaml" ? reader.yaml(target.path) : target.format === "json" ? reader.json(target.path) : (() => { throw new DocumentFactFailure("unsupported_document_type", `unsupported document type for "${target.path}"`, pointer); })();
+        resolveJsonPointer(document, pointer);
+        return { ok: true, document: target.document, path: target.path, pointer };
+    }
+    catch (error) {
+        return { ok: false, error: pointerTargetError(error, pointer) };
+    }
+}
+function checkDocumentReferencedPointerExists(facts, constraint) {
+    const source = factOperand(facts.documents, constraint.source);
+    if (!source.ok || typeof source.value !== "string")
+        return { ok: false, message: `document relation "${constraint.relation_id}" could not read JSON Pointer source`, data: { kind: "referenced_pointer_exists", source } };
+    const target = readReferencedPointerTarget(facts.documents, constraint.target, source.value);
+    return { ok: target.ok, message: target.ok ? undefined : `document relation "${constraint.relation_id}" references a missing target pointer`, data: { kind: "referenced_pointer_exists", source, target } };
+}
 function checkEvidenceWorkflowPathCoverage(facts, constraint) {
     const source = factOperand(facts.documents, constraint.source);
     if (!source.ok)
@@ -255,6 +298,12 @@ export function evaluateConstraintIR(facts, context = {}) {
             check = checkDocumentScalarLiteral(facts, constraint);
         else if (constraint.kind === "document_referenced_paths_exist")
             check = checkDocumentReferencedPathsExist(facts, constraint);
+        else if (constraint.kind === "document_set_equal")
+            check = checkDocumentSetRelation(facts, constraint, "equal");
+        else if (constraint.kind === "document_set_subset")
+            check = checkDocumentSetRelation(facts, constraint, "left_subset");
+        else if (constraint.kind === "document_referenced_pointer_exists")
+            check = checkDocumentReferencedPointerExists(facts, constraint);
         else if (constraint.kind === "evidence_workflow_path_coverage")
             check = checkEvidenceWorkflowPathCoverage(facts, constraint);
         else if (constraint.kind === "evidence_anchor_value_coverage")
