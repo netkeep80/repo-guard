@@ -74,6 +74,12 @@ export function projectDocumentValue(data, pointer, projection = "value") {
         }
         return Object.values(selected);
     }
+    if (projection === "object_keys") {
+        if (selected === null || typeof selected !== "object" || Array.isArray(selected)) {
+            failDocumentFact("projection_type_mismatch", `document projection "object_keys" requires an object at json_pointer "${pointer}"`, pointer);
+        }
+        return Object.keys(selected);
+    }
     const exhaustive = projection;
     return failDocumentFact("projection_type_mismatch", `unsupported document projection "${String(exhaustive)}"`, pointer);
 }

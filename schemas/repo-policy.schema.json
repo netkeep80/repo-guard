@@ -496,6 +496,16 @@
         "type": { "type": "string", "enum": ["scalar", "string", "boolean"] }
       }
     },
+    "document_string_selector": {
+      "type": "object",
+      "required": ["document", "pointer", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "document": { "$ref": "#/definitions/non_empty_string" },
+        "pointer": { "type": "string" },
+        "type": { "const": "string" }
+      }
+    },
     "document_repository_path_set_selector": {
       "type": "object",
       "required": ["document", "pointer", "projection", "type"],
@@ -514,7 +524,7 @@
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
         "pointer": { "type": "string" },
-        "projection": { "type": "string", "enum": ["array_items", "object_values"] },
+        "projection": { "type": "string", "enum": ["array_items", "object_values", "object_keys"] },
         "type": { "const": "string_set" }
       }
     },
@@ -550,6 +560,39 @@
             "id": { "$ref": "#/definitions/non_empty_string" },
             "kind": { "const": "referenced_paths_exist" },
             "source": { "$ref": "#/definitions/document_repository_path_set_selector" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "set_equal" },
+            "left": { "$ref": "#/definitions/document_string_set_selector" },
+            "right": { "$ref": "#/definitions/document_string_set_selector" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "set_subset" },
+            "left": { "$ref": "#/definitions/document_string_set_selector" },
+            "right": { "$ref": "#/definitions/document_string_set_selector" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "source", "target_document"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "referenced_pointer_exists" },
+            "source": { "$ref": "#/definitions/document_string_selector" },
+            "target_document": { "$ref": "#/definitions/non_empty_string" }
           }
         }
       ]

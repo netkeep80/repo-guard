@@ -38,6 +38,10 @@ function compileDocumentSelector(selectorValue, documents) {
         type: selector.type,
     };
 }
+function compileDocumentTarget(documentValue, documents) {
+    const document = typeof documentValue === "string" ? documentValue : "", definition = documents[document] || {};
+    return { document, path: canonicalDocumentPath(definition.path), format: definition.format };
+}
 function contractConformanceRolesByPath(documents) {
     const roles = new Map();
     for (const [document, role] of CONTRACT_CONFORMANCE_DOCUMENT_ROLES) {
@@ -155,6 +159,16 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
             const source = compileDocumentSelector(rule.source, documents);
             runtime = { ...runtimeBase, kind: "document_referenced_paths_exist", source };
             shape = { kind: rule.kind, source };
+        }
+        else if (rule.kind === "set_equal" || rule.kind === "set_subset") {
+            const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
+            runtime = { ...runtimeBase, kind: rule.kind === "set_equal" ? "document_set_equal" : "document_set_subset", left, right };
+            shape = { kind: rule.kind, left, right };
+        }
+        else if (rule.kind === "referenced_pointer_exists") {
+            const source = compileDocumentSelector(rule.source, documents), target = compileDocumentTarget(rule.target_document, documents);
+            runtime = { ...runtimeBase, kind: "document_referenced_pointer_exists", source, target };
+            shape = { kind: rule.kind, source, target };
         }
         add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
             removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));

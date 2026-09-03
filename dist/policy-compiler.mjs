@@ -136,20 +136,22 @@ export function compileDocumentRelationsPolicy(policy = {}) {
     const errors = [], seenRuleIds = new Set(), usedDocuments = new Set();
     for (const [name, rawDefinition] of Object.entries(documents))
         normalizeDeclaredDocumentPath(name, object(rawDefinition), errors);
-    const useSelector = (ruleId, field, rawSelector) => {
-        const selector = object(rawSelector), document = selector.document;
+    const useDocument = (ruleId, field, document) => {
         if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
             errors.push({ rule_id: ruleId, field, document, message: `document_relations rule "${ruleId}" ${field} references unknown document "${document}"` });
             return;
         }
         usedDocuments.add(document);
     };
+    const useSelector = (ruleId, field, rawSelector) => {
+        useDocument(ruleId, field, object(rawSelector).document);
+    };
     for (const [index, rule] of rules.entries()) {
         const id = rule.id;
         if (seenRuleIds.has(id))
             errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
         seenRuleIds.add(id);
-        if (rule.kind === "scalar_equal") {
+        if (rule.kind === "scalar_equal" || rule.kind === "set_equal" || rule.kind === "set_subset") {
             useSelector(id, "left", rule.left);
             useSelector(id, "right", rule.right);
         }
@@ -161,6 +163,10 @@ export function compileDocumentRelationsPolicy(policy = {}) {
         }
         else if (rule.kind === "referenced_paths_exist")
             useSelector(id, "source", rule.source);
+        else if (rule.kind === "referenced_pointer_exists") {
+            useSelector(id, "source", rule.source);
+            useDocument(id, "target_document", rule.target_document);
+        }
     }
     // Evidence bindings are first-class consumers of the shared document pool.
     for (const binding of list(policy.evidence_bindings)) {
