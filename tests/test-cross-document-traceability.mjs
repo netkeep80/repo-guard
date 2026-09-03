@@ -1,11 +1,15 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import {
   normalizeDocumentFact,
   projectDocumentValue,
 } from "../dist/document-facts.mjs";
+import { compileDocumentRelationsPolicy } from "../dist/policy-compiler.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
+import { loadPolicyRuntimeFromObject } from "../dist/runtime/validation.mjs";
 
+const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const basePolicy = {
   policy_format_version: "0.3.0",
   repository_kind: "tooling",
@@ -158,4 +162,38 @@ it("fails closed when a referenced JSON Pointer is dangling", () => {
 
   assert.equal(Boolean(violation), true);
   assert.equal(violation?.data?.target?.error?.code, "missing_pointer_segment");
+});
+
+it("accepts the synthetic traceability policy through the public schema and semantic compiler", () => {
+  const policy = traceabilityPolicy();
+  const loaded = loadPolicyRuntimeFromObject(
+    { packageRoot: projectRoot, repoRoot: projectRoot },
+    policy,
+    { quiet: true },
+  );
+
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(compileDocumentRelationsPolicy(policy), []);
+});
+
+it("semantic compilation rejects an unknown referenced-pointer target document", () => {
+  const policy = traceabilityPolicy();
+  policy.document_relations.rules[2].target_document = "missing";
+  const messages = compileDocumentRelationsPolicy(policy).map((error) => error.message);
+
+  assert.ok(messages.some((message) => /target_document.*unknown document "missing"/.test(message)));
+});
+
+it("public schema keeps traceability relations narrow and non-executable", () => {
+  const executable = traceabilityPolicy();
+  executable.document_relations.rules[1].command = "pytest";
+  assert.equal(loadPolicyRuntimeFromObject(
+    { packageRoot: projectRoot, repoRoot: projectRoot }, executable, { quiet: true },
+  ).ok, false);
+
+  const wrongPointerSource = traceabilityPolicy();
+  wrongPointerSource.document_relations.rules[2].source.type = "string_set";
+  assert.equal(loadPolicyRuntimeFromObject(
+    { packageRoot: projectRoot, repoRoot: projectRoot }, wrongPointerSource, { quiet: true },
+  ).ok, false);
 });
