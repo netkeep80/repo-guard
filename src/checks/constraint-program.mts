@@ -61,9 +61,9 @@ interface IntegrationDocProjection { id: string; must_reference_files?: unknown;
 interface IntegrationProjection { workflows?: IntegrationWorkflowProjection[]; docs?: IntegrationDocProjection[]; [key: string]: unknown; }
 interface CochangeRuleProjection { if_changed?: unknown; must_change_any?: unknown; [key: string]: unknown; }
 interface CochangeRoleEdge { from: ContractConformanceRole; to: ContractConformanceRole; }
-interface DocumentDefinitionProjection { path?: unknown; format?: unknown; }
+interface DocumentDefinitionProjection { path?: unknown; format?: unknown; snapshot?: unknown; }
 interface DocumentSelectorProjection { document?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
-interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; left?: unknown; right?: unknown; source?: unknown; value?: unknown; target_document?: unknown; }
+interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; left?: unknown; right?: unknown; source?: unknown; value?: unknown; target_document?: unknown; comparator?: unknown; }
 interface DocumentRelationsProjection { documents?: Record<string, DocumentDefinitionProjection>; rules?: DocumentRelationRuleProjection[]; }
 interface EvidenceBindingProjection {
   id?: unknown;
@@ -128,6 +128,7 @@ function compileDocumentSelector(selectorValue: unknown, documents: Record<strin
     document: name,
     path: canonicalDocumentPath(definition.path),
     format: definition.format,
+    snapshot: definition.snapshot,
     pointer: typeof selector.pointer === "string" ? selector.pointer : "",
     projection: selector.projection,
     type: selector.type as DocumentFactType,
@@ -239,7 +240,11 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
     const runtimeBase = { name: owner, relation_id: id };
     let runtime: RuntimeConstraint | null = null, shape: unknown = { kind: rule.kind };
-    if (rule.kind === "scalar_equal") {
+    if (rule.kind === "scalar_strictly_greater") {
+      const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
+      runtime = { ...runtimeBase, kind: "document_scalar_strictly_greater", left, right, comparator: rule.comparator };
+      shape = { kind: rule.kind, left, right, comparator: rule.comparator };
+    } else if (rule.kind === "scalar_equal") {
       const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
       runtime = { ...runtimeBase, kind: "document_scalar_equal", left, right };
       shape = { kind: rule.kind, left, right };
