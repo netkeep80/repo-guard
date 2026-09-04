@@ -6,6 +6,7 @@ import { parseDiff } from "../diff/parser.mjs";
 import type { AnchorPolicyProjection } from "../extractors/anchors.mjs";
 import { extractAnchors } from "../extractors/anchors.mjs";
 import { extractIntegration } from "../extractors/integration.mjs";
+import { readFileAtRef as readGitFileAtRef } from "../git.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
 
 type PathSelectorMap = Readonly<Record<string, readonly string[]>>;
@@ -28,6 +29,8 @@ export interface RepositoryFactsInput {
   policy: RepositoryFactsPolicyProjection;
   basePolicy?: unknown;
   headPolicy?: unknown;
+  baseRef?: string | null;
+  headRef?: string | null;
   changeIntent?: unknown;
   changeIntentSource?: string;
   governanceGrant?: unknown;
@@ -38,16 +41,17 @@ export interface RepositoryFactsInput {
   trackedFiles?: string[] | null;
   diagnostics?: Readonly<Record<string, unknown>>;
   readFile?: ((filePath: string) => unknown) | null;
+  readFileAtRef?: ((ref: string, filePath: string) => unknown) | null;
 }
 
 export const listTrackedFiles = (repoRoot: string): string[] => execFileSync("git", ["ls-files"], { encoding: "utf-8", cwd: repoRoot }).split(/\r?\n/).filter(Boolean);
 
 export function buildPolicyFacts(input: RepositoryFactsInput) {
   const {
-    mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null,
+    mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null,
     changeIntent = null, changeIntentSource = "none", governanceGrant = null,
     trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText,
-    trackedFiles = null, diagnostics = {}, readFile = null,
+    trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null,
   } = input;
   const allFiles = parseDiff(diffText);
   const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths);
@@ -56,11 +60,12 @@ export function buildPolicyFacts(input: RepositoryFactsInput) {
     if (!cache.has(path)) cache.set(path, readRepositoryBufferFile(path, { repoRoot: repositoryRoot, readFile } as Parameters<typeof readRepositoryBufferFile>[1]));
     return cache.get(path)!;
   };
+  const snapshotReadFile = readFileAtRef || ((ref: string, path: string) => readGitFileAtRef(ref, path, repositoryRoot));
   const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
   const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
   return {
-    mode, repositoryRoot, policy, basePolicy, headPolicy, changeIntent, changeIntentSource, governanceGrant,
-    trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, documents,
+    mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, changeIntent, changeIntentSource, governanceGrant,
+    trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
     enforcementMode: enforcement.mode, enforcement,
     diff: { files: { all: allFiles, checked: checkedFiles, skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)) } },
     anchors: extractAnchors(policy, options), integration: extractIntegration(policy, options), trackedFiles: resolvedTrackedFiles,
