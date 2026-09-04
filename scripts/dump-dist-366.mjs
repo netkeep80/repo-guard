@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const paths = [
   "dist/facts/input.mjs",
@@ -10,6 +11,9 @@ const paths = [
 
 execFileSync("npm", ["run", "build"], { stdio: "inherit" });
 
-console.log("@@DIST-DIFF-BEGIN@@");
-process.stdout.write(execFileSync("git", ["diff", "--no-ext-diff", "--unified=3", "--", ...paths], { encoding: "utf-8" }));
-console.log("@@DIST-DIFF-END@@");
+for (const path of paths) {
+  const content = readFileSync(path);
+  console.log(`@@DIST-RAW-BASE64:${path}@@`);
+  console.log(content.toString("base64"));
+  console.log(`@@DIST-RAW-END:${path}@@`);
+}
