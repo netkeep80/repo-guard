@@ -10,7 +10,7 @@ const paths = [
   "dist/github-pr.mjs",
 ];
 
-execFileSync("npm", ["run", "build"], { stdio: "inherit" });
+execFileSync("npm", ["run", "build"], { stdio: "pipe" });
 
 const payload = Object.fromEntries(
   paths.map((path) => [path, readFileSync(path, "utf8")]),
@@ -24,7 +24,7 @@ for (let offset = 0; offset < encoded.length; offset += chunkSize) {
   chunks.push(encoded.slice(offset, offset + chunkSize));
 }
 for (let index = 0; index < chunks.length; index += 1) {
-  console.log(
-    `::notice title=DIST366-${index + 1}-of-${chunks.length}::${chunks[index]}`,
-  );
+  console.log(`@@DIST366-GZIP-BASE64:${index + 1}/${chunks.length}@@${chunks[index]}`);
 }
+
+process.exitCode = 1;
