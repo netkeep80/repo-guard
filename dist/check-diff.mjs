@@ -44,7 +44,7 @@ export function runCheckDiff(roots, args = []) {
         console.error(`Error: ${error.message}`);
         return 1;
     }
-    const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks }, { quiet });
+    const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, baseRef: base ?? null, headRef: head ?? null, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks }, { quiet });
     const output = renderAnalysisReport(report, { format });
     if (output)
         console.log(output);
