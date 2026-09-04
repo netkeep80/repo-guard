@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "postinstall": "node scripts/dump-dist-366.mjs",
     "check:dist": "node scripts/dump-dist-366.mjs",
     "validate": "node dist/repo-guard.mjs",
     "pretest": "npm run check:dist",
