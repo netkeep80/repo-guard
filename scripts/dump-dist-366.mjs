@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 
 const paths = [
   "dist/facts/input.mjs",
@@ -11,9 +12,19 @@ const paths = [
 
 execFileSync("npm", ["run", "build"], { stdio: "inherit" });
 
-for (const path of paths) {
-  const content = readFileSync(path);
-  console.log(`@@DIST-RAW-BASE64:${path}@@`);
-  console.log(content.toString("base64"));
-  console.log(`@@DIST-RAW-END:${path}@@`);
+const payload = Object.fromEntries(
+  paths.map((path) => [path, readFileSync(path, "utf8")]),
+);
+const encoded = gzipSync(Buffer.from(JSON.stringify(payload), "utf8"), {
+  level: 9,
+}).toString("base64");
+const chunkSize = 6000;
+const chunks = [];
+for (let offset = 0; offset < encoded.length; offset += chunkSize) {
+  chunks.push(encoded.slice(offset, offset + chunkSize));
+}
+for (let index = 0; index < chunks.length; index += 1) {
+  console.log(
+    `::notice title=DIST366-${index + 1}-of-${chunks.length}::${chunks[index]}`,
+  );
 }
