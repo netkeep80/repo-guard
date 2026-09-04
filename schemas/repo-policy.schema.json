@@ -478,13 +478,27 @@
       }
     },
     "document_relation_document": {
-      "type": "object",
-      "required": ["path", "format"],
-      "additionalProperties": false,
-      "properties": {
-        "path": { "$ref": "#/definitions/non_empty_string" },
-        "format": { "type": "string", "enum": ["json", "yaml"] }
-      }
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["path", "format"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "$ref": "#/definitions/non_empty_string" },
+            "format": { "type": "string", "enum": ["json", "yaml"] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["path", "format", "snapshot"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "$ref": "#/definitions/non_empty_string" },
+            "format": { "const": "plain_text" },
+            "snapshot": { "type": "string", "enum": ["base", "head"] }
+          }
+        }
+      ]
     },
     "document_scalar_selector": {
       "type": "object",
@@ -539,6 +553,18 @@
             "kind": { "const": "scalar_equal" },
             "left": { "$ref": "#/definitions/document_scalar_selector" },
             "right": { "$ref": "#/definitions/document_scalar_selector" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["id", "kind", "left", "right", "comparator"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/non_empty_string" },
+            "kind": { "const": "scalar_strictly_greater" },
+            "left": { "$ref": "#/definitions/document_string_selector" },
+            "right": { "$ref": "#/definitions/document_string_selector" },
+            "comparator": { "const": "semver" }
           }
         },
         {
