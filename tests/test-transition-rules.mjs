@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import Ajv from "ajv";
 import { compileConstraintProgram, compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 
@@ -139,4 +141,26 @@ describe("ordered document relation policy-delta semantics", () => {
       assert.ok(result.incomparable.some((item) => item.pointer === "/document_relations/rules/release-revision"));
     });
   }
+});
+
+describe("ordered document relation schema", () => {
+  const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf-8"));
+  const validate = new Ajv({ allErrors: true, strict: false }).compile(schema);
+  const schemaPolicy = () => ({
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    ...basePolicy(),
+    content_rules: [],
+    cochange_rules: [],
+  });
+
+  it("accepts snapshot plain-text documents with semver ordering", () => {
+    assert.equal(validate(schemaPolicy()), true, JSON.stringify(validate.errors));
+  });
+
+  it("rejects unsupported comparators fail-closed", () => {
+    const policy = schemaPolicy();
+    policy.document_relations.rules[0].comparator = "numeric_tuple";
+    assert.equal(validate(policy), false);
+  });
 });
