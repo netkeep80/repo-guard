@@ -25,10 +25,10 @@ const basePolicy = () => ({
   },
 });
 
-function facts(baseValue, headValue, { missingBase = false, missingHead = false } = {}) {
+function facts(baseValue, headValue, { missingBase = false, missingHead = false, missingBaseRef = false } = {}) {
   return {
     repositoryRoot: process.cwd(),
-    baseRef: "BASE",
+    baseRef: missingBaseRef ? null : "BASE",
     headRef: "HEAD",
     readFileAtRef: (ref, path) => {
       assert.equal(path, "meta/REVISION");
@@ -94,6 +94,20 @@ describe("snapshot-aware ordered document relations", () => {
     assert.equal(check?.ok, false);
     assert.equal(check?.path, "meta/REVISION");
     assert.match(check?.message || "", /HEAD/i);
+  });
+
+  it("missing trusted BASE fails closed", () => {
+    const check = transitionCheck(null, "1.2.4", { missingBase: true });
+    assert.equal(check?.ok, false);
+    assert.equal(check?.path, "meta/REVISION");
+    assert.match(check?.message || "", /BASE/i);
+  });
+
+  it("missing baseRef fails closed", () => {
+    const check = transitionCheck("1.2.3", "1.2.4", { missingBaseRef: true });
+    assert.equal(check?.ok, false);
+    assert.equal(check?.path, "meta/REVISION");
+    assert.match(check?.message || "", /BASE|ref/i);
   });
 
   it("malformed trusted BASE fails closed", () => {
