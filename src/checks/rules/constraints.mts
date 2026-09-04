@@ -21,6 +21,7 @@ interface SurfaceDebt {
 }
 interface AnchorEvidenceInstance { value?: unknown; file?: unknown; line?: unknown; column?: unknown; }
 interface DocumentPointerTarget { document?: string; path?: string; format?: unknown; }
+interface RuntimeDocumentSelector extends DocumentFactSelector { format?: unknown; snapshot?: unknown; }
 
 type RuntimeConstraintKind =
   | "max_metric"
@@ -34,6 +35,7 @@ type RuntimeConstraintKind =
   | "change_profile"
   | "trace_rules"
   | "integration"
+  | "document_scalar_strictly_greater"
   | "document_scalar_equal"
   | "document_scalar_equals_literal"
   | "document_referenced_paths_exist"
@@ -56,11 +58,12 @@ interface RuntimeConstraint {
   rules?: unknown;
   relation_id?: string;
   binding_id?: string;
-  left?: DocumentFactSelector;
-  right?: DocumentFactSelector;
-  source?: DocumentFactSelector;
+  left?: RuntimeDocumentSelector;
+  right?: RuntimeDocumentSelector;
+  source?: RuntimeDocumentSelector;
   target?: DocumentPointerTarget;
   value?: unknown;
+  comparator?: unknown;
   workflow?: string;
   covers?: string[];
   target_anchor_type?: string;
@@ -74,6 +77,9 @@ interface ConstraintFacts {
   repositoryRoot?: string;
   trackedFiles?: string[];
   readFile?: (filePath: string) => unknown;
+  readFileAtRef?: (ref: string, filePath: string) => unknown;
+  baseRef?: string | null;
+  headRef?: string | null;
   documents?: DocumentReader;
   policy: ConstraintPolicyProjection;
   changeIntent?: { change_type?: string } | null;
@@ -101,6 +107,7 @@ const CONSTRAINT_PHASES: Record<RuntimeConstraintKind, ExecutionPhase> = {
   change_profile: "transaction",
   trace_rules: "transaction",
   integration: "state",
+  document_scalar_strictly_greater: "transaction",
   document_scalar_equal: "state",
   document_scalar_equals_literal: "state",
   document_referenced_paths_exist: "state",
@@ -188,6 +195,53 @@ function evaluateMetric(files: ParsedDiffFile[], constraint: RuntimeConstraint, 
 function factOperand(reader: DocumentReader | undefined, selector: DocumentFactSelector | undefined) {
   if (!reader || !selector) return { ok: false as const, error: { code: "document_read_error", pointer: selector?.pointer || "", message: "document reader or selector is unavailable" } };
   return readDocumentFact(reader, selector);
+}
+function snapshotOperand(facts: ConstraintFacts, selector: RuntimeDocumentSelector | undefined) {
+  const snapshot = selector?.snapshot, label = snapshot === "base" ? "BASE" : snapshot === "head" ? "HEAD" : "snapshot";
+  const ref = snapshot === "base" ? facts.baseRef : snapshot === "head" ? facts.headRef : null;
+  const path = selector?.path || "";
+  if (!selector || selector.format !== "plain_text" || selector.pointer !== "" || selector.type !== "string" || (snapshot !== "base" && snapshot !== "head")) {
+    return { ok: false as const, label, path, error: `invalid ${label} plain-text scalar selector` };
+  }
+  if (!ref) return { ok: false as const, label, path, error: `missing ${label} ref` };
+  if (!facts.readFileAtRef) return { ok: false as const, label, path, error: `snapshot reader unavailable for ${label}` };
+  try {
+    const raw = facts.readFileAtRef(ref, path);
+    if (raw === null || raw === undefined) return { ok: false as const, label, path, error: `missing ${label} file` };
+    return { ok: true as const, label, path, value: String(raw).trim() };
+  } catch (error: unknown) {
+    return { ok: false as const, label, path, error: `${label} read failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+function parseSemverCore(value: string): [number, number, number] | null {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
+  if (!match) return null;
+  const tuple = [Number(match[1]), Number(match[2]), Number(match[3])] as [number, number, number];
+  return tuple.every(Number.isSafeInteger) ? tuple : null;
+}
+function tupleGreater(left: [number, number, number], right: [number, number, number]): boolean {
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return left[index]! > right[index]!;
+  }
+  return false;
+}
+function checkDocumentScalarStrictlyGreater(facts: ConstraintFacts, constraint: RuntimeConstraint) {
+  const left = snapshotOperand(facts, constraint.left), right = snapshotOperand(facts, constraint.right);
+  const base = left.label === "BASE" ? left : right.label === "BASE" ? right : null;
+  const head = left.label === "HEAD" ? left : right.label === "HEAD" ? right : null;
+  const path = head?.path || base?.path || constraint.left?.path || constraint.right?.path || "";
+  const baseValue = base?.ok ? base.value : undefined, headValue = head?.ok ? head.value : undefined;
+  const diagnostic = { rule_id: constraint.relation_id, path, base_value: baseValue, head_value: headValue, expected_relation: "strictly_greater", comparator: constraint.comparator };
+  if (!base || !head) return { ok: false, message: `document relation "${constraint.relation_id}" requires one BASE and one HEAD operand`, ...diagnostic, data: { left, right } };
+  if (base.path !== head.path) return { ok: false, message: `document relation "${constraint.relation_id}" requires BASE and HEAD of the same path`, ...diagnostic, data: { left, right } };
+  if (!base.ok) return { ok: false, message: `document relation "${constraint.relation_id}" could not read BASE: ${base.error}`, ...diagnostic, data: { left, right } };
+  if (!head.ok) return { ok: false, message: `document relation "${constraint.relation_id}" could not read HEAD: ${head.error}`, ...diagnostic, data: { left, right } };
+  if (constraint.comparator !== "semver") return { ok: false, message: `document relation "${constraint.relation_id}" has unsupported comparator`, ...diagnostic, data: { left, right } };
+  const baseTuple = parseSemverCore(base.value), headTuple = parseSemverCore(head.value);
+  if (!baseTuple) return { ok: false, message: `document relation "${constraint.relation_id}" has malformed BASE semver`, ...diagnostic, data: { left, right } };
+  if (!headTuple) return { ok: false, message: `document relation "${constraint.relation_id}" has malformed HEAD semver`, ...diagnostic, data: { left, right } };
+  const ok = tupleGreater(headTuple, baseTuple);
+  return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" expected HEAD > BASE`, ...diagnostic, data: { left, right } };
 }
 function checkDocumentScalarEqual(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
@@ -320,7 +374,8 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     } else if (constraint.kind === "integration") {
       results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
       continue;
-    } else if (constraint.kind === "document_scalar_equal") check = checkDocumentScalarEqual(facts, constraint);
+    } else if (constraint.kind === "document_scalar_strictly_greater") check = checkDocumentScalarStrictlyGreater(facts, constraint);
+    else if (constraint.kind === "document_scalar_equal") check = checkDocumentScalarEqual(facts, constraint);
     else if (constraint.kind === "document_scalar_equals_literal") check = checkDocumentScalarLiteral(facts, constraint);
     else if (constraint.kind === "document_referenced_paths_exist") check = checkDocumentReferencedPathsExist(facts, constraint);
     else if (constraint.kind === "document_set_equal") check = checkDocumentSetRelation(facts, constraint, "equal");
