@@ -115,7 +115,7 @@ function normalizeDeclaredDocumentPath(name, definition, errors) {
     try {
         const path = normalizeDocumentFact(definition.path, "repository_path");
         const format = definition.format;
-        const matchesFormat = format === "json" ? /\.json$/i.test(path) : format === "yaml" ? /\.ya?ml$/i.test(path) : false;
+        const matchesFormat = format === "plain_text" ? true : format === "json" ? /\.json$/i.test(path) : format === "yaml" ? /\.ya?ml$/i.test(path) : false;
         if (!matchesFormat)
             errors.push({ document: name, path, format, message: `document_relations.documents["${name}"] format "${format}" does not match path "${path}"` });
         return path;
@@ -151,7 +151,7 @@ export function compileDocumentRelationsPolicy(policy = {}) {
         if (seenRuleIds.has(id))
             errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
         seenRuleIds.add(id);
-        if (rule.kind === "scalar_equal" || rule.kind === "set_equal" || rule.kind === "set_subset") {
+        if (rule.kind === "scalar_equal" || rule.kind === "set_equal" || rule.kind === "set_subset" || rule.kind === "scalar_strictly_greater") {
             useSelector(id, "left", rule.left);
             useSelector(id, "right", rule.right);
         }
