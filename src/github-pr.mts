@@ -207,7 +207,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber }); } catch {}
 
   const baseInput = {
-    mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy,
+    mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
   } as Parameters<typeof runPolicyPipeline>[0];
   if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy)) return runPolicyPipeline(baseInput).exitCode;
@@ -215,7 +215,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const proposedEnforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: headRuntime.policy } as Parameters<typeof resolveEnforcementMode>[0]);
   if (!proposedEnforcement.ok) { console.error(`ERROR: proposed policy enforcement: ${proposedEnforcement.message}`); return 1; }
   const proposedInput = {
-    mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy,
+    mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
     enforcement: proposedEnforcement, diffText, initialChecks: [],
   } as Parameters<typeof runPolicyPipeline>[0];
