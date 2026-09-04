@@ -33,6 +33,7 @@ function compileDocumentSelector(selectorValue, documents) {
         document: name,
         path: canonicalDocumentPath(definition.path),
         format: definition.format,
+        snapshot: definition.snapshot,
         pointer: typeof selector.pointer === "string" ? selector.pointer : "",
         projection: selector.projection,
         type: selector.type,
@@ -145,7 +146,12 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
         const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
         const runtimeBase = { name: owner, relation_id: id };
         let runtime = null, shape = { kind: rule.kind };
-        if (rule.kind === "scalar_equal") {
+        if (rule.kind === "scalar_strictly_greater") {
+            const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
+            runtime = { ...runtimeBase, kind: "document_scalar_strictly_greater", left, right, comparator: rule.comparator };
+            shape = { kind: rule.kind, left, right, comparator: rule.comparator };
+        }
+        else if (rule.kind === "scalar_equal") {
             const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
             runtime = { ...runtimeBase, kind: "document_scalar_equal", left, right };
             shape = { kind: rule.kind, left, right };

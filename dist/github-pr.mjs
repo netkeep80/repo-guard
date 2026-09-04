@@ -236,7 +236,7 @@ export function runCheckPR(roots, args = []) {
         }
         catch { }
     const baseInput = {
-        mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy,
+        mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head,
         changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
     };
     if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy))
@@ -247,7 +247,7 @@ export function runCheckPR(roots, args = []) {
         return 1;
     }
     const proposedInput = {
-        mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy,
+        mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head,
         changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
         enforcement: proposedEnforcement, diffText, initialChecks: [],
     };

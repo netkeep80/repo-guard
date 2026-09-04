@@ -32,7 +32,7 @@ export function runCheckDiff(roots: CheckDiffRoots, args: string[] = []) {
   let diffText: string;
   try { diffText = getDiff(base, head, roots.repoRoot); }
   catch (error: unknown) { console.error(`Error: ${(error as Error).message}`); return 1; }
-  const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks } as Parameters<typeof runPolicyPipeline>[0], { quiet });
+  const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, baseRef: base ?? null, headRef: head ?? null, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks } as Parameters<typeof runPolicyPipeline>[0], { quiet });
   const output = renderAnalysisReport(report, { format });
   if (output) console.log(output);
   return report.exitCode;
