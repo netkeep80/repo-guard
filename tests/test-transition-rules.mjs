@@ -3,12 +3,24 @@ import { describe, it } from "node:test";
 import { compileConstraintProgram, compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 
+const transitionRule = {
+  id: "release-revision",
+  kind: "scalar_strictly_greater",
+  comparator: "semver",
+  left: { document: "head-revision", pointer: "", type: "string" },
+  right: { document: "base-revision", pointer: "", type: "string" },
+};
+
 const basePolicy = () => ({
   paths: { forbidden: [], canonical_docs: [], governance_paths: ["repo-policy.json"], operational_paths: [] },
   diff_rules: { max_new_docs: 2, max_new_files: 5 },
-  transition_rules: [
-    { id: "release-revision", path: "meta/REVISION", format: "semver", relation: "strictly_greater" },
-  ],
+  document_relations: {
+    documents: {
+      "base-revision": { path: "meta/REVISION", format: "plain_text", snapshot: "base" },
+      "head-revision": { path: "meta/REVISION", format: "plain_text", snapshot: "head" },
+    },
+    rules: [structuredClone(transitionRule)],
+  },
 });
 
 function facts(baseValue, headValue, { missingBase = false, missingHead = false } = {}) {
@@ -40,13 +52,13 @@ function facts(baseValue, headValue, { missingBase = false, missingHead = false 
 
 function transitionCheck(baseValue, headValue, options) {
   const entries = evaluateConstraintIR(facts(baseValue, headValue, options), { executionPhase: "transaction" });
-  return entries.find((entry) => entry.name === "transition:release-revision")?.check;
+  return entries.find((entry) => entry.name === "document-relation:release-revision")?.check;
 }
 
-describe("generic BASE -> HEAD scalar transition rules", () => {
-  it("compiles into the canonical Constraint Program", () => {
-    const entry = compileConstraintProgram(basePolicy()).find((item) => item.key === "transition:release-revision");
-    assert.equal(entry?.runtime?.kind, "scalar_transition");
+describe("snapshot-aware ordered document relations", () => {
+  it("compiles into the existing document-relation Constraint Program path", () => {
+    const entry = compileConstraintProgram(basePolicy()).find((item) => item.key === "document-relation:release-revision");
+    assert.equal(entry?.runtime?.kind, "document_scalar_strictly_greater");
   });
 
   for (const [from, to] of [["1.2.3\n", "1.2.4\n"], ["1.2.3", "1.3.0"]]) {
@@ -55,6 +67,7 @@ describe("generic BASE -> HEAD scalar transition rules", () => {
       assert.equal(check?.ok, true);
       assert.equal(check?.base_value, from.trim());
       assert.equal(check?.head_value, to.trim());
+      assert.equal(check?.expected_relation, "strictly_greater");
     });
   }
 
@@ -63,7 +76,7 @@ describe("generic BASE -> HEAD scalar transition rules", () => {
     ["downgrade", "1.2.3", "1.2.2"],
     ["malformed HEAD", "1.2.3", "not-a-version"],
   ]) {
-    it(`${label} fails closed with structured diagnostics`, () => {
+    it(`${label} fails closed with BASE/HEAD diagnostics`, () => {
       const check = transitionCheck(from, to);
       assert.equal(check?.ok, false);
       assert.equal(check?.rule_id, "release-revision");
@@ -88,41 +101,42 @@ describe("generic BASE -> HEAD scalar transition rules", () => {
     assert.match(check?.message || "", /BASE/i);
   });
 
-  it("unrelated repository change still requires a bump", () => {
+  it("unrelated repository change still requires the ordered relation", () => {
     const check = transitionCheck("2.0.0", "2.0.0");
     assert.equal(check?.ok, false);
   });
 
-  it("is transaction-only rather than a main-state invariant", () => {
+  it("is transaction-only rather than a state-only invariant", () => {
     const entries = evaluateConstraintIR(facts("1.0.0", "1.0.1"), { executionPhase: "state" });
-    assert.equal(entries.some((entry) => entry.name === "transition:release-revision"), false);
+    assert.equal(entries.some((entry) => entry.name === "document-relation:release-revision"), false);
   });
 });
 
-describe("transition rule policy-delta semantics", () => {
-  it("adding a transition rule is tightening", () => {
+describe("ordered document relation policy-delta semantics", () => {
+  it("adding the relation is tightening", () => {
     const before = basePolicy();
-    delete before.transition_rules;
+    before.document_relations.rules = [];
     assert.equal(compareConstraintPrograms(before, basePolicy()).relation, "stricter");
   });
 
-  it("removing a transition rule is a relaxation", () => {
+  it("removing the relation is a relaxation", () => {
     const after = basePolicy();
-    delete after.transition_rules;
+    after.document_relations.rules = [];
     const result = compareConstraintPrograms(basePolicy(), after);
     assert.equal(result.relation, "weaker");
-    assert.ok(result.relaxations.some((item) => item.kind === "transition_rule_removed" && item.rule_id === "release-revision"));
+    assert.ok(result.relaxations.some((item) => item.kind === "document_relation_removed" && item.rule_id === "release-revision"));
   });
 
-  for (const field of ["path", "format", "relation"]) {
-    it(`changing transition ${field} is incomparable`, () => {
+  for (const field of ["path", "format", "snapshot", "comparator"]) {
+    it(`changing ${field} is incomparable through existing relation identity`, () => {
       const after = basePolicy();
-      if (field === "path") after.transition_rules[0].path = "meta/OTHER";
-      if (field === "format") after.transition_rules[0].format = "numeric_tuple";
-      if (field === "relation") after.transition_rules[0].relation = "greater_or_equal";
+      if (field === "path") after.document_relations.documents["head-revision"].path = "meta/OTHER";
+      if (field === "format") after.document_relations.documents["head-revision"].format = "json";
+      if (field === "snapshot") after.document_relations.documents["head-revision"].snapshot = "base";
+      if (field === "comparator") after.document_relations.rules[0].comparator = "numeric_tuple";
       const result = compareConstraintPrograms(basePolicy(), after);
       assert.equal(result.relation, "incomparable");
-      assert.ok(result.incomparable.some((item) => item.pointer === "/transition_rules/release-revision"));
+      assert.ok(result.incomparable.some((item) => item.pointer === "/document_relations/rules/release-revision"));
     });
   }
 });
