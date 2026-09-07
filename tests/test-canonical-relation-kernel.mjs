@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { readFact } from "../dist/document-facts.mjs";
@@ -124,6 +125,20 @@ for (const file of [
 
 expect("old selector type is deleted", source("src/document-facts.mts").includes("DocumentFactSelector"), false);
 expect("old selector reader is deleted", source("src/document-facts.mts").includes("readDocumentFact"), false);
+
+const compressionMetrics = JSON.parse(execFileSync(
+  process.execPath,
+  ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
+  { encoding: "utf8" },
+));
+const c31 = compressionMetrics.architecture;
+expect("compression metrics see one canonical FactRef model", c31.canonical_factref_model_count, 1);
+expect("compression metrics see one primitive descriptor registry", c31.primitive_descriptor_registry_count, 1);
+expect("compression metrics see the same seven descriptor kinds", c31.primitive_descriptor_kinds.join(","), expectedKinds.join(","));
+expect("compression metrics prove schema and descriptor parity", c31.schema_relation_kinds_match_descriptors, true);
+expect("compression metrics see one generic primitive runtime shape", c31.primitive_runtime_shape_count, 1);
+expect("compression metrics see no downstream relation switches", c31.independent_document_relation_switches, 0);
+expect("new primitive requires one semantic kernel edit-site", c31.semantic_edit_sites_per_new_primitive, 1);
 
 if (failures) {
   console.error(`\n${failures} canonical relation kernel assertion(s) failed.`);
