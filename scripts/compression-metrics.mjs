@@ -56,7 +56,7 @@ function schemaConstKinds(schema, definitionName) {
 }
 
 function descriptorKinds(source) {
-  const table = source.match(/const\s+DESCRIPTORS\s*=\s*\[([\s\S]*?)\n\];/);
+  const table = source.match(/const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\];/);
   return table ? [...table[1].matchAll(/\bkind:\s*"([^"]+)"/g)].map((item) => item[1]).sort() : [];
 }
 
@@ -135,7 +135,7 @@ function architecture(target) {
     .filter(([, source]) => relationKinds.some((kind) => source.includes(`"${kind}"`)))
     .map(([name]) => name)
     .sort();
-  const descriptorRegistryCount = count(relationKernel, /const\s+DESCRIPTORS\s*=/g);
+  const descriptorRegistryCount = count(relationKernel, /const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=/g);
 
   const metric = {
     // Historical Compression 2 metrics are retained so --compare remains useful.
