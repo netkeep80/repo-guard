@@ -212,9 +212,9 @@ describe("canonical FactRef read boundary", () => {
     }), { ok: true, value: ["docs/new.md"] });
     assert.deepEqual(readFact({ diff }, {
       source: "diff",
-      selector: { kind: "path_count", patterns: ["src/**"], mode: "outside" },
-      type: "scalar",
-    }), { ok: true, value: 2 });
+      selector: { kind: "changed_paths", patterns: ["src/**"], mode: "outside" },
+      type: "repository_path_set",
+    }), { ok: true, value: ["docs/deleted.md", "docs/new.md"] });
     assert.deepEqual(readFact({ diff }, {
       source: "diff",
       selector: { kind: "metric", metric: "new_docs", exclude_paths: ["README.md"] },
