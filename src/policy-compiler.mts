@@ -178,7 +178,7 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
     try {
       const descriptor = relationDescriptor(String(rule.kind ?? ""));
       if (descriptor.evidenceSource !== "repository_paths_exist") return [];
-      return [documentSelectorKey(rule[descriptor.operands[0]!)];
+      return [documentSelectorKey(rule[descriptor.operands[0]!])];
     } catch {
       return [];
     }
