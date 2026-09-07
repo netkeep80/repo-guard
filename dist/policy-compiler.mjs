@@ -222,7 +222,7 @@ export function compileEvidenceBindingsPolicy(policy = {}) {
             else if (object(workflow.expect).enforcement !== "blocking")
                 errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
             if (!pathExistenceSelectors.has(documentSelectorKey(source)))
-                errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent repository-path existence relation for the same source selector` });
+                errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
         }
         else if (binding.kind === "anchor_value_coverage") {
             const target = binding.target_anchor_type;
