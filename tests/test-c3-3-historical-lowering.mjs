@@ -15,7 +15,13 @@ function expect(label, actual, expected) {
 const source = (path) => readFileSync(path, "utf8");
 const constraints = source("src/checks/rules/constraints.mts");
 const documentFacts = source("src/document-facts.mts");
-const factRef = documentFacts.match(/export\s+(?:interface|type)\s+FactRef\b[\s\S]*?(?:\n}\n|;\n)/)?.[0] || "";
+const declaration = (start, end) => {
+  const from = documentFacts.indexOf(start);
+  const to = documentFacts.indexOf(end, from);
+  return from >= 0 && to > from ? documentFacts.slice(from, to) : "";
+};
+const factRef = declaration("export type FactRef =", "\ntype DocumentRef");
+const diffSelector = declaration("export type DiffFactSelector =", "\nexport type DocumentFactErrorCode");
 
 const historicalRuntimeKinds = [
   "max_metric",
@@ -30,8 +36,14 @@ for (const kind of historicalRuntimeKinds) {
   expect(`historical runtime kind ${kind} is deleted`, constraints.includes(`\"${kind}\"`), false);
 }
 
-expect("canonical FactRef declares a typed fact source", /\bsource\s*:/.test(factRef), true);
-expect("canonical FactRef declares a finite selector", /\bselector\s*:/.test(factRef), true);
+const factSources = [...factRef.matchAll(/\bsource\s*:\s*"([^"]+)"/g)].map((match) => match[1]).sort();
+expect("canonical FactRef has exactly the finite document/diff source alternatives", factSources.join(","), "diff,document");
+expect("canonical FactRef keeps one selector per source alternative", (factRef.match(/\bselector\s*:/g) || []).length, 2);
+const diffSelectorKinds = [...diffSelector.matchAll(/\bkind\s*:\s*([^;]+);/g)]
+  .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]))
+  .sort();
+expect("diff selector vocabulary is finite", diffSelectorKinds.join(","), "changed_paths,metric,path_count");
+expect("no compatibility document selector model is reintroduced", documentFacts.includes("DocumentFactSelector"), false);
 
 const descriptorKinds = new Set(relationDescriptors().map((descriptor) => descriptor.kind));
 for (const kind of ["numeric_bound", "set_presence_implies", "set_all_or_none"]) {
@@ -55,4 +67,4 @@ if (failures) {
   process.exit(1);
 }
 
-console.log("\nC3.3a historical runtime lowering contract passed.");
+console.log("\nC3.3a historical runtime lowering contract passed.\n");
