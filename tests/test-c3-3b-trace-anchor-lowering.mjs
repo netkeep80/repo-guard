@@ -46,9 +46,18 @@ console.log("\n--- canonical FactRef sources for C3.3b ---");
     selector: { kind: "anchor_values", anchor_type: "requirement_id" },
     type: "string_set",
   });
-  expect("repository anchor_values is a canonical normalized string_set fact", repositoryFact, {
+  expect("repository anchor_values keeps normalized values and source provenance", repositoryFact, {
     ok: true,
     value: ["FR-001", "FR-002"],
+    provenance: {
+      kind: "anchor_instances",
+      anchor_type: "requirement_id",
+      instances: [
+        { value: "FR-001", file: "docs/duplicate.md", line: 3, column: 2 },
+        { value: "FR-001", file: "requirements/fr-001.json" },
+        { value: "FR-002", file: "requirements/fr-002.json" },
+      ],
+    },
   });
 
   const changeIntentFact = readFact({
