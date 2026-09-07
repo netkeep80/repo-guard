@@ -1,7 +1,8 @@
 import { parseDocument } from "yaml";
+import { selectPaths } from "./diff/classification.mjs";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
-import { normalizePathEntry } from "./utils/path-patterns.mjs";
+import { matchesAny, normalizePathEntry } from "./utils/path-patterns.mjs";
 export class DocumentFactFailure extends Error {
     code;
     pointer;
@@ -136,62 +137,98 @@ export function normalizeDocumentFact(value, type, pointer = "") {
     const exhaustive = type;
     return failDocumentFact("fact_type_mismatch", `unsupported document fact type "${String(exhaustive)}"`, pointer);
 }
-function structuredFactSource(reader, ref) {
-    const path = normalizeRepositoryPathFact(ref.path, ref.pointer);
-    if (ref.format === "json")
+function factPointer(ref) {
+    return ref.source === "document" ? ref.selector.pointer : "";
+}
+function documentSelector(ref) {
+    if (ref.source !== "document")
+        failDocumentFact("document_read_error", "document fact requires document source");
+    return ref.selector;
+}
+function structuredFactSource(reader, selector) {
+    const path = normalizeRepositoryPathFact(selector.path, selector.pointer);
+    if (selector.format === "json")
         return reader.json(path);
-    if (ref.format === "yaml")
+    if (selector.format === "yaml")
         return reader.yaml(path);
-    if (ref.format === "plain_text") {
-        if (ref.pointer !== "" || (ref.projection !== undefined && ref.projection !== "value")) {
-            return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", ref.pointer);
+    if (selector.format === "plain_text") {
+        if (selector.pointer !== "" || (selector.projection !== undefined && selector.projection !== "value")) {
+            return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", selector.pointer);
         }
         return reader.text(path).trim();
     }
-    return failDocumentFact("unsupported_document_type", `unsupported document type for "${path}"`, ref.pointer);
+    const exhaustive = selector.format;
+    return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
-function snapshotFactSource(context, ref) {
-    const label = ref.snapshot === "base" ? "BASE" : "HEAD";
-    const revision = ref.snapshot === "base" ? context.baseRef : context.headRef;
-    const path = normalizeRepositoryPathFact(ref.path, ref.pointer);
+function snapshotFactSource(context, selector) {
+    const label = selector.snapshot === "base" ? "BASE" : "HEAD";
+    const revision = selector.snapshot === "base" ? context.baseRef : context.headRef;
+    const path = normalizeRepositoryPathFact(selector.path, selector.pointer);
     if (!revision)
-        return failDocumentFact("document_read_error", `missing ${label} ref`, ref.pointer);
+        return failDocumentFact("document_read_error", `missing ${label} ref`, selector.pointer);
     if (!context.readFileAtRef)
-        return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, ref.pointer);
+        return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, selector.pointer);
     let raw;
     try {
         raw = context.readFileAtRef(revision, path);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return failDocumentFact("document_read_error", `${label} read failed: ${collapseMessage(message)}`, ref.pointer);
+        return failDocumentFact("document_read_error", `${label} read failed: ${collapseMessage(message)}`, selector.pointer);
     }
     if (raw === null || raw === undefined)
-        return failDocumentFact("document_read_error", `missing ${label} file`, ref.pointer);
-    if (ref.format === "plain_text") {
-        if (ref.pointer !== "" || (ref.projection !== undefined && ref.projection !== "value")) {
-            return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", ref.pointer);
+        return failDocumentFact("document_read_error", `missing ${label} file`, selector.pointer);
+    if (selector.format === "plain_text") {
+        if (selector.pointer !== "" || (selector.projection !== undefined && selector.projection !== "value")) {
+            return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", selector.pointer);
         }
         return String(raw).trim();
     }
-    if (ref.format === "json")
+    if (selector.format === "json")
         return parseJson(String(raw));
-    if (ref.format === "yaml")
+    if (selector.format === "yaml")
         return parseYaml(String(raw));
-    return failDocumentFact("unsupported_document_type", `unsupported document type for "${path}"`, ref.pointer);
+    const exhaustive = selector.format;
+    return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
+}
+function diffFactSource(context, selector) {
+    const files = context.diff?.files?.checked;
+    if (!Array.isArray(files))
+        return failDocumentFact("document_read_error", "diff facts are unavailable");
+    if (selector.kind === "metric") {
+        const excludedPaths = new Set(selector.exclude_paths || []);
+        if (selector.metric === "new_files")
+            return files.filter((file) => file.status === "added").length;
+        if (selector.metric === "new_docs") {
+            return files.filter((file) => file.status === "added" && /\.md$/i.test(file.path) && !excludedPaths.has(file.path)).length;
+        }
+        return files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
+    }
+    const patterns = [...selector.patterns];
+    const excluded = new Set(selector.exclude_statuses || []);
+    const candidates = files.filter((file) => !excluded.has(file.status));
+    const paths = selector.mode === "outside"
+        ? uniqueSorted(candidates.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path))
+        : selectPaths(candidates, patterns);
+    return selector.kind === "path_count" ? paths.length : paths;
 }
 export function readFact(context, ref) {
+    const pointer = factPointer(ref);
     try {
-        const source = ref.snapshot === "state"
-            ? context.documents ? structuredFactSource(context.documents, ref) : failDocumentFact("document_read_error", "document reader is unavailable", ref.pointer)
-            : ref.snapshot === "base" || ref.snapshot === "head"
-                ? snapshotFactSource(context, ref)
-                : failDocumentFact("document_read_error", `unsupported fact snapshot "${String(ref.snapshot)}"`, ref.pointer);
-        const projected = ref.format === "plain_text" ? source : projectDocumentValue(source, ref.pointer, ref.projection ?? "value");
-        return { ok: true, value: normalizeDocumentFact(projected, ref.type, ref.pointer) };
+        if (ref.source === "diff") {
+            return { ok: true, value: normalizeDocumentFact(diffFactSource(context, ref.selector), ref.type, pointer) };
+        }
+        const selector = documentSelector(ref);
+        const source = selector.snapshot === "state"
+            ? context.documents ? structuredFactSource(context.documents, selector) : failDocumentFact("document_read_error", "document reader is unavailable", selector.pointer)
+            : selector.snapshot === "base" || selector.snapshot === "head"
+                ? snapshotFactSource(context, selector)
+                : failDocumentFact("document_read_error", `unsupported fact snapshot "${String(selector.snapshot)}"`, selector.pointer);
+        const projected = selector.format === "plain_text" ? source : projectDocumentValue(source, selector.pointer, selector.projection ?? "value");
+        return { ok: true, value: normalizeDocumentFact(projected, ref.type, selector.pointer) };
     }
     catch (error) {
-        return { ok: false, error: documentFactError(error, ref.pointer) };
+        return { ok: false, error: documentFactError(error, pointer) };
     }
 }
 export function stripMarkdownInline(line) {
