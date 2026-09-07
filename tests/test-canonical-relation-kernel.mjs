@@ -32,10 +32,22 @@ const expectedKinds = [
 ].sort();
 
 const descriptors = relationDescriptors();
+const descriptorKinds = descriptors.map((item) => item.kind).sort();
 expect(
   "one relation descriptor table owns every public document relation kind",
-  descriptors.map((item) => item.kind).sort().join(","),
+  descriptorKinds.join(","),
   expectedKinds.join(",")
+);
+
+const schema = JSON.parse(source("schemas/repo-policy.schema.json"));
+const schemaKinds = schema.definitions.document_relation_rule.oneOf
+  .map((form) => form.properties?.kind?.const)
+  .filter((kind) => typeof kind === "string")
+  .sort();
+expect(
+  "schema document relation kinds exactly match the canonical kernel registry",
+  schemaKinds.join(","),
+  descriptorKinds.join(",")
 );
 
 const transition = relationDescriptor("scalar_strictly_greater");
