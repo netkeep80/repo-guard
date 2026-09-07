@@ -1,14 +1,14 @@
-# C3.2 — Structural compression and pure macro lowering
+# C3.2 — Структурное сжатие и чистое понижение макросов
 
 Дата: 2026-09-07
 
-Issue: #373
+Задача: #373
 
 Принятая база дизайна: `6791fa3d842bb3031869d602601565a9e334fd1f`
 
 ## 1. Цель
 
-C3.2 удаляет high-level/methodology-specific знание из canonical core и заменяет специальную обработку `contract_conformance.cochange` на одну универсальную структурную конструкцию.
+C3.2 удаляет знание конкретных методик из канонического ядра и заменяет специальную обработку `contract_conformance.cochange` на одну универсальную структурную конструкцию.
 
 После понижения высокоуровневого пакета должно выполняться:
 
@@ -18,7 +18,7 @@ source pack vocabulary
 canonical policy / facts / constraints
 ```
 
-Canonical Constraint Program, policy comparison и runtime evaluator не должны знать роли:
+Каноническая программа ограничений, сравнение политик и вычислитель не должны знать роли:
 
 ```text
 current.contract
@@ -28,13 +28,13 @@ previous.conformance
 acceptance
 ```
 
-Эти роли допустимы только внутри high-level compiler/lowering слоя.
+Эти роли допустимы только внутри слоя компиляции и понижения высокоуровневого пакета.
 
 ## 2. Текущее состояние и проблема
 
-На базе C3.1 `contract_conformance` уже компилируется в generic `document_relations`, но `cochange` остаётся специальным случаем.
+На базе C3.1 `contract_conformance` уже компилируется в универсальные `document_relations`, но `cochange` остаётся специальным случаем.
 
-Сейчас high-level compiler делает следующее:
+Сейчас высокоуровневый компилятор делает следующее:
 
 ```text
 contract_conformance.cochange = [r1, r2, ..., rN]
@@ -44,7 +44,7 @@ N × (N - 1) directed cochange_rules
 
 Для пяти ролей это даёт двадцать направленных правил.
 
-Затем canonical `constraint-program.mts` пытается восстановить потерянное high-level происхождение:
+Затем канонический `constraint-program.mts` пытается восстановить потерянное происхождение:
 
 ```text
 ordinary cochange_rules
@@ -52,18 +52,18 @@ ordinary cochange_rules
 contract-conformance role edges
 ```
 
-Для этого core содержит:
+Для этого ядро содержит:
 
 - `ContractConformanceRole`;
 - `CONTRACT_CONFORMANCE_DOCUMENT_ROLES`;
 - `contractConformanceRolesByPath(...)`;
 - `cochangeRoleEdge(...)`;
 - `generatedContractConformanceCochange(...)`;
-- отдельную generated-edge identity и диагностику.
+- отдельную идентичность и диагностику сгенерированных рёбер.
 
-Это нарушает pure lowering invariant: high-level смысл сначала уничтожается, затем canonical core пытается его восстановить.
+Это нарушает инвариант чистого понижения: высокоуровневый смысл сначала уничтожается, затем каноническое ядро пытается его восстановить.
 
-Дополнительная проблема — positional identity обычных `cochange_rules`:
+Дополнительная проблема — позиционная идентичность обычных `cochange_rules`:
 
 ```text
 cochange:<index>
@@ -75,7 +75,7 @@ cochange-policy:<index>
 
 ## 3. Выбранное решение
 
-Вводится одна generic canonical конструкция:
+Вводится одна универсальная каноническая конструкция `cochange_groups`:
 
 ```json
 {
@@ -94,7 +94,7 @@ cochange-policy:<index>
 }
 ```
 
-Она domain-neutral. Ядро не знает, почему эти пути образуют группу.
+Она не зависит от предметной области. Ядро не знает, почему эти пути образуют группу.
 
 ### 3.1. Семантика
 
@@ -108,15 +108,15 @@ PASS ⇔ C = ∅ ∨ C = members
 
 То есть:
 
-- не изменился ни один участник — PASS;
-- изменились все участники — PASS;
-- изменилось любое непустое собственное подмножество — FAIL.
+- не изменился ни один участник — правило выполнено;
+- изменились все участники — правило выполнено;
+- изменилось любое непустое собственное подмножество — нарушение.
 
-Это exactly-all-or-none constraint.
+Это ограничение «все вместе или никто».
 
 ### 3.2. Область применения
 
-Generic конструкция подходит не только для contract/conformance:
+Конструкция пригодна не только для пары контрактов и подтверждений:
 
 ```text
 schema + generated types
@@ -126,11 +126,11 @@ VERSION + release metadata
 API spec + generated client
 ```
 
-Наличие нескольких независимых применений — обязательное обоснование того, что primitive действительно generic, а не скрытый methodology-specific runtime.
+Наличие нескольких независимых применений доказывает, что примитив универсален и не маскирует специальную предметную семантику.
 
-## 4. Pure lowering `contract_conformance`
+## 4. Чистое понижение `contract_conformance`
 
-`policy-profiles.mts` остаётся единственным слоем, который имеет право знать high-level роли.
+`policy-profiles.mts` остаётся единственным слоем, который имеет право знать высокоуровневые роли.
 
 Понижение выполняется так:
 
@@ -151,34 +151,34 @@ cochange_group {
 }
 ```
 
-После `resolvePolicyProfile()` в canonical policy не остаётся role vocabulary.
+После `resolvePolicyProfile()` в канонической политике не остаётся словаря ролей исходного пакета.
 
-Никаких generated directional edges для этого macro больше нет.
+Направленные рёбра для этого макроса больше не генерируются.
 
-## 5. Canonical identity
+## 5. Каноническая идентичность
 
-У группы semantic identity:
+У группы семантическая идентичность:
 
 ```text
 cochange-group:<id>
 ```
 
-Runtime key, strictness owner и policy comparison должны опираться на `id`, а не на позицию массива.
+Ключ выполнения, владелец ограничения и сравнение политик должны опираться на `id`, а не на позицию массива.
 
-Порядок `cochange_groups` не влияет на identity.
+Порядок `cochange_groups` не влияет на идентичность.
 
-Порядок `members` также не должен менять семантику. Для сравнения members нормализуются как множество canonical repository paths.
+Порядок `members` также не меняет семантику. Для сравнения участники нормализуются как множество канонических путей репозитория.
 
-## 6. Policy comparison / strictness
+## 6. Сравнение политик и строгость
 
-Сама сущность группы является required entity:
+Сама сущность группы является обязательной сущностью:
 
 ```text
 owner = cochange-group:<id>
 relation = required_entity
 ```
 
-Удаление группы — policy relaxation.
+Удаление группы является ослаблением политики.
 
 Изменение `members` в C3.2 трактуется как:
 
@@ -186,13 +186,13 @@ relation = required_entity
 equal_or_incomparable
 ```
 
-Причина: ни добавление, ни удаление участника не задаёт общий безопасный монотонный порядок. Такое изменение может усиливать одни допустимые переходы и ослаблять другие.
+Причина: ни добавление, ни удаление участника не задаёт общего безопасного монотонного порядка. Такое изменение может усиливать одни допустимые переходы и ослаблять другие.
 
-C3.2 не вводит фиктивную strictness только ради удобства сравнения.
+C3.2 не вводит фиктивный порядок строгости ради удобства сравнения.
 
-## 7. Runtime model
+## 7. Модель выполнения
 
-Предпочтительная canonical runtime shape:
+Предпочтительная каноническая форма во время выполнения:
 
 ```text
 kind: cochange_group
@@ -200,51 +200,54 @@ name: <semantic owner>
 members: <canonical path set>
 ```
 
-Execution phase:
+Фаза выполнения:
 
 ```text
 transaction
 ```
 
-Runtime evaluator получает только diff facts / changed paths и список `members`.
+Вычислитель получает только факты изменения путей и список `members`.
 
 Он не получает:
 
-- contract/conformance roles;
-- source macro metadata;
-- generated-edge metadata;
-- positional index как semantic identity.
+- роли контрактов и подтверждений;
+- метаданные исходного макроса;
+- метаданные сгенерированных рёбер;
+- позиционный индекс как семантическую идентичность.
 
-Вторая evaluator-система не создаётся.
+Вторая система вычисления не создаётся.
 
 ## 8. Отношение к существующим `cochange_rules`
 
-Существующие directed `cochange_rules` имеют другую семантику:
+Существующие направленные `cochange_rules` имеют другую семантику:
 
 ```text
 if A changed => at least one path from B changed
 ```
 
-Поэтому C3.2 не объявляет их автоматически эквивалентными `cochange_group`.
+Аудит принятого `repo-policy.json` подтвердил независимого реального потребителя: сам репозиторий требует изменение `tests/**`, когда затронут `src/**`.
 
-Правило решения:
+Следовательно, направленная возможность не является устаревшей совместимостью и сохраняется как отдельная универсальная семантика.
 
-1. `contract_conformance` перестаёт генерировать directed `cochange_rules` безусловно.
-2. Reverse recognition generated contract-conformance edges удаляется без legacy adapter.
-3. Обычные generic `cochange_rules` сохраняются только если аудит обнаруживает реальную независимую ценность/потребителя.
-4. Если аудит показывает, что они полностью поглощаются новой архитектурой без потери generic capability, они удаляются в том же accepted sequence.
+C3.2 фиксирует следующие границы:
 
-Никакого compatibility alias между `cochange_rules` и `cochange_groups` не вводится.
+1. `contract_conformance` больше не генерирует направленные `cochange_rules`.
+2. Для высокоуровневого `cochange` создаётся ровно одна `cochange_group`.
+3. Обратное распознавание сгенерированных рёбер полностью удаляется.
+4. Самостоятельные направленные `cochange_rules` продолжают работать по своей исходной универсальной семантике.
+5. Между `cochange_rules` и `cochange_groups` не вводится псевдоним, адаптер или автоматическая взаимная конверсия.
 
-## 9. Canonical core после cutover
+Таким образом две конструкции остаются только потому, что выражают разные ограничения, а не ради поддержки старого способа представления одного и того же смысла.
 
-Из `constraint-program.mts` должны исчезнуть все methodology-specific элементы:
+## 9. Каноническое ядро после перехода
+
+Из `constraint-program.mts` должны исчезнуть все элементы, завязанные на конкретный пакет:
 
 ```text
 ContractConformanceRole
 CONTRACT_CONFORMANCE_DOCUMENT_ROLES
 contractConformanceRolesByPath
-ochangeRoleEdge
+cochangeRoleEdge
 generatedContractConformanceCochange
 current.contract
 current.conformance
@@ -253,9 +256,7 @@ previous.conformance
 acceptance
 ```
 
-Исправление опечатки выше не создаёт нового символа: фактический удаляемый helper называется `cochangeRoleEdge`.
-
-Core должен видеть только generic:
+Ядро должно видеть только универсальные понятия:
 
 ```text
 cochange_groups
@@ -266,9 +267,9 @@ changed_paths
 
 ## 10. Публичная схема
 
-`cochange_groups` является canonical public policy syntax, а не скрытым IR.
+`cochange_groups` является публичной канонической частью политики, а не скрытым промежуточным представлением.
 
-Минимальная structural schema:
+Минимальная структурная схема:
 
 ```json
 {
@@ -281,19 +282,19 @@ changed_paths
 }
 ```
 
-Structural validation должна требовать:
+Структурная проверка должна требовать:
 
 - непустой `id`;
-- минимум два distinct members;
-- canonical repository paths;
-- отсутствие duplicates внутри members;
+- минимум два различных участника;
+- канонические пути репозитория;
+- отсутствие повторов внутри `members`;
 - уникальный `id` среди групп.
 
-High-level compiler обязан генерировать валидную canonical форму и не полагаться на runtime normalization для исправления malformed macro output.
+Высокоуровневый компилятор обязан генерировать валидную каноническую форму и не должен рассчитывать на исправление ошибочного результата во время выполнения.
 
 ## 11. Диагностика
 
-FAIL должен сообщать semantic group id и полный набор изменённых/пропущенных участников, например:
+При нарушении выводится семантический идентификатор группы и полный набор изменённых и пропущенных участников, например:
 
 ```text
 cochange group "contract-conformance" requires all members to change together
@@ -303,16 +304,16 @@ missing: [conformance/current.json, acceptance.json]
 
 Диагностика не должна упоминать:
 
-- generated edges;
-- role reconstruction;
-- array index;
-- внутреннюю историю lowering.
+- сгенерированные рёбра;
+- восстановление ролей;
+- индекс массива;
+- внутреннюю историю понижения.
 
-## 12. Falsifier / TDD contract
+## 12. Фальсификатор и контракт TDD
 
-Первый RED должен доказать архитектуру, а не только одно поведение.
+Первый красный тест должен доказать архитектуру, а не только одно поведение.
 
-Для пяти contract roles:
+Для пяти ролей:
 
 ```text
 high-level roles = 5
@@ -320,7 +321,7 @@ canonical cochange groups = 1
 canonical generated directed edges = 0
 ```
 
-Behavior matrix:
+Матрица поведения:
 
 ```text
 0 changed        -> PASS
@@ -329,7 +330,7 @@ Behavior matrix:
 N changed        -> PASS
 ```
 
-Identity checks:
+Проверки идентичности:
 
 ```text
 reorder unrelated policy arrays -> same group identity
@@ -337,7 +338,7 @@ reorder cochange_groups         -> same group identity
 reorder members                 -> same semantic shape
 ```
 
-Core vocabulary checks:
+Проверки словаря ядра:
 
 ```text
 constraint-program.mts contains none of:
@@ -350,11 +351,18 @@ constraint-program.mts contains none of:
   generatedContractConformanceCochange
 ```
 
-## 13. Compression metrics
+Отдельный регрессионный тест сохраняет независимую направленную семантику:
+
+```text
+src/** changed, tests/** unchanged -> directed cochange_rules FAIL
+src/** changed, tests/** changed   -> directed cochange_rules PASS
+```
+
+## 13. Метрики сжатия
 
 C3.2 должна измеримо уменьшить архитектурную амплификацию.
 
-Acceptance metrics:
+Критерии:
 
 ```text
 contract-conformance role vocabulary in canonical core = 0
@@ -364,35 +372,35 @@ positional identity for macro-generated cochange = 0
 high-level pack semantic edit-sites in canonical core = 0
 ```
 
-Новая primitive допустима только если итоговый architecture concept/edit-site count уменьшается относительно accepted C3.1 state.
+Новый примитив допустим только если итоговое число архитектурных понятий и независимых мест семантической правки уменьшается относительно принятого состояния C3.1.
 
-Tests, scenarios и observability не обязаны уменьшаться.
+Тесты, сценарии и наблюдаемость уменьшаться не обязаны.
 
 ## 14. Документация
 
-Так как `cochange_groups` становится public canonical syntax, тот же PR обязан синхронизировать:
+Так как `cochange_groups` становится публичной канонической частью политики, тот же PR обязан синхронизировать:
 
-- schema descriptions;
-- README / architecture docs, где перечислена canonical policy surface;
-- examples, если там показывается cochange;
-- Compression 3 metrics/observability, если они учитывают structural primitives.
+- описание схемы;
+- README и архитектурные документы, где перечислена каноническая поверхность политики;
+- примеры, если там показывается совместное изменение файлов;
+- метрики Compression 3, если они учитывают структурные примитивы.
 
-Русский остаётся основным языком пользовательской архитектурной документации; identifiers и machine syntax остаются техническими.
+Русский остаётся основным языком пользовательской архитектурной документации; идентификаторы и машинный синтаксис остаются техническими.
 
-## 15. No legacy / forbidden outcomes
+## 15. Без совместимости и запрещённые результаты
 
 Запрещено:
 
-- сохранять reverse-recognition helper под deprecated именем;
-- поддерживать одновременно generated N² contract-conformance edges и canonical group;
-- добавлять `contract_conformance` awareness в runtime evaluator;
-- вводить второй evaluator;
-- делать arbitrary predicate/expression language;
-- делать `cochange_group` специальным contract primitive;
-- сохранять positional identity для macro-generated group;
-- ослаблять repo-guard self-policy ради прохождения C3.2.
+- сохранять обратное распознавание под устаревшим именем;
+- поддерживать одновременно N²-рёбра макроса и каноническую группу;
+- добавлять знание `contract_conformance` в вычислитель;
+- вводить второй вычислитель;
+- добавлять язык произвольных предикатов или выражений;
+- делать `cochange_group` специальным примитивом контрактов;
+- сохранять позиционную идентичность для группы, созданной макросом;
+- ослаблять собственную политику repo-guard ради прохождения C3.2.
 
-## 16. Предлагаемая implementation boundary
+## 16. Предлагаемая граница реализации
 
 Ожидаемая зона изменений:
 
@@ -419,19 +427,20 @@ external consumer validation
 
 Эти работы принадлежат более поздним фазам C3.
 
-## 17. Acceptance
+## 17. Критерии принятия
 
 C3.2 считается принятой только если одновременно доказано:
 
-1. high-level `contract_conformance` компилируется полностью до domain-neutral canonical policy;
-2. для macro cochange создаётся одна `cochange_group`, а не N² edges;
-3. canonical core не содержит contract/conformance role vocabulary;
-4. reverse recognition полностью удалён;
-5. identity группы semantic и не зависит от позиции;
-6. unknown/malformed structure fail closed на schema/compiler boundary;
-7. runtime semantics all-or-none доказана тестами;
-8. policy comparison не придумывает ложный monotonic ordering для member changes;
-9. generated dist current;
-10. self repo-guard, `validate`, `smoke-pack` GREEN;
-11. документация синхронизирована;
-12. ни одного legacy alias/adapter не осталось.
+1. `contract_conformance` компилируется полностью до нейтральной канонической политики;
+2. для высокоуровневого совместного изменения создаётся одна `cochange_group`, а не N² рёбер;
+3. каноническое ядро не содержит словаря ролей контрактов и подтверждений;
+4. обратное распознавание полностью удалено;
+5. идентичность группы семантическая и не зависит от позиции;
+6. ошибочная структура закрывается отказом на границе схемы или компилятора;
+7. семантика «все вместе или никто» доказана тестами;
+8. самостоятельная направленная семантика `cochange_rules` сохранена и доказана отдельным тестом;
+9. сравнение политик не придумывает ложный монотонный порядок для изменения `members`;
+10. сгенерированный `dist` актуален;
+11. собственный repo-guard, `validate` и `smoke-pack` зелёные;
+12. документация синхронизирована;
+13. ни одного псевдонима или адаптера старого представления макроса не осталось.
