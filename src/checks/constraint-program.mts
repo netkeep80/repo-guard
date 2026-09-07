@@ -8,7 +8,6 @@ type SetRelation = "superset_stricter" | "subset_stricter";
 type StrictnessRelation = RankRelation | SetRelation | "equal_or_incomparable" | "required_entity";
 type ComparisonRelation = "equal" | "weaker" | "incomparable" | "stricter";
 type DiagnosticValue = string | number | boolean | null | undefined;
-type ContractConformanceRole = "current.contract" | "current.conformance" | "previous.contract" | "previous.conformance" | "acceptance";
 
 interface StrictnessMetadata {
   owner?: string;
@@ -60,7 +59,7 @@ interface IntegrationWorkflowProjection { id: string; kind?: unknown; path?: unk
 interface IntegrationDocProjection { id: string; must_reference_files?: unknown; [key: string]: unknown; }
 interface IntegrationProjection { workflows?: IntegrationWorkflowProjection[]; docs?: IntegrationDocProjection[]; [key: string]: unknown; }
 interface CochangeRuleProjection { if_changed?: unknown; must_change_any?: unknown; [key: string]: unknown; }
-interface CochangeRoleEdge { from: ContractConformanceRole; to: ContractConformanceRole; }
+interface CochangeGroupProjection { id?: unknown; members?: unknown; }
 interface DocumentDefinitionProjection { path?: unknown; format?: unknown; snapshot?: unknown; }
 interface DocumentSelectorProjection { document?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
 interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; [key: string]: unknown; }
@@ -84,6 +83,7 @@ export interface ConstraintPolicyProjection {
   trace_rules?: unknown[];
   change_profiles?: unknown;
   cochange_rules?: CochangeRuleProjection[];
+  cochange_groups?: CochangeGroupProjection[];
   document_relations?: DocumentRelationsProjection;
   evidence_bindings?: EvidenceBindingProjection[];
 }
@@ -101,13 +101,6 @@ const RANKS = {
   enforcement: { advisory: 0, blocking: 1 },
   count: { changed_only: 0, all_tracked: 1 },
 };
-const CONTRACT_CONFORMANCE_DOCUMENT_ROLES = new Map<string, ContractConformanceRole>([
-  ["contract-conformance.current.contract", "current.contract"],
-  ["contract-conformance.current.conformance", "current.conformance"],
-  ["contract-conformance.previous.contract", "previous.contract"],
-  ["contract-conformance.previous.conformance", "previous.conformance"],
-  ["contract-conformance.acceptance", "acceptance"],
-]);
 const array = <T,>(value: T[] | null | undefined): T[] => Array.isArray(value) ? value : [];
 const compare = (relation: StrictnessRelation, value: unknown, metadata: StrictnessMetadata = {}) => ({ relation, value, ...metadata });
 const scalar = (relation: RankRelation, value: number, metadata: StrictnessMetadata): RankStrictness => compare(relation, value, metadata) as RankStrictness;
@@ -137,36 +130,6 @@ function compileFactRef(selectorValue: unknown, documents: Record<string, Docume
 function compileDocumentTarget(documentValue: unknown, documents: Record<string, DocumentDefinitionProjection>): RelationDocumentTarget {
   const document = typeof documentValue === "string" ? documentValue : "", definition = documents[document] || {};
   return { document, path: canonicalDocumentPath(definition.path), format: definition.format as FactFormat };
-}
-function contractConformanceRolesByPath(documents: Record<string, DocumentDefinitionProjection>): Map<string, ContractConformanceRole> {
-  const roles = new Map<string, ContractConformanceRole>();
-  for (const [document, role] of CONTRACT_CONFORMANCE_DOCUMENT_ROLES) {
-    const definition = documents[document];
-    if (definition?.path !== undefined) roles.set(canonicalDocumentPath(definition.path), role);
-  }
-  return roles;
-}
-function cochangeRoleEdge(rule: CochangeRuleProjection, rolesByPath: Map<string, ContractConformanceRole>): CochangeRoleEdge | null {
-  if (Object.keys(rule).some((field) => field !== "if_changed" && field !== "must_change_any")) return null;
-  const changed = array(rule.if_changed as string[] | undefined), required = array(rule.must_change_any as string[] | undefined);
-  if (changed.length !== 1 || required.length !== 1) return null;
-  const from = rolesByPath.get(canonicalDocumentPath(changed[0])), to = rolesByPath.get(canonicalDocumentPath(required[0]));
-  return from && to && from !== to ? { from, to } : null;
-}
-function generatedContractConformanceCochange(rules: CochangeRuleProjection[], documents: Record<string, DocumentDefinitionProjection>): Map<number, CochangeRoleEdge> {
-  const rolesByPath = contractConformanceRolesByPath(documents), roleCount = rolesByPath.size;
-  for (let count = 2; count <= roleCount; count++) {
-    const edgeCount = count * (count - 1);
-    if (edgeCount > rules.length) continue;
-    const start = rules.length - edgeCount, edges = rules.slice(start).map((rule) => cochangeRoleEdge(rule, rolesByPath));
-    if (edges.some((edge) => edge === null)) continue;
-    const typed = edges as CochangeRoleEdge[], order = [...new Set(typed.map((edge) => edge.from))];
-    if (order.length !== count) continue;
-    const expected = order.flatMap((from) => order.filter((to) => to !== from).map((to) => ({ from, to })));
-    if (expected.some((edge, index) => edge.from !== typed[index].from || edge.to !== typed[index].to)) continue;
-    return new Map(typed.map((edge, offset) => [start + offset, edge]));
-  }
-  return new Map();
 }
 
 export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}, changeIntent: ChangeIntentProjection | null = null): ConstraintProgramEntry[] {
@@ -282,19 +245,21 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   if (policy.change_profiles) add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
   if (policy.integration) add("runtime:integration", { kind: "integration", name: "integration" });
   add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: changeIntent?.surface_debt });
-  const cochangeRules = array(policy.cochange_rules), generatedCochange = generatedContractConformanceCochange(cochangeRules, documents);
-  cochangeRules.forEach((rule, index) => {
-    const generated = generatedCochange.get(index), shape = generated ? { source: "contract_conformance.cochange", ...generated } : rule, pointer = `/cochange_rules/${index}`;
-    const owner = generated ? `cochange-policy:contract-conformance:${generated.from}->${generated.to}` : `cochange-policy:${index}`;
+
+  for (const group of array(policy.cochange_groups)) {
+    const id = String(group.id ?? ""), owner = `cochange-group:${id}`, pointer = `/cochange_groups/${id}`;
+    const members = array(group.members as string[] | undefined).map(canonicalDocumentPath).sort();
+    add(owner, { kind: "cochange_group", name: owner, group_id: id, members }, entity({
+      owner, pointer, removeKind: "cochange_group_removed", removeBefore: { id, members }, removeAfter: { present: false }, removeMessage: `cochange group "${id}" removed`,
+    }));
+    add(`${owner}:shape`, null, exact({ members }, { owner, pointer, incomparableMessage: `cochange group "${id}" changed members` }));
+  }
+
+  array(policy.cochange_rules).forEach((rule, index) => {
+    const pointer = `/cochange_rules/${index}`, owner = `cochange-policy:${index}`;
     add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule });
-    add(owner, null, entity({
-      owner, pointer, removeKind: "cochange_rule_removed", removeBefore: shape, removeAfter: { present: false },
-      removeMessage: generated ? `contract_conformance.cochange generated edge ${generated.from} -> ${generated.to} removed` : `cochange_rules[${index}] removed`,
-    }));
-    add(`${owner}:shape`, null, exact(shape, {
-      owner, pointer,
-      incomparableMessage: generated ? `contract_conformance.cochange generated edge ${generated.from} -> ${generated.to} changed semantics` : `cochange_rules[${index}] changed semantics`,
-    }));
+    add(owner, null, entity({ owner, pointer, removeKind: "cochange_rule_removed", removeBefore: rule, removeAfter: { present: false }, removeMessage: `cochange_rules[${index}] removed` }));
+    add(`${owner}:shape`, null, exact(rule, { owner, pointer, incomparableMessage: `cochange_rules[${index}] changed semantics` }));
   });
   if (changeIntent) {
     add("change-intent:scope", { kind: "scope_paths", name: "change-intent-scope", patterns: changeIntent.scope });
@@ -310,7 +275,7 @@ function canonical(value: unknown): unknown { if (Array.isArray(value)) return v
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
-  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.cochange_rules; delete copy.document_relations; delete copy.evidence_bindings;
+  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.cochange_rules; delete copy.cochange_groups; delete copy.document_relations; delete copy.evidence_bindings;
   if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
   if (copy.integration) {
     delete copy.integration.workflows;
