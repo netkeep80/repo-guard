@@ -36,12 +36,22 @@ function compileFactRef(selectorValue, documents) {
 function diffFact(type, selector) {
     return { source: "diff", selector, type };
 }
+function repositoryAnchorFact(anchorType) {
+    return { source: "repository", selector: { kind: "anchor_values", anchor_type: String(anchorType ?? "") }, type: "string_set" };
+}
+function pointerFromDottedField(value) {
+    const parts = String(value ?? "").split(".").filter(Boolean);
+    return parts.length ? `/${parts.map((part) => part.replace(/~/g, "~0").replace(/\//g, "~1")).join("/")}` : "";
+}
+function changeIntentFact(type, field) {
+    return { source: "change_intent", selector: { pointer: pointerFromDottedField(field), projection: "array_items" }, type };
+}
 function compileDocumentTarget(documentValue, documents) {
     const document = typeof documentValue === "string" ? documentValue : "", definition = documents[document] || {};
     return { document, path: canonicalDocumentPath(definition.path), format: definition.format };
 }
-function primitiveRuntime(name, relationId, primitive, operands, parameters = {}) {
-    return { kind: "primitive_relation", name, relation_id: relationId, primitive, operands, parameters };
+function primitiveRuntime(name, relationId, primitive, operands, parameters = {}, phase) {
+    return { kind: "primitive_relation", name, relation_id: relationId, primitive, operands, parameters, ...(phase ? { phase } : {}) };
 }
 function strings(value) {
     return array(value).map(String);
@@ -150,20 +160,41 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
         const runtime = binding.kind === "workflow_path_coverage" ? {
             kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
             workflow: binding.workflow, covers: array(binding.covers),
-        } : binding.kind === "anchor_value_coverage" ? {
-            kind: "evidence_anchor_value_coverage", name: owner, binding_id: id, source,
-            target_anchor_type: binding.target_anchor_type,
-        } : null;
+        } : binding.kind === "anchor_value_coverage"
+            ? primitiveRuntime(owner, `evidence:${id}`, "set_subset", {
+                left: source,
+                right: repositoryAnchorFact(binding.target_anchor_type),
+            })
+            : null;
         add(owner, runtime, entity({ owner, pointer, removeKind: "evidence_binding_removed", evidence_binding_id: id,
             removeBefore: shape, removeAfter: { present: false }, removeMessage: `evidence binding "${id}" removed` }));
         add(`${owner}:shape`, null, exact(shape, { owner, pointer, evidence_binding_id: id, incomparableMessage: `evidence binding "${id}" changed semantics` }));
+    }
+    for (const rule of array(policy.trace_rules)) {
+        const id = String(rule.id ?? ""), relationId = `trace:${id}`, name = `trace-rule: ${id}`;
+        if (rule.kind === "must_resolve") {
+            add(relationId, primitiveRuntime(name, relationId, "set_subset", {
+                left: repositoryAnchorFact(rule.from_anchor_type),
+                right: repositoryAnchorFact(rule.to_anchor_type),
+            }, {}, "transaction"));
+        }
+        else if (rule.kind === "changed_files_require_evidence") {
+            add(relationId, primitiveRuntime(name, relationId, "set_presence_implies", {
+                left: diffFact("repository_path_set", { kind: "changed_paths", patterns: strings(rule.if_changed) }),
+                right: diffFact("repository_path_set", { kind: "changed_paths", patterns: strings(rule.must_touch_any) }),
+            }));
+        }
+        else if (rule.kind === "declared_anchors_require_evidence") {
+            add(relationId, primitiveRuntime(name, relationId, "set_presence_implies", {
+                left: changeIntentFact("string_set", rule.change_intent_field),
+                right: diffFact("repository_path_set", { kind: "changed_paths", patterns: strings(rule.must_touch_any) }),
+            }));
+        }
     }
     if (array(policy.size_rules).length)
         add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
     if (array(policy.registry_rules).length)
         add("runtime:registry-rules", { kind: "registry_rules", name: "registry-rules", rules: policy.registry_rules });
-    if (array(policy.trace_rules).length)
-        add("runtime:trace-rules", { kind: "trace_rules", name: "trace-rules" });
     if (policy.change_profiles)
         add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
     if (policy.integration)
