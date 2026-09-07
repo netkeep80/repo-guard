@@ -178,7 +178,7 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
     try {
       const descriptor = relationDescriptor(String(rule.kind ?? ""));
       if (descriptor.evidenceSource !== "repository_paths_exist") return [];
-      return [documentSelectorKey(rule[descriptor.operands[0]!])];
+      return [documentSelectorKey(rule[descriptor.operands[0]!)];
     } catch {
       return [];
     }
@@ -199,7 +199,7 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
       const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
       if (!workflow) errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
       else if (object(workflow.expect).enforcement !== "blocking") errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
-      if (!pathExistenceSelectors.has(documentSelectorKey(source))) errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent repository-path existence relation for the same source selector` });
+      if (!pathExistenceSelectors.has(documentSelectorKey(source))) errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
     } else if (binding.kind === "anchor_value_coverage") {
       const target = binding.target_anchor_type;
       if (typeof target !== "string" || !anchorTypes.has(target)) errors.push({ evidence_binding: id, target_anchor_type: target, message: `evidence binding "${id}" references unknown anchor type "${target}"` });
