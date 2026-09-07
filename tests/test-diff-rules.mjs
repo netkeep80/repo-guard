@@ -5,12 +5,20 @@ import { parseDiff } from "../dist/diff/parser.mjs";
 import { checkAdvisoryTextRules } from "../dist/checks/rules/advisory-text-rules.mjs";
 import { checkChangeProfile } from "../dist/checks/rules/change-profiles.mjs";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
-import {
-  checkCanonicalDocsBudget, checkCochangeRules, checkForbiddenPaths, checkMustNotTouch, checkMustTouch,
-  checkNetAddedLinesBudget, checkNewFilesBudget, checkScope, checkSurfaceDebt,
-} from "../dist/checks/rules/constraints.mjs";
+import { checkSurfaceDebt, evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { checkRegistryRules } from "../dist/checks/rules/registry-rules.mjs";
 import { checkSizeRules, countTextLines } from "../dist/checks/rules/size-rules.mjs";
+
+const constraintResults = (checked, policy = {}, changeIntent = null) => evaluateConstraintIR({
+  diff: { files: { checked } },
+  policy,
+  changeIntent,
+});
+const checkNamed = (results, name) => {
+  const entry = results.find((result) => result.name === name);
+  assert.ok(entry, `missing canonical constraint result: ${name}`);
+  return entry.check;
+};
 
 const sampleDiff = [
   "diff --git a/src/app.mjs b/src/app.mjs", "new file mode 100644", "--- /dev/null", "+++ b/src/app.mjs", "+one", "+two",
@@ -26,24 +34,41 @@ const files = [
   { path: "src/a.mjs", status: "modified", addedLines: ["a", "b"], deletedLines: ["old"] },
   { path: "tests/a.test.mjs", status: "added", addedLines: ["test"], deletedLines: [] },
 ];
-assert.deepEqual(checkForbiddenPaths(files, ["*.bak"]), []);
-assert.equal(checkNewFilesBudget(files, 1).ok, true);
-assert.equal(checkNetAddedLinesBudget(files, 2).actual, 2);
-assert.equal(checkCanonicalDocsBudget(files, ["README.md"], 0).ok, true);
-assert.equal(checkCochangeRules(files, [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }]).length, 0);
-assert.equal(checkMustTouch(files, ["tests/**"]).ok, true);
-assert.equal(checkMustNotTouch(files, ["schemas/**"]).ok, true);
-assert.equal(checkScope(files, ["src/**", "tests/**"]).ok, true);
-assert.deepEqual(checkScope(files, ["src/**"]).out_of_scope_paths, ["tests/a.test.mjs"]);
-assert.equal(checkScope([{ ...files[0], status: "deleted" }], ["src/**"]).ok, true);
-assert.equal(checkScope(files, null).ok, true);
+const canonicalResults = constraintResults(files, {
+  paths: { forbidden: ["*.bak"], canonical_docs: ["README.md"] },
+  diff_rules: { max_new_docs: 0, max_new_files: 1, max_net_added_lines: 2 },
+  cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
+}, {
+  scope: ["src/**", "tests/**"],
+  must_touch: ["tests/**"],
+  must_not_touch: ["schemas/**"],
+  budgets: {},
+});
+assert.equal(checkNamed(canonicalResults, "forbidden-paths").ok, true);
+assert.equal(checkNamed(canonicalResults, "max-new-files").ok, true);
+assert.equal(checkNamed(canonicalResults, "max-net-added-lines").actual, 2);
+assert.equal(checkNamed(canonicalResults, "canonical-docs-budget").ok, true);
+assert.equal(checkNamed(canonicalResults, "cochange: src/** -> tests/**").ok, true);
+assert.equal(checkNamed(canonicalResults, "must-touch").ok, true);
+assert.equal(checkNamed(canonicalResults, "must-not-touch").ok, true);
+assert.equal(checkNamed(canonicalResults, "change-intent-scope").ok, true);
+
+const scopeFailure = constraintResults(files, {}, { scope: ["src/**"], must_touch: [], must_not_touch: [], budgets: {} });
+assert.equal(checkNamed(scopeFailure, "change-intent-scope").ok, false);
+assert.equal(checkNamed(scopeFailure, "change-intent-scope").actual, 1);
+const deletedScope = constraintResults([{ ...files[0], status: "deleted" }], {}, { scope: ["src/**"], must_touch: [], must_not_touch: [], budgets: {} });
+assert.equal(checkNamed(deletedScope, "change-intent-scope").ok, true);
+const emptyScope = constraintResults(files, {}, { scope: null, must_touch: [], must_not_touch: [], budgets: {} });
+assert.equal(emptyScope.some((result) => result.name === "change-intent-scope"), false);
 
 const forbidden = [{ path: "backup.bak", status: "added", addedLines: ["x"], deletedLines: [] }];
-assert.deepEqual(checkForbiddenPaths(forbidden, ["*.bak"]), ["backup.bak"]);
-assert.deepEqual(checkForbiddenPaths([{ ...forbidden[0], status: "deleted" }], ["*.bak"]), []);
-assert.equal(checkMustNotTouch(files, ["src/**"]).ok, false);
-assert.equal(checkMustTouch(files, ["docs/**"]).ok, false);
-assert.equal(checkCochangeRules(files.slice(0, 1), [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }]).length, 1);
+assert.equal(checkNamed(constraintResults(forbidden, { paths: { forbidden: ["*.bak"] } }), "forbidden-paths").ok, false);
+assert.equal(checkNamed(constraintResults([{ ...forbidden[0], status: "deleted" }], { paths: { forbidden: ["*.bak"] } }), "forbidden-paths").ok, true);
+assert.equal(checkNamed(constraintResults(files, {}, { scope: [], must_touch: [], must_not_touch: ["src/**"], budgets: {} }), "must-not-touch").ok, false);
+assert.equal(checkNamed(constraintResults(files, {}, { scope: [], must_touch: ["docs/**"], must_not_touch: [], budgets: {} }), "must-touch").ok, false);
+assert.equal(checkNamed(constraintResults(files.slice(0, 1), {
+  cochange_rules: [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }],
+}), "cochange: src/** -> tests/**").ok, false);
 
 const growth = [{ path: "src/new.mjs", status: "added", addedLines: new Array(5).fill("x"), deletedLines: [] }];
 assert.equal(checkSurfaceDebt(growth, null).status, "undeclared");
@@ -52,7 +77,7 @@ assert.equal(checkSurfaceDebt(growth, { kind: "temporary_growth", reason: "tempo
 
 const filtered = filterOperationalPaths([...files, { path: ".claude/state.json", status: "added", addedLines: ["{}"], deletedLines: [] }], [".claude/**"]);
 assert.equal(filtered.length, 2);
-assert.equal(checkScope(filtered, ["src/**", "tests/**"]).ok, true);
+assert.equal(checkNamed(constraintResults(filtered, {}, { scope: ["src/**", "tests/**"], must_touch: [], must_not_touch: [], budgets: {} }), "change-intent-scope").ok, true);
 
 const surfaces = detectTouchedSurfaces(files, { source: ["src/**"], tests: ["tests/**"] });
 assert.deepEqual(surfaces.touched_surfaces, ["source", "tests"]);
