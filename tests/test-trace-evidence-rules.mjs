@@ -84,12 +84,13 @@ console.log("\n--- changed requirement files require evidence ---");
   expect("requirement-only diff fails", result.ok, false);
   expect("requirement-only diff sets blocking exit code", result.exitCode, 1);
 
-  const violation = result.violations.find((item) => item.data?.trace_rule === "changed-requirements-need-evidence");
-  expect("missing evidence violation is reported as a trace rule", Boolean(violation), true);
-  expect("missing evidence violation has evidence trace kind", violation?.data?.trace_kind, "changed_files_require_evidence");
-  expect("missing evidence violation keeps changed requirement path", violation?.data?.changed_files, ["requirements/fr-001.json"]);
-  expect("missing evidence violation keeps required evidence surfaces", violation?.data?.must_touch_any, evidenceSurfaces);
-  expectIncludes("missing evidence message is distinct", violation?.message, "missing evidence");
+  const violation = result.violations.find((item) => item.rule === "trace-rule: changed-requirements-need-evidence");
+  expect("missing evidence violation is reported as the trace rule", Boolean(violation), true);
+  expect("missing evidence uses canonical set_presence_implies", violation?.data?.kind, "set_presence_implies");
+  expect("missing evidence keeps changed requirement path in trigger fact", violation?.data?.left?.value, ["requirements/fr-001.json"]);
+  expect("missing evidence keeps required evidence surfaces in FactRef", violation?.data?.operands?.right?.selector?.patterns, evidenceSurfaces);
+  expect("missing evidence has an empty evidence fact", violation?.data?.right?.value, []);
+  expectIncludes("missing evidence message is relation-native", violation?.message, "requires evidence");
 }
 
 console.log("\n--- evidence surfaces satisfy changed requirement rule ---");
@@ -117,9 +118,10 @@ console.log("\n--- evidence surfaces satisfy changed requirement rule ---");
   const result = runTracePolicy({ traceRules, diffText });
 
   expect("requirement diff with test evidence passes", result.ok, true);
-  expect("evidence trace result records touched evidence",
-    result.traceRuleResults.find((item) => item.id === "changed-requirements-need-evidence")?.evidenceFiles,
+  expect("canonical evidence operand records touched evidence",
+    result.ruleResults.find((item) => item.rule === "trace-rule: changed-requirements-need-evidence")?.data?.right?.value,
     ["tests/fr-001.test.mjs"]);
+  expect("legacy trace result side channel is absent", Object.prototype.hasOwnProperty.call(result, "traceRuleResults"), false);
 }
 
 console.log("\n--- declared ChangeIntent anchors require evidence ---");
@@ -153,12 +155,13 @@ console.log("\n--- declared ChangeIntent anchors require evidence ---");
   const result = runTracePolicy({ traceRules, diffText: missingEvidenceDiff, changeIntent });
 
   expect("declared affects without evidence fails", result.ok, false);
-  const violation = result.violations.find((item) => item.data?.trace_rule === "declared-anchors-need-evidence");
+  const violation = result.violations.find((item) => item.rule === "trace-rule: declared-anchors-need-evidence");
   expect("declared anchor evidence violation is reported", Boolean(violation), true);
-  expect("declared anchor evidence violation has distinct kind", violation?.data?.trace_kind, "declared_anchors_require_evidence");
-  expect("declared anchor evidence keeps change_intent_field DSL", violation?.data?.change_intent_field, "anchors.affects");
-  expect("declared anchor evidence violation keeps declared anchors", violation?.data?.declared_anchors, ["FR-001"]);
-  expectIncludes("declared anchor evidence message is distinct", violation?.message, "missing evidence");
+  expect("declared anchor evidence uses canonical set_presence_implies", violation?.data?.kind, "set_presence_implies");
+  expect("declared anchor evidence keeps generic ChangeIntent pointer", violation?.data?.operands?.left?.selector?.pointer, "/anchors/affects");
+  expect("declared anchor evidence keeps declared anchors as the left fact", violation?.data?.left?.value, ["FR-001"]);
+  expect("declared anchor evidence keeps evidence patterns in the right FactRef", violation?.data?.operands?.right?.selector?.patterns, evidenceSurfaces);
+  expectIncludes("declared anchor evidence message is relation-native", violation?.message, "requires evidence");
 }
 
 console.log("\n--- evidence surfaces satisfy declared anchor rule ---");
@@ -197,9 +200,9 @@ console.log("\n--- evidence surfaces satisfy declared anchor rule ---");
   const result = runTracePolicy({ traceRules, diffText, changeIntent });
 
   expect("declared affects with docs evidence passes", result.ok, true);
-  expect("declared anchor trace result records declared anchors",
-    result.traceRuleResults.find((item) => item.id === "declared-anchors-need-evidence")?.declaredAnchors,
-    ["FR-001"]);
+  const relation = result.ruleResults.find((item) => item.rule === "trace-rule: declared-anchors-need-evidence");
+  expect("declared anchor relation keeps declared anchors", relation?.data?.left?.value, ["FR-001"]);
+  expect("declared anchor relation records evidence paths", relation?.data?.right?.value, ["docs/fr-001.md"]);
 }
 
 console.log(`\n${failures === 0 ? "All trace evidence rule tests passed" : `${failures} test(s) failed`}`);
