@@ -175,17 +175,18 @@ console.log("\n--- anchor evidence lowers into existing set_subset ---");
 
 console.log("\n--- relation algebra stays finite ---");
 {
-  expect("C3.3b adds no relation descriptor", relationDescriptors().map((item) => item.kind), [
+  expect("C3.3b keeps exactly the existing ten relation descriptors", relationDescriptors().length, 10);
+  expect("C3.3b adds no relation descriptor kind", relationDescriptors().map((item) => item.kind).sort(), [
+    "numeric_bound",
     "referenced_paths_exist",
     "referenced_pointer_exists",
     "scalar_equal",
     "scalar_equals_literal",
     "scalar_strictly_greater",
-    "set_equal",
-    "set_subset",
-    "numeric_bound",
-    "set_presence_implies",
     "set_all_or_none",
+    "set_equal",
+    "set_presence_implies",
+    "set_subset",
   ]);
 }
 
