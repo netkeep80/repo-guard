@@ -136,6 +136,12 @@ function architecture(target) {
     .map(([name]) => name)
     .sort();
   const descriptorRegistryCount = count(relationKernel, /const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=/g);
+  const canonicalCore = [constraintProgram, relationKernel, policyCompiler, constraintEvaluator].join("\n");
+  const contractRoleVocabulary = count(canonicalCore, /ContractConformanceRole|CONTRACT_CONFORMANCE_DOCUMENT_ROLES|contractConformanceRolesByPath|current\.contract|current\.conformance|previous\.contract|previous\.conformance/g);
+  const generatedEdgeHelpers = count(canonicalCore, /CochangeRoleEdge|cochangeRoleEdge|generatedContractConformanceCochange/g);
+  const macroCochangeConstraints = count(policyProfiles, /cochangeGroups\.push\(\{\s*id:\s*"contract-conformance"/g);
+  const macroPositionalIdentity = count(canonicalCore, /contract-conformance/g);
+  const highLevelPackCoreEditSites = count(canonicalCore, /contract_conformance|contract-conformance|current\.contract|current\.conformance|previous\.contract|previous\.conformance/g);
 
   const metric = {
     // Historical Compression 2 metrics are retained so --compare remains useful.
@@ -177,6 +183,14 @@ function architecture(target) {
     independent_document_relation_switches: independentRelationSwitchFiles.length,
     independent_document_relation_switch_files: independentRelationSwitchFiles,
     semantic_edit_sites_per_new_primitive: descriptorRegistryCount + independentRelationSwitchFiles.length,
+
+    // C3.2 structural-compression proof. The high-level pack may exist in policy-profiles,
+    // but canonical compilation/evaluation/strictness must not know its domain vocabulary.
+    contract_conformance_role_vocabulary_in_canonical_core: contractRoleVocabulary,
+    generated_edge_recognition_helpers: generatedEdgeHelpers,
+    contract_conformance_cochange_constraints: macroCochangeConstraints,
+    macro_generated_positional_identity: macroPositionalIdentity,
+    high_level_pack_semantic_edit_sites_in_canonical_core: highLevelPackCoreEditSites,
   };
   metric.semantic_edit_sites = metric.rule_families + metric.runtime_ir_compilers + metric.strictness_ir_compilers + metric.bespoke_integration_validator + metric.command_dispatch_branches;
 
