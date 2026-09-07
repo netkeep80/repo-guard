@@ -223,7 +223,7 @@ for (const name of [
   "anchor-extraction",
   "trace-rule: evidence-ok",
   "change-profiles",
-  "cochange-rules",
+  "cochange: src/** -> tests/**",
   "content-rules",
   "must-touch",
   "must-not-touch",
