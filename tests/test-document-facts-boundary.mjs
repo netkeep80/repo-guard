@@ -4,7 +4,7 @@ import {
   createDocumentReader,
   normalizeDocumentFact,
   projectDocumentValue,
-  readDocumentFact,
+  readFact,
   resolveJsonPointer,
 } from "../dist/document-facts.mjs";
 import { checkRegistryRules } from "../dist/checks/rules/registry-rules.mjs";
@@ -134,7 +134,7 @@ describe("typed document fact normalization", () => {
   });
 });
 
-describe("DocumentFact selector/read boundary", () => {
+describe("canonical FactRef read boundary", () => {
   const files = {
     "facts.json": JSON.stringify({
       contract: "contracts/mts-contract-v0.7.json",
@@ -146,28 +146,43 @@ describe("DocumentFact selector/read boundary", () => {
     "bad.yaml": "[unterminated",
   };
   const reader = createDocumentReader({ readFile: (path) => files[path] });
+  const readState = (selector) => readFact({ documents: reader }, {
+    ...selector,
+    format: selector.path.endsWith(".yaml") ? "yaml" : selector.path.endsWith(".json") ? "json" : "toml",
+    snapshot: "state",
+  });
 
   it("reads JSON scalar/path facts and defaults projection to value", () => {
-    assert.deepEqual(readDocumentFact(reader, { path: "facts.json", pointer: "/contract", type: "string" }), {
+    assert.deepEqual(readState({ path: "facts.json", pointer: "/contract", type: "string" }), {
       ok: true,
       value: "contracts/mts-contract-v0.7.json",
     });
-    assert.deepEqual(readDocumentFact(reader, { path: "facts.json", pointer: "/corpus", type: "repository_path" }), {
+    assert.deepEqual(readState({ path: "facts.json", pointer: "/corpus", type: "repository_path" }), {
       ok: true,
       value: "contracts/mts-conformance-v0.7.json",
     });
   });
 
   it("composes object/array projections with deterministic path sets", () => {
-    assert.deepEqual(readDocumentFact(reader, { path: "facts.json", pointer: "/owners", projection: "object_values", type: "repository_path_set" }), {
+    assert.deepEqual(readState({ path: "facts.json", pointer: "/owners", projection: "object_values", type: "repository_path_set" }), {
       ok: true,
       value: ["core/runtime.ts", "schemas/mts.json"],
     });
-    assert.deepEqual(readDocumentFact(reader, { path: "facts.yaml", pointer: "/gates", projection: "array_items", type: "repository_path_set" }), {
+    assert.deepEqual(readState({ path: "facts.yaml", pointer: "/gates", projection: "array_items", type: "repository_path_set" }), {
       ok: true,
       value: ["tests/smoke.mjs", "tools/check.mjs"],
     });
-    assert.deepEqual(readDocumentFact(reader, { path: "facts.yaml", pointer: "/enabled", type: "boolean" }), { ok: true, value: true });
+    assert.deepEqual(readState({ path: "facts.yaml", pointer: "/enabled", type: "boolean" }), { ok: true, value: true });
+  });
+
+  it("reads plain-text BASE and HEAD through the same FactRef boundary", () => {
+    const context = {
+      baseRef: "BASE",
+      headRef: "HEAD",
+      readFileAtRef: (ref, path) => `${ref === "BASE" ? "2.0.0" : "3.0.0"}\n`,
+    };
+    assert.deepEqual(readFact(context, { path: "VERSION", format: "plain_text", snapshot: "base", pointer: "", type: "string" }), { ok: true, value: "2.0.0" });
+    assert.deepEqual(readFact(context, { path: "VERSION", format: "plain_text", snapshot: "head", pointer: "", type: "string" }), { ok: true, value: "3.0.0" });
   });
 
   it("exposes required structured failure codes without parsing messages", () => {
@@ -191,35 +206,35 @@ describe("DocumentFact selector/read boundary", () => {
     assert.equal(path.pointer, "/corpus");
   });
 
-  it("returns the same structured codes through the read boundary", () => {
-    const missing = readDocumentFact(reader, { path: "facts.json", pointer: "/missing", type: "string" });
+  it("returns the same structured codes through the FactRef boundary", () => {
+    const missing = readState({ path: "facts.json", pointer: "/missing", type: "string" });
     assert.equal(missing.ok, false);
     assert.equal(missing.error.code, "missing_pointer_segment");
     assert.equal(missing.error.segment, "missing");
 
-    const projection = readDocumentFact(reader, { path: "facts.json", pointer: "/owners", projection: "array_items", type: "string_set" });
+    const projection = readState({ path: "facts.json", pointer: "/owners", projection: "array_items", type: "string_set" });
     assert.equal(projection.ok, false);
     assert.equal(projection.error.code, "projection_type_mismatch");
 
-    const type = readDocumentFact(reader, { path: "facts.json", pointer: "/contract", type: "boolean" });
+    const type = readState({ path: "facts.json", pointer: "/contract", type: "boolean" });
     assert.equal(type.ok, false);
     assert.equal(type.error.code, "fact_type_mismatch");
 
-    const path = readDocumentFact(reader, { path: "../facts.json", pointer: "/contract", type: "string" });
+    const path = readState({ path: "../facts.json", pointer: "/contract", type: "string" });
     assert.equal(path.ok, false);
     assert.equal(path.error.code, "invalid_repository_path");
   });
 
   it("fails closed for parser/read and unsupported document errors", () => {
-    const badJson = readDocumentFact(reader, { path: "bad.json", pointer: "", type: "string" });
+    const badJson = readState({ path: "bad.json", pointer: "", type: "string" });
     assert.equal(badJson.ok, false);
     assert.equal(badJson.error.code, "document_read_error");
 
-    const badYaml = readDocumentFact(reader, { path: "bad.yaml", pointer: "", type: "string" });
+    const badYaml = readState({ path: "bad.yaml", pointer: "", type: "string" });
     assert.equal(badYaml.ok, false);
     assert.equal(badYaml.error.code, "document_read_error");
 
-    const unsupported = readDocumentFact(reader, { path: "facts.toml", pointer: "", type: "string" });
+    const unsupported = readState({ path: "facts.toml", pointer: "", type: "string" });
     assert.equal(unsupported.ok, false);
     assert.equal(unsupported.error.code, "unsupported_document_type");
   });
