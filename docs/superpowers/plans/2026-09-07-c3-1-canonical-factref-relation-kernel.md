@@ -1,42 +1,42 @@
-# C3.1 Canonical FactRef + Relation Kernel Implementation Plan
+# C3.1: план канонического `FactRef` и ядра отношений
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
+Для выполнения использовать навык `superpowers:executing-plans`; состояние шагов фиксируется флажками прямо в этом плане.
 
-**Goal:** свести document-relation semantics к одному canonical `FactRef` и одной finite relation descriptor table без второго evaluator или compatibility-слоя.
+**Цель:** свести семантику документных отношений к одному `FactRef` и одной конечной таблице описателей отношений без второго вычислителя и без слоя совместимости.
 
-**Architecture:** `src/document-facts.mts` становится единственным владельцем typed `FactRef` и чтения state/base/head фактов. `src/checks/relation-kernel.mts` становится единственным владельцем relation kind, operand roles, phase, evaluator binding, strictness fallback и stable identity inputs. `constraint-program` и `constraints` используют generic relation lookup и не перечисляют primitive kinds самостоятельно.
+**Архитектура:** `src/document-facts.mts` является единственным владельцем типизированного `FactRef` и чтения фактов `state/base/head`. `src/checks/relation-kernel.mts` является единственным владельцем вида отношения, ролей операндов, фазы исполнения, привязки вычислителя, поведения при сравнении строгости и входов устойчивой идентичности. `constraint-program` и `constraints` используют общий поиск описателя и не перечисляют виды примитивов самостоятельно.
 
-**Tech Stack:** TypeScript 7, Node.js >=20, ESM, JSON Schema draft-07, существующий build в `scripts/build.mjs`.
+**Стек:** `TypeScript 7`, `Node.js >=20`, `ESM`, `JSON Schema draft-07`, существующая сборка `scripts/build.mjs`.
 
-**Spec:** `docs/superpowers/specs/2026-09-07-c3-1-canonical-factref-relation-kernel-design.md`
+**Проект решения:** `docs/superpowers/specs/2026-09-07-c3-1-canonical-factref-relation-kernel-design.md`
 
-## Global Constraints
+## Общие ограничения
 
-- Base accepted main: `730769112d94ae03ab996ba19cc3b20da9be965f`.
-- Issue: #372.
-- Один canonical evaluator entry point: `evaluateConstraintIR`.
-- Один canonical FactRef model.
-- Один relation descriptor registry; он живёт в существующем `relation-kernel.mts`.
-- Никакого нового `primitive-registry.mts`.
-- Никаких compatibility aliases старых internal selector/runtime kinds.
-- Unknown primitive fails closed.
-- Public policy syntax в C3.1 не расширяется.
-- Contract-conformance/cochange compression остаётся C3.2.
-- Новый generic primitive: <=1 semantic kernel edit-site + schema + tests.
+- Принятая исходная точка `main`: `730769112d94ae03ab996ba19cc3b20da9be965f`.
+- Рабочая задача: #372.
+- Единственная точка входа вычислителя: `evaluateConstraintIR`.
+- Единственная модель ссылки на факт: `FactRef`.
+- Единственный реестр описателей отношений находится в существующем `relation-kernel.mts`.
+- Новый файл отдельного реестра не создаётся.
+- Псевдонимы совместимости для старых внутренних селекторов и видов исполнения запрещены.
+- Неизвестный примитив обязан завершаться закрытым отказом.
+- Публичный синтаксис политики в C3.1 не расширяется.
+- Сжатие `contract_conformance` и `cochange` остаётся задачей C3.2.
+- Новый общий примитив должен требовать не более одного семантического места изменения в ядре, плюс схему и тесты.
 
 ---
 
-### Task 1: RED architecture falsifier
+### Задача 1: красный архитектурный фальсификатор
 
-**Files:**
-- Create: `tests/test-canonical-relation-kernel.mjs`
-- Modify: none
+**Файлы:**
+- создать: `tests/test-canonical-relation-kernel.mjs`;
+- другие файлы на красной стадии не менять.
 
-**Produces:** regression contract для #366/#368 class: один registry обязан владеть relation metadata; compiler/runtime не должны иметь независимые primitive switches.
+**Результат:** регрессионный контракт для класса ошибок #366/#368: один реестр обязан владеть метаданными отношений, а компилятор и вычислитель не должны иметь независимые переключатели по видам примитивов.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Шаг 1: добавить падающий тест**
 
-Проверить из built `dist`:
+Проверить собранный `dist`:
 
 ```js
 import { relationDescriptors, relationDescriptor } from "../dist/checks/relation-kernel.mjs";
@@ -48,42 +48,39 @@ expect(relationDescriptor("scalar_strictly_greater").operands.join(","), "left,r
 expect(() => relationDescriptor("unknown_relation"), "throws");
 ```
 
-Дополнительно прочитать source text и доказать, что `policy-compiler.mts`, `constraint-program.mts`, `constraints.mts` не содержат собственный перечень семи public relation kinds после cutover.
+Дополнительно тест читает исходный текст и доказывает, что `policy-compiler.mts`, `constraint-program.mts` и `constraints.mts` после перехода не содержат собственного перечня семи публичных видов отношений.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Шаг 2: подтвердить красное состояние**
 
-Run in CI through draft PR:
+Проверка выполнена через черновой PR:
 
 ```bash
 npm test
 ```
 
-Expected: новый тест падает, потому что descriptor API ещё отсутствует.
+Независимый запуск действий на голове `9f4b5652349b58e915dc7fab7504e5c6ad7ae525` упал именно потому, что `relationDescriptor` ещё отсутствовал.
 
-- [ ] **Step 3: Commit RED only**
+- [x] **Шаг 3: зафиксировать только красный тест**
 
-```bash
-git add tests/test-canonical-relation-kernel.mjs
-git commit -m "test(c3): falsify duplicated relation semantics"
-```
+Красный тест был отдельным коммитом до производственного кода.
 
 ---
 
-### Task 2: Canonical FactRef
+### Задача 2: канонический `FactRef`
 
-**Files:**
-- Modify: `src/document-facts.mts`
-- Test: `tests/test-canonical-relation-kernel.mjs`
+**Файлы:**
+- изменить: `src/document-facts.mts`;
+- проверить: `tests/test-canonical-relation-kernel.mjs` и `tests/test-document-facts-boundary.mjs`.
 
-**Produces:** `FactRef`, `FactSnapshot`, generic typed fact read boundary for state/base/head.
+**Результат:** `FactRef`, `FactSnapshot` и единая типизированная граница чтения фактов для `state/base/head`.
 
-- [ ] **Step 1: Extend RED test**
+- [x] **Шаг 1: расширить фальсификатор**
 
-Assert exported canonical type behavior through runtime helpers: state reads structured documents; base/head reads plain-text snapshot values; malformed snapshot request fails closed.
+Проверяется чтение структурированных фактов состояния, чтение текстовых значений `BASE/HEAD` и закрытый отказ при некорректном запросе снимка.
 
-- [ ] **Step 2: Replace selector model**
+- [x] **Шаг 2: заменить модель селектора**
 
-Canonical source shape:
+Каноническая форма:
 
 ```ts
 export type FactSnapshot = "state" | "base" | "head";
@@ -98,37 +95,32 @@ export interface FactRef {
 }
 ```
 
-Add one `readFact(...)` boundary that receives repository/document readers plus base/head refs and resolves the requested snapshot.
+Единая функция `readFact(...)` получает необходимые читатели и ссылки `BASE/HEAD`, после чего разрешает требуемый снимок.
 
-- [ ] **Step 3: Delete superseded internal selector type**
+- [x] **Шаг 3: удалить вытесненный внутренний селектор**
 
-Do not leave `DocumentFactSelector` as alias. Migrate all canonical callers in the same branch.
+`DocumentFactSelector` и `readDocumentFact` удалены без псевдонимов совместимости; канонические вызывающие места мигрированы в той же ветке.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Шаг 4: пройти сфокусированные проверки**
 
-```bash
-npm run build
-node tests/test-canonical-relation-kernel.mjs
-node tests/test-document-facts-boundary.mjs
-node tests/test-transition-rules.mjs
-```
+В последнем полном запуске `test-canonical-relation-kernel.mjs` и `test-document-facts-boundary.mjs` зелёные; `test-transition-rules.mjs` также проходит через новую форму исполнения.
 
 ---
 
-### Task 3: Turn relation-kernel into the single descriptor authority
+### Задача 3: единственный реестр описателей в `relation-kernel`
 
-**Files:**
-- Modify: `src/checks/relation-kernel.mts`
-- Modify: `src/checks/constraint-program.mts`
-- Modify: `src/policy-compiler.mts`
-- Modify: `src/checks/rules/constraints.mts`
-- Test: `tests/test-canonical-relation-kernel.mjs`
+**Файлы:**
+- изменить: `src/checks/relation-kernel.mts`;
+- изменить: `src/checks/constraint-program.mts`;
+- изменить: `src/policy-compiler.mts`;
+- изменить: `src/checks/rules/constraints.mts`;
+- проверить: `tests/test-canonical-relation-kernel.mjs`.
 
-**Produces:** one descriptor table and one generic runtime relation shape.
+**Результат:** одна таблица описателей и одна общая форма отношения времени исполнения.
 
-- [ ] **Step 1: Add finite descriptor table**
+- [x] **Шаг 1: добавить конечную таблицу описателей**
 
-Each descriptor owns exactly:
+Каждый описатель владеет минимум следующими свойствами:
 
 ```ts
 kind
@@ -139,66 +131,58 @@ strictness
 identity
 ```
 
-The seven current relation kinds are the complete initial table.
+Начальная таблица содержит ровно семь уже существующих видов отношений.
 
-- [ ] **Step 2: Make unknown lookup fail closed**
+- [x] **Шаг 2: закрыто отклонять неизвестный вид**
 
 ```ts
 relationDescriptor(kind)
 ```
 
-throws for an unregistered kind.
+Функция выбрасывает ошибку для незарегистрированного вида.
 
-- [ ] **Step 3: Generic lowering**
+- [x] **Шаг 3: сделать понижение общим**
 
-Replace the relation-kind switch in `constraint-program.mts` with descriptor-driven operand compilation. Emit one runtime shape:
+Переключатель по видам отношений в `constraint-program.mts` удалён. Все правила понижаются в одну форму:
 
 ```ts
 { kind: "primitive_relation", primitive: rule.kind, relation_id: id, operands, parameters }
 ```
 
-- [ ] **Step 4: Generic compiler consumer discovery**
+- [x] **Шаг 4: сделать обнаружение потребителей компилятором общим**
 
-Replace `policy-compiler.mts` kind conditions with `descriptor.operands`, so every fact/document operand is mechanically consumed from the same descriptor.
+`policy-compiler.mts` получает роли операндов из `descriptor.operands`; каждый документный операнд учитывается механически тем же описателем.
 
-- [ ] **Step 5: Generic evaluator dispatch**
+- [x] **Шаг 5: сделать диспетчеризацию вычислителя общей**
 
-Delete document-specific runtime kinds and their entries from `CONSTRAINT_PHASES`. For `primitive_relation`, fetch the descriptor, use its phase, and call its evaluator through the existing `evaluateConstraintIR` loop.
+Отдельные документные виды времени исполнения и их записи в `CONSTRAINT_PHASES` удалены. Для `primitive_relation` фаза и вычислитель берутся из описателя, а точкой входа остаётся `evaluateConstraintIR`.
 
-- [ ] **Step 6: Preserve policy comparison semantics**
+- [x] **Шаг 6: сохранить сравнение политик**
 
-Relation descriptors use explicit incomparable-on-shape-change semantics in C3.1 unless a monotonic ordering is already proven. Stable semantic identity remains the relation `id`.
+В C3.1 описатели используют явное поведение «несравнимо при изменении формы», пока для отношения не доказан монотонный порядок. Устойчивая семантическая идентичность остаётся основанной на `id`.
 
-- [ ] **Step 7: Run focused regression set**
+- [x] **Шаг 7: пройти регрессионный набор**
 
-```bash
-npm run build
-node tests/test-canonical-relation-kernel.mjs
-node tests/test-transition-policy-compiler.mjs
-node tests/test-transition-rules.mjs
-node tests/test-cross-document-traceability.mjs
-node tests/test-execution-phases.mjs
-node tests/test-policy-delta-rules.mjs
-```
+Последний полный запуск дошёл до проверки языка документации; до неё новые проверки ядра, перехода, междокументной трассируемости и продвижения контрактов зелёные.
 
 ---
 
-### Task 4: Schema/runtime mechanical consistency and compression evidence
+### Задача 4: механическая согласованность схемы и ядра, измерение сжатия
 
-**Files:**
-- Modify: `tests/validate-schemas.mjs` or the focused C3.1 test if sufficient
-- Modify: `scripts/compression-metrics.mjs`
-- Modify: `docs/architecture-compression-3-baseline.md`
+**Файлы:**
+- изменить существующий сфокусированный тест;
+- изменить: `scripts/compression-metrics.mjs`;
+- изменить: `docs/architecture-compression-3-baseline.md`.
 
-**Produces:** machine proof that schema kinds and kernel kinds cannot silently drift, plus measured C3.1 edit-site result.
+**Результат:** машинное доказательство отсутствия тихого расхождения между видами отношений в схеме и ядре, а также измеренный результат C3.1.
 
-- [ ] **Step 1: Add schema-to-kernel consistency assertion**
+- [ ] **Шаг 1: добавить проверку согласованности схемы и ядра**
 
-Extract `document_relation_rule` kinds from schema and require exact equality with `relationDescriptors()`.
+Извлечь виды `document_relation_rule` из схемы и потребовать точного равенства с `relationDescriptors()`.
 
-- [ ] **Step 2: Extend compression metrics**
+- [ ] **Шаг 2: расширить метрики сжатия**
 
-Report:
+Зафиксировать:
 
 ```text
 primitive_descriptor_registry_count = 1
@@ -207,51 +191,51 @@ independent_document_relation_switches = 0
 semantic_edit_sites_per_new_primitive = 1
 ```
 
-- [ ] **Step 3: Update canonical architecture doc**
+Также восстановить корректный учёт шести типов документных фактов после перехода на `FactRef`.
 
-Append accepted C3.1 architecture and explain that public policy syntax is unchanged; internal selectors/runtime kinds were removed rather than aliased.
+- [ ] **Шаг 3: обновить канонический архитектурный отчёт**
+
+Зафиксировать результат кандидата C3.1: публичный синтаксис политики не изменён; старые внутренние селекторы и отдельные виды времени исполнения удалены, а не оставлены псевдонимами.
 
 ---
 
-### Task 5: Full verification and protected acceptance
+### Задача 5: полная проверка и защищённое принятие
 
-**Files:**
-- Generated: `dist/**`
-- No new production concepts.
+**Файлы:**
+- сгенерированный `dist/**`;
+- новых производственных понятий не добавлять.
 
-- [ ] **Step 1: Generate dist**
+- [x] **Шаг 1: сгенерировать `dist`**
 
-```bash
-npm run build
+Пять изменённых файлов `dist` приведены к точному выводу `TypeScript`.
+
+- [x] **Шаг 2: проверить свежесть генерации**
+
+На голове `9d613032f74237e50a0791aa58e9e6c45a5d6512`:
+
+```text
+Generated dist is current.
 ```
 
-- [ ] **Step 2: Verify generated freshness**
+- [ ] **Шаг 3: получить полностью зелёный набор тестов**
 
-```bash
-npm run check:dist
-```
+Текущий единственный наблюдаемый отказ — политика русского Markdown в двух новых документах; исправление выполняется без изменения архитектуры.
 
-- [ ] **Step 3: Run full suite**
+- [ ] **Шаг 4: пройти самопроверку и интеграционные ворота PR**
 
-```bash
-npm test
-```
-
-- [ ] **Step 4: Run self-policy/integration gates through PR CI**
-
-Required checks:
+Обязательные проверки:
 
 ```text
 validate
 smoke-pack
 ```
 
-The ready-for-review run must execute the real self `check-pr` step.
+После перевода PR из черновика запуск обязан реально выполнить шаг самопроверки `check-pr`, а не пропустить его.
 
-- [ ] **Step 5: Exact-head merge only**
+- [ ] **Шаг 5: выполнить слияние только по точной голове**
 
-Before merge fresh-read `main`, #372, PR head/base/mergeability and exact-head CI. Merge only if base is still accepted C3.0 main or the branch is cleanly updated and reverified.
+Перед слиянием заново проверить `main`, #372, голову и базу PR, возможность слияния и результаты CI на этой же голове. Слияние допустимо только с принятой базой C3.0 либо после чистого обновления ветки и повторной проверки.
 
-- [ ] **Step 6: Post-merge evidence**
+- [ ] **Шаг 6: подтвердить состояние после слияния**
 
-Verify new `main`, merged PR, #372 closed completed, required checks green, then and only then proceed to #373/C3.2.
+Проверить новый `main`, состояние PR, закрытие #372 как выполненной и зелёные обязательные проверки. Только после этого переходить к #373/C3.2.
