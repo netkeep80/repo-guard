@@ -43,7 +43,7 @@ const constraintFacts = {
   changeIntent: { must_touch: ["src/**"], must_not_touch: ["schemas/**"], budgets: {} },
 };
 const constraintIR = compileConstraintIR(constraintFacts);
-expect("policy frontends compile into primitive constraints", constraintIR.constraints.some((c) => c.kind === "implies_nonempty"), true);
+expect("policy frontends compile into canonical primitive constraints", constraintIR.constraints.some((c) => c.kind === "primitive_relation" && c.primitive === "set_presence_implies"), true);
 expect("constraint kernel preserves familiar result names", evaluateConstraintIR(constraintFacts).some((r) => r.name === "must-touch" && r.check.ok), true);
 
 const missingChangeType = checkChangeProfile([], { change_profiles: { feature: {} } }, null);

@@ -1,7 +1,9 @@
 import { parseDocument } from "yaml";
+import type { DiffFileStatus, ParsedDiffFile } from "./diff/parser.mjs";
+import { selectPaths } from "./diff/classification.mjs";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
-import { normalizePathEntry } from "./utils/path-patterns.mjs";
+import { matchesAny, normalizePathEntry } from "./utils/path-patterns.mjs";
 
 export interface MarkdownHeading {
   level: number;
@@ -66,6 +68,19 @@ export type DocumentScalar = string | number | boolean | null;
 export type NormalizedDocumentFact = DocumentScalar | string[];
 export type FactSnapshot = "state" | "base" | "head";
 export type FactFormat = "json" | "yaml" | "plain_text";
+export type FactSource = "document" | "diff";
+export type DiffFactSelector =
+  | {
+      kind: "changed_paths";
+      patterns: readonly string[];
+      mode?: "matching" | "outside";
+      exclude_statuses?: readonly DiffFileStatus[];
+    }
+  | {
+      kind: "metric";
+      metric: "new_docs" | "new_files" | "net_added_lines";
+      exclude_paths?: readonly string[];
+    };
 export type DocumentFactErrorCode =
   | "malformed_pointer"
   | "missing_pointer_segment"
@@ -75,20 +90,23 @@ export type DocumentFactErrorCode =
   | "document_read_error"
   | "unsupported_document_type";
 
-export interface FactRef {
-  path: string;
-  format: FactFormat;
-  snapshot: FactSnapshot;
-  pointer: string;
-  projection?: DocumentProjection;
-  type: DocumentFactType;
-}
+export type FactRef =
+  | {
+      source: "document";
+      selector: { path: string; format: FactFormat; snapshot: FactSnapshot; pointer: string; projection?: DocumentProjection };
+      type: DocumentFactType;
+    }
+  | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType };
+
+type DocumentRef = Extract<FactRef, { source: "document" }>;
+type DocumentSelector = DocumentRef["selector"];
 
 export interface FactReadContext {
   documents?: DocumentReader;
   baseRef?: string | null;
   headRef?: string | null;
   readFileAtRef?: (ref: string, filePath: string) => unknown;
+  diff?: { files?: { checked?: ParsedDiffFile[] } };
 }
 
 export interface DocumentFactError {
@@ -241,7 +259,7 @@ export function normalizeDocumentFact(value: unknown, type: "repository_path", p
 export function normalizeDocumentFact(value: unknown, type: DocumentFactType, pointer?: string): NormalizedDocumentFact;
 export function normalizeDocumentFact(value: unknown, type: DocumentFactType, pointer = ""): NormalizedDocumentFact {
   if (type === "scalar") {
-    if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value;
+    if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value as DocumentScalar;
     return failDocumentFact("fact_type_mismatch", "document fact scalar requires a JSON scalar", pointer);
   }
   if (type === "string") {
@@ -259,55 +277,93 @@ export function normalizeDocumentFact(value: unknown, type: DocumentFactType, po
   return failDocumentFact("fact_type_mismatch", `unsupported document fact type "${String(exhaustive)}"`, pointer);
 }
 
-function structuredFactSource(reader: DocumentReader, ref: FactRef): unknown {
-  const path = normalizeRepositoryPathFact(ref.path, ref.pointer);
-  if (ref.format === "json") return reader.json(path);
-  if (ref.format === "yaml") return reader.yaml(path);
-  if (ref.format === "plain_text") {
-    if (ref.pointer !== "" || (ref.projection !== undefined && ref.projection !== "value")) {
-      return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", ref.pointer);
+function factPointer(ref: FactRef): string {
+  return ref.source === "document" ? ref.selector.pointer : "";
+}
+
+function documentSelector(ref: FactRef): DocumentSelector {
+  if (ref.source !== "document") failDocumentFact("document_read_error", "document fact requires document source");
+  return ref.selector;
+}
+
+function structuredFactSource(reader: DocumentReader, selector: DocumentSelector): unknown {
+  const path = normalizeRepositoryPathFact(selector.path, selector.pointer);
+  if (selector.format === "json") return reader.json(path);
+  if (selector.format === "yaml") return reader.yaml(path);
+  if (selector.format === "plain_text") {
+    if (selector.pointer !== "" || (selector.projection !== undefined && selector.projection !== "value")) {
+      return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", selector.pointer);
     }
     return reader.text(path).trim();
   }
-  return failDocumentFact("unsupported_document_type", `unsupported document type for "${path}"`, ref.pointer);
+  const exhaustive: never = selector.format;
+  return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
 
-function snapshotFactSource(context: FactReadContext, ref: FactRef): unknown {
-  const label = ref.snapshot === "base" ? "BASE" : "HEAD";
-  const revision = ref.snapshot === "base" ? context.baseRef : context.headRef;
-  const path = normalizeRepositoryPathFact(ref.path, ref.pointer);
-  if (!revision) return failDocumentFact("document_read_error", `missing ${label} ref`, ref.pointer);
-  if (!context.readFileAtRef) return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, ref.pointer);
+function snapshotFactSource(context: FactReadContext, selector: DocumentSelector): unknown {
+  const label = selector.snapshot === "base" ? "BASE" : "HEAD";
+  const revision = selector.snapshot === "base" ? context.baseRef : context.headRef;
+  const path = normalizeRepositoryPathFact(selector.path, selector.pointer);
+  if (!revision) return failDocumentFact("document_read_error", `missing ${label} ref`, selector.pointer);
+  if (!context.readFileAtRef) return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, selector.pointer);
   let raw: unknown;
   try {
     raw = context.readFileAtRef(revision, path);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return failDocumentFact("document_read_error", `${label} read failed: ${collapseMessage(message)}`, ref.pointer);
+    return failDocumentFact("document_read_error", `${label} read failed: ${collapseMessage(message)}`, selector.pointer);
   }
-  if (raw === null || raw === undefined) return failDocumentFact("document_read_error", `missing ${label} file`, ref.pointer);
-  if (ref.format === "plain_text") {
-    if (ref.pointer !== "" || (ref.projection !== undefined && ref.projection !== "value")) {
-      return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", ref.pointer);
+  if (raw === null || raw === undefined) return failDocumentFact("document_read_error", `missing ${label} file`, selector.pointer);
+  if (selector.format === "plain_text") {
+    if (selector.pointer !== "" || (selector.projection !== undefined && selector.projection !== "value")) {
+      return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", selector.pointer);
     }
     return String(raw).trim();
   }
-  if (ref.format === "json") return parseJson(String(raw));
-  if (ref.format === "yaml") return parseYaml(String(raw));
-  return failDocumentFact("unsupported_document_type", `unsupported document type for "${path}"`, ref.pointer);
+  if (selector.format === "json") return parseJson(String(raw));
+  if (selector.format === "yaml") return parseYaml(String(raw));
+  const exhaustive: never = selector.format;
+  return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
+}
+
+function diffFactSource(context: FactReadContext, selector: DiffFactSelector): unknown {
+  const files = context.diff?.files?.checked;
+  if (!Array.isArray(files)) return failDocumentFact("document_read_error", "diff facts are unavailable");
+
+  if (selector.kind === "metric") {
+    const excludedPaths = new Set(selector.exclude_paths || []);
+    if (selector.metric === "new_files") return files.filter((file) => file.status === "added").length;
+    if (selector.metric === "new_docs") {
+      return files.filter((file) => file.status === "added" && /\.md$/i.test(file.path) && !excludedPaths.has(file.path)).length;
+    }
+    return files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
+  }
+
+  const patterns = [...selector.patterns];
+  const excluded = new Set(selector.exclude_statuses || []);
+  const candidates = files.filter((file) => !excluded.has(file.status));
+  const paths = selector.mode === "outside"
+    ? uniqueSorted(candidates.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path))
+    : selectPaths(candidates, patterns);
+  return paths;
 }
 
 export function readFact(context: FactReadContext, ref: FactRef): DocumentFactResult {
+  const pointer = factPointer(ref);
   try {
-    const source = ref.snapshot === "state"
-      ? context.documents ? structuredFactSource(context.documents, ref) : failDocumentFact("document_read_error", "document reader is unavailable", ref.pointer)
-      : ref.snapshot === "base" || ref.snapshot === "head"
-        ? snapshotFactSource(context, ref)
-        : failDocumentFact("document_read_error", `unsupported fact snapshot "${String((ref as { snapshot?: unknown }).snapshot)}"`, ref.pointer);
-    const projected = ref.format === "plain_text" ? source : projectDocumentValue(source, ref.pointer, ref.projection ?? "value");
-    return { ok: true, value: normalizeDocumentFact(projected, ref.type, ref.pointer) };
+    if (ref.source === "diff") {
+      return { ok: true, value: normalizeDocumentFact(diffFactSource(context, ref.selector), ref.type, pointer) };
+    }
+    const selector = documentSelector(ref);
+    const source = selector.snapshot === "state"
+      ? context.documents ? structuredFactSource(context.documents, selector) : failDocumentFact("document_read_error", "document reader is unavailable", selector.pointer)
+      : selector.snapshot === "base" || selector.snapshot === "head"
+        ? snapshotFactSource(context, selector)
+        : failDocumentFact("document_read_error", `unsupported fact snapshot "${String((selector as { snapshot?: unknown }).snapshot)}"`, selector.pointer);
+    const projected = selector.format === "plain_text" ? source : projectDocumentValue(source, selector.pointer, selector.projection ?? "value");
+    return { ok: true, value: normalizeDocumentFact(projected, ref.type, selector.pointer) };
   } catch (error: unknown) {
-    return { ok: false, error: documentFactError(error, ref.pointer) };
+    return { ok: false, error: documentFactError(error, pointer) };
   }
 }
 

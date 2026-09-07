@@ -55,9 +55,11 @@ function schemaConstKinds(schema, definitionName) {
     .sort();
 }
 
-function descriptorKinds(source) {
+function descriptorEntries(source) {
   const table = source.match(/const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\];/);
-  return table ? [...table[1].matchAll(/\bkind:\s*"([^"]+)"/g)].map((item) => item[1]).sort() : [];
+  if (!table) return [];
+  return [...table[1].matchAll(/\{\s*kind:\s*"([^"]+)",([\s\S]*?)(?=\n\s*\{\s*kind:|$)/g)]
+    .map((match) => ({ kind: match[1], public: /\bpublic:\s*true\b/.test(match[2]) }));
 }
 
 function integrationCounts(policy) {
@@ -123,9 +125,14 @@ function architecture(target) {
   const relationKinds = schemaConstKinds(policySchema, "document_relation_rule");
   const selectorDefinitions = Object.keys(policySchema.definitions || {}).filter((name) => /^document_.*_selector$/.test(name)).sort();
   const factTypes = unionMembers(documentFacts, "DocumentFactType");
+  const factSources = unionMembers(documentFacts, "FactSource");
   const evidenceBindingKinds = schemaConstKinds(policySchema, "evidence_binding");
   const relationKernelOperations = [...relationKernel.matchAll(/export\s+(?:function|const)\s+([A-Za-z0-9_]+)/g)].map((item) => item[1]).sort();
-  const relationDescriptorKinds = descriptorKinds(relationKernel);
+  const descriptors = descriptorEntries(relationKernel);
+  const relationDescriptorKinds = descriptors.map((item) => item.kind).sort();
+  const publicRelationDescriptorKinds = descriptors.filter((item) => item.public).map((item) => item.kind).sort();
+  const runtimeConstraintKinds = unionMembers(constraintEvaluator, "RuntimeConstraintKind");
+  const historicalRuntimeKinds = ["max_metric", "scope_paths", "require_paths", "forbid_paths", "implies_nonempty", "cochange_group"];
   const relationConsumerSources = {
     policy_compiler: policyCompiler,
     constraint_program: constraintProgram,
@@ -165,6 +172,7 @@ function architecture(target) {
     document_selector_definitions: selectorDefinitions,
     document_fact_types: factTypes.length,
     document_fact_type_names: factTypes,
+    canonical_fact_sources: factSources,
     evidence_binding_kinds: evidenceBindingKinds,
     relation_kernel_operations: relationKernelOperations.length,
     relation_kernel_operation_names: relationKernelOperations,
@@ -175,10 +183,11 @@ function architecture(target) {
 
     // C3.1 targeted amplification metrics. Schema and tests are deliberate structural edit-sites
     // and are therefore excluded from the semantic kernel edit-site count.
-    canonical_factref_model_count: count(documentFacts, /export\s+interface\s+FactRef\b/g),
+    canonical_factref_model_count: count(documentFacts, /export\s+(?:interface|type)\s+FactRef\b/g),
     primitive_descriptor_registry_count: descriptorRegistryCount,
     primitive_descriptor_kinds: relationDescriptorKinds,
-    schema_relation_kinds_match_descriptors: JSON.stringify(relationKinds) === JSON.stringify(relationDescriptorKinds),
+    public_primitive_descriptor_kinds: publicRelationDescriptorKinds,
+    schema_relation_kinds_match_descriptors: JSON.stringify(relationKinds) === JSON.stringify(publicRelationDescriptorKinds),
     primitive_runtime_shape_count: count(constraintProgram, /kind:\s*"primitive_relation"/g),
     independent_document_relation_switches: independentRelationSwitchFiles.length,
     independent_document_relation_switch_files: independentRelationSwitchFiles,
@@ -191,6 +200,11 @@ function architecture(target) {
     contract_conformance_cochange_constraints: macroCochangeConstraints,
     macro_generated_positional_identity: macroPositionalIdentity,
     high_level_pack_semantic_edit_sites_in_canonical_core: highLevelPackCoreEditSites,
+
+    // C3.3 historical runtime convergence.
+    runtime_constraint_kinds: runtimeConstraintKinds.length,
+    runtime_constraint_kind_names: runtimeConstraintKinds,
+    c33a_historical_runtime_kinds_remaining: historicalRuntimeKinds.filter((kind) => runtimeConstraintKinds.includes(kind)),
   };
   metric.semantic_edit_sites = metric.rule_families + metric.runtime_ir_compilers + metric.strictness_ir_compilers + metric.bespoke_integration_validator + metric.command_dispatch_branches;
 

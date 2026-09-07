@@ -1,4 +1,10 @@
-import { normalizeDocumentFact, type DocumentFactType, type FactFormat, type FactRef } from "../document-facts.mjs";
+import {
+  normalizeDocumentFact,
+  type DiffFactSelector,
+  type DocumentFactType,
+  type FactFormat,
+  type FactRef,
+} from "../document-facts.mjs";
 import { relationDescriptor, type RelationDocumentTarget } from "./relation-kernel.mjs";
 
 type EnforcementMode = "advisory" | "blocking";
@@ -118,32 +124,57 @@ function canonicalDocumentPath(value: unknown): string {
 function compileFactRef(selectorValue: unknown, documents: Record<string, DocumentDefinitionProjection>): FactRef {
   const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
   const snapshot = definition.snapshot === "base" || definition.snapshot === "head" ? definition.snapshot : "state";
-  return {
+  const documentSelector: Extract<FactRef, { source: "document" }>["selector"] = {
     path: canonicalDocumentPath(definition.path),
     format: definition.format as FactFormat,
     snapshot,
     pointer: typeof selector.pointer === "string" ? selector.pointer : "",
-    projection: selector.projection as FactRef["projection"],
-    type: selector.type as DocumentFactType,
+    projection: selector.projection as Extract<FactRef, { source: "document" }>["selector"]["projection"],
   };
+  return { source: "document", selector: documentSelector, type: selector.type as DocumentFactType };
+}
+function diffFact(type: DocumentFactType, selector: DiffFactSelector): FactRef {
+  return { source: "diff", selector, type };
 }
 function compileDocumentTarget(documentValue: unknown, documents: Record<string, DocumentDefinitionProjection>): RelationDocumentTarget {
   const document = typeof documentValue === "string" ? documentValue : "", definition = documents[document] || {};
   return { document, path: canonicalDocumentPath(definition.path), format: definition.format as FactFormat };
+}
+function primitiveRuntime(
+  name: string,
+  relationId: string,
+  primitive: string,
+  operands: Record<string, FactRef | RelationDocumentTarget>,
+  parameters: Record<string, unknown> = {},
+): RuntimeConstraint {
+  return { kind: "primitive_relation", name, relation_id: relationId, primitive, operands, parameters };
+}
+function strings(value: unknown): string[] {
+  return array(value as string[] | undefined).map(String);
 }
 
 export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}, changeIntent: ChangeIntentProjection | null = null): ConstraintProgramEntry[] {
   const program: ConstraintProgramEntry[] = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
   const add = (key: string, runtime: RuntimeConstraint | null = null, strictness: StrictnessConstraint | null = null) => program.push({ key, runtime, strictness });
 
-  add("paths:forbidden", { kind: "forbid_paths", name: "forbidden-paths", patterns: policy.paths?.forbidden || [] },
-    set("superset_stricter", policy.paths?.forbidden, { pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern", message: (item) => `paths.forbidden removed: ${item}` }));
+  const forbidden = strings(policy.paths?.forbidden);
+  add("paths:forbidden", primitiveRuntime("forbidden-paths", "paths:forbidden", "numeric_bound", {
+    source: diffFact("repository_path_set", { kind: "changed_paths", patterns: forbidden, exclude_statuses: ["deleted"] }),
+  }, { max: 0 }),
+  set("superset_stricter", policy.paths?.forbidden, { pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern", message: (item) => `paths.forbidden removed: ${item}` }));
 
   for (const [field, metric, name] of [
     ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
   ] as const) {
-    const value = diff[field];
-    add(`diff:${field}`, { kind: "max_metric", name, metric, max: budgets[field] ?? value }, typeof value === "number" ? scalar("lower_stricter", value, {
+    const value = diff[field], effective = budgets[field] ?? value;
+    const runtime = effective === undefined ? null : primitiveRuntime(name, `diff:${field}`, "numeric_bound", {
+      source: diffFact("scalar", {
+        kind: "metric",
+        metric,
+        ...(metric === "new_docs" ? { exclude_paths: strings(policy.paths?.canonical_docs) } : {}),
+      }),
+    }, { max: effective });
+    add(`diff:${field}`, runtime, typeof value === "number" ? scalar("lower_stricter", value, {
       pointer: `/diff_rules/${field}`, weakenKind: "diff_rule_budget_increased", removeKind: "diff_rule_budget_removed", field,
       message: (before, after) => `diff_rules.${field}: ${before} -> ${after}`, removeMessage: `diff_rules.${field} removed (was ${value})`,
     }) : null);
@@ -201,6 +232,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
   for (const rule of array(documentRelations?.rules)) {
     const descriptor = relationDescriptor(String(rule.kind ?? ""));
+    if (!descriptor.public) throw new Error(`document relation "${String(rule.kind ?? "")}" is internal`);
     const identity = descriptor.identity.map((field) => String(rule[field] ?? "")).join(":");
     const id = String(rule.id ?? ""), owner = `document-relation:${identity}`, pointer = `/document_relations/rules/${id}`;
     const documentOperands = new Set(descriptor.documentOperands || []);
@@ -213,7 +245,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     const omitted = new Set(["id", "kind", ...descriptor.operands]);
     const parameters = Object.fromEntries(Object.entries(rule).filter(([field, value]) => !omitted.has(field) && value !== undefined));
     const shape = { kind: descriptor.kind, operands, parameters };
-    const runtime = { name: owner, kind: "primitive_relation", relation_id: id, primitive: descriptor.kind, operands, parameters };
+    const runtime = primitiveRuntime(owner, id, descriptor.kind, operands, parameters);
     add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
       removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));
     if (descriptor.strictness === "incomparable") {
@@ -248,8 +280,10 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
 
   for (const group of array(policy.cochange_groups)) {
     const id = String(group.id ?? ""), owner = `cochange-group:${id}`, pointer = `/cochange_groups/${id}`;
-    const members = array(group.members as string[] | undefined).map(canonicalDocumentPath).sort();
-    add(owner, { kind: "cochange_group", name: owner, group_id: id, members }, entity({
+    const members = strings(group.members).map(canonicalDocumentPath).sort();
+    add(owner, primitiveRuntime(owner, owner, "set_all_or_none", {
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: members }),
+    }, { universe: members, group_id: id }), entity({
       owner, pointer, removeKind: "cochange_group_removed", removeBefore: { id, members }, removeAfter: { present: false }, removeMessage: `cochange group "${id}" removed`,
     }));
     add(`${owner}:shape`, null, exact({ members }, { owner, pointer, incomparableMessage: `cochange group "${id}" changed members` }));
@@ -257,14 +291,31 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
 
   array(policy.cochange_rules).forEach((rule, index) => {
     const pointer = `/cochange_rules/${index}`, owner = `cochange-policy:${index}`;
-    add(`cochange:${index}`, { kind: "implies_nonempty", name: "cochange", ...rule });
+    const changed = strings(rule.if_changed), required = strings(rule.must_change_any);
+    add(`cochange:${index}`, primitiveRuntime(
+      `cochange: ${changed.join(",")} -> ${required.join(",")}`,
+      `cochange:${index}`,
+      "set_presence_implies",
+      {
+        left: diffFact("repository_path_set", { kind: "changed_paths", patterns: changed }),
+        right: diffFact("repository_path_set", { kind: "changed_paths", patterns: required }),
+      },
+    ));
     add(owner, null, entity({ owner, pointer, removeKind: "cochange_rule_removed", removeBefore: rule, removeAfter: { present: false }, removeMessage: `cochange_rules[${index}] removed` }));
     add(`${owner}:shape`, null, exact(rule, { owner, pointer, incomparableMessage: `cochange_rules[${index}] changed semantics` }));
   });
+
   if (changeIntent) {
-    add("change-intent:scope", { kind: "scope_paths", name: "change-intent-scope", patterns: changeIntent.scope });
-    add("change-intent:must-touch", { kind: "require_paths", name: "must-touch", patterns: changeIntent.must_touch });
-    add("change-intent:must-not-touch", { kind: "forbid_paths", name: "must-not-touch", patterns: changeIntent.must_not_touch, changeIntent: true });
+    const scope = strings(changeIntent.scope), mustTouch = strings(changeIntent.must_touch), mustNotTouch = strings(changeIntent.must_not_touch);
+    if (scope.length) add("change-intent:scope", primitiveRuntime("change-intent-scope", "change-intent:scope", "numeric_bound", {
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: scope, mode: "outside" }),
+    }, { max: 0 }));
+    if (mustTouch.length) add("change-intent:must-touch", primitiveRuntime("must-touch", "change-intent:must-touch", "numeric_bound", {
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: mustTouch }),
+    }, { min: 1 }));
+    if (mustNotTouch.length) add("change-intent:must-not-touch", primitiveRuntime("must-not-touch", "change-intent:must-not-touch", "numeric_bound", {
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: mustNotTouch }),
+    }, { max: 0 }));
   }
   return program;
 }

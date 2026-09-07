@@ -147,9 +147,15 @@ describe("canonical FactRef read boundary", () => {
   };
   const reader = createDocumentReader({ readFile: (path) => files[path] });
   const readState = (selector) => readFact({ documents: reader }, {
-    ...selector,
-    format: selector.path.endsWith(".yaml") ? "yaml" : selector.path.endsWith(".json") ? "json" : "toml",
-    snapshot: "state",
+    source: "document",
+    selector: {
+      path: selector.path,
+      format: selector.path.endsWith(".yaml") ? "yaml" : selector.path.endsWith(".json") ? "json" : "toml",
+      snapshot: "state",
+      pointer: selector.pointer ?? "",
+      ...(selector.projection ? { projection: selector.projection } : {}),
+    },
+    type: selector.type,
   });
 
   it("reads JSON scalar/path facts and defaults projection to value", () => {
@@ -181,8 +187,59 @@ describe("canonical FactRef read boundary", () => {
       headRef: "HEAD",
       readFileAtRef: (ref, path) => `${ref === "BASE" ? "2.0.0" : "3.0.0"}\n`,
     };
-    assert.deepEqual(readFact(context, { path: "VERSION", format: "plain_text", snapshot: "base", pointer: "", type: "string" }), { ok: true, value: "2.0.0" });
-    assert.deepEqual(readFact(context, { path: "VERSION", format: "plain_text", snapshot: "head", pointer: "", type: "string" }), { ok: true, value: "3.0.0" });
+    assert.deepEqual(readFact(context, {
+      source: "document",
+      selector: { path: "VERSION", format: "plain_text", snapshot: "base", pointer: "" },
+      type: "string",
+    }), { ok: true, value: "2.0.0" });
+    assert.deepEqual(readFact(context, {
+      source: "document",
+      selector: { path: "VERSION", format: "plain_text", snapshot: "head", pointer: "" },
+      type: "string",
+    }), { ok: true, value: "3.0.0" });
+  });
+
+  it("reads finite diff path and metric facts through the same boundary", () => {
+    const diff = { files: { checked: [
+      { path: "src/a.mts", status: "modified", addedLines: ["x"], deletedLines: [] },
+      { path: "docs/new.md", status: "added", addedLines: ["# New"], deletedLines: [] },
+      { path: "docs/deleted.md", status: "deleted", addedLines: [], deletedLines: ["old"] },
+    ] } };
+    assert.deepEqual(readFact({ diff }, {
+      source: "diff",
+      selector: { kind: "changed_paths", patterns: ["docs/**"], exclude_statuses: ["deleted"] },
+      type: "repository_path_set",
+    }), { ok: true, value: ["docs/new.md"] });
+    assert.deepEqual(readFact({ diff }, {
+      source: "diff",
+      selector: { kind: "changed_paths", patterns: ["src/**"], mode: "outside" },
+      type: "repository_path_set",
+    }), { ok: true, value: ["docs/deleted.md", "docs/new.md"] });
+    assert.deepEqual(readFact({ diff }, {
+      source: "diff",
+      selector: { kind: "metric", metric: "new_docs", exclude_paths: ["README.md"] },
+      type: "scalar",
+    }), { ok: true, value: 1 });
+    assert.deepEqual(readFact({ diff }, {
+      source: "diff",
+      selector: { kind: "metric", metric: "new_files" },
+      type: "scalar",
+    }), { ok: true, value: 1 });
+    assert.deepEqual(readFact({ diff }, {
+      source: "diff",
+      selector: { kind: "metric", metric: "net_added_lines" },
+      type: "scalar",
+    }), { ok: true, value: 1 });
+  });
+
+  it("fails closed when a diff source is unavailable", () => {
+    const result = readFact({}, {
+      source: "diff",
+      selector: { kind: "changed_paths", patterns: ["src/**"] },
+      type: "repository_path_set",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "document_read_error");
   });
 
   it("exposes required structured failure codes without parsing messages", () => {

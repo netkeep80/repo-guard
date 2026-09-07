@@ -36,6 +36,7 @@ export interface RelationEvaluationFacts extends FactReadContext {
 
 export interface RelationDescriptor {
   kind: string;
+  public: boolean;
   operands: readonly string[];
   documentOperands?: readonly string[];
   phase: RelationPhase;
@@ -63,14 +64,19 @@ export const maxBound = (actual: number, max: number | undefined): boolean => ma
 
 function factRef(relation: PrimitiveRelation, role: string): FactRef {
   const operand = relation.operands[role];
-  if (!operand || !("snapshot" in operand)) throw new Error(`relation "${relation.relation_id}" requires fact operand "${role}"`);
+  if (!operand || !("source" in operand)) throw new Error(`relation "${relation.relation_id}" requires fact operand "${role}"`);
   return operand as FactRef;
 }
 
 function documentTarget(relation: PrimitiveRelation, role: string): RelationDocumentTarget {
   const operand = relation.operands[role];
-  if (!operand || "snapshot" in operand) throw new Error(`relation "${relation.relation_id}" requires document operand "${role}"`);
+  if (!operand || "source" in operand) throw new Error(`relation "${relation.relation_id}" requires document operand "${role}"`);
   return operand as RelationDocumentTarget;
+}
+
+function documentFactSelector(ref: FactRef, relationId: string): Extract<FactRef, { source: "document" }>["selector"] {
+  if (ref.source !== "document") throw new Error(`relation "${relationId}" requires document fact operands`);
+  return ref.selector;
 }
 
 function factOperand(facts: RelationEvaluationFacts, relation: PrimitiveRelation, role: string) {
@@ -93,17 +99,20 @@ function tupleGreater(left: [number, number, number], right: [number, number, nu
 
 function scalarStrictlyGreater(facts: RelationEvaluationFacts, relation: PrimitiveRelation) {
   const leftRef = factRef(relation, "left"), rightRef = factRef(relation, "right");
-  const baseRef = leftRef.snapshot === "base" ? leftRef : rightRef.snapshot === "base" ? rightRef : null;
-  const headRef = leftRef.snapshot === "head" ? leftRef : rightRef.snapshot === "head" ? rightRef : null;
-  const path = headRef?.path || baseRef?.path || leftRef.path || rightRef.path || "";
+  const leftSelector = documentFactSelector(leftRef, relation.relation_id), rightSelector = documentFactSelector(rightRef, relation.relation_id);
+  const baseRef = leftSelector.snapshot === "base" ? leftRef : rightSelector.snapshot === "base" ? rightRef : null;
+  const headRef = leftSelector.snapshot === "head" ? leftRef : rightSelector.snapshot === "head" ? rightRef : null;
+  const baseSelector = baseRef ? documentFactSelector(baseRef, relation.relation_id) : null;
+  const headSelector = headRef ? documentFactSelector(headRef, relation.relation_id) : null;
+  const path = headSelector?.path || baseSelector?.path || leftSelector.path || rightSelector.path || "";
   const comparator = relation.parameters.comparator;
-  if (!baseRef || !headRef) return {
+  if (!baseRef || !headRef || !baseSelector || !headSelector) return {
     ok: false,
     message: `document relation "${relation.relation_id}" requires one BASE and one HEAD operand`,
     rule_id: relation.relation_id, path, base_value: undefined, head_value: undefined,
     expected_relation: "strictly_greater", comparator,
   };
-  if (baseRef.path !== headRef.path) return {
+  if (baseSelector.path !== headSelector.path) return {
     ok: false,
     message: `document relation "${relation.relation_id}" requires BASE and HEAD of the same path`,
     rule_id: relation.relation_id, path, base_value: undefined, head_value: undefined,
@@ -144,6 +153,83 @@ function scalarEqualsLiteral(facts: RelationEvaluationFacts, relation: Primitive
   if (!source.ok) return { ok: false, message: `document relation "${relation.relation_id}" could not read scalar operand`, data };
   const ok = source.value === expected;
   return { ok, message: ok ? undefined : `document relation "${relation.relation_id}" scalar value does not match literal`, data };
+}
+
+function numericBound(facts: RelationEvaluationFacts, relation: PrimitiveRelation) {
+  const source = factOperand(facts, relation, "source");
+  const min = relation.parameters.min, max = relation.parameters.max;
+  const sourceValues = source.ok && Array.isArray(source.value) ? source.value : undefined;
+  const data = {
+    kind: relation.primitive,
+    operands: relation.operands,
+    source,
+    ...(sourceValues ? { source_values: sourceValues } : {}),
+    min,
+    max,
+  };
+  if (!source.ok) return { ok: false, message: `relation "${relation.relation_id}" could not read bounded operand`, data };
+  const actual = typeof source.value === "number" && Number.isFinite(source.value)
+    ? source.value
+    : Array.isArray(source.value)
+      ? source.value.length
+      : null;
+  if (actual === null) {
+    return { ok: false, message: `relation "${relation.relation_id}" requires a finite number or set operand`, data };
+  }
+  if (min !== undefined && (typeof min !== "number" || !Number.isFinite(min))) {
+    return { ok: false, message: `relation "${relation.relation_id}" has invalid minimum bound`, data };
+  }
+  if (max !== undefined && (typeof max !== "number" || !Number.isFinite(max))) {
+    return { ok: false, message: `relation "${relation.relation_id}" has invalid maximum bound`, data };
+  }
+  if (min === undefined && max === undefined) {
+    return { ok: false, message: `relation "${relation.relation_id}" requires min or max`, data };
+  }
+  const ok = (min === undefined || actual >= min) && (max === undefined || actual <= max);
+  return {
+    ok,
+    message: ok ? undefined : `relation "${relation.relation_id}" is outside numeric bound`,
+    actual,
+    limit: max,
+    min,
+    max,
+    data: { ...data, actual },
+  };
+}
+
+function setPresenceImplies(facts: RelationEvaluationFacts, relation: PrimitiveRelation) {
+  const left = factOperand(facts, relation, "left"), right = factOperand(facts, relation, "right");
+  const data = { kind: relation.primitive, operands: relation.operands, left, right };
+  if (!left.ok || !right.ok) return { ok: false, message: `relation "${relation.relation_id}" could not read set operands`, data };
+  if (!Array.isArray(left.value) || !Array.isArray(right.value)) {
+    return { ok: false, message: `relation "${relation.relation_id}" requires set operands`, data };
+  }
+  const ok = implies(left.value.length, right.value.length);
+  return { ok, message: ok ? undefined : `relation "${relation.relation_id}" requires evidence when trigger set is non-empty`, data };
+}
+
+function setAllOrNone(facts: RelationEvaluationFacts, relation: PrimitiveRelation) {
+  const source = factOperand(facts, relation, "source");
+  const universe = relation.parameters.universe;
+  const data = { kind: relation.primitive, source, universe };
+  if (!source.ok) return { ok: false, message: `relation "${relation.relation_id}" could not read selected set`, data };
+  if (!Array.isArray(source.value) || !Array.isArray(universe) || universe.some((item) => typeof item !== "string")) {
+    return { ok: false, message: `relation "${relation.relation_id}" requires selected and universe sets`, data };
+  }
+  const selected = source.value as string[];
+  const normalizedUniverse = [...new Set(universe as string[])].sort();
+  const selectedSet = new Set(selected);
+  const missing = normalizedUniverse.filter((item) => !selectedSet.has(item));
+  const extra = selected.filter((item) => !normalizedUniverse.includes(item));
+  const ok = selected.length === 0 || (missing.length === 0 && extra.length === 0);
+  return {
+    ok,
+    group_id: relation.parameters.group_id,
+    changed: selected,
+    missing,
+    message: ok ? undefined : `relation "${relation.relation_id}" requires all members to be selected together`,
+    data: { ...data, selected, missing, extra },
+  };
 }
 
 function referencedPathsExist(facts: RelationEvaluationFacts, relation: PrimitiveRelation) {
@@ -201,6 +287,7 @@ function referencedPointerExists(facts: RelationEvaluationFacts, relation: Primi
 const DESCRIPTORS: readonly RelationDescriptor[] = [
   {
     kind: "scalar_strictly_greater",
+    public: true,
     operands: ["left", "right"],
     phase: "transaction",
     evaluate: scalarStrictlyGreater,
@@ -209,6 +296,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
   },
   {
     kind: "scalar_equal",
+    public: true,
     operands: ["left", "right"],
     phase: "state",
     evaluate: scalarEqual,
@@ -217,6 +305,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
   },
   {
     kind: "scalar_equals_literal",
+    public: true,
     operands: ["source"],
     phase: "state",
     evaluate: scalarEqualsLiteral,
@@ -226,6 +315,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
   },
   {
     kind: "referenced_paths_exist",
+    public: true,
     operands: ["source"],
     phase: "state",
     evaluate: referencedPathsExist,
@@ -235,6 +325,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
   },
   {
     kind: "set_equal",
+    public: true,
     operands: ["left", "right"],
     phase: "state",
     evaluate: (facts, relation) => setRelation(facts, relation, "equal"),
@@ -243,6 +334,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
   },
   {
     kind: "set_subset",
+    public: true,
     operands: ["left", "right"],
     phase: "state",
     evaluate: (facts, relation) => setRelation(facts, relation, "left_subset"),
@@ -251,10 +343,38 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
   },
   {
     kind: "referenced_pointer_exists",
+    public: true,
     operands: ["source", "target_document"],
     documentOperands: ["target_document"],
     phase: "state",
     evaluate: referencedPointerExists,
+    strictness: "incomparable",
+    identity: ["id"],
+  },
+  {
+    kind: "numeric_bound",
+    public: false,
+    operands: ["source"],
+    phase: "transaction",
+    evaluate: numericBound,
+    strictness: "incomparable",
+    identity: ["id"],
+  },
+  {
+    kind: "set_presence_implies",
+    public: false,
+    operands: ["left", "right"],
+    phase: "transaction",
+    evaluate: setPresenceImplies,
+    strictness: "incomparable",
+    identity: ["id"],
+  },
+  {
+    kind: "set_all_or_none",
+    public: false,
+    operands: ["source"],
+    phase: "transaction",
+    evaluate: setAllOrNone,
     strictness: "incomparable",
     identity: ["id"],
   },

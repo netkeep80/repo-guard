@@ -124,9 +124,13 @@ console.log("\n--- stable JSON envelope and violation details ---");
   expect("repository root is reported", parsed?.repositoryRoot, repo.dir);
   expect("result records failure", parsed?.ok, false);
   expect("forbidden violation is structured",
-    parsed?.violations.some((item) => item.rule === "forbidden-paths" && item.data?.files?.includes("secrets/token.txt")), true);
+    parsed?.violations.some((item) => item.rule === "forbidden-paths"
+      && item.data?.source_values?.includes("secrets/token.txt")
+      && item.data?.operands?.source?.selector?.patterns?.includes("secrets/**")), true);
   expect("cochange violation is structured",
-    parsed?.violations.some((item) => item.rule.startsWith("cochange:") && item.data?.must_touch?.includes("tests/**")), true);
+    parsed?.violations.some((item) => item.rule.startsWith("cochange:")
+      && item.data?.left?.value?.includes("src/feature.mjs")
+      && item.data?.operands?.right?.selector?.patterns?.includes("tests/**")), true);
   const keys = Object.keys(parsed || {}).sort();
   expect("top-level JSON envelope remains stable", JSON.stringify(keys), JSON.stringify([
     "advisoryWarnings", "command", "diff", "exitCode", "failed", "hints", "mode", "ok",
