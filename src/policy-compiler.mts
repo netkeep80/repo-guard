@@ -1,4 +1,5 @@
 import { normalizeDocumentFact } from "./document-facts.mjs";
+import { relationDescriptor } from "./checks/relation-kernel.mjs";
 
 type LooseObject = Record<string, unknown>;
 type SemanticDiagnostic = { message: string } & LooseObject;
@@ -142,20 +143,24 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
     const id = rule.id;
     if (seenRuleIds.has(id)) errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
     seenRuleIds.add(id);
-    if (rule.kind === "scalar_equal" || rule.kind === "set_equal" || rule.kind === "set_subset" || rule.kind === "scalar_strictly_greater") {
-      useSelector(id, "left", rule.left);
-      useSelector(id, "right", rule.right);
-    } else if (rule.kind === "scalar_equals_literal") {
-      useSelector(id, "source", rule.source);
-      const selector = object(rule.source);
-      if (!scalarLiteralMatches(selector.type, rule.value)) errors.push({ rule_id: id, type: selector.type, value: rule.value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
-    } else if (rule.kind === "referenced_paths_exist") useSelector(id, "source", rule.source);
-    else if (rule.kind === "referenced_pointer_exists") {
-      useSelector(id, "source", rule.source);
-      useDocument(id, "target_document", rule.target_document);
+    let descriptor;
+    try {
+      descriptor = relationDescriptor(String(rule.kind ?? ""));
+    } catch (error) {
+      errors.push({ rule_id: id, kind: rule.kind, message: (error as Error).message });
+      continue;
+    }
+    const documentOperands = new Set(descriptor.documentOperands || []);
+    for (const role of descriptor.operands) {
+      if (documentOperands.has(role)) useDocument(id, role, rule[role]);
+      else useSelector(id, role, rule[role]);
+    }
+    if (descriptor.literal) {
+      const selector = object(rule[descriptor.literal.source]);
+      const value = rule[descriptor.literal.value];
+      if (!scalarLiteralMatches(selector.type, value)) errors.push({ rule_id: id, type: selector.type, value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
     }
   }
-  // Evidence bindings are first-class consumers of the shared document pool.
   for (const binding of list<LooseObject>(policy.evidence_bindings)) {
     const document = object(binding.source).document;
     if (typeof document === "string" && Object.hasOwn(documents, document)) usedDocuments.add(document);
@@ -169,7 +174,15 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
   if (!bindings.length) return [];
   const errors: SemanticDiagnostic[] = [], seenIds = new Set<unknown>();
   const relationSection = object(policy.document_relations), documents = object(relationSection.documents), relationRules = list<LooseObject>(relationSection.rules);
-  const pathExistenceSelectors = new Set(relationRules.filter((rule) => rule.kind === "referenced_paths_exist").map((rule) => documentSelectorKey(rule.source)));
+  const pathExistenceSelectors = new Set(relationRules.flatMap((rule) => {
+    try {
+      const descriptor = relationDescriptor(String(rule.kind ?? ""));
+      if (descriptor.evidenceSource !== "repository_paths_exist") return [];
+      return [documentSelectorKey(rule[descriptor.operands[0]!])];
+    } catch {
+      return [];
+    }
+  }));
   const workflows = new Map<string, LooseObject>();
   for (const workflow of list<LooseObject>(object(policy.integration).workflows)) if (typeof workflow.id === "string" && workflow.id) workflows.set(workflow.id, workflow);
   const anchorTypes = new Set(Object.keys(object(policy.anchors?.types)));

@@ -1,3 +1,4 @@
+import { DocumentFactFailure, readFact, resolveJsonPointer, } from "../document-facts.mjs";
 const set = (values = []) => new Set(values);
 export function compareSets(left = [], right = [], relation = "equal") {
     const l = set(left), r = set(right);
@@ -10,3 +11,224 @@ export function compareSets(left = [], right = [], relation = "equal") {
 }
 export const implies = (trigger, evidence) => !trigger || Boolean(evidence);
 export const maxBound = (actual, max) => max === undefined || actual <= max;
+function factRef(relation, role) {
+    const operand = relation.operands[role];
+    if (!operand || !("snapshot" in operand))
+        throw new Error(`relation "${relation.relation_id}" requires fact operand "${role}"`);
+    return operand;
+}
+function documentTarget(relation, role) {
+    const operand = relation.operands[role];
+    if (!operand || "snapshot" in operand)
+        throw new Error(`relation "${relation.relation_id}" requires document operand "${role}"`);
+    return operand;
+}
+function factOperand(facts, relation, role) {
+    return readFact(facts, factRef(relation, role));
+}
+function parseSemverCore(value) {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
+    if (!match)
+        return null;
+    const tuple = [Number(match[1]), Number(match[2]), Number(match[3])];
+    return tuple.every(Number.isSafeInteger) ? tuple : null;
+}
+function tupleGreater(left, right) {
+    for (let index = 0; index < left.length; index++) {
+        if (left[index] !== right[index])
+            return left[index] > right[index];
+    }
+    return false;
+}
+function scalarStrictlyGreater(facts, relation) {
+    const leftRef = factRef(relation, "left"), rightRef = factRef(relation, "right");
+    const baseRef = leftRef.snapshot === "base" ? leftRef : rightRef.snapshot === "base" ? rightRef : null;
+    const headRef = leftRef.snapshot === "head" ? leftRef : rightRef.snapshot === "head" ? rightRef : null;
+    const path = headRef?.path || baseRef?.path || leftRef.path || rightRef.path || "";
+    const comparator = relation.parameters.comparator;
+    if (!baseRef || !headRef)
+        return {
+            ok: false,
+            message: `document relation "${relation.relation_id}" requires one BASE and one HEAD operand`,
+            rule_id: relation.relation_id, path, base_value: undefined, head_value: undefined,
+            expected_relation: "strictly_greater", comparator,
+        };
+    if (baseRef.path !== headRef.path)
+        return {
+            ok: false,
+            message: `document relation "${relation.relation_id}" requires BASE and HEAD of the same path`,
+            rule_id: relation.relation_id, path, base_value: undefined, head_value: undefined,
+            expected_relation: "strictly_greater", comparator,
+        };
+    const base = readFact(facts, baseRef), head = readFact(facts, headRef);
+    const baseValue = base.ok ? base.value : undefined, headValue = head.ok ? head.value : undefined;
+    const diagnostic = {
+        rule_id: relation.relation_id,
+        path,
+        base_value: baseValue,
+        head_value: headValue,
+        expected_relation: "strictly_greater",
+        comparator,
+    };
+    if (!base.ok)
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read BASE: ${base.error.message}`, ...diagnostic, data: { base, head } };
+    if (!head.ok)
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read HEAD: ${head.error.message}`, ...diagnostic, data: { base, head } };
+    if (comparator !== "semver")
+        return { ok: false, message: `document relation "${relation.relation_id}" has unsupported comparator`, ...diagnostic, data: { base, head } };
+    if (typeof base.value !== "string" || typeof head.value !== "string")
+        return { ok: false, message: `document relation "${relation.relation_id}" requires string operands`, ...diagnostic, data: { base, head } };
+    const baseTuple = parseSemverCore(base.value), headTuple = parseSemverCore(head.value);
+    if (!baseTuple)
+        return { ok: false, message: `document relation "${relation.relation_id}" has malformed BASE semver`, ...diagnostic, data: { base, head } };
+    if (!headTuple)
+        return { ok: false, message: `document relation "${relation.relation_id}" has malformed HEAD semver`, ...diagnostic, data: { base, head } };
+    const ok = tupleGreater(headTuple, baseTuple);
+    return { ok, message: ok ? undefined : `document relation "${relation.relation_id}" expected HEAD > BASE`, ...diagnostic, data: { base, head } };
+}
+function scalarEqual(facts, relation) {
+    const left = factOperand(facts, relation, "left"), right = factOperand(facts, relation, "right");
+    const data = { kind: relation.primitive, left, right };
+    if (!left.ok || !right.ok)
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read scalar operands`, data };
+    const ok = left.value === right.value;
+    return { ok, message: ok ? undefined : `document relation "${relation.relation_id}" scalar values differ`, data };
+}
+function scalarEqualsLiteral(facts, relation) {
+    const source = factOperand(facts, relation, "source"), expected = relation.parameters.value;
+    const data = { kind: relation.primitive, source, expected };
+    if (!source.ok)
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read scalar operand`, data };
+    const ok = source.value === expected;
+    return { ok, message: ok ? undefined : `document relation "${relation.relation_id}" scalar value does not match literal`, data };
+}
+function referencedPathsExist(facts, relation) {
+    const source = factOperand(facts, relation, "source");
+    if (!source.ok)
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read repository path references`, data: { kind: relation.primitive, source } };
+    if (!Array.isArray(source.value))
+        return { ok: false, message: `document relation "${relation.relation_id}" did not produce a repository path set`, data: { kind: relation.primitive, source } };
+    const referencedPaths = source.value;
+    if (facts.trackedFiles === undefined)
+        return {
+            ok: false,
+            message: `document relation "${relation.relation_id}" cannot verify references without tracked repository facts`,
+            data: { kind: relation.primitive, source, referenced_paths: referencedPaths, missing_paths: [], tracked_repository_available: false },
+        };
+    const tracked = new Set(facts.trackedFiles);
+    const missingPaths = referencedPaths.filter((path) => !tracked.has(path)).sort();
+    return { ok: missingPaths.length === 0, message: missingPaths.length ? `document relation "${relation.relation_id}" references missing repository paths` : undefined, data: { kind: relation.primitive, source, referenced_paths: referencedPaths, missing_paths: missingPaths } };
+}
+function setRelation(facts, relation, comparison) {
+    const left = factOperand(facts, relation, "left"), right = factOperand(facts, relation, "right");
+    if (!left.ok || !right.ok)
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read string-set operands`, data: { kind: relation.primitive, left, right } };
+    if (!Array.isArray(left.value) || !Array.isArray(right.value))
+        return { ok: false, message: `document relation "${relation.relation_id}" did not produce string sets`, data: { kind: relation.primitive, left, right } };
+    const compared = compareSets(left.value, right.value, comparison);
+    return {
+        ok: compared.ok,
+        message: compared.ok ? undefined : `document relation "${relation.relation_id}" failed ${relation.primitive}`,
+        data: { kind: relation.primitive, left, right, missing_values: compared.missing, extra_values: compared.extra },
+    };
+}
+function pointerTargetError(error, pointer) {
+    if (error instanceof DocumentFactFailure)
+        return { code: error.code, pointer: error.pointer, ...(error.segment === undefined ? {} : { segment: error.segment }), message: error.message };
+    const message = error instanceof Error ? error.message : String(error);
+    return { code: "document_read_error", pointer, message: String(message || "document read failed").replace(/\s+/g, " ").trim() };
+}
+function readReferencedPointerTarget(facts, target, pointer) {
+    const reader = facts.documents;
+    if (!reader || !target.path)
+        return { ok: false, error: { code: "document_read_error", pointer, message: "document reader or target document is unavailable" } };
+    try {
+        const document = target.format === "yaml" ? reader.yaml(target.path) : target.format === "json" ? reader.json(target.path) : (() => { throw new DocumentFactFailure("unsupported_document_type", `unsupported document type for "${target.path}"`, pointer); })();
+        resolveJsonPointer(document, pointer);
+        return { ok: true, document: target.document, path: target.path, pointer };
+    }
+    catch (error) {
+        return { ok: false, error: pointerTargetError(error, pointer) };
+    }
+}
+function referencedPointerExists(facts, relation) {
+    const source = factOperand(facts, relation, "source");
+    if (!source.ok || typeof source.value !== "string")
+        return { ok: false, message: `document relation "${relation.relation_id}" could not read JSON Pointer source`, data: { kind: relation.primitive, source } };
+    const target = readReferencedPointerTarget(facts, documentTarget(relation, "target_document"), source.value);
+    return { ok: target.ok, message: target.ok ? undefined : `document relation "${relation.relation_id}" references a missing target pointer`, data: { kind: relation.primitive, source, target } };
+}
+const DESCRIPTORS = [
+    {
+        kind: "scalar_strictly_greater",
+        operands: ["left", "right"],
+        phase: "transaction",
+        evaluate: scalarStrictlyGreater,
+        strictness: "incomparable",
+        identity: ["id"],
+    },
+    {
+        kind: "scalar_equal",
+        operands: ["left", "right"],
+        phase: "state",
+        evaluate: scalarEqual,
+        strictness: "incomparable",
+        identity: ["id"],
+    },
+    {
+        kind: "scalar_equals_literal",
+        operands: ["source"],
+        phase: "state",
+        evaluate: scalarEqualsLiteral,
+        strictness: "incomparable",
+        identity: ["id"],
+        literal: { source: "source", value: "value" },
+    },
+    {
+        kind: "referenced_paths_exist",
+        operands: ["source"],
+        phase: "state",
+        evaluate: referencedPathsExist,
+        strictness: "incomparable",
+        identity: ["id"],
+        evidenceSource: "repository_paths_exist",
+    },
+    {
+        kind: "set_equal",
+        operands: ["left", "right"],
+        phase: "state",
+        evaluate: (facts, relation) => setRelation(facts, relation, "equal"),
+        strictness: "incomparable",
+        identity: ["id"],
+    },
+    {
+        kind: "set_subset",
+        operands: ["left", "right"],
+        phase: "state",
+        evaluate: (facts, relation) => setRelation(facts, relation, "left_subset"),
+        strictness: "incomparable",
+        identity: ["id"],
+    },
+    {
+        kind: "referenced_pointer_exists",
+        operands: ["source", "target_document"],
+        documentOperands: ["target_document"],
+        phase: "state",
+        evaluate: referencedPointerExists,
+        strictness: "incomparable",
+        identity: ["id"],
+    },
+];
+const DESCRIPTOR_BY_KIND = new Map(DESCRIPTORS.map((descriptor) => [descriptor.kind, descriptor]));
+export function relationDescriptors() {
+    return DESCRIPTORS;
+}
+export function relationDescriptor(kind) {
+    const descriptor = DESCRIPTOR_BY_KIND.get(kind);
+    if (!descriptor)
+        throw new Error(`unknown relation "${kind}"`);
+    return descriptor;
+}
+export function evaluatePrimitiveRelation(facts, relation) {
+    return relationDescriptor(relation.primitive).evaluate(facts, relation);
+}

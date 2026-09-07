@@ -136,22 +136,62 @@ export function normalizeDocumentFact(value, type, pointer = "") {
     const exhaustive = type;
     return failDocumentFact("fact_type_mismatch", `unsupported document fact type "${String(exhaustive)}"`, pointer);
 }
-function readSelectorDocument(reader, path, pointer) {
-    const normalizedPath = normalizeRepositoryPathFact(path, pointer);
-    if (/\.json$/i.test(normalizedPath))
-        return reader.json(normalizedPath);
-    if (/\.ya?ml$/i.test(normalizedPath))
-        return reader.yaml(normalizedPath);
-    return failDocumentFact("unsupported_document_type", `unsupported document type for "${normalizedPath}"`, pointer);
+function structuredFactSource(reader, ref) {
+    const path = normalizeRepositoryPathFact(ref.path, ref.pointer);
+    if (ref.format === "json")
+        return reader.json(path);
+    if (ref.format === "yaml")
+        return reader.yaml(path);
+    if (ref.format === "plain_text") {
+        if (ref.pointer !== "" || (ref.projection !== undefined && ref.projection !== "value")) {
+            return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", ref.pointer);
+        }
+        return reader.text(path).trim();
+    }
+    return failDocumentFact("unsupported_document_type", `unsupported document type for "${path}"`, ref.pointer);
 }
-export function readDocumentFact(reader, selector) {
+function snapshotFactSource(context, ref) {
+    const label = ref.snapshot === "base" ? "BASE" : "HEAD";
+    const revision = ref.snapshot === "base" ? context.baseRef : context.headRef;
+    const path = normalizeRepositoryPathFact(ref.path, ref.pointer);
+    if (!revision)
+        return failDocumentFact("document_read_error", `missing ${label} ref`, ref.pointer);
+    if (!context.readFileAtRef)
+        return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, ref.pointer);
+    let raw;
     try {
-        const document = readSelectorDocument(reader, selector.path, selector.pointer);
-        const projected = projectDocumentValue(document, selector.pointer, selector.projection ?? "value");
-        return { ok: true, value: normalizeDocumentFact(projected, selector.type, selector.pointer) };
+        raw = context.readFileAtRef(revision, path);
     }
     catch (error) {
-        return { ok: false, error: documentFactError(error, selector.pointer) };
+        const message = error instanceof Error ? error.message : String(error);
+        return failDocumentFact("document_read_error", `${label} read failed: ${collapseMessage(message)}`, ref.pointer);
+    }
+    if (raw === null || raw === undefined)
+        return failDocumentFact("document_read_error", `missing ${label} file`, ref.pointer);
+    if (ref.format === "plain_text") {
+        if (ref.pointer !== "" || (ref.projection !== undefined && ref.projection !== "value")) {
+            return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", ref.pointer);
+        }
+        return String(raw).trim();
+    }
+    if (ref.format === "json")
+        return parseJson(String(raw));
+    if (ref.format === "yaml")
+        return parseYaml(String(raw));
+    return failDocumentFact("unsupported_document_type", `unsupported document type for "${path}"`, ref.pointer);
+}
+export function readFact(context, ref) {
+    try {
+        const source = ref.snapshot === "state"
+            ? context.documents ? structuredFactSource(context.documents, ref) : failDocumentFact("document_read_error", "document reader is unavailable", ref.pointer)
+            : ref.snapshot === "base" || ref.snapshot === "head"
+                ? snapshotFactSource(context, ref)
+                : failDocumentFact("document_read_error", `unsupported fact snapshot "${String(ref.snapshot)}"`, ref.pointer);
+        const projected = ref.format === "plain_text" ? source : projectDocumentValue(source, ref.pointer, ref.projection ?? "value");
+        return { ok: true, value: normalizeDocumentFact(projected, ref.type, ref.pointer) };
+    }
+    catch (error) {
+        return { ok: false, error: documentFactError(error, ref.pointer) };
     }
 }
 export function stripMarkdownInline(line) {

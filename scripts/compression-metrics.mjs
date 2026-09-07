@@ -55,6 +55,11 @@ function schemaConstKinds(schema, definitionName) {
     .sort();
 }
 
+function descriptorKinds(source) {
+  const table = source.match(/const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\];/);
+  return table ? [...table[1].matchAll(/\bkind:\s*"([^"]+)"/g)].map((item) => item[1]).sort() : [];
+}
+
 function integrationCounts(policy) {
   const integration = policy.integration || {};
   return {
@@ -107,16 +112,30 @@ function architecture(target) {
   const policySchema = jsonAt(target, "schemas/repo-policy.schema.json");
   const coverage = jsonAt(target, "docs/self-hosting-coverage.json");
   const defaults = sourceModuleTextAt(target, "src/checks/default-rule-families");
+  const documentFacts = optionalSourceModuleTextAt(target, "src/document-facts");
   const constraintProgram = optionalSourceModuleTextAt(target, "src/checks/constraint-program");
   const relationKernel = optionalSourceModuleTextAt(target, "src/checks/relation-kernel");
+  const policyCompiler = optionalSourceModuleTextAt(target, "src/policy-compiler");
+  const constraintEvaluator = optionalSourceModuleTextAt(target, "src/checks/rules/constraints");
   const policyProfiles = optionalSourceModuleTextAt(target, "src/policy-profiles");
   const corpus = sourceCorpus(target);
   const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
   const relationKinds = schemaConstKinds(policySchema, "document_relation_rule");
   const selectorDefinitions = Object.keys(policySchema.definitions || {}).filter((name) => /^document_.*_selector$/.test(name)).sort();
-  const factTypes = unionMembers(constraintProgram, "DocumentFactType");
+  const factTypes = unionMembers(documentFacts, "DocumentFactType");
   const evidenceBindingKinds = schemaConstKinds(policySchema, "evidence_binding");
   const relationKernelOperations = [...relationKernel.matchAll(/export\s+(?:function|const)\s+([A-Za-z0-9_]+)/g)].map((item) => item[1]).sort();
+  const relationDescriptorKinds = descriptorKinds(relationKernel);
+  const relationConsumerSources = {
+    policy_compiler: policyCompiler,
+    constraint_program: constraintProgram,
+    evaluator: constraintEvaluator,
+  };
+  const independentRelationSwitchFiles = Object.entries(relationConsumerSources)
+    .filter(([, source]) => relationKinds.some((kind) => source.includes(`"${kind}"`)))
+    .map(([name]) => name)
+    .sort();
+  const descriptorRegistryCount = count(relationKernel, /const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=/g);
 
   const metric = {
     // Historical Compression 2 metrics are retained so --compare remains useful.
@@ -147,6 +166,17 @@ function architecture(target) {
     constraint_program_knows_contract_conformance_roles: /type ContractConformanceRole\b/.test(constraintProgram),
     policy_profiles_has_contract_conformance_macro: /compileContractConformancePolicy\b/.test(policyProfiles),
     policy_profiles_has_requirements_strict_pack: /"requirements-strict"/.test(policyProfiles),
+
+    // C3.1 targeted amplification metrics. Schema and tests are deliberate structural edit-sites
+    // and are therefore excluded from the semantic kernel edit-site count.
+    canonical_factref_model_count: count(documentFacts, /export\s+interface\s+FactRef\b/g),
+    primitive_descriptor_registry_count: descriptorRegistryCount,
+    primitive_descriptor_kinds: relationDescriptorKinds,
+    schema_relation_kinds_match_descriptors: JSON.stringify(relationKinds) === JSON.stringify(relationDescriptorKinds),
+    primitive_runtime_shape_count: count(constraintProgram, /kind:\s*"primitive_relation"/g),
+    independent_document_relation_switches: independentRelationSwitchFiles.length,
+    independent_document_relation_switch_files: independentRelationSwitchFiles,
+    semantic_edit_sites_per_new_primitive: descriptorRegistryCount + independentRelationSwitchFiles.length,
   };
   metric.semantic_edit_sites = metric.rule_families + metric.runtime_ir_compilers + metric.strictness_ir_compilers + metric.bespoke_integration_validator + metric.command_dispatch_branches;
 

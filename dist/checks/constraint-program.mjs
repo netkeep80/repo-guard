@@ -1,4 +1,5 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
+import { relationDescriptor } from "./relation-kernel.mjs";
 const RANKS = {
     enforcement: { advisory: 0, blocking: 1 },
     count: { changed_only: 0, all_tracked: 1 },
@@ -27,13 +28,13 @@ function canonicalDocumentPath(value) {
         return typeof value === "string" ? value : String(value ?? "");
     }
 }
-function compileDocumentSelector(selectorValue, documents) {
+function compileFactRef(selectorValue, documents) {
     const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
+    const snapshot = definition.snapshot === "base" || definition.snapshot === "head" ? definition.snapshot : "state";
     return {
-        document: name,
         path: canonicalDocumentPath(definition.path),
         format: definition.format,
-        snapshot: definition.snapshot,
+        snapshot,
         pointer: typeof selector.pointer === "string" ? selector.pointer : "",
         projection: selector.projection,
         type: selector.type,
@@ -143,46 +144,29 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
     }
     const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
     for (const rule of array(documentRelations?.rules)) {
-        const id = String(rule.id ?? ""), owner = `document-relation:${id}`, pointer = `/document_relations/rules/${id}`;
-        const runtimeBase = { name: owner, relation_id: id };
-        let runtime = null, shape = { kind: rule.kind };
-        if (rule.kind === "scalar_strictly_greater") {
-            const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
-            runtime = { ...runtimeBase, kind: "document_scalar_strictly_greater", left, right, comparator: rule.comparator };
-            shape = { kind: rule.kind, left, right, comparator: rule.comparator };
+        const descriptor = relationDescriptor(String(rule.kind ?? ""));
+        const identity = descriptor.identity.map((field) => String(rule[field] ?? "")).join(":");
+        const id = String(rule.id ?? ""), owner = `document-relation:${identity}`, pointer = `/document_relations/rules/${id}`;
+        const documentOperands = new Set(descriptor.documentOperands || []);
+        const operands = {};
+        for (const role of descriptor.operands) {
+            operands[role] = documentOperands.has(role)
+                ? compileDocumentTarget(rule[role], documents)
+                : compileFactRef(rule[role], documents);
         }
-        else if (rule.kind === "scalar_equal") {
-            const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
-            runtime = { ...runtimeBase, kind: "document_scalar_equal", left, right };
-            shape = { kind: rule.kind, left, right };
-        }
-        else if (rule.kind === "scalar_equals_literal") {
-            const source = compileDocumentSelector(rule.source, documents);
-            runtime = { ...runtimeBase, kind: "document_scalar_equals_literal", source, value: rule.value };
-            shape = { kind: rule.kind, source, value: rule.value };
-        }
-        else if (rule.kind === "referenced_paths_exist") {
-            const source = compileDocumentSelector(rule.source, documents);
-            runtime = { ...runtimeBase, kind: "document_referenced_paths_exist", source };
-            shape = { kind: rule.kind, source };
-        }
-        else if (rule.kind === "set_equal" || rule.kind === "set_subset") {
-            const left = compileDocumentSelector(rule.left, documents), right = compileDocumentSelector(rule.right, documents);
-            runtime = { ...runtimeBase, kind: rule.kind === "set_equal" ? "document_set_equal" : "document_set_subset", left, right };
-            shape = { kind: rule.kind, left, right };
-        }
-        else if (rule.kind === "referenced_pointer_exists") {
-            const source = compileDocumentSelector(rule.source, documents), target = compileDocumentTarget(rule.target_document, documents);
-            runtime = { ...runtimeBase, kind: "document_referenced_pointer_exists", source, target };
-            shape = { kind: rule.kind, source, target };
-        }
+        const omitted = new Set(["id", "kind", ...descriptor.operands]);
+        const parameters = Object.fromEntries(Object.entries(rule).filter(([field, value]) => !omitted.has(field) && value !== undefined));
+        const shape = { kind: descriptor.kind, operands, parameters };
+        const runtime = { name: owner, kind: "primitive_relation", relation_id: id, primitive: descriptor.kind, operands, parameters };
         add(owner, runtime, entity({ owner, pointer, removeKind: "document_relation_removed", rule_id: id,
             removeBefore: shape, removeAfter: { present: false }, removeMessage: `document_relations rule "${id}" removed` }));
-        add(`${owner}:shape`, null, exact(shape, { owner, pointer, rule_id: id, incomparableMessage: `document_relations rule "${id}" changed semantics` }));
+        if (descriptor.strictness === "incomparable") {
+            add(`${owner}:shape`, null, exact(shape, { owner, pointer, rule_id: id, incomparableMessage: `document_relations rule "${id}" changed semantics` }));
+        }
     }
     for (const binding of array(policy.evidence_bindings)) {
         const id = String(binding.id ?? ""), owner = `evidence-binding:${id}`, pointer = `/evidence_bindings/${id}`;
-        const source = compileDocumentSelector(binding.source, documents);
+        const source = compileFactRef(binding.source, documents);
         const shape = binding.kind === "anchor_value_coverage"
             ? { kind: binding.kind, source, target_anchor_type: binding.target_anchor_type }
             : { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
