@@ -210,7 +210,7 @@ function diffFactSource(context, selector) {
     const paths = selector.mode === "outside"
         ? uniqueSorted(candidates.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path))
         : selectPaths(candidates, patterns);
-    return selector.kind === "path_count" ? paths.length : paths;
+    return paths;
 }
 export function readFact(context, ref) {
     const pointer = factPointer(ref);
