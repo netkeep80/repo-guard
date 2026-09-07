@@ -42,7 +42,7 @@ expect("canonical FactRef keeps one selector per source alternative", (factRef.m
 const diffSelectorKinds = [...diffSelector.matchAll(/\bkind\s*:\s*([^;]+);/g)]
   .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]))
   .sort();
-expect("diff selector vocabulary is finite", diffSelectorKinds.join(","), "changed_paths,metric,path_count");
+expect("diff selector vocabulary is finite", diffSelectorKinds.join(","), "changed_paths,metric");
 expect("no compatibility document selector model is reintroduced", documentFacts.includes("DocumentFactSelector"), false);
 
 const descriptorKinds = new Set(relationDescriptors().map((descriptor) => descriptor.kind));
