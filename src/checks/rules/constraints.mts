@@ -33,6 +33,7 @@ type RuntimeConstraintKind =
   | "require_paths"
   | "forbid_paths"
   | "implies_nonempty"
+  | "cochange_group"
   | "size_rules"
   | "registry_rules"
   | "change_profile"
@@ -54,6 +55,8 @@ interface RuntimeConstraint {
   changeIntent?: unknown;
   if_changed?: string[];
   must_change_any?: string[];
+  group_id?: string;
+  members?: string[];
   rules?: unknown;
   relation_id?: string;
   primitive?: string;
@@ -95,6 +98,7 @@ const CONSTRAINT_PHASES: Record<FixedPhaseConstraintKind, ExecutionPhase> = {
   require_paths: "transaction",
   forbid_paths: "transaction",
   implies_nonempty: "transaction",
+  cochange_group: "transaction",
   size_rules: "both",
   registry_rules: "state",
   change_profile: "transaction",
@@ -176,6 +180,18 @@ export function checkMustNotTouch(files: ParsedDiffFile[], patterns?: string[]) 
   return { ok: !touched.length, touched, must_not_touch: patterns };
 }
 export const checkCochangeRules = (files: ParsedDiffFile[], rules: Array<{ if_changed: string[]; must_change_any: string[] }> = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
+export function checkCochangeGroup(files: ParsedDiffFile[], groupId: string, members: string[] = []) {
+  const changed = members.filter((member) => selectPaths(files, [member]).length > 0);
+  const changedSet = new Set(changed), missing = members.filter((member) => !changedSet.has(member));
+  const ok = changed.length === 0 || missing.length === 0;
+  return {
+    ok,
+    group_id: groupId,
+    changed,
+    missing,
+    message: ok ? undefined : `cochange group "${groupId}" requires all members to change together`,
+  };
+}
 export function compileConstraintIR(facts: ConstraintFacts): ConstraintIR {
   return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
 }
@@ -252,7 +268,8 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     } else if (constraint.kind === "implies_nonempty") {
       if (selectPaths(files, constraint.if_changed!).length && !selectPaths(files, constraint.must_change_any!).length) cochange.push(constraint);
       continue;
-    } else if (constraint.kind === "size_rules") {
+    } else if (constraint.kind === "cochange_group") check = checkCochangeGroup(files, constraint.group_id || "", constraint.members || []);
+    else if (constraint.kind === "size_rules") {
       const rules = projectSizeRules(constraint.rules as SizeRule[], executionPhase);
       if (!rules.length) continue;
       const result = checkSizeRules(files, rules, {
