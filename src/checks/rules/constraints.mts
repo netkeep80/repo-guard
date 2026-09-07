@@ -1,8 +1,6 @@
 import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import { calculateDiffGrowth } from "../../diff/growth.mjs";
-import { selectPaths } from "../../diff/classification.mjs";
 import { readFact, type DocumentReader, type FactRef } from "../../document-facts.mjs";
-import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
 import {
@@ -18,7 +16,6 @@ import { checkRegistryRules } from "./registry-rules.mjs";
 import type { SizeRule } from "./size-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
 
-interface BudgetResult { ok: boolean; actual?: number; limit?: number; files?: string[]; }
 interface SurfaceDebt {
   repayment_issue?: unknown;
   expected_delta?: { max_new_files?: number; max_net_added_lines?: number };
@@ -27,13 +24,7 @@ interface SurfaceDebt {
 interface AnchorEvidenceInstance { value?: unknown; file?: unknown; line?: unknown; column?: unknown; }
 
 type RuntimeConstraintKind =
-  | "max_metric"
   | "surface_debt"
-  | "scope_paths"
-  | "require_paths"
-  | "forbid_paths"
-  | "implies_nonempty"
-  | "cochange_group"
   | "size_rules"
   | "registry_rules"
   | "change_profile"
@@ -48,15 +39,7 @@ type FixedPhaseConstraintKind = Exclude<RuntimeConstraintKind, "primitive_relati
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
   name: string;
-  metric?: "new_docs" | "new_files" | "net_added_lines";
-  max?: number;
   debt?: SurfaceDebt | null;
-  patterns?: string[];
-  changeIntent?: unknown;
-  if_changed?: string[];
-  must_change_any?: string[];
-  group_id?: string;
-  members?: string[];
   rules?: unknown;
   relation_id?: string;
   primitive?: string;
@@ -92,13 +75,7 @@ interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint
 interface RuleResult { name: string; check: unknown; }
 
 const CONSTRAINT_PHASES: Record<FixedPhaseConstraintKind, ExecutionPhase> = {
-  max_metric: "transaction",
   surface_debt: "transaction",
-  scope_paths: "transaction",
-  require_paths: "transaction",
-  forbid_paths: "transaction",
-  implies_nonempty: "transaction",
-  cochange_group: "transaction",
   size_rules: "both",
   registry_rules: "state",
   change_profile: "transaction",
@@ -142,17 +119,6 @@ function projectSizeRules(rules: SizeRule[], requested: ExecutionPhase): SizeRul
   });
 }
 
-function budget(selected: ParsedDiffFile[], max: number | undefined): BudgetResult {
-  if (max === undefined) return { ok: true };
-  return { ok: selected.length <= max, actual: selected.length, limit: max, files: selected.map((file) => file.path) };
-}
-export const checkCanonicalDocsBudget = (files: ParsedDiffFile[], canonicalDocs: string[] = [], max?: number): BudgetResult => budget(files.filter((file) => file.status === "added" && /\.md$/i.test(file.path) && !canonicalDocs.includes(file.path)), max);
-export const checkNewFilesBudget = (files: ParsedDiffFile[], max?: number): BudgetResult => budget(files.filter((file) => file.status === "added"), max);
-export function checkNetAddedLinesBudget(files: ParsedDiffFile[], max?: number): BudgetResult {
-  if (max === undefined) return { ok: true };
-  const actual = files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
-  return { ok: actual <= max, actual, limit: max };
-}
 export function checkSurfaceDebt(files: ParsedDiffFile[], debt: SurfaceDebt | null | undefined) {
   const growth = calculateDiffGrowth(files);
   if (growth.new_files <= 0 && growth.net_added_lines <= 0) return { ok: true, status: "not_needed", growth };
@@ -163,47 +129,16 @@ export function checkSurfaceDebt(files: ParsedDiffFile[], debt: SurfaceDebt | nu
   if (expected.max_net_added_lines !== undefined && growth.net_added_lines > expected.max_net_added_lines) exceeded.push(`net added lines ${growth.net_added_lines} exceeds declared debt ${expected.max_net_added_lines}`);
   return { ok: !exceeded.length, status: exceeded.length ? "declared_debt_exceeded" : "declared", message: exceeded.length ? "declared surface debt is smaller than actual diff growth" : undefined, growth, surface_debt: debt, details: exceeded, hint: exceeded.length ? "Update expected_delta to match intentional temporary growth or reduce the diff." : undefined };
 }
-export const checkForbiddenPaths = (files: ParsedDiffFile[], patterns: string[]): string[] => selectPaths(files, patterns, { excludeStatuses: ["deleted"] });
-export function checkScope(files: ParsedDiffFile[], patterns?: string[]) {
-  if (!patterns?.length) return { ok: true };
-  const out = files.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path).sort();
-  return { ok: !out.length, declared_scope: patterns, out_of_scope_paths: out, message: out.length ? "changed files fall outside declared ChangeIntent scope" : undefined, details: out.map((path) => `out of scope: ${path}`) };
-}
-export function checkMustTouch(files: ParsedDiffFile[], patterns?: string[]) {
-  if (!patterns?.length) return { ok: true };
-  const ok = selectPaths(files, patterns).length > 0;
-  return { ok, must_touch: patterns, changed: files.map((file) => file.path), hint: ok ? undefined : "must_touch uses any-of semantics: at least one pattern must match a changed file" };
-}
-export function checkMustNotTouch(files: ParsedDiffFile[], patterns?: string[]) {
-  if (!patterns?.length) return { ok: true };
-  const touched = selectPaths(files, patterns);
-  return { ok: !touched.length, touched, must_not_touch: patterns };
-}
-export const checkCochangeRules = (files: ParsedDiffFile[], rules: Array<{ if_changed: string[]; must_change_any: string[] }> = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
-export function checkCochangeGroup(files: ParsedDiffFile[], groupId: string, members: string[] = []) {
-  const changed = members.filter((member) => selectPaths(files, [member]).length > 0);
-  const changedSet = new Set(changed), missing = members.filter((member) => !changedSet.has(member));
-  const ok = changed.length === 0 || missing.length === 0;
-  return {
-    ok,
-    group_id: groupId,
-    changed,
-    missing,
-    message: ok ? undefined : `cochange group "${groupId}" requires all members to change together`,
-  };
-}
+
 export function compileConstraintIR(facts: ConstraintFacts): ConstraintIR {
   return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
 }
-function evaluateMetric(files: ParsedDiffFile[], constraint: RuntimeConstraint, policy: ConstraintPolicyProjection) {
-  if (constraint.metric === "new_docs") return checkCanonicalDocsBudget(files, policy.paths.canonical_docs, constraint.max);
-  if (constraint.metric === "new_files") return checkNewFilesBudget(files, constraint.max);
-  return checkNetAddedLinesBudget(files, constraint.max);
-}
+
 function factOperand(facts: ConstraintFacts, ref: FactRef | undefined) {
   if (!ref) return { ok: false as const, error: { code: "document_read_error", pointer: "", message: "fact reference is unavailable" } };
   return readFact(facts, ref);
 }
+
 function checkEvidenceWorkflowPathCoverage(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const source = factOperand(facts, constraint.source);
   if (!source.ok) return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read repository path references`, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source } };
@@ -211,6 +146,7 @@ function checkEvidenceWorkflowPathCoverage(facts: ConstraintFacts, constraint: R
   const coverage = checkWorkflowPathCoverage(facts.integration as Parameters<typeof checkWorkflowPathCoverage>[0], { workflow: constraint.workflow || "", covers: constraint.covers || [] }, source.value);
   return { ...coverage, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data } };
 }
+
 function checkEvidenceAnchorValueCoverage(facts: ConstraintFacts, constraint: RuntimeConstraint) {
   const source = factOperand(facts, constraint.source), target = constraint.target_anchor_type || "";
   if (!source.ok) return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read semantic evidence ids`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
@@ -254,21 +190,11 @@ function primitiveRelation(constraint: RuntimeConstraint): PrimitiveRelation {
 
 export function evaluateConstraintIR(facts: ConstraintFacts, context: ConstraintContext = {}): RuleResult[] {
   const executionPhase = requestedExecutionPhase(context);
-  const { files, constraints } = compileConstraintIR(facts), results: RuleResult[] = [], cochange: RuntimeConstraint[] = [];
+  const { files, constraints } = compileConstraintIR(facts), results: RuleResult[] = [];
   for (const constraint of constraints) {
     if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
     let check: unknown;
-    if (constraint.kind === "max_metric") check = evaluateMetric(files, constraint, facts.policy);
-    else if (constraint.kind === "surface_debt") check = checkSurfaceDebt(files, constraint.debt);
-    else if (constraint.kind === "scope_paths") check = checkScope(files, constraint.patterns);
-    else if (constraint.kind === "require_paths") check = checkMustTouch(files, constraint.patterns);
-    else if (constraint.kind === "forbid_paths") {
-      if (constraint.changeIntent) check = checkMustNotTouch(files, constraint.patterns);
-      else { const found = checkForbiddenPaths(files, constraint.patterns!); check = { ok: !found.length, files: found }; }
-    } else if (constraint.kind === "implies_nonempty") {
-      if (selectPaths(files, constraint.if_changed!).length && !selectPaths(files, constraint.must_change_any!).length) cochange.push(constraint);
-      continue;
-    } else if (constraint.kind === "cochange_group") check = checkCochangeGroup(files, constraint.group_id || "", constraint.members || []);
+    if (constraint.kind === "surface_debt") check = checkSurfaceDebt(files, constraint.debt);
     else if (constraint.kind === "size_rules") {
       const rules = projectSizeRules(constraint.rules as SizeRule[], executionPhase);
       if (!rules.length) continue;
@@ -292,9 +218,6 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
     else if (constraint.kind === "evidence_anchor_value_coverage") check = checkEvidenceAnchorValueCoverage(facts, constraint);
     else throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
     results.push({ name: constraint.name, check });
-  }
-  if (executionPhase !== "state") {
-    results.push(...(cochange.length ? cochange.map((item) => ({ name: `cochange: ${item.if_changed!.join(",")} -> ${item.must_change_any!.join(",")}`, check: { ok: false, must_touch: item.must_change_any } })) : [{ name: "cochange-rules", check: { ok: true } }]));
   }
   return results;
 }
