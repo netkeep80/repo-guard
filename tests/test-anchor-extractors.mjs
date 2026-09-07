@@ -173,16 +173,24 @@ console.log("\n--- must_resolve trace rules enforce code and doc anchors ---");
   expect("unresolved trace anchors fail blocking mode", result.ok, false);
   expect("unresolved trace anchors set blocking exit code", result.exitCode, 1);
   expect("multiple trace rule violations coexist",
-    result.violations.filter((v) => v.rule.startsWith("trace-rule:")).map((v) => v.data?.trace_rule).sort(),
-    ["code-refs-must-resolve", "doc-refs-must-resolve"]);
-  const codeViolation = result.violations.find((v) => v.data?.trace_rule === "code-refs-must-resolve");
-  const docViolation = result.violations.find((v) => v.data?.trace_rule === "doc-refs-must-resolve");
-  expect("code violation lists unresolved anchor value", codeViolation?.data?.unresolved_anchors?.[0]?.value, "FR-404");
-  expect("code violation lists offending source file", codeViolation?.data?.unresolved_anchors?.[0]?.locations[0], "src/feature.mjs:2:9");
-  expect("doc violation lists unresolved anchor value", docViolation?.data?.unresolved_anchors?.[0]?.value, "FR-405");
-  expect("doc violation lists offending source file", docViolation?.data?.unresolved_anchors?.[0]?.locations[0], "docs/feature.md:1:22");
-  expect("resolved trace values remain visible in diagnostics",
-    result.traceRuleResults.map((traceResult) => traceResult.resolved[0]?.value).sort(), ["FR-001", "FR-002"]);
+    result.violations.filter((v) => v.rule.startsWith("trace-rule:")).map((v) => v.rule).sort(),
+    ["trace-rule: code-refs-must-resolve", "trace-rule: doc-refs-must-resolve"]);
+  const codeViolation = result.violations.find((v) => v.rule === "trace-rule: code-refs-must-resolve");
+  const docViolation = result.violations.find((v) => v.rule === "trace-rule: doc-refs-must-resolve");
+  expect("code trace uses canonical set_subset diagnostics", codeViolation?.data?.kind, "set_subset");
+  expect("code violation lists unresolved anchor value", codeViolation?.data?.missing_values, ["FR-404"]);
+  expect("code violation preserves offending source location through FactRef provenance",
+    codeViolation?.data?.left?.provenance?.instances?.filter((item) => item.value === "FR-404"),
+    [{ value: "FR-404", file: "src/feature.mjs", line: 2, column: 9 }]);
+  expect("doc violation lists unresolved anchor value", docViolation?.data?.missing_values, ["FR-405"]);
+  expect("doc violation preserves offending source location through FactRef provenance",
+    docViolation?.data?.left?.provenance?.instances?.filter((item) => item.value === "FR-405"),
+    [{ value: "FR-405", file: "docs/feature.md", line: 1, column: 22 }]);
+  expect("resolved trace values remain visible in canonical fact operands", [
+    ...codeViolation.data.left.value.filter((value) => !codeViolation.data.missing_values.includes(value)),
+    ...docViolation.data.left.value.filter((value) => !docViolation.data.missing_values.includes(value)),
+  ].sort(), ["FR-001", "FR-002"]);
+  expect("legacy trace result side channel is absent", Object.prototype.hasOwnProperty.call(result, "traceRuleResults"), false);
   const advisory = runPolicyPipeline({
     ...input, enforcement: { ok: true, mode: "advisory", source: "test", requested: "advisory" },
   }, { quiet: true });
