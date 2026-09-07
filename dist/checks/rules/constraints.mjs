@@ -16,6 +16,7 @@ const CONSTRAINT_PHASES = {
     require_paths: "transaction",
     forbid_paths: "transaction",
     implies_nonempty: "transaction",
+    cochange_group: "transaction",
     size_rules: "both",
     registry_rules: "state",
     change_profile: "transaction",
@@ -108,6 +109,18 @@ export function checkMustNotTouch(files, patterns) {
     return { ok: !touched.length, touched, must_not_touch: patterns };
 }
 export const checkCochangeRules = (files, rules = []) => rules.flatMap((rule) => selectPaths(files, rule.if_changed).length && !selectPaths(files, rule.must_change_any).length ? [{ if_changed: rule.if_changed, must_change_any: rule.must_change_any }] : []);
+export function checkCochangeGroup(files, groupId, members = []) {
+    const changed = members.filter((member) => selectPaths(files, [member]).length > 0);
+    const changedSet = new Set(changed), missing = members.filter((member) => !changedSet.has(member));
+    const ok = changed.length === 0 || missing.length === 0;
+    return {
+        ok,
+        group_id: groupId,
+        changed,
+        missing,
+        message: ok ? undefined : `cochange group "${groupId}" requires all members to change together`,
+    };
+}
 export function compileConstraintIR(facts) {
     return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) };
 }
@@ -205,6 +218,8 @@ export function evaluateConstraintIR(facts, context = {}) {
                 cochange.push(constraint);
             continue;
         }
+        else if (constraint.kind === "cochange_group")
+            check = checkCochangeGroup(files, constraint.group_id || "", constraint.members || []);
         else if (constraint.kind === "size_rules") {
             const rules = projectSizeRules(constraint.rules, executionPhase);
             if (!rules.length)
