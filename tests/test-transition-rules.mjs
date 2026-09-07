@@ -58,9 +58,10 @@ function transitionCheck(baseValue, headValue, options) {
 }
 
 describe("snapshot-aware ordered document relations", () => {
-  it("compiles into the existing document-relation Constraint Program path", () => {
+  it("compiles into one generic primitive relation IR", () => {
     const entry = compileConstraintProgram(basePolicy()).find((item) => item.key === "document-relation:release-revision");
-    assert.equal(entry?.runtime?.kind, "document_scalar_strictly_greater");
+    assert.equal(entry?.runtime?.kind, "primitive_relation");
+    assert.equal(entry?.runtime?.primitive, "scalar_strictly_greater");
   });
 
   for (const [from, to] of [["1.2.3\n", "1.2.4\n"], ["1.2.3", "1.3.0"]]) {
