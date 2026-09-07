@@ -70,9 +70,9 @@ function ciMetrics(target, pkg) {
   const action = textAt(target, "action.yml");
   const jobsBlock = workflow.split(/\njobs:\s*\n/)[1] || "";
   const jobs = count(jobsBlock, /^  [A-Za-z0-9_-]+:\s*$/gm);
-  const npmCiRuns = count(workflow, /^\s*-\s+run:\s+npm ci\s*$/gm);
-  const explicitCheckDistRuns = count(workflow, /^\s*-\s+run:\s+npm run check:dist\s*$/gm);
-  const testRuns = count(workflow, /^\s*-\s+run:\s+npm test\s*$/gm);
+  const npmCiRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm ci\s*$/gm);
+  const explicitCheckDistRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm run check:dist\s*$/gm);
+  const testRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm test\s*$/gm);
   const pretestCallsCheckDist = /check:dist/.test(pkg.scripts?.pretest || "") ? 1 : 0;
   return {
     jobs,
