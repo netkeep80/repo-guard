@@ -159,7 +159,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
 
   const forbidden = strings(policy.paths?.forbidden);
   add("paths:forbidden", primitiveRuntime("forbidden-paths", "paths:forbidden", "numeric_bound", {
-    source: diffFact("scalar", { kind: "path_count", patterns: forbidden, exclude_statuses: ["deleted"] }),
+    source: diffFact("repository_path_set", { kind: "changed_paths", patterns: forbidden, exclude_statuses: ["deleted"] }),
   }, { max: 0 }),
   set("superset_stricter", policy.paths?.forbidden, { pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern", message: (item) => `paths.forbidden removed: ${item}` }));
 
@@ -308,13 +308,13 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   if (changeIntent) {
     const scope = strings(changeIntent.scope), mustTouch = strings(changeIntent.must_touch), mustNotTouch = strings(changeIntent.must_not_touch);
     if (scope.length) add("change-intent:scope", primitiveRuntime("change-intent-scope", "change-intent:scope", "numeric_bound", {
-      source: diffFact("scalar", { kind: "path_count", patterns: scope, mode: "outside" }),
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: scope, mode: "outside" }),
     }, { max: 0 }));
     if (mustTouch.length) add("change-intent:must-touch", primitiveRuntime("must-touch", "change-intent:must-touch", "numeric_bound", {
-      source: diffFact("scalar", { kind: "path_count", patterns: mustTouch }),
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: mustTouch }),
     }, { min: 1 }));
     if (mustNotTouch.length) add("change-intent:must-not-touch", primitiveRuntime("must-not-touch", "change-intent:must-not-touch", "numeric_bound", {
-      source: diffFact("scalar", { kind: "path_count", patterns: mustNotTouch }),
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: mustNotTouch }),
     }, { max: 0 }));
   }
   return program;
