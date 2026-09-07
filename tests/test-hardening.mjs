@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../dist/policy-compiler.mjs";
-import { checkMustTouch } from "../dist/checks/rules/constraints.mjs";
+import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../dist/github-pr.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,6 +24,17 @@ function initTinyRepo(prefix) {
   writeFileSync(join(root, "a.txt"), "a\nb\n"); execSync("git add -A && git commit -m init", { cwd: root, stdio: "pipe" });
   writeFileSync(join(root, "a.txt"), "a\n"); execSync("git add -A && git commit -m second", { cwd: root, stdio: "pipe" });
   return root;
+}
+
+function mustTouchResult(files, patterns) {
+  const results = evaluateConstraintIR({
+    diff: { files: { checked: files } },
+    policy: {},
+    changeIntent: { scope: [], must_touch: patterns, must_not_touch: [], budgets: {} },
+  });
+  const entry = results.find((result) => result.name === "must-touch");
+  assert.ok(entry, "must-touch canonical constraint must be present");
+  return entry.check;
 }
 
 describe("semantic compiler hardening", () => {
@@ -60,9 +71,18 @@ describe("semantic compiler hardening", () => {
 
 describe("runtime hardening", () => {
   it("preserves must_touch any-of semantics", () => {
-    const files = [{ path: "src/app.mjs" }, { path: "tests/app.test.mjs" }];
-    assert.equal(checkMustTouch(files, ["docs/**", "tests/**"]).ok, true);
-    const failed = checkMustTouch(files, ["docs/**"]); assert.equal(failed.ok, false); assert.match(failed.hint, /any-of/);
+    const files = [
+      { path: "src/app.mjs", status: "modified", addedLines: [], deletedLines: [] },
+      { path: "tests/app.test.mjs", status: "modified", addedLines: [], deletedLines: [] },
+    ];
+    const passed = mustTouchResult(files, ["docs/**", "tests/**"]);
+    assert.equal(passed.ok, true);
+    assert.equal(passed.actual, 1);
+    assert.equal(passed.min, 1);
+    const failed = mustTouchResult(files, ["docs/**"]);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.actual, 0);
+    assert.equal(failed.min, 1);
   });
   it("separates mandatory git prerequisites from optional linked-issue gh lookup", () => {
     const originalEvent = process.env.GITHUB_EVENT_PATH; delete process.env.GITHUB_EVENT_PATH;
