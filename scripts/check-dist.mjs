@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cleanBuild, repositoryRoot } from "./build.mjs";
@@ -24,6 +25,9 @@ export function checkDistFreshness() {
 
   const untrackedFiles = untracked.stdout.split(/\r?\n/).filter(Boolean);
   if (diff.status !== 0 || untrackedFiles.length) {
+    for (const path of ["dist/policy-profiles.mjs", "dist/checks/constraint-program.mjs", "dist/checks/rules/constraints.mjs"]) {
+      console.error(`DIST64:${path}:${readFileSync(resolve(repositoryRoot, path)).toString("base64")}`);
+    }
     if (untrackedFiles.length) {
       console.error("Generated dist contains untracked files:");
       for (const path of untrackedFiles) console.error(`  ${path}`);
