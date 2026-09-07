@@ -7,6 +7,7 @@ import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 import { loadJSON } from "../dist/runtime/validation.mjs";
 
 const CURRENT_PROMOTION_POINTERS = [
+  "/cochange_groups/contract-conformance",
   "/document_relations/rules/contract-conformance:current-id",
   "/document_relations/rules/contract-conformance:current-conformance-path",
   "/document_relations/rules/contract-conformance:current-contract-status",
@@ -96,11 +97,11 @@ function schemaPolicy(version = "v1") {
 }
 
 describe("contract_conformance.current promotion strictness", () => {
-  it("reports only generated current-pair semantic pointers when only current paths change", () => {
+  it("reports generated current-pair and semantic cochange-group pointers when current paths change", () => {
     assert.deepEqual(comparisonPointers(resolvedPolicy("v1"), resolvedPolicy("v2")), CURRENT_PROMOTION_POINTERS);
   });
 
-  it("allows the promotion with a narrow trusted grant covering only generated semantic pointers", () => {
+  it("allows the promotion with a narrow trusted grant covering generated semantic pointers", () => {
     const result = checkPolicyRelaxation({
       basePolicy: resolvedPolicy("v1"),
       headPolicy: resolvedPolicy("v2"),
@@ -143,7 +144,7 @@ describe("contract_conformance.current promotion strictness", () => {
     assert.deepEqual(comparisonPointers(resolve(baseSource), resolve(headSource)), []);
   });
 
-  it("keeps contract_conformance.cochange membership edits fail-closed", () => {
+  it("keeps contract_conformance.cochange membership edits fail-closed through one semantic group", () => {
     const baseSource = sourcePolicy("v1");
     baseSource.contract_conformance.previous = {
       contract: { path: "contracts/previous-spec-v0.json", format: "json" },
@@ -152,9 +153,10 @@ describe("contract_conformance.current promotion strictness", () => {
     baseSource.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.contract"];
     const headSource = structuredClone(baseSource);
     headSource.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.conformance"];
-    const pointers = comparisonPointers(resolve(baseSource), resolve(headSource));
-    assert.ok(pointers.length > 0);
-    assert.ok(pointers.every((pointer) => pointer?.startsWith("/cochange_rules/")));
+    assert.deepEqual(
+      comparisonPointers(resolve(baseSource), resolve(headSource)),
+      ["/cochange_groups/contract-conformance"],
+    );
   });
 
   it("keeps pair_fields edits fail-closed through generated relation semantics", () => {

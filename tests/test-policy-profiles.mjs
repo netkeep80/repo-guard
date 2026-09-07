@@ -352,10 +352,11 @@ console.log("\n--- current macro expands to ordinary policy only ---");
   expect("explicit relation remains first", resolved.policy.document_relations.rules[0].id, "explicit-state");
   expect("macro emits six scalar relations plus required-path relations", resolved.policy.document_relations.rules.length, 9);
   expect("existing cochange rule composes", resolved.policy.cochange_rules[0], { if_changed: ["docs/**"], must_change_any: ["tests/**"] });
-  expect("macro adds bidirectional current pair cochange", resolved.policy.cochange_rules.slice(1), [
-    { if_changed: ["contracts/spec-v2.json"], must_change_any: ["contracts/checks-v2.yaml"] },
-    { if_changed: ["contracts/checks-v2.yaml"], must_change_any: ["contracts/spec-v2.json"] },
-  ]);
+  expect("macro does not generate directed cochange edges", resolved.policy.cochange_rules.slice(1), []);
+  expect("macro adds one semantic current-pair cochange group", resolved.policy.cochange_groups, [{
+    id: "contract-conformance",
+    members: ["contracts/checks-v2.yaml", "contracts/spec-v2.json"],
+  }]);
   expect("control paths compose into stable governance paths", resolved.policy.paths.governance_paths, ["contracts/**", "repo-policy.json", "schemas/**"]);
 }
 
@@ -407,7 +408,7 @@ console.log("\n--- synthetic current macro executes through ordinary R2 constrai
     "+++ b/contracts/spec-v2.json",
     "+{}",
   ].join("\n");
-  expect("current pair cochange uses ordinary cochange rule", run(Object.keys(files), contractOnlyDiff).violations.some((item) => item.rule.startsWith("cochange:")), true);
+  expect("current pair cochange uses semantic cochange group", run(Object.keys(files), contractOnlyDiff).violations.some((item) => item.rule === "cochange-group:contract-conformance"), true);
 }
 
 console.log("\n--- synthetic previous pair and acceptance execute through ordinary R2 constraints ---");

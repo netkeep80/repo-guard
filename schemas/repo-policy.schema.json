@@ -345,6 +345,7 @@
     },
     "cochange_rules": {
       "type": "array",
+      "description": "Directed implication rules: when if_changed matches, at least one must_change_any path must change.",
       "items": {
         "type": "object",
         "required": ["if_changed", "must_change_any"],
@@ -359,6 +360,24 @@
             "type": "array",
             "items": { "type": "string" },
             "minItems": 1
+          }
+        }
+      }
+    },
+    "cochange_groups": {
+      "type": "array",
+      "description": "Semantic all-or-none groups: either none of the members change or every member changes.",
+      "items": {
+        "type": "object",
+        "required": ["id", "members"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "members": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 2,
+            "uniqueItems": true
           }
         }
       }

@@ -105,6 +105,24 @@ export function compileIntegrationPolicy(policy = {}) {
             errors.push({ section: ref.section, index: ref.index, field: ref.field, profile_id: ref.profileId, message: `integration.${ref.section}[${ref.index}].${ref.field} references unknown integration.profiles id "${ref.profileId}"` });
     return errors;
 }
+export function compileCochangeGroupsPolicy(policy = {}) {
+    const errors = [], ids = new Set();
+    for (const rawGroup of list(policy.cochange_groups)) {
+        const group = object(rawGroup), id = group.id;
+        if (ids.has(id))
+            errors.push({ field: "cochange_groups", message: `cochange group id "${id}" is duplicated` });
+        ids.add(id);
+        for (const member of list(group.members)) {
+            try {
+                normalizeDocumentFact(member, "repository_path");
+            }
+            catch (error) {
+                errors.push({ field: "cochange_groups", member, message: `cochange group "${id}" has invalid repository path "${member}": ${error.message}` });
+            }
+        }
+    }
+    return errors;
+}
 function scalarLiteralMatches(type, value) {
     if (type === "string")
         return typeof value === "string";

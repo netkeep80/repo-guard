@@ -222,6 +222,10 @@ export function compileContractConformancePolicy(policy) {
         if (explicitRuleIds.has(id)) {
             errors.push({ field: "document_relations.rules", message: `contract_conformance generated rule "${id}" collides with explicit document_relations` });
         }
+    const explicitCochangeGroups = Array.isArray(source.cochange_groups) ? source.cochange_groups : [];
+    if (explicitCochangeGroups.some((group) => isObject(group) && group.id === "contract-conformance")) {
+        errors.push({ field: "cochange_groups", message: "contract_conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
+    }
     return errors;
 }
 export function expandPolicyProfile(policy) {
@@ -260,12 +264,9 @@ export function expandContractConformancePolicy(policy) {
         rules.push({ id: `contract-conformance:required-path:${index}`, kind: "referenced_paths_exist", source: { document: GENERATED_DOCUMENTS[source.document], pointer: source.pointer, projection: source.projection, type: "repository_path_set" } });
     }
     base.document_relations = { ...relations, documents, rules };
-    const cochange = macro.cochange, cochangeRules = Array.isArray(base.cochange_rules) ? clone(base.cochange_rules) : [];
-    for (const role of cochange)
-        for (const peer of cochange)
-            if (peer !== role)
-                cochangeRules.push({ if_changed: [rolePaths[role]], must_change_any: [rolePaths[peer]] });
-    base.cochange_rules = cochangeRules;
+    const cochange = macro.cochange, cochangeGroups = Array.isArray(base.cochange_groups) ? clone(base.cochange_groups) : [];
+    cochangeGroups.push({ id: "contract-conformance", members: cochange.map((role) => rolePaths[role]).sort() });
+    base.cochange_groups = cochangeGroups;
     const paths = isObject(base.paths) ? clone(base.paths) : {}, governance = stringList(paths.governance_paths), controlPaths = stringList(macro.control_paths);
     paths.governance_paths = [...new Set([...governance, ...controlPaths])].sort();
     base.paths = paths;

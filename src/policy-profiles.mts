@@ -60,6 +60,7 @@ interface PolicyProjection extends Record<string, unknown> {
   contract_conformance?: unknown;
   document_relations?: unknown;
   cochange_rules?: unknown;
+  cochange_groups?: unknown;
   paths?: Record<string, unknown>;
 }
 interface ProfileValidationError {
@@ -238,6 +239,10 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
   for (const id of generatedRuleIds(macro)) if (explicitRuleIds.has(id)) {
     errors.push({ field: "document_relations.rules", message: `contract_conformance generated rule "${id}" collides with explicit document_relations` });
   }
+  const explicitCochangeGroups = Array.isArray(source.cochange_groups) ? source.cochange_groups : [];
+  if (explicitCochangeGroups.some((group) => isObject(group) && group.id === "contract-conformance")) {
+    errors.push({ field: "cochange_groups", message: "contract_conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
+  }
   return errors;
 }
 
@@ -287,9 +292,9 @@ export function expandContractConformancePolicy(policy: unknown) {
   }
   base.document_relations = { ...relations, documents, rules };
 
-  const cochange = macro.cochange as ContractRole[], cochangeRules = Array.isArray(base.cochange_rules) ? clone(base.cochange_rules) : [];
-  for (const role of cochange) for (const peer of cochange) if (peer !== role) cochangeRules.push({ if_changed: [rolePaths[role]], must_change_any: [rolePaths[peer]] });
-  base.cochange_rules = cochangeRules;
+  const cochange = macro.cochange as ContractRole[], cochangeGroups = Array.isArray(base.cochange_groups) ? clone(base.cochange_groups) : [];
+  cochangeGroups.push({ id: "contract-conformance", members: cochange.map((role) => rolePaths[role]).sort() });
+  base.cochange_groups = cochangeGroups;
 
   const paths = isObject(base.paths) ? clone(base.paths) : {}, governance = stringList(paths.governance_paths), controlPaths = stringList(macro.control_paths);
   paths.governance_paths = [...new Set([...governance, ...controlPaths])].sort();

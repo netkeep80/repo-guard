@@ -295,7 +295,17 @@ describe("contract/conformance macro strictness", () => {
     assert.ok(resolved.policy.document_relations.rules.some((rule) => rule.id === "contract-conformance:acceptance-current-contract"));
     assert.ok(resolved.policy.document_relations.rules.some((rule) => rule.id === "historical-runtime-not-selectable"));
     assert.equal(resolved.policy.document_relations.rules.filter((rule) => rule.kind === "referenced_paths_exist").length, 1);
-    assert.ok(resolved.policy.cochange_rules.some((rule) => rule.if_changed[0] === "cutover/acceptance.json"));
+    assert.deepEqual(resolved.policy.cochange_rules, []);
+    assert.deepEqual(resolved.policy.cochange_groups, [{
+      id: "contract-conformance",
+      members: [
+        "contracts/checks-v1.json",
+        "contracts/checks-v2.json",
+        "contracts/spec-v1.json",
+        "contracts/spec-v2.json",
+        "cutover/acceptance.json",
+      ],
+    }]);
 
     const currentOnly = resolvePolicyProfile(macroPolicy()).policy;
     const historyComparison = compareConstraintPrograms(currentOnly, resolved.policy);
