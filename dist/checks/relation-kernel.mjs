@@ -113,11 +113,24 @@ function scalarEqualsLiteral(facts, relation) {
 function numericBound(facts, relation) {
     const source = factOperand(facts, relation, "source");
     const min = relation.parameters.min, max = relation.parameters.max;
-    const data = { kind: relation.primitive, source, min, max };
+    const sourceValues = source.ok && Array.isArray(source.value) ? source.value : undefined;
+    const data = {
+        kind: relation.primitive,
+        operands: relation.operands,
+        source,
+        ...(sourceValues ? { source_values: sourceValues } : {}),
+        min,
+        max,
+    };
     if (!source.ok)
-        return { ok: false, message: `relation "${relation.relation_id}" could not read numeric operand`, data };
-    if (typeof source.value !== "number" || !Number.isFinite(source.value)) {
-        return { ok: false, message: `relation "${relation.relation_id}" requires a finite numeric operand`, data };
+        return { ok: false, message: `relation "${relation.relation_id}" could not read bounded operand`, data };
+    const actual = typeof source.value === "number" && Number.isFinite(source.value)
+        ? source.value
+        : Array.isArray(source.value)
+            ? source.value.length
+            : null;
+    if (actual === null) {
+        return { ok: false, message: `relation "${relation.relation_id}" requires a finite number or set operand`, data };
     }
     if (min !== undefined && (typeof min !== "number" || !Number.isFinite(min))) {
         return { ok: false, message: `relation "${relation.relation_id}" has invalid minimum bound`, data };
@@ -128,7 +141,6 @@ function numericBound(facts, relation) {
     if (min === undefined && max === undefined) {
         return { ok: false, message: `relation "${relation.relation_id}" requires min or max`, data };
     }
-    const actual = source.value;
     const ok = (min === undefined || actual >= min) && (max === undefined || actual <= max);
     return {
         ok,
@@ -142,7 +154,7 @@ function numericBound(facts, relation) {
 }
 function setPresenceImplies(facts, relation) {
     const left = factOperand(facts, relation, "left"), right = factOperand(facts, relation, "right");
-    const data = { kind: relation.primitive, left, right };
+    const data = { kind: relation.primitive, operands: relation.operands, left, right };
     if (!left.ok || !right.ok)
         return { ok: false, message: `relation "${relation.relation_id}" could not read set operands`, data };
     if (!Array.isArray(left.value) || !Array.isArray(right.value)) {
