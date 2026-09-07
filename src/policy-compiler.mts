@@ -19,6 +19,7 @@ interface PolicyProjection {
   integration?: unknown;
   paths?: { public_api?: unknown };
   content_rules?: unknown;
+  cochange_groups?: unknown;
   document_relations?: unknown;
   evidence_bindings?: unknown;
 }
@@ -102,6 +103,20 @@ export function compileIntegrationPolicy(policy: PolicyProjection = {}): Semanti
   return errors;
 }
 
+export function compileCochangeGroupsPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
+  const errors: SemanticDiagnostic[] = [], ids = new Set<unknown>();
+  for (const rawGroup of list<LooseObject>(policy.cochange_groups)) {
+    const group = object(rawGroup), id = group.id;
+    if (ids.has(id)) errors.push({ field: "cochange_groups", message: `cochange group id "${id}" is duplicated` });
+    ids.add(id);
+    for (const member of list(group.members)) {
+      try { normalizeDocumentFact(member, "repository_path"); }
+      catch (error) { errors.push({ field: "cochange_groups", member, message: `cochange group "${id}" has invalid repository path "${member}": ${(error as Error).message}` }); }
+    }
+  }
+  return errors;
+}
+
 function scalarLiteralMatches(type: unknown, value: unknown): boolean {
   if (type === "string") return typeof value === "string";
   if (type === "boolean") return typeof value === "boolean";
@@ -178,7 +193,7 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
     try {
       const descriptor = relationDescriptor(String(rule.kind ?? ""));
       if (descriptor.evidenceSource !== "repository_paths_exist") return [];
-      return [documentSelectorKey(rule[descriptor.operands[0]!])];
+      return [documentSelectorKey(rule[descriptor.operands[0]!] )];
     } catch {
       return [];
     }
