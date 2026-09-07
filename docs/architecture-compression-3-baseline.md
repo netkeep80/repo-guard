@@ -4,7 +4,7 @@
 
 Базовый этап: #371.
 
-Текущий этап программы: #373.
+Текущий этап программы: #374.
 
 Этот этап только измеряет существующую архитектуру. Он не меняет семантику политик, исполнение правил, схемы, рабочие процессы или выпуск.
 
@@ -667,3 +667,102 @@ canonical-core semantic edit-sites = 0
 ```
 
 Новый структурный примитив не создаёт второй вычислитель и не возвращает предметную семантику в каноническое ядро. Замороженные исходные числа C3.0 выше остаются точкой сравнения и не переписываются текущими значениями.
+
+## 14. C3.3a — понижение исторических path/budget/cochange semantics
+
+C3.3a (#390) — первый bounded slice C3.3. Он не вводит новый публичный язык правил: существующие path/touch/budget/cochange semantics компилируются в тот же `primitive_relation` runtime, который установлен C3.1.
+
+Шесть исторических runtime kinds удалены из production source:
+
+```text
+max_metric
+scope_paths
+require_paths
+forbid_paths
+implies_nonempty
+cochange_group
+```
+
+Вместо них используются три малых внутренних relation descriptors:
+
+```text
+numeric_bound
+set_presence_implies
+set_all_or_none
+```
+
+Они принадлежат единственному `relation-kernel` registry и имеют `public = false`. Публичная relation schema поэтому не расширена.
+
+### 14.1 FactRef для diff facts
+
+Каноническая модель `FactRef` остаётся одна. Она имеет конечный набор источников:
+
+```text
+document
+diff
+```
+
+Для `diff` после дополнительного сжатия осталось ровно два вида selector:
+
+```text
+changed_paths
+metric
+```
+
+Промежуточный `path_count` удалён. Ограничения пути теперь сначала сохраняют множество реальных изменённых путей как `repository_path_set`, а `numeric_bound` применяет границу к мощности этого множества.
+
+Поэтому семантика выражается без отдельного производного fact kind:
+
+```text
+forbidden paths -> cardinality(changed_paths(patterns)) <= 0
+scope           -> cardinality(changed_paths(outside scope)) <= 0
+must_touch      -> cardinality(changed_paths(patterns)) >= 1
+must_not_touch  -> cardinality(changed_paths(patterns)) <= 0
+budget          -> metric(diff) <= limit
+cochange        -> presence(changed_paths(trigger)) => presence(changed_paths(required))
+cochange group  -> selected = ∅ OR selected = universe
+```
+
+### 14.2 Диагностика остаётся следствием канонических фактов
+
+При понижении не восстановлены исторические diagnostic adapters вроде:
+
+```text
+files
+must_touch
+```
+
+`numeric_bound` сохраняет исходный operand и выбранные `source_values`, а `set_presence_implies` сохраняет canonical operands и прочитанные left/right facts. Поэтому offending path и требуемый selector доступны структурированному JSON/summary непосредственно из relation evidence.
+
+Это устраняет класс ошибки, при котором семантика оставалась правильной, но раннее сворачивание множества путей в число уничтожало доказательные данные до `AnalysisReport`.
+
+### 14.3 Проверенный результат
+
+На проверенном состоянии PR #391 до синхронизации этого раздела:
+
+```text
+head = 43bb8a4c829f0fdc6745dc0e76ccaa286653a45f
+Actions run = 34155056196
+validate = success
+smoke-pack = success
+discovered test suite = success
+dist freshness = success
+compression metrics = success
+self policy / integration / doctor / portable readiness = success
+```
+
+PR policy check на этом запуске был пропущен только потому, что PR оставался draft. После синхронизации документации PR должен пройти тот же self-hosted check уже в ready-for-review состоянии.
+
+Архитектурные инварианты C3.3a:
+
+```text
+canonical FactRef model count = 1
+primitive descriptor registry count = 1
+canonical runtime shape = primitive_relation
+historical runtime kinds removed = 6
+diff selector vocabulary = changed_paths | metric
+compatibility selector models = 0
+legacy diagnostic aliases added = 0
+```
+
+Таким образом, bounded slice уменьшает историческую runtime surface, сохраняя fail-closed поведение и доказательные данные. Следующие семейства C3.3 могут понижаться тем же методом только при отдельном доказательстве эквивалентности; этот результат не является разрешением заранее расширять relation algebra.
