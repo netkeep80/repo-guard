@@ -3,7 +3,6 @@ import { readFact } from "../../document-facts.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
 import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
-import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
@@ -12,10 +11,8 @@ const CONSTRAINT_PHASES = {
     size_rules: "both",
     registry_rules: "state",
     change_profile: "transaction",
-    trace_rules: "transaction",
     integration: "state",
     evidence_workflow_path_coverage: "state",
-    evidence_anchor_value_coverage: "state",
 };
 function requestedExecutionPhase(context) {
     const phase = context.executionPhase ?? "both";
@@ -26,7 +23,7 @@ function requestedExecutionPhase(context) {
 }
 function constraintPhase(constraint) {
     if (constraint.kind === "primitive_relation")
-        return relationDescriptor(constraint.primitive || "").phase;
+        return constraint.phase ?? relationDescriptor(constraint.primitive || "").phase;
     const phase = CONSTRAINT_PHASES[constraint.kind];
     if (!phase)
         throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
@@ -85,40 +82,6 @@ function checkEvidenceWorkflowPathCoverage(facts, constraint) {
     const coverage = checkWorkflowPathCoverage(facts.integration, { workflow: constraint.workflow || "", covers: constraint.covers || [] }, source.value);
     return { ...coverage, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data } };
 }
-function checkEvidenceAnchorValueCoverage(facts, constraint) {
-    const source = factOperand(facts, constraint.source), target = constraint.target_anchor_type || "";
-    if (!source.ok)
-        return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read semantic evidence ids`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
-    if (!Array.isArray(source.value))
-        return { ok: false, message: `evidence binding "${constraint.binding_id}" did not produce a string set`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
-    const byType = facts.anchors?.byType;
-    if (!byType)
-        return {
-            ok: false,
-            message: `evidence binding "${constraint.binding_id}" cannot verify ids without anchor facts`,
-            data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: source.value, missing_values: source.value, anchor_facts_available: false },
-        };
-    const instances = Array.isArray(byType[target]) ? byType[target] : [], locations = new Map();
-    for (const instance of instances) {
-        if (typeof instance.value !== "string" || typeof instance.file !== "string")
-            continue;
-        const location = { file: instance.file };
-        if (typeof instance.line === "number")
-            location.line = instance.line;
-        if (typeof instance.column === "number")
-            location.column = instance.column;
-        const found = locations.get(instance.value) || [];
-        found.push(location);
-        locations.set(instance.value, found);
-    }
-    const sourceValues = source.value, missingValues = sourceValues.filter((value) => !locations.has(value)).sort();
-    const evidenceLocations = sourceValues.filter((value) => locations.has(value)).map((value) => ({ value, locations: locations.get(value) }));
-    return {
-        ok: missingValues.length === 0,
-        message: missingValues.length ? `evidence binding "${constraint.binding_id}" has declared ids without evidence anchors` : undefined,
-        data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: sourceValues, missing_values: missingValues, evidence_locations: evidenceLocations },
-    };
-}
 function primitiveRelation(constraint) {
     if (!constraint.relation_id || !constraint.primitive || !constraint.operands || !constraint.parameters) {
         throw new Error(`runtime primitive relation "${constraint.name}" is incomplete`);
@@ -156,11 +119,6 @@ export function evaluateConstraintIR(facts, context = {}) {
             check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
         else if (constraint.kind === "change_profile")
             check = checkChangeProfile(files, facts.policy, facts.changeIntent?.change_type, facts.derived);
-        else if (constraint.kind === "trace_rules") {
-            for (const trace of context.anchorDiagnostics?.traceRuleResults || [])
-                results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
-            continue;
-        }
         else if (constraint.kind === "integration") {
             results.push(...integrationConstraintEntries(facts.integration));
             continue;
@@ -169,8 +127,6 @@ export function evaluateConstraintIR(facts, context = {}) {
             check = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
         else if (constraint.kind === "evidence_workflow_path_coverage")
             check = checkEvidenceWorkflowPathCoverage(facts, constraint);
-        else if (constraint.kind === "evidence_anchor_value_coverage")
-            check = checkEvidenceAnchorValueCoverage(facts, constraint);
         else
             throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);
         results.push({ name: constraint.name, check });
