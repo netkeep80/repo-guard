@@ -1,48 +1,46 @@
-# C3.1 Canonical FactRef + Relation Kernel Design
+# C3.1: канонический `FactRef` и ядро отношений
 
-Issue: #372
-Parent: #370
-Base main: `730769112d94ae03ab996ba19cc3b20da9be965f`
+Задача: #372  
+Родительская задача: #370  
+Исходная точка `main`: `730769112d94ae03ab996ba19cc3b20da9be965f`
 
-## Goal
+## Цель
 
-Убрать дублирование semantic knowledge о document relation primitives. После C3.1 новый generic primitive должен требовать не более одного semantic edit-site в kernel, плюс schema и tests.
+Убрать дублирование семантического знания о примитивах документных отношений. После C3.1 новый общий примитив должен требовать не более одного семантического места изменения в ядре, плюс изменение схемы и тесты.
 
-## Simplicity rule
+## Правило простоты
 
-Не создавать новую подсистему, если существующая подходит.
+Не создавать новую подсистему, если существующая уже выражает нужную семантику.
 
-Authority после cutover:
+После перехода полномочия распределяются так:
 
-- `src/document-facts.mts` — canonical typed `FactRef` и чтение фактов;
-- `src/checks/relation-kernel.mts` — canonical finite relation descriptor registry и relation evaluation metadata;
-- `src/checks/constraint-program.mts` — только lowering policy -> canonical runtime relation;
-- `src/checks/rules/constraints.mts` — один evaluator entry point, который dispatches relation через kernel descriptor.
+- `src/document-facts.mts` — канонический типизированный `FactRef` и единое чтение фактов;
+- `src/checks/relation-kernel.mts` — канонический конечный реестр описателей отношений и их вычислительная семантика;
+- `src/checks/constraint-program.mts` — только понижение политики в каноническое представление времени исполнения;
+- `src/checks/rules/constraints.mts` — единственная точка входа вычислителя, передающая отношения ядру.
 
 Запрещено:
 
-- новый `primitive-registry` рядом с `relation-kernel`;
-- второй evaluator;
-- compatibility aliases для старых internal selectors/runtime kinds;
-- arbitrary predicates/expression language;
-- contract-conformance-specific semantics в новом kernel;
-- C3.2 cochange compression в этом slice.
+- новый отдельный реестр примитивов рядом с `relation-kernel`;
+- второй вычислитель;
+- псевдонимы совместимости для старых внутренних селекторов и видов исполнения;
+- произвольные предикаты или отдельный язык выражений;
+- специальная для `contract_conformance` семантика в новом ядре;
+- сжатие `cochange` из C3.2 в этом изменении.
 
-## Canonical FactRef
+## Канонический `FactRef`
 
-Существующий `DocumentFactSelector` заменяется одним canonical reference, который полностью описывает источник, snapshot, selector и ожидаемый тип.
+Существующий `DocumentFactSelector` заменяется одной канонической ссылкой, полностью описывающей путь источника, формат, снимок, селектор и ожидаемый тип.
 
-Минимальная модель:
+Фактическая модель C3.1:
 
 ```ts
 export type FactSnapshot = "state" | "base" | "head";
+export type FactFormat = "json" | "yaml" | "plain_text";
 
 export interface FactRef {
-  source: {
-    document: string;
-    path: string;
-    format: "json" | "yaml" | "plain_text";
-  };
+  path: string;
+  format: FactFormat;
   snapshot: FactSnapshot;
   pointer: string;
   projection?: DocumentProjection;
@@ -50,51 +48,51 @@ export interface FactRef {
 }
 ```
 
-`readFact(...)` является единственной точкой чтения typed facts.
+`readFact(...)` является единственной точкой чтения типизированных документных фактов:
 
-- `state` использует current repository `DocumentReader`;
-- `base` использует `baseRef + readFileAtRef`;
-- `head` использует `headRef + readFileAtRef`.
+- `state` использует текущий `DocumentReader` репозитория;
+- `base` использует `baseRef` и `readFileAtRef`;
+- `head` использует `headRef` и `readFileAtRef`.
 
-Старые `RuntimeDocumentSelector` и `snapshotOperand()` после миграции удаляются.
+Старые `DocumentFactSelector`, `readDocumentFact`, `RuntimeDocumentSelector` и отдельное чтение снимков после миграции не сохраняются как параллельная модель.
 
-## Canonical relation descriptor registry
+## Канонический реестр описателей отношений
 
-`src/checks/relation-kernel.mts` расширяется существующей конечной таблицей descriptors.
+`src/checks/relation-kernel.mts` содержит одну конечную таблицу `DESCRIPTORS`.
 
-Descriptor владеет минимум:
+Каждый описатель владеет как минимум:
 
 ```ts
-interface RelationDescriptor {
-  kind: string;
-  operands: readonly OperandDescriptor[];
-  phase: ExecutionPhase;
-  evaluate: RelationEvaluator;
-  strictness: "exact_or_incomparable" | RelationStrictnessDescriptor;
-  identityInputs: readonly string[];
-}
+kind
+operands
+phase
+evaluate
+strictness
+identity
 ```
 
-Registry является единственным semantic inventory relation kinds внутри runtime code.
+При необходимости описатель также содержит сведения о документных операндах, литералах или роли источника доказательств. Это остаётся метаданными того же реестра, а не новой системой правил.
 
-Schema остаётся отдельным structural inventory как untrusted-input boundary.
+Реестр является единственным семантическим перечнем видов документных отношений в производственном коде.
 
-## Runtime representation
+Схема остаётся отдельным структурным перечнем на границе недоверенного ввода. Тест обязан механически сравнивать её перечень с `relationDescriptors()`.
 
-Все document relation policy rules lower в один runtime shape:
+## Представление времени исполнения
+
+Все правила `document_relations` понижаются в одну форму:
 
 ```ts
 {
-  kind: "relation",
+  kind: "primitive_relation",
   name: "document-relation:<id>",
   relation_id: "<id>",
-  relation: "scalar_equal" | "scalar_strictly_greater" | ...,
-  operands: { ...canonical FactRef/document/literal operands... },
+  primitive: "scalar_equal" | "scalar_strictly_greater" | ...,
+  operands: { ... },
   parameters: { ... }
 }
 ```
 
-Не должно оставаться отдельных runtime kinds вида:
+Отдельные виды времени исполнения наподобие следующих удаляются:
 
 ```text
 document_scalar_equal
@@ -103,85 +101,89 @@ document_set_equal
 ...
 ```
 
-## Compiler behavior
+## Поведение компилятора политики
 
-`policy-compiler.mts` не перечисляет relation kinds для определения используемых документов.
+`policy-compiler.mts` не перечисляет виды отношений для определения используемых документов.
 
 Алгоритм:
 
-1. lookup descriptor by `rule.kind`;
-2. fail closed, если descriptor отсутствует;
-3. пройти descriptor operand roles;
-4. проверить/пометить referenced documents generically;
-5. relation-specific structural compatibility, которая не может быть выражена общей operand metadata, принадлежит descriptor validation.
+1. получить описатель по `rule.kind`;
+2. закрыто отклонить правило, если описатель отсутствует;
+3. пройти роли из `descriptor.operands`;
+4. механически проверить и отметить используемые документы;
+5. дополнительную структурную совместимость, если она нужна конкретному виду, выводить из метаданных того же описателя.
 
-Это делает класс ошибки #368 механически невозможным: compiler consumer path выводится из descriptor, а не из отдельного switch.
+Так класс ошибки #368 становится механически предотвращаемым: путь потребителя в компиляторе выводится из того же описателя, который определяет примитив, а не из отдельного переключателя.
 
-## Constraint Program behavior
+## Поведение программы ограничений
 
-`constraint-program.mts` не содержит relation-kind switch.
+`constraint-program.mts` не содержит переключателя по видам документных отношений.
 
-Для каждой relation rule:
+Для каждого правила выполняется:
 
-1. lookup descriptor;
-2. compile operands to canonical refs/values;
-3. emit one `kind: "relation"` runtime constraint;
-4. emit existing entity/shape strictness entries using descriptor identity/strictness metadata.
+1. поиск описателя;
+2. компиляция операндов в `FactRef` или документные цели;
+3. формирование одного ограничения `primitive_relation`;
+4. формирование существующих записей идентичности и строгости по метаданным описателя.
 
-## Evaluator behavior
+Устойчивая идентичность текущих отношений основана на `id`. Изменение семантической формы отношения в C3.1 считается несравнимым, если для него не доказан отдельный монотонный порядок.
 
-`evaluateConstraintIR()` остаётся единственным evaluator entry point.
+## Поведение вычислителя
 
-Для `kind: "relation"` он:
+`evaluateConstraintIR()` остаётся единственной точкой входа вычислителя.
 
-1. lookup descriptor by `constraint.relation`;
-2. fail closed if unknown;
-3. фильтрует по `descriptor.phase`;
-4. вызывает `descriptor.evaluate`.
+Для `primitive_relation` он:
 
-Отдельного `CONSTRAINT_PHASES` inventory для relation kinds больше нет.
+1. получает описатель по `constraint.primitive`;
+2. закрыто отклоняет неизвестный вид;
+3. получает фазу из `descriptor.phase`;
+4. вызывает `descriptor.evaluate` через `evaluatePrimitiveRelation`.
 
-Нереляционные historical runtime constraints пока остаются как есть; их lowering относится к C3.3.
+Отдельного перечня фаз для документных видов в `CONSTRAINT_PHASES` больше нет.
 
-## Falsifiers
+Нереляционные исторические ограничения времени исполнения пока остаются как есть; их дальнейшее понижение относится к C3.3.
 
-C3.1 обязан иметь RED -> GREEN tests минимум для:
+## Фальсификаторы
 
-1. `scalar_strictly_greater` из #366/#368 компилируется и исполняется без отдельного compiler switch;
-2. каждый registered relation автоматически учитывает все declared document operands в unused-document analysis;
-3. unknown relation fails closed в compiler/runtime boundary;
-4. runtime relation phase берётся из descriptor;
-5. после cutover в production source нет старых document-specific runtime kind inventories;
-6. schema relation kinds и kernel descriptors mechanically compared, чтобы drift был обнаружен тестом.
+C3.1 обязан иметь красно-зелёные проверки минимум для следующих свойств:
 
-## Public surface
+1. `scalar_strictly_greater` из #366/#368 компилируется и исполняется без отдельного переключателя компилятора;
+2. каждый зарегистрированный вид автоматически учитывает все объявленные документные операнды при анализе неиспользованных документов;
+3. неизвестное отношение закрыто отклоняется на границе компилятора и времени исполнения;
+4. фаза отношения берётся из описателя;
+5. после перехода в производственном исходном коде нет старых перечней документных видов времени исполнения;
+6. виды отношений из схемы и описателей ядра механически сравниваются, поэтому расхождение обнаруживается тестом.
 
-Public policy syntax C3.1 не расширяет.
+Первичный красный фальсификатор был подтверждён отдельным запуском на голове `9f4b5652349b58e915dc7fab7504e5c6ad7ae525`: тест упал из-за отсутствия `relationDescriptor` до реализации производственного кода.
 
-Если canonical docs используют термин `DocumentFactSelector` как архитектурный authority, они обновляются на `FactRef` в этом же PR. Примеры policy не меняются, если их JSON surface остаётся прежним.
+## Публичная поверхность
 
-## Scope boundary
+Публичный синтаксис политики C3.1 не расширяет. Существующие записи `document_relations` остаются входной формой политики; меняется только внутреннее каноническое представление.
 
-Не делать в C3.1:
+Термин `DocumentFactSelector` больше не является внутренним архитектурным полномочием. Каноническая внутренняя ссылка — `FactRef`.
 
-- generic `cochange_group`;
+## Граница C3.1
+
+В C3.1 не выполнять:
+
+- общий `cochange_group`;
 - удаление `CONTRACT_CONFORMANCE_DOCUMENT_ROLES`;
-- pure macro lowering `contract_conformance`;
-- historical ChangeIntent/trace/integration family lowering;
-- self-policy rewrite;
-- Pages;
-- version/release changes;
-- CI optimization.
+- чистое макропонижение `contract_conformance`;
+- понижение исторических семейств `ChangeIntent`, трассировки и интеграции;
+- переписывание собственной политики репозитория;
+- страницы наблюдаемости;
+- изменения версии и выпуска;
+- оптимизацию конвейера CI.
 
-Это следующие C3 gates.
+Это последующие ворота программы C3.
 
-## Acceptance mapping
+## Соответствие критериям приёмки
 
-- one canonical FactRef model -> `document-facts.mts`;
-- one primitive descriptor registry -> `relation-kernel.mts`;
-- unknown primitive fails closed -> descriptor lookup boundaries;
-- #368 class impossible/mechanically detected -> descriptor-driven operand consumption + schema/registry drift test;
-- semantic edit-sites target -> one kernel descriptor edit-site + schema + tests;
-- no second evaluator/registry -> existing kernel and existing `evaluateConstraintIR` only;
-- tests/dist/self-policy green -> normal protected PR gate;
-- docs current -> terminology updated only where public architecture changed.
+- один канонический `FactRef` — `document-facts.mts`;
+- один реестр описателей примитивов — `relation-kernel.mts`;
+- закрытый отказ неизвестного примитива — границы поиска описателя;
+- предотвращение класса #368 — потребление операндов из описателя плюс тест согласованности схемы и реестра;
+- цель по местам изменения — один описатель в ядре, плюс схема и тесты;
+- отсутствие второго вычислителя и реестра — существующие `relation-kernel` и `evaluateConstraintIR`;
+- зелёные тесты, `dist` и самопроверка — защищённые ворота PR;
+- актуальная документация — этот проект решения, рабочий план и канонический отчёт C3.
