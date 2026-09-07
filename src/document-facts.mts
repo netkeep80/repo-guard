@@ -71,7 +71,7 @@ export type FactFormat = "json" | "yaml" | "plain_text";
 export type FactSource = "document" | "diff";
 export type DiffFactSelector =
   | {
-      kind: "changed_paths" | "path_count";
+      kind: "changed_paths";
       patterns: readonly string[];
       mode?: "matching" | "outside";
       exclude_statuses?: readonly DiffFileStatus[];
@@ -345,7 +345,7 @@ function diffFactSource(context: FactReadContext, selector: DiffFactSelector): u
   const paths = selector.mode === "outside"
     ? uniqueSorted(candidates.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path))
     : selectPaths(candidates, patterns);
-  return selector.kind === "path_count" ? paths.length : paths;
+  return paths;
 }
 
 export function readFact(context: FactReadContext, ref: FactRef): DocumentFactResult {
