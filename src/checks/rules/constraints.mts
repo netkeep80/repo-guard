@@ -10,7 +10,6 @@ import {
   type RelationEvaluationFacts,
 } from "../relation-kernel.mjs";
 import type { ExecutionPhase, RuleFamily } from "../rule-registry.mjs";
-import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
 import type { SizeRule } from "./size-rules.mjs";
@@ -21,24 +20,22 @@ interface SurfaceDebt {
   expected_delta?: { max_new_files?: number; max_net_added_lines?: number };
   [key: string]: unknown;
 }
-interface AnchorEvidenceInstance { value?: unknown; file?: unknown; line?: unknown; column?: unknown; }
 
 type RuntimeConstraintKind =
   | "surface_debt"
   | "size_rules"
   | "registry_rules"
   | "change_profile"
-  | "trace_rules"
   | "integration"
   | "primitive_relation"
-  | "evidence_workflow_path_coverage"
-  | "evidence_anchor_value_coverage";
+  | "evidence_workflow_path_coverage";
 
 type FixedPhaseConstraintKind = Exclude<RuntimeConstraintKind, "primitive_relation">;
 
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
   name: string;
+  phase?: ExecutionPhase;
   debt?: SurfaceDebt | null;
   rules?: unknown;
   relation_id?: string;
@@ -49,7 +46,6 @@ interface RuntimeConstraint {
   source?: FactRef;
   workflow?: string;
   covers?: string[];
-  target_anchor_type?: string;
 }
 
 interface ConstraintPolicyProjection {
@@ -61,15 +57,13 @@ interface ConstraintFacts extends RelationEvaluationFacts {
   readFile?: (filePath: string) => unknown;
   documents?: DocumentReader;
   policy: ConstraintPolicyProjection;
-  changeIntent?: { change_type?: string } | null;
+  changeIntent?: { change_type?: string; [key: string]: unknown } | null;
   diff: { files: { checked: ParsedDiffFile[] } };
   derived?: unknown;
   integration?: unknown;
-  anchors?: { byType?: Record<string, AnchorEvidenceInstance[]> };
 }
 interface ConstraintContext {
   executionPhase?: ExecutionPhase;
-  anchorDiagnostics?: { traceRuleResults?: Array<{ id: string; [key: string]: unknown }> };
 }
 interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
@@ -79,10 +73,8 @@ const CONSTRAINT_PHASES: Record<FixedPhaseConstraintKind, ExecutionPhase> = {
   size_rules: "both",
   registry_rules: "state",
   change_profile: "transaction",
-  trace_rules: "transaction",
   integration: "state",
   evidence_workflow_path_coverage: "state",
-  evidence_anchor_value_coverage: "state",
 };
 
 function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
@@ -94,7 +86,7 @@ function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
 }
 
 function constraintPhase(constraint: RuntimeConstraint): ExecutionPhase {
-  if (constraint.kind === "primitive_relation") return relationDescriptor(constraint.primitive || "").phase;
+  if (constraint.kind === "primitive_relation") return constraint.phase ?? relationDescriptor(constraint.primitive || "").phase;
   const phase = CONSTRAINT_PHASES[constraint.kind];
   if (!phase) throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
   return phase;
@@ -147,35 +139,6 @@ function checkEvidenceWorkflowPathCoverage(facts: ConstraintFacts, constraint: R
   return { ...coverage, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data } };
 }
 
-function checkEvidenceAnchorValueCoverage(facts: ConstraintFacts, constraint: RuntimeConstraint) {
-  const source = factOperand(facts, constraint.source), target = constraint.target_anchor_type || "";
-  if (!source.ok) return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read semantic evidence ids`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
-  if (!Array.isArray(source.value)) return { ok: false, message: `evidence binding "${constraint.binding_id}" did not produce a string set`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
-  const byType = facts.anchors?.byType;
-  if (!byType) return {
-    ok: false,
-    message: `evidence binding "${constraint.binding_id}" cannot verify ids without anchor facts`,
-    data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: source.value, missing_values: source.value, anchor_facts_available: false },
-  };
-  const instances = Array.isArray(byType[target]) ? byType[target] : [], locations = new Map<string, Array<{ file: string; line?: number; column?: number }>>();
-  for (const instance of instances) {
-    if (typeof instance.value !== "string" || typeof instance.file !== "string") continue;
-    const location: { file: string; line?: number; column?: number } = { file: instance.file };
-    if (typeof instance.line === "number") location.line = instance.line;
-    if (typeof instance.column === "number") location.column = instance.column;
-    const found = locations.get(instance.value) || [];
-    found.push(location);
-    locations.set(instance.value, found);
-  }
-  const sourceValues = source.value as string[], missingValues = sourceValues.filter((value) => !locations.has(value)).sort();
-  const evidenceLocations = sourceValues.filter((value) => locations.has(value)).map((value) => ({ value, locations: locations.get(value) }));
-  return {
-    ok: missingValues.length === 0,
-    message: missingValues.length ? `evidence binding "${constraint.binding_id}" has declared ids without evidence anchors` : undefined,
-    data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: sourceValues, missing_values: missingValues, evidence_locations: evidenceLocations },
-  };
-}
-
 function primitiveRelation(constraint: RuntimeConstraint): PrimitiveRelation {
   if (!constraint.relation_id || !constraint.primitive || !constraint.operands || !constraint.parameters) {
     throw new Error(`runtime primitive relation "${constraint.name}" is incomplete`);
@@ -207,15 +170,11 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
       continue;
     } else if (constraint.kind === "registry_rules") check = checkRegistryRules(constraint.rules as Parameters<typeof checkRegistryRules>[0], { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
     else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy as Parameters<typeof checkChangeProfile>[1], facts.changeIntent?.change_type, facts.derived as Parameters<typeof checkChangeProfile>[3]);
-    else if (constraint.kind === "trace_rules") {
-      for (const trace of context.anchorDiagnostics?.traceRuleResults || []) results.push({ name: `trace-rule: ${trace.id}`, check: checkTraceRuleResult(trace) });
-      continue;
-    } else if (constraint.kind === "integration") {
+    else if (constraint.kind === "integration") {
       results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
       continue;
     } else if (constraint.kind === "primitive_relation") check = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
     else if (constraint.kind === "evidence_workflow_path_coverage") check = checkEvidenceWorkflowPathCoverage(facts, constraint);
-    else if (constraint.kind === "evidence_anchor_value_coverage") check = checkEvidenceAnchorValueCoverage(facts, constraint);
     else throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
     results.push({ name: constraint.name, check });
   }
