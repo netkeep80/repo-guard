@@ -1,10 +1,10 @@
 import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { selectPaths } from "../../diff/classification.mjs";
-import { DocumentFactFailure, readDocumentFact, resolveJsonPointer } from "../../document-facts.mjs";
+import { readFact } from "../../document-facts.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
-import { compareSets } from "../relation-kernel.mjs";
+import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
 import { checkTraceRuleResult } from "../trace-rules.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
@@ -21,13 +21,6 @@ const CONSTRAINT_PHASES = {
     change_profile: "transaction",
     trace_rules: "transaction",
     integration: "state",
-    document_scalar_strictly_greater: "transaction",
-    document_scalar_equal: "state",
-    document_scalar_equals_literal: "state",
-    document_referenced_paths_exist: "state",
-    document_set_equal: "state",
-    document_set_subset: "state",
-    document_referenced_pointer_exists: "state",
     evidence_workflow_path_coverage: "state",
     evidence_anchor_value_coverage: "state",
 };
@@ -38,10 +31,16 @@ function requestedExecutionPhase(context) {
     }
     return phase;
 }
-function constraintAppliesToPhase(constraint, requested) {
+function constraintPhase(constraint) {
+    if (constraint.kind === "primitive_relation")
+        return relationDescriptor(constraint.primitive || "").phase;
     const phase = CONSTRAINT_PHASES[constraint.kind];
     if (!phase)
         throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
+    return phase;
+}
+function constraintAppliesToPhase(constraint, requested) {
+    const phase = constraintPhase(constraint);
     return requested === "both" || phase === "both" || phase === requested;
 }
 function projectSizeRules(rules, requested) {
@@ -119,145 +118,13 @@ function evaluateMetric(files, constraint, policy) {
         return checkNewFilesBudget(files, constraint.max);
     return checkNetAddedLinesBudget(files, constraint.max);
 }
-function factOperand(reader, selector) {
-    if (!reader || !selector)
-        return { ok: false, error: { code: "document_read_error", pointer: selector?.pointer || "", message: "document reader or selector is unavailable" } };
-    return readDocumentFact(reader, selector);
-}
-function snapshotOperand(facts, selector) {
-    const snapshot = selector?.snapshot, label = snapshot === "base" ? "BASE" : snapshot === "head" ? "HEAD" : "snapshot";
-    const ref = snapshot === "base" ? facts.baseRef : snapshot === "head" ? facts.headRef : null;
-    const path = selector?.path || "";
-    if (!selector || selector.format !== "plain_text" || selector.pointer !== "" || selector.type !== "string" || (snapshot !== "base" && snapshot !== "head")) {
-        return { ok: false, label, path, error: `invalid ${label} plain-text scalar selector` };
-    }
+function factOperand(facts, ref) {
     if (!ref)
-        return { ok: false, label, path, error: `missing ${label} ref` };
-    if (!facts.readFileAtRef)
-        return { ok: false, label, path, error: `snapshot reader unavailable for ${label}` };
-    try {
-        const raw = facts.readFileAtRef(ref, path);
-        if (raw === null || raw === undefined)
-            return { ok: false, label, path, error: `missing ${label} file` };
-        return { ok: true, label, path, value: String(raw).trim() };
-    }
-    catch (error) {
-        return { ok: false, label, path, error: `${label} read failed: ${error instanceof Error ? error.message : String(error)}` };
-    }
-}
-function parseSemverCore(value) {
-    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
-    if (!match)
-        return null;
-    const tuple = [Number(match[1]), Number(match[2]), Number(match[3])];
-    return tuple.every(Number.isSafeInteger) ? tuple : null;
-}
-function tupleGreater(left, right) {
-    for (let index = 0; index < left.length; index++) {
-        if (left[index] !== right[index])
-            return left[index] > right[index];
-    }
-    return false;
-}
-function checkDocumentScalarStrictlyGreater(facts, constraint) {
-    const left = snapshotOperand(facts, constraint.left), right = snapshotOperand(facts, constraint.right);
-    const base = left.label === "BASE" ? left : right.label === "BASE" ? right : null;
-    const head = left.label === "HEAD" ? left : right.label === "HEAD" ? right : null;
-    const path = head?.path || base?.path || constraint.left?.path || constraint.right?.path || "";
-    const baseValue = base?.ok ? base.value : undefined, headValue = head?.ok ? head.value : undefined;
-    const diagnostic = { rule_id: constraint.relation_id, path, base_value: baseValue, head_value: headValue, expected_relation: "strictly_greater", comparator: constraint.comparator };
-    if (!base || !head)
-        return { ok: false, message: `document relation "${constraint.relation_id}" requires one BASE and one HEAD operand`, ...diagnostic, data: { left, right } };
-    if (base.path !== head.path)
-        return { ok: false, message: `document relation "${constraint.relation_id}" requires BASE and HEAD of the same path`, ...diagnostic, data: { left, right } };
-    if (!base.ok)
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read BASE: ${base.error}`, ...diagnostic, data: { left, right } };
-    if (!head.ok)
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read HEAD: ${head.error}`, ...diagnostic, data: { left, right } };
-    if (constraint.comparator !== "semver")
-        return { ok: false, message: `document relation "${constraint.relation_id}" has unsupported comparator`, ...diagnostic, data: { left, right } };
-    const baseTuple = parseSemverCore(base.value), headTuple = parseSemverCore(head.value);
-    if (!baseTuple)
-        return { ok: false, message: `document relation "${constraint.relation_id}" has malformed BASE semver`, ...diagnostic, data: { left, right } };
-    if (!headTuple)
-        return { ok: false, message: `document relation "${constraint.relation_id}" has malformed HEAD semver`, ...diagnostic, data: { left, right } };
-    const ok = tupleGreater(headTuple, baseTuple);
-    return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" expected HEAD > BASE`, ...diagnostic, data: { left, right } };
-}
-function checkDocumentScalarEqual(facts, constraint) {
-    const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
-    const data = { kind: "scalar_equal", left, right };
-    if (!left.ok || !right.ok)
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read scalar operands`, data };
-    const ok = left.value === right.value;
-    return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar values differ`, data };
-}
-function checkDocumentScalarLiteral(facts, constraint) {
-    const source = factOperand(facts.documents, constraint.source), expected = constraint.value;
-    const data = { kind: "scalar_equals_literal", source, expected };
-    if (!source.ok)
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read scalar operand`, data };
-    const ok = source.value === expected;
-    return { ok, message: ok ? undefined : `document relation "${constraint.relation_id}" scalar value does not match literal`, data };
-}
-function checkDocumentReferencedPathsExist(facts, constraint) {
-    const source = factOperand(facts.documents, constraint.source);
-    if (!source.ok)
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read repository path references`, data: { kind: "referenced_paths_exist", source } };
-    if (!Array.isArray(source.value))
-        return { ok: false, message: `document relation "${constraint.relation_id}" did not produce a repository path set`, data: { kind: "referenced_paths_exist", source } };
-    const referencedPaths = source.value;
-    if (facts.trackedFiles === undefined)
-        return {
-            ok: false,
-            message: `document relation "${constraint.relation_id}" cannot verify references without tracked repository facts`,
-            data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: [], tracked_repository_available: false },
-        };
-    const tracked = new Set(facts.trackedFiles);
-    const missingPaths = referencedPaths.filter((path) => !tracked.has(path)).sort();
-    return { ok: missingPaths.length === 0, message: missingPaths.length ? `document relation "${constraint.relation_id}" references missing repository paths` : undefined, data: { kind: "referenced_paths_exist", source, referenced_paths: referencedPaths, missing_paths: missingPaths } };
-}
-function checkDocumentSetRelation(facts, constraint, relation) {
-    const left = factOperand(facts.documents, constraint.left), right = factOperand(facts.documents, constraint.right);
-    const kind = relation === "equal" ? "set_equal" : "set_subset";
-    if (!left.ok || !right.ok)
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read string-set operands`, data: { kind, left, right } };
-    if (!Array.isArray(left.value) || !Array.isArray(right.value))
-        return { ok: false, message: `document relation "${constraint.relation_id}" did not produce string sets`, data: { kind, left, right } };
-    const compared = compareSets(left.value, right.value, relation);
-    return {
-        ok: compared.ok,
-        message: compared.ok ? undefined : `document relation "${constraint.relation_id}" failed ${kind}`,
-        data: { kind, left, right, missing_values: compared.missing, extra_values: compared.extra },
-    };
-}
-function pointerTargetError(error, pointer) {
-    if (error instanceof DocumentFactFailure)
-        return { code: error.code, pointer: error.pointer, ...(error.segment === undefined ? {} : { segment: error.segment }), message: error.message };
-    const message = error instanceof Error ? error.message : String(error);
-    return { code: "document_read_error", pointer, message: String(message || "document read failed").replace(/\s+/g, " ").trim() };
-}
-function readReferencedPointerTarget(reader, target, pointer) {
-    if (!reader || !target?.path)
-        return { ok: false, error: { code: "document_read_error", pointer, message: "document reader or target document is unavailable" } };
-    try {
-        const document = target.format === "yaml" ? reader.yaml(target.path) : target.format === "json" ? reader.json(target.path) : (() => { throw new DocumentFactFailure("unsupported_document_type", `unsupported document type for "${target.path}"`, pointer); })();
-        resolveJsonPointer(document, pointer);
-        return { ok: true, document: target.document, path: target.path, pointer };
-    }
-    catch (error) {
-        return { ok: false, error: pointerTargetError(error, pointer) };
-    }
-}
-function checkDocumentReferencedPointerExists(facts, constraint) {
-    const source = factOperand(facts.documents, constraint.source);
-    if (!source.ok || typeof source.value !== "string")
-        return { ok: false, message: `document relation "${constraint.relation_id}" could not read JSON Pointer source`, data: { kind: "referenced_pointer_exists", source } };
-    const target = readReferencedPointerTarget(facts.documents, constraint.target, source.value);
-    return { ok: target.ok, message: target.ok ? undefined : `document relation "${constraint.relation_id}" references a missing target pointer`, data: { kind: "referenced_pointer_exists", source, target } };
+        return { ok: false, error: { code: "document_read_error", pointer: "", message: "fact reference is unavailable" } };
+    return readFact(facts, ref);
 }
 function checkEvidenceWorkflowPathCoverage(facts, constraint) {
-    const source = factOperand(facts.documents, constraint.source);
+    const source = factOperand(facts, constraint.source);
     if (!source.ok)
         return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read repository path references`, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source } };
     if (!Array.isArray(source.value))
@@ -266,7 +133,7 @@ function checkEvidenceWorkflowPathCoverage(facts, constraint) {
     return { ...coverage, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data } };
 }
 function checkEvidenceAnchorValueCoverage(facts, constraint) {
-    const source = factOperand(facts.documents, constraint.source), target = constraint.target_anchor_type || "";
+    const source = factOperand(facts, constraint.source), target = constraint.target_anchor_type || "";
     if (!source.ok)
         return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read semantic evidence ids`, data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source } };
     if (!Array.isArray(source.value))
@@ -297,6 +164,17 @@ function checkEvidenceAnchorValueCoverage(facts, constraint) {
         ok: missingValues.length === 0,
         message: missingValues.length ? `evidence binding "${constraint.binding_id}" has declared ids without evidence anchors` : undefined,
         data: { kind: "anchor_value_coverage", binding_id: constraint.binding_id, target_anchor_type: target, source, source_values: sourceValues, missing_values: missingValues, evidence_locations: evidenceLocations },
+    };
+}
+function primitiveRelation(constraint) {
+    if (!constraint.relation_id || !constraint.primitive || !constraint.operands || !constraint.parameters) {
+        throw new Error(`runtime primitive relation "${constraint.name}" is incomplete`);
+    }
+    return {
+        relation_id: constraint.relation_id,
+        primitive: constraint.primitive,
+        operands: constraint.operands,
+        parameters: constraint.parameters,
     };
 }
 export function evaluateConstraintIR(facts, context = {}) {
@@ -353,20 +231,8 @@ export function evaluateConstraintIR(facts, context = {}) {
             results.push(...integrationConstraintEntries(facts.integration));
             continue;
         }
-        else if (constraint.kind === "document_scalar_strictly_greater")
-            check = checkDocumentScalarStrictlyGreater(facts, constraint);
-        else if (constraint.kind === "document_scalar_equal")
-            check = checkDocumentScalarEqual(facts, constraint);
-        else if (constraint.kind === "document_scalar_equals_literal")
-            check = checkDocumentScalarLiteral(facts, constraint);
-        else if (constraint.kind === "document_referenced_paths_exist")
-            check = checkDocumentReferencedPathsExist(facts, constraint);
-        else if (constraint.kind === "document_set_equal")
-            check = checkDocumentSetRelation(facts, constraint, "equal");
-        else if (constraint.kind === "document_set_subset")
-            check = checkDocumentSetRelation(facts, constraint, "left_subset");
-        else if (constraint.kind === "document_referenced_pointer_exists")
-            check = checkDocumentReferencedPointerExists(facts, constraint);
+        else if (constraint.kind === "primitive_relation")
+            check = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
         else if (constraint.kind === "evidence_workflow_path_coverage")
             check = checkEvidenceWorkflowPathCoverage(facts, constraint);
         else if (constraint.kind === "evidence_anchor_value_coverage")
