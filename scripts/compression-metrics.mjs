@@ -19,6 +19,12 @@ const sourceModuleTextAt = (target, stem) => {
   if (paths.length !== 1) throw new Error(`expected exactly one source module for ${stem} at ${target}, found ${paths.length}`);
   return textAt(target, paths[0]);
 };
+const optionalSourceModuleTextAt = (target, stem) => {
+  const paths = sourceModulePathsAt(target, stem);
+  if (!paths.length) return "";
+  if (paths.length !== 1) throw new Error(`expected at most one source module for ${stem} at ${target}, found ${paths.length}`);
+  return textAt(target, paths[0]);
+};
 const lines = (text) => text ? (text.match(/\n/g) || []).length + (text.endsWith("\n") ? 0 : 1) : 0;
 const count = (text, pattern) => (text.match(pattern) || []).length;
 
@@ -101,9 +107,9 @@ function architecture(target) {
   const policySchema = jsonAt(target, "schemas/repo-policy.schema.json");
   const coverage = jsonAt(target, "docs/self-hosting-coverage.json");
   const defaults = sourceModuleTextAt(target, "src/checks/default-rule-families");
-  const constraintProgram = sourceModuleTextAt(target, "src/checks/constraint-program");
-  const relationKernel = sourceModuleTextAt(target, "src/checks/relation-kernel");
-  const policyProfiles = sourceModuleTextAt(target, "src/policy-profiles");
+  const constraintProgram = optionalSourceModuleTextAt(target, "src/checks/constraint-program");
+  const relationKernel = optionalSourceModuleTextAt(target, "src/checks/relation-kernel");
+  const policyProfiles = optionalSourceModuleTextAt(target, "src/policy-profiles");
   const corpus = sourceCorpus(target);
   const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
   const relationKinds = schemaConstKinds(policySchema, "document_relation_rule");
@@ -127,7 +133,7 @@ function architecture(target) {
     bespoke_integration_validator: sourceModulePathsAt(target, "src/integration-validator").length,
     privileged_field_workarounds: count(corpus, /stripPrivilegedSchemaUnknownFields|SCHEMA_UNKNOWN_PRIVILEGED_FIELDS/g),
 
-    // Compression 3 inventory: measure the actual semantic surface, not name matches.
+    // Compression 3 inventory: absent historical modules produce an empty inventory.
     registered_rule_families: count(defaults, /^\s*withPhase\(/gm),
     document_relation_kinds: relationKinds,
     document_selector_kinds: selectorDefinitions.length,
