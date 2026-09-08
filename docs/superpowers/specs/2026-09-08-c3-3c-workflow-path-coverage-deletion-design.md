@@ -163,14 +163,16 @@ integrationConstraintEntries
 
 Реализация начинается отдельным test-only RED commit.
 
-Focused falsifier должен доказать до production-изменений:
+Focused falsifier утверждает целевое состояние C3.3c и на принятом исходном состоянии обязан падать именно потому, что historical surface ещё существует.
+
+RED probes должны требовать:
 
 ```text
-public schema still accepts workflow_path_coverage
-compiler still emits evidence_workflow_path_coverage
-runtime union still contains evidence_workflow_path_coverage
-runtime still dispatches dedicated evaluator
-checkWorkflowPathCoverage still exists
+public schema rejects workflow_path_coverage
+compiler does not emit evidence_workflow_path_coverage
+runtime union does not contain evidence_workflow_path_coverage
+runtime has no dedicated workflow coverage dispatch
+checkWorkflowPathCoverage is absent
 self repo-policy does not declare workflow_path_coverage
 init scaffold does not generate workflow_path_coverage
 anchor_value_coverage remains primitive_relation/set_subset
@@ -178,7 +180,9 @@ relation descriptor count remains 10
 FactRef source count remains 4
 ```
 
-RED считается чистым только если новые failing probes относятся к исторической форме, а существующие behavior tests до них остаются GREEN.
+На первом test-only head ожидаемые failing probes — первые пять требований удаления. Проверки отсутствия self-consumer, отсутствия `init`-consumer и сохранения уже канонических инвариантов должны быть GREEN уже до production deletion.
+
+RED считается чистым только если failures объясняются исторической schema/compiler/runtime поверхностью, а существующие behavior tests до нового falsifier остаются GREEN.
 
 После доказанного RED выполняется минимальное удаление schema/compiler/runtime helper, затем миграция тестов и документации.
 
