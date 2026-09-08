@@ -181,7 +181,7 @@ checkRegistryRules import/dispatch
 registry_rules RuntimeConstraintKind/phase
 ```
 
-Перед удалением schema definitions подтвердить отсутствие других ссылок поиском. `markdown_section_links` в новый селектор не переносить. Новую обёртку вокруг `compareSets` не создавать.
+Перед удалением определений схемы подтвердить отсутствие других ссылок поиском. `markdown_section_links` в новый селектор не переносить. Новую обёртку вокруг `compareSets` не создавать.
 
 Собрать и проверить:
 
