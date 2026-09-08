@@ -217,3 +217,6 @@ expect(
   entries.every((entry) => typeof entry.check.ok === "boolean"),
   true
 );
+
+console.log(`\n${failures === 0 ? "All rule registry tests passed" : `${failures} test(s) failed`}`);
+process.exit(failures === 0 ? 0 : 1);
