@@ -161,7 +161,7 @@ function setPresenceImplies(facts, relation) {
         return { ok: false, message: `relation "${relation.relation_id}" requires set operands`, data };
     }
     const ok = implies(left.value.length, right.value.length);
-    return { ok, message: ok ? undefined : `relation "${relation.relation_id}" requires evidence when trigger set is non-empty`, data };
+    return { ok, message: ok ? undefined : `relation "${relation.relation_id}" has missing evidence when trigger set is non-empty`, data };
 }
 function setAllOrNone(facts, relation) {
     const source = factOperand(facts, relation, "source");
