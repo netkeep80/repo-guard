@@ -112,9 +112,10 @@ function addSizeRuleRuntime(add, policy, rule, changeIntent) {
         }),
     }, { max: rule.max_growth }, "transaction", advisory));
 }
-export function compileConstraintProgram(policy = {}, changeIntent = null) {
+export function compileConstraintProgram(policy = {}, changeIntent = null, options = {}) {
+    const emitRuntime = options.emitRuntime !== false;
     const program = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
-    const add = (key, runtime = null, strictness = null) => program.push({ key, runtime, strictness });
+    const add = (key, runtime = null, strictness = null) => program.push({ key, runtime: emitRuntime ? runtime : null, strictness });
     const forbidden = strings(policy.paths?.forbidden);
     add("paths:forbidden", primitiveRuntime("forbidden-paths", "paths:forbidden", "numeric_bound", {
         source: diffFact("repository_path_set", { kind: "changed_paths", patterns: forbidden, exclude_statuses: ["deleted"] }),
@@ -161,7 +162,8 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
                 owner, pointer: `${pointer}/max_growth`, weakenKind: "size_rule_max_growth_increased", removeKind: "size_rule_max_growth_removed", rule_id: rule.id,
                 message: (a, b) => `size_rules[${rule.id}].max_growth: ${a} -> ${b}`, removeMessage: `size_rules[${rule.id}].max_growth removed (was ${rule.max_growth})`,
             }));
-        addSizeRuleRuntime(add, policy, rule, changeIntent);
+        if (emitRuntime)
+            addSizeRuleRuntime(add, policy, rule, changeIntent);
     }
     for (const workflow of array(policy.integration?.workflows)) {
         const owner = `workflow:${workflow.id}`, pointer = `/integration/workflows/${workflow.id}`;
@@ -341,7 +343,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
     return program;
 }
 export const runtimeConstraints = (program) => program.flatMap((entry) => entry.runtime ? [{ key: entry.key, ...entry.runtime }] : []);
-const comparisonConstraints = (policy) => compileConstraintProgram(policy).flatMap((entry) => entry.strictness ? [{ key: entry.key, ...entry.strictness }] : []);
+const comparisonConstraints = (policy) => compileConstraintProgram(policy, null, { emitRuntime: false }).flatMap((entry) => entry.strictness ? [{ key: entry.key, ...entry.strictness }] : []);
 function canonical(value) { if (Array.isArray(value))
     return value.map(canonical); if (value && typeof value === "object")
     return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])); return value; }

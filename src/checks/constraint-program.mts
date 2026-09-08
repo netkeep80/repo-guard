@@ -113,6 +113,10 @@ interface ChangeIntentProjection {
   anchors?: unknown;
 }
 
+interface ConstraintProgramOptions {
+  emitRuntime?: boolean;
+}
+
 export interface PolicyRelaxation {
   kind: string; pointer?: string; before: unknown; after: unknown; message?: string; rule_id?: string; field?: string;
   workflow_id?: string; integration_doc_id?: string; evidence_binding_id?: string; [key: string]: unknown;
@@ -233,9 +237,14 @@ function addSizeRuleRuntime(
   }, { max: rule.max_growth }, "transaction", advisory));
 }
 
-export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}, changeIntent: ChangeIntentProjection | null = null): ConstraintProgramEntry[] {
+export function compileConstraintProgram(
+  policy: ConstraintPolicyProjection = {},
+  changeIntent: ChangeIntentProjection | null = null,
+  options: ConstraintProgramOptions = {},
+): ConstraintProgramEntry[] {
+  const emitRuntime = options.emitRuntime !== false;
   const program: ConstraintProgramEntry[] = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
-  const add = (key: string, runtime: RuntimeConstraint | null = null, strictness: StrictnessConstraint | null = null) => program.push({ key, runtime, strictness });
+  const add = (key: string, runtime: RuntimeConstraint | null = null, strictness: StrictnessConstraint | null = null) => program.push({ key, runtime: emitRuntime ? runtime : null, strictness });
 
   const forbidden = strings(policy.paths?.forbidden);
   add("paths:forbidden", primitiveRuntime("forbidden-paths", "paths:forbidden", "numeric_bound", {
@@ -285,7 +294,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
       owner, pointer: `${pointer}/max_growth`, weakenKind: "size_rule_max_growth_increased", removeKind: "size_rule_max_growth_removed", rule_id: rule.id,
       message: (a, b) => `size_rules[${rule.id}].max_growth: ${a} -> ${b}`, removeMessage: `size_rules[${rule.id}].max_growth removed (was ${rule.max_growth})`,
     }));
-    addSizeRuleRuntime(add, policy, rule, changeIntent);
+    if (emitRuntime) addSizeRuleRuntime(add, policy, rule, changeIntent);
   }
 
   for (const workflow of array(policy.integration?.workflows)) {
@@ -465,7 +474,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
 }
 
 export const runtimeConstraints = (program: ConstraintProgramEntry[]): RuntimeProgramConstraint[] => program.flatMap((entry) => entry.runtime ? [{ key: entry.key, ...entry.runtime }] : []);
-const comparisonConstraints = (policy: ConstraintPolicyProjection): StrictnessProgramEntry[] => compileConstraintProgram(policy).flatMap((entry) => entry.strictness ? [{ key: entry.key, ...entry.strictness }] : []) as StrictnessProgramEntry[];
+const comparisonConstraints = (policy: ConstraintPolicyProjection): StrictnessProgramEntry[] => compileConstraintProgram(policy, null, { emitRuntime: false }).flatMap((entry) => entry.strictness ? [{ key: entry.key, ...entry.strictness }] : []) as StrictnessProgramEntry[];
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])])); return value; }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
