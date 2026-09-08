@@ -4,9 +4,9 @@
 
 **Цель:** полностью удалить историческую форму `workflow_path_coverage` из публичной схемы, семантической компиляции и рабочего выполнения без нового примитива, источника `FactRef`, псевдонима совместимости или второй подсистемы доказательств.
 
-**Архитектура:** срез является чистым удалением. `anchor_value_coverage` остаётся единственным видом `evidence_bindings` и по-прежнему понижается в существующее отношение `set_subset`; интеграционный извлекатель и команда `validate-integration` не меняются. Удаление должно уменьшить число рабочих видов ограничений с семи до шести при неизменных десяти дескрипторах отношений и четырёх источниках `FactRef`.
+**Архитектура:** срез является чистым удалением. `anchor_value_coverage` остаётся единственным видом `evidence_bindings` и по-прежнему понижается в существующее отношение `set_subset`; интеграционный извлекатель и команда `validate-integration` не меняются. Число рабочих видов ограничений должно уменьшиться с семи до шести при неизменных десяти дескрипторах отношений и четырёх источниках `FactRef`.
 
-**Технологии:** `Node.js`, `TypeScript` в файлах `.mts`, модули `ESM`, `AJV`, встроенный `node:test`, исполняемая схема `JSON Schema`, сгенерированный каталог `dist/**`, `GitHub Actions`.
+**Технологии:** `Node.js`, `TypeScript`, файлы `.mts`, модули `ESM`, `AJV`, встроенный `node:test`, `JSON Schema`, сгенерированный каталог `dist/**`, `GitHub Actions`.
 
 **Спецификация:** `docs/superpowers/specs/2026-09-08-c3-3c-workflow-path-coverage-deletion-design.md`
 
@@ -38,9 +38,11 @@ NO changes to .github/**
 NO changes to action.yml
 ```
 
-`docs/architecture-compression-3-baseline.md` является замороженным историческим срезом и не изменяется. `docs/architecture-compression-3-c3.3b.md` является записью принятого состояния C3.3b и также не переписывается. Весь PR допускает не более двух новых документов; первый — утверждённая спецификация, второй — этот план. Поэтому отдельный новый итоговый документ C3.3c не создаётся.
+`docs/architecture-compression-3-baseline.md` является замороженным историческим срезом и не изменяется. `docs/architecture-compression-3-c3.3b.md` является записью принятого состояния C3.3b и также не переписывается.
 
-Перед каждым записывающим действием сверять вершину рабочей ветки и состояние PR #395. Если `main` продвинулся, не выполнять скрытое перебазирование: сначала заново проверить, что новый базовый переход не меняет архитектурные предпосылки #394.
+Весь `PR` допускает не более двух новых документов. Первый — утверждённая спецификация, второй — этот план. Отдельный новый итоговый документ C3.3c не создаётся.
+
+Перед каждым записывающим действием сверять вершину рабочей ветки и состояние `PR` #395. Если `main` продвинулся, не выполнять скрытое перебазирование: сначала заново проверить, что новый базовый переход не меняет архитектурные предпосылки #394.
 
 ---
 
@@ -48,18 +50,18 @@ NO changes to action.yml
 
 ### Создаётся
 
-- `tests/test-c3-3c-workflow-path-coverage-deletion.mjs` — отдельный отрицательный контракт C3.3c; сначала даёт намеренный красный результат, после удаления становится постоянной защитой от возврата исторической формы.
+- `tests/test-c3-3c-workflow-path-coverage-deletion.mjs` — исполняемый отрицательный контракт C3.3c. До удаления он намеренно падает, после удаления становится постоянной защитой от возврата исторической формы.
 
-### Изменяются в рабочей реализации
+### Изменяются
 
 - `schemas/repo-policy.schema.json` — удаляет публичную альтернативу `workflow_path_coverage`, сохраняя `anchor_value_coverage`.
-- `src/checks/constraint-program.mts` — перестаёт компилировать `evidence_workflow_path_coverage`; сохраняет понижение `anchor_value_coverage -> primitive_relation(set_subset)`.
+- `src/checks/constraint-program.mts` — перестаёт компилировать `evidence_workflow_path_coverage`; сохраняет понижение `anchor_value_coverage` в `primitive_relation` с `set_subset`.
 - `src/policy-compiler.mts` — удаляет отдельную ссылочную семантику рабочего процесса, блокировки и эквивалентного `referenced_paths_exist` для исторической формы.
 - `src/checks/rules/constraints.mts` — удаляет рабочий вид, фазу, специализированный вычислитель и диспетчеризацию покрытия путей.
 - `src/checks/integration-constraints.mts` — удаляет `WorkflowPathCoverageBinding`, `checkWorkflowPathCoverage` и ставший ненужным импорт сопоставления шаблонов.
 - `tests/test-policy-compiler-boundary.mjs` — удаляет позитивные тесты уже неподдерживаемой формы; тесты `anchor_value_coverage` сохраняются.
-- `tests/validate-schemas.mjs` — закрепляет, что удалённая форма теперь отвергается на границе схемы.
-- `docs/superpowers/specs/2026-09-08-c3-3c-workflow-path-coverage-deletion-design.md` — меняет статус с проекта на утверждённую архитектуру; архитектурное содержание не расширяется.
+- `tests/validate-schemas.mjs` — закрепляет отказ старой формы на границе схемы.
+- `docs/superpowers/specs/2026-09-08-c3-3c-workflow-path-coverage-deletion-design.md` — меняет только статус с проекта на утверждённую архитектуру.
 
 ### Генерируются сборкой
 
@@ -68,7 +70,7 @@ NO changes to action.yml
 - `dist/checks/rules/constraints.mjs`
 - `dist/checks/integration-constraints.mjs`
 
-Сборка может технически переписать другие файлы `dist/**`, но в коммит не должны попадать файлы без содержательного изменения относительно исходников. `scripts/compression-metrics.mjs` не изменяется: текущий измеритель уже считает `evidence_binding_kinds`, `runtime_constraint_kinds`, `runtime_constraint_kind_names`, дескрипторы и источники фактов.
+`scripts/compression-metrics.mjs` не изменяется: текущий измеритель уже считает `evidence_binding_kinds`, `runtime_constraint_kinds`, `runtime_constraint_kind_names`, дескрипторы отношений и источники фактов.
 
 ---
 
@@ -76,28 +78,26 @@ NO changes to action.yml
 
 **Файлы:**
 - Создать: `tests/test-c3-3c-workflow-path-coverage-deletion.mjs`
-- Читать без изменения: `schemas/repo-policy.schema.json`
-- Читать без изменения: `src/checks/constraint-program.mts`
-- Читать без изменения: `src/policy-compiler.mts`
-- Читать без изменения: `src/checks/rules/constraints.mts`
-- Читать без изменения: `src/checks/integration-constraints.mts`
-- Читать без изменения: `src/document-facts.mts`
-- Читать без изменения: `src/init.mts`
-- Читать без изменения: `repo-policy.json`
+- Читать: `schemas/repo-policy.schema.json`
+- Читать: `src/checks/constraint-program.mts`
+- Читать: `src/policy-compiler.mts`
+- Читать: `src/checks/rules/constraints.mts`
+- Читать: `src/checks/integration-constraints.mts`
+- Читать: `src/document-facts.mts`
+- Читать: `src/init.mts`
+- Читать: `repo-policy.json`
 
 **Интерфейсы:**
 - Использует: `compileConstraintProgram(policy, changeIntent?)`, `runtimeConstraints(program)`, `relationDescriptors()`.
-- Создаёт: постоянный исполняемый контракт, требующий отсутствия `workflow_path_coverage` и сохранения канонических инвариантов.
+- Создаёт: постоянный тест отсутствия старой формы и сохранения канонических инвариантов.
 
-- [ ] **Шаг 1: перед тестом доказать полноту известных упоминаний**
-
-Выполнить:
+- [ ] **Шаг 1: получить полный список известных упоминаний**
 
 ```bash
 git grep -n -I -E 'workflow_path_coverage|evidence_workflow_path_coverage|checkWorkflowPathCoverage|WorkflowPathCoverageBinding' -- ':!dist/**'
 ```
 
-Ожидаемые содержательные области до удаления:
+До удаления ожидаются содержательные упоминания в:
 
 ```text
 schemas/repo-policy.schema.json
@@ -112,11 +112,11 @@ docs/superpowers/specs/2026-09-08-c3-3c-workflow-path-coverage-deletion-design.m
 docs/superpowers/plans/2026-09-08-c3-3c-workflow-path-coverage-deletion.md
 ```
 
-Исторические документы и текущие design/plan документы не считаются рабочим API. Если команда обнаружит дополнительный производственный потребитель или пример политики, которого нет в этой карте, остановить реализацию и сопоставить его с границей #394 до редактирования.
+Исторические документы, спецификация и план не считаются рабочим программным интерфейсом. Если команда обнаружит дополнительный производственный потребитель или пример политики, которого нет в этой карте, остановить реализацию и сопоставить его с границей #394 до редактирования.
 
-- [ ] **Шаг 2: создать красный тест ровно на целевую архитектуру**
+- [ ] **Шаг 2: создать красный тест**
 
-Создать `tests/test-c3-3c-workflow-path-coverage-deletion.mjs` с таким содержанием:
+Создать `tests/test-c3-3c-workflow-path-coverage-deletion.mjs`:
 
 ```js
 import { strict as assert } from "node:assert";
@@ -280,50 +280,44 @@ console.log(`\n${failures === 0 ? "C3.3c workflow path coverage deletion contrac
 process.exit(failures === 0 ? 0 : 1);
 ```
 
-- [ ] **Шаг 3: запустить только новый тест и подтвердить намеренный красный результат**
-
-Выполнить:
+- [ ] **Шаг 3: подтвердить намеренный красный результат**
 
 ```bash
 node tests/test-c3-3c-workflow-path-coverage-deletion.mjs
 ```
 
-Ожидаемый результат на ещё не изменённом рабочем коде:
+Ожидаются ровно пять отказов:
 
 ```text
-FAIL: public evidence binding vocabulary contains only anchor_value_coverage
-FAIL: constraint compiler emits no historical workflow coverage runtime
-FAIL: runtime evaluator contains no workflow coverage kind or dedicated helper
-FAIL: integration constraints contain no workflow path coverage evaluator
-FAIL: semantic policy compiler contains no workflow path coverage branch
+public evidence binding vocabulary contains only anchor_value_coverage
+constraint compiler emits no historical workflow coverage runtime
+runtime evaluator contains no workflow coverage kind or dedicated helper
+integration constraints contain no workflow path coverage evaluator
+semantic policy compiler contains no workflow path coverage branch
 ```
 
-Одновременно должны пройти проверки отсутствия self-consumer, отсутствия генерации через `init`, сохранения `anchor_value_coverage`, десяти дескрипторов и четырёх источников `FactRef`.
+Проверки собственного `repo-policy.json`, `init`, `anchor_value_coverage`, десяти дескрипторов и четырёх источников `FactRef` должны уже проходить.
 
-Если число или причины отказов отличаются, не переходить к удалению до объяснения расхождения.
-
-- [ ] **Шаг 4: запустить весь набор тестов и убедиться, что дополнительный отказ вызван только новым тестом**
-
-Выполнить:
+- [ ] **Шаг 4: проверить, что старые тесты не сломаны новым тестовым коммитом**
 
 ```bash
 npm test
 ```
 
-Ожидается ненулевой код только из-за `test-c3-3c-workflow-path-coverage-deletion.mjs`. Все существовавшие до этого тестовые файлы должны оставаться зелёными.
+Ненулевой код должен объясняться только новым `test-c3-3c-workflow-path-coverage-deletion.mjs`.
 
-- [ ] **Шаг 5: закоммитить только красный тест**
+- [ ] **Шаг 5: закоммитить только тест**
 
 ```bash
 git add tests/test-c3-3c-workflow-path-coverage-deletion.mjs
 git commit -m "test(c3.3c): falsify workflow path coverage deletion"
 ```
 
-После публикации коммита зафиксировать номер намеренно красного запуска CI в комментарии #394. Не менять производственные файлы в этом коммите.
+После публикации сохранить номер намеренно красного запуска в комментарии #394. Производственные файлы в этом коммите не менять.
 
 ---
 
-### Задача 2: удалить публичную и исполняемую семантику `workflow_path_coverage`
+### Задача 2: удалить публичную и исполняемую семантику
 
 **Файлы:**
 - Изменить: `schemas/repo-policy.schema.json`
@@ -331,19 +325,17 @@ git commit -m "test(c3.3c): falsify workflow path coverage deletion"
 - Изменить: `src/policy-compiler.mts`
 - Изменить: `src/checks/rules/constraints.mts`
 - Изменить: `src/checks/integration-constraints.mts`
-- Сгенерировать: соответствующие `dist/**/*.mjs`
-- Проверить: `tests/test-c3-3c-workflow-path-coverage-deletion.mjs`
-- Проверить: `tests/test-c3-3b-trace-anchor-lowering.mjs`
+- Сгенерировать: соответствующие файлы `dist/**/*.mjs`
 
 **Интерфейсы:**
 - Сохраняет: `compileEvidenceBindingsPolicy(policy)` для `anchor_value_coverage`.
-- Сохраняет: `compileConstraintProgram(policy, changeIntent?)` и `runtimeConstraints(program)`.
-- Сохраняет: `integrationConstraintEntries(integration)` и весь текущий продуктовый слой интеграции.
-- Удаляет: `WorkflowPathCoverageBinding`, `checkWorkflowPathCoverage`, `checkEvidenceWorkflowPathCoverage`, рабочий вид `evidence_workflow_path_coverage`.
+- Сохраняет: `compileConstraintProgram(policy, changeIntent?)`, `runtimeConstraints(program)`.
+- Сохраняет: `integrationConstraintEntries(integration)` и команду `validate-integration`.
+- Удаляет: `WorkflowPathCoverageBinding`, `checkWorkflowPathCoverage`, `checkEvidenceWorkflowPathCoverage`, `evidence_workflow_path_coverage`.
 
-- [ ] **Шаг 1: удалить первую альтернативу из публичной схемы**
+- [ ] **Шаг 1: удалить первую альтернативу из схемы**
 
-В `definitions.evidence_binding.oneOf` оставить единственный объект:
+В `definitions.evidence_binding.oneOf` оставить только:
 
 ```json
 {
@@ -359,13 +351,13 @@ git commit -m "test(c3.3c): falsify workflow path coverage deletion"
 }
 ```
 
-Не сворачивать `oneOf` в другую форму: существующая метрика `schemaConstKinds(..., "evidence_binding")` должна продолжить читать конечный набор без изменения измерителя.
+Не сворачивать `oneOf`: существующий измеритель должен продолжить читать конечный набор без своего изменения.
 
 - [ ] **Шаг 2: удалить историческую ветку из `compileEvidenceBindingsPolicy`**
 
 Удалить `documentSelectorKey`, вычисление `pathExistenceSelectors`, карту `workflows` и ветку `binding.kind === "workflow_path_coverage"`.
 
-Целевая форма функции:
+Целевая функция:
 
 ```ts
 export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
@@ -391,18 +383,18 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
 }
 ```
 
-Не добавлять отдельную ошибку совместимости для `workflow_path_coverage`: публичная схема уже должна отвергать её как неподдерживаемую форму.
+Не добавлять специальную ошибку совместимости: старый синтаксис должен отвергаться схемой.
 
-- [ ] **Шаг 3: сузить представление привязки и компиляцию рабочего ограничения**
+- [ ] **Шаг 3: сузить представление привязки в `constraint-program`**
 
-В `EvidenceBindingProjection` удалить поля:
+Из `EvidenceBindingProjection` удалить:
 
 ```ts
 workflow?: unknown;
 covers?: unknown;
 ```
 
-В цикле `policy.evidence_bindings` заменить выбор исторической формы на единственное поддерживаемое понижение:
+Целевой цикл:
 
 ```ts
 for (const binding of array(policy.evidence_bindings)) {
@@ -421,11 +413,11 @@ for (const binding of array(policy.evidence_bindings)) {
 }
 ```
 
-Семантическая идентичность `evidence-binding:<id>` и строгость удаления/изменения `anchor_value_coverage` остаются прежними.
+Идентичность `evidence-binding:<id>` и строгость `anchor_value_coverage` сохраняются.
 
-- [ ] **Шаг 4: удалить рабочий вид и специализированный вычислитель**
+- [ ] **Шаг 4: удалить рабочий вид из `constraints.mts`**
 
-В `src/checks/rules/constraints.mts` целевой союз должен стать:
+Целевой союз:
 
 ```ts
 type RuntimeConstraintKind =
@@ -437,7 +429,7 @@ type RuntimeConstraintKind =
   | "primitive_relation";
 ```
 
-Удалить из `RuntimeConstraint` поля, использовавшиеся только старой формой:
+Удалить только старые поля:
 
 ```ts
 binding_id?: string;
@@ -446,46 +438,23 @@ workflow?: string;
 covers?: string[];
 ```
 
-Удалить импорт:
+Удалить `factOperand`, `checkEvidenceWorkflowPathCoverage`, фазу `evidence_workflow_path_coverage: "state"` и соответствующую ветку диспетчеризации.
 
-```ts
-import { readFact, type DocumentReader, type FactRef } from "../../document-facts.mjs";
-```
-
-и заменить его на импорт только реально оставшегося `DocumentReader`, если этот тип ещё используется в файле:
+Импорт фактов сузить до реально оставшегося типа:
 
 ```ts
 import type { DocumentReader } from "../../document-facts.mjs";
 ```
 
-Удалить:
-
-```ts
-checkEvidenceWorkflowPathCoverage
-factOperand
-```
-
-Удалить пару:
-
-```ts
-evidence_workflow_path_coverage: "state"
-```
-
-из `CONSTRAINT_PHASES` и удалить ветку:
-
-```ts
-else if (constraint.kind === "evidence_workflow_path_coverage") check = checkEvidenceWorkflowPathCoverage(facts, constraint);
-```
-
-Импорт интеграционного модуля должен остаться только таким:
+Импорт интеграции сузить до:
 
 ```ts
 import { integrationConstraintEntries } from "../integration-constraints.mjs";
 ```
 
-- [ ] **Шаг 5: удалить helper покрытия из интеграционного модуля**
+- [ ] **Шаг 5: удалить helper из `integration-constraints.mts`**
 
-В `src/checks/integration-constraints.mts` удалить:
+Удалить:
 
 ```ts
 export interface WorkflowPathCoverageBinding {
@@ -504,23 +473,18 @@ export function checkWorkflowPathCoverage(
 )
 ```
 
-После этого удалить ставший ненужным импорт:
+После этого удалить:
 
 ```ts
 import { matchesAny } from "../utils/path-patterns.mjs";
 ```
 
-Не изменять `workflowDetails`, `parallelReadinessDetails`, `integrationConstraintEntries` или роли интеграции: они относятся к C3.3d.
+Не изменять `workflowDetails`, `parallelReadinessDetails`, `integrationConstraintEntries` и роли интеграции: это C3.3d.
 
-- [ ] **Шаг 6: собрать `dist` из исходников**
+- [ ] **Шаг 6: собрать и проверить `dist`**
 
 ```bash
 npm run build
-```
-
-Ожидается успешная сборка. Затем проверить, что сгенерированная поверхность свежая:
-
-```bash
 npm run check:dist
 ```
 
@@ -530,34 +494,16 @@ npm run check:dist
 Generated dist is current.
 ```
 
-- [ ] **Шаг 7: превратить новый отрицательный тест из красного в зелёный**
+- [ ] **Шаг 7: превратить новый тест в зелёный**
 
 ```bash
 node tests/test-c3-3c-workflow-path-coverage-deletion.mjs
-```
-
-Ожидается:
-
-```text
-C3.3c workflow path coverage deletion contract passed
-```
-
-- [ ] **Шаг 8: доказать, что каноническое покрытие якорей не изменилось**
-
-```bash
 node tests/test-c3-3b-trace-anchor-lowering.mjs
 ```
 
-Ожидается успешный итог C3.3b, включая:
+Обе команды должны завершиться с кодом `0`; вторая доказывает сохранение `anchor_value_coverage -> set_subset` и десяти дескрипторов.
 
-```text
-anchor value coverage lowers to existing set_subset
-C3.3b keeps exactly the existing ten relation descriptors
-```
-
-На этом этапе полный набор тестов ещё может быть красным из-за старых тестов, которые намеренно ожидают поддержку удалённого API. Их миграция — следующая отдельная задача.
-
-- [ ] **Шаг 9: закоммитить производственное удаление и свежий `dist`**
+- [ ] **Шаг 8: закоммитить производственное удаление и свежий `dist`**
 
 ```bash
 git add schemas/repo-policy.schema.json \
@@ -579,52 +525,37 @@ git commit -m "refactor(c3.3c): delete workflow path coverage runtime"
 **Файлы:**
 - Изменить: `tests/test-policy-compiler-boundary.mjs`
 - Изменить: `tests/validate-schemas.mjs`
-- Проверить: `tests/test-c3-3c-workflow-path-coverage-deletion.mjs`
-- Проверить: `tests/test-c3-3b-trace-anchor-lowering.mjs`
 
 **Интерфейсы:**
-- Сохраняет позитивные тесты `anchor_value_coverage`.
-- Добавляет постоянный schema-level regression test на отказ удалённой формы.
-- Удаляет тесты, требующие существования старого workflow coverage API.
+- Сохраняет позитивные проверки `anchor_value_coverage`.
+- Добавляет постоянную регрессионную проверку отказа старой формы на уровне схемы.
+- Удаляет тесты, которые требуют существования старого интерфейса покрытия путей рабочего процесса.
 
-- [ ] **Шаг 1: удалить исторические fixture helpers из `test-policy-compiler-boundary.mjs`**
+- [ ] **Шаг 1: удалить исторические вспомогательные фикстуры**
 
-Удалить полностью:
+Из `tests/test-policy-compiler-boundary.mjs` удалить полностью определения `ciWorkflow` и `evidencePolicy`.
 
-```js
-const ciWorkflow = (enforcement = "blocking") => ({
-  id: "project-ci", kind: "github_actions", path: ".github/workflows/ci.yml", role: "ci_gate",
-  expect: { events: ["pull_request"], enforcement, disallow: ["continue_on_error"] },
-});
-const evidencePolicy = (overrides = {}) => ({
-  ...basePolicy,
-  integration: { workflows: [ciWorkflow()] },
-  document_relations: {
-    documents: { contract: structuredClone(documents.contract) },
-    rules: [structuredClone(referencedPaths)],
-  },
-  evidence_bindings: [{ id: "owners-covered", kind: "workflow_path_coverage", source: structuredClone(referencedPaths.source), workflow: "project-ci", covers: ["tests/**"] }],
-  ...overrides,
-});
-```
-
-Удалить тест:
+Также удалить тест с именем:
 
 ```text
 requires evidence bindings to reuse known blocking workflows and exact R2 existence selectors
 ```
 
-и весь блок:
+и весь раздел:
 
 ```text
 workflow path evidence public/runtime boundary
 ```
 
-Не удалять `anchorEvidencePolicy` и блок `anchor value evidence public/runtime boundary`.
+Не удалять `anchorEvidencePolicy` и раздел:
 
-- [ ] **Шаг 2: добавить явную schema-регрессию**
+```text
+anchor value evidence public/runtime boundary
+```
 
-Сразу после существующей проверки `evidence trace` в `tests/validate-schemas.mjs` добавить:
+- [ ] **Шаг 2: добавить явную регрессию схемы**
+
+После проверки `evidence trace` в `tests/validate-schemas.mjs` добавить:
 
 ```js
 expect("removed workflow_path_coverage rejected", policy({
@@ -644,9 +575,7 @@ expect("removed workflow_path_coverage rejected", policy({
 }), false);
 ```
 
-Это закрепляет fail-closed границу: старый синтаксис является ошибкой схемы, а не молча игнорируемой конфигурацией.
-
-- [ ] **Шаг 3: запустить узкие тесты схемы и компилятора**
+- [ ] **Шаг 3: запустить узкие проверки**
 
 ```bash
 node tests/validate-schemas.mjs
@@ -657,13 +586,13 @@ node tests/test-c3-3b-trace-anchor-lowering.mjs
 
 Все четыре команды должны завершиться с кодом `0`.
 
-- [ ] **Шаг 4: запустить весь обнаруживаемый набор тестов**
+- [ ] **Шаг 4: запустить весь набор**
 
 ```bash
 npm test
 ```
 
-Ожидается полный зелёный результат. Если остаётся тест, который требует `workflow_path_coverage`, сначала определить, является ли он исторической записью или текущим продуктовым потребителем. Не добавлять псевдоним совместимости ради прохождения такого теста.
+Ожидается полный зелёный результат. Если обнаружится ещё один тест, который требует `workflow_path_coverage`, сначала определить, является ли он исторической записью или текущим продуктовым потребителем. Псевдоним совместимости не добавлять.
 
 - [ ] **Шаг 5: закоммитить миграцию тестов**
 
@@ -674,7 +603,7 @@ git commit -m "test(c3.3c): enforce workflow coverage removal"
 
 ---
 
-### Задача 4: доказать архитектурное сжатие и синхронизировать утверждённую спецификацию
+### Задача 4: доказать сжатие и синхронизировать утверждённую спецификацию
 
 **Файлы:**
 - Изменить: `docs/superpowers/specs/2026-09-08-c3-3c-workflow-path-coverage-deletion-design.md`
@@ -682,11 +611,7 @@ git commit -m "test(c3.3c): enforce workflow coverage removal"
 - Не изменять: `docs/architecture-compression-3-baseline.md`
 - Не изменять: `docs/architecture-compression-3-c3.3b.md`
 
-**Интерфейсы:**
-- Использует существующий машинный измеритель `scripts/compression-metrics.mjs`.
-- Фиксирует только статус утверждённой спецификации; не создаёт третий документ.
-
-- [ ] **Шаг 1: изменить только строку статуса спецификации**
+- [ ] **Шаг 1: изменить только статус спецификации**
 
 Заменить:
 
@@ -700,9 +625,7 @@ git commit -m "test(c3.3c): enforce workflow coverage removal"
 Статус: утверждённая архитектура C3.3c для #394; реализация ведётся в PR #395.
 ```
 
-Не переписывать разделы C3.3d и не добавлять новую семантику.
-
-- [ ] **Шаг 2: получить машинные метрики текущей вершины**
+- [ ] **Шаг 2: проверить машинные метрики**
 
 ```bash
 node scripts/compression-metrics.mjs > /tmp/c3-3c-metrics.json
@@ -729,37 +652,28 @@ console.log("C3.3c architecture metrics passed");
 C3.3c architecture metrics passed
 ```
 
-- [ ] **Шаг 3: доказать отсутствие рабочей исторической семантики после удаления**
-
-Выполнить:
+- [ ] **Шаг 3: доказать отсутствие рабочей исторической семантики**
 
 ```bash
 git grep -n -I -E 'workflow_path_coverage|evidence_workflow_path_coverage|checkWorkflowPathCoverage|WorkflowPathCoverageBinding' -- \
   schemas src tests examples README.md RELEASING.md PORTFOLIO.md
 ```
 
-Допустимое совпадение после задачи 3 — только отрицательные тестовые строки, явно утверждающие удаление или отклонение старого имени. В `schemas/**`, `src/**`, `examples/**`, `README.md`, `RELEASING.md`, `PORTFOLIO.md` совпадений быть не должно.
+В `schemas/**`, `src/**`, `examples/**`, `README.md`, `RELEASING.md`, `PORTFOLIO.md` совпадений быть не должно. В тестах допустимы только строки, явно проверяющие удаление или отказ старого имени.
 
-- [ ] **Шаг 4: проверить языковую политику документации через полный набор**
-
-```bash
-npm test
-```
-
-Ожидается зелёный `test-documentation-language.mjs` вместе со всем набором.
-
-- [ ] **Шаг 5: проверить свежесть генерации и сам инструмент**
+- [ ] **Шаг 4: выполнить полную проверку**
 
 ```bash
 npm run check:dist
+npm test
 node dist/repo-guard.mjs
 node dist/repo-guard.mjs validate-integration
 node dist/repo-guard.mjs doctor
 ```
 
-Все команды должны завершиться успешно.
+Все команды должны завершиться с кодом `0`.
 
-- [ ] **Шаг 6: закоммитить только изменение статуса документа**
+- [ ] **Шаг 5: закоммитить изменение статуса документа**
 
 ```bash
 git add docs/superpowers/specs/2026-09-08-c3-3c-workflow-path-coverage-deletion-design.md
@@ -768,19 +682,18 @@ git commit -m "docs(c3.3c): mark deletion design approved"
 
 ---
 
-### Задача 5: провести PR через собственную политику и принять exact head
+### Задача 5: провести `PR` через собственную политику и принять точную вершину
 
-**Файлы:**
-- Новых изменений файлов не должно быть.
-- Источник санкции: Issue #394.
-- Кандидат: PR #395.
+**Источник санкции:** Issue #394.
+
+**Кандидат:** `PR` #395.
 
 **Интерфейсы:**
 - Использует `ChangeIntent` и `GovernanceGrant` из #394.
-- Требует `authorized_governance_paths: [schemas/repo-policy.schema.json]` и пустой `allow_policy_relaxation`.
-- Не допускает merge другого head, чем прошедший готовую проверку.
+- Разрешает изменение только `schemas/repo-policy.schema.json` среди управляющих путей.
+- Не допускает слияние вершины, которая не проходила готовую проверку.
 
-- [ ] **Шаг 1: проверить чистоту рабочей ветки и точный diff**
+- [ ] **Шаг 1: проверить чистоту ветки и точный набор файлов**
 
 ```bash
 git status --short
@@ -797,7 +710,7 @@ action.yml absent
 new docs count = 2
 ```
 
-- [ ] **Шаг 2: выполнить финальную локальную верификацию exact head**
+- [ ] **Шаг 2: выполнить финальную локальную проверку вершины**
 
 ```bash
 npm run check:dist
@@ -808,9 +721,7 @@ node dist/repo-guard.mjs validate-integration
 node dist/repo-guard.mjs doctor
 ```
 
-Все команды должны завершиться с кодом `0`.
-
-- [ ] **Шаг 3: опубликовать вершину и дождаться зелёного draft CI**
+- [ ] **Шаг 3: опубликовать вершину и сохранить её `SHA`**
 
 ```bash
 git push origin c3/394-workflow-path-coverage-deletion
@@ -818,24 +729,19 @@ HEAD=$(git rev-parse HEAD)
 echo "$HEAD"
 ```
 
-Сохранить точный SHA. Draft CI должен иметь зелёные `validate` и `smoke-pack`. На этом состоянии `Run PR policy check` может быть пропущен, потому что PR ещё draft.
+Черновой `CI` должен иметь зелёные `validate` и `smoke-pack`. Пока `PR` остаётся черновым, шаг `Run PR policy check` может быть пропущен.
 
-- [ ] **Шаг 4: перевести PR #395 в готовое состояние без изменения head**
+- [ ] **Шаг 4: перевести `PR` #395 в готовое состояние без изменения вершины**
 
 ```bash
 gh pr ready 395 --repo netkeep80/repo-guard
-```
-
-Сразу повторно получить SHA:
-
-```bash
 READY_HEAD=$(gh pr view 395 --repo netkeep80/repo-guard --json headRefOid --jq .headRefOid)
 test "$READY_HEAD" = "$HEAD"
 ```
 
-- [ ] **Шаг 5: проверить готовую self-policy на том же exact head**
+- [ ] **Шаг 5: проверить собственную политику на том же `SHA`**
 
-Дождаться запуска события `ready_for_review` и проверить, что зелёными являются как минимум:
+В запуске события `ready_for_review` должны быть зелёными как минимум:
 
 ```text
 validate
@@ -850,9 +756,9 @@ Run discovered test suite
 Exercise advisory policy mode
 ```
 
-Если self-policy сообщает ослабление политики, не расширять `GovernanceGrant`: в #394 разрешено изменение схемы, но `allow_policy_relaxation` намеренно пуст.
+Если собственная политика сообщает ослабление, не расширять `GovernanceGrant`: `allow_policy_relaxation` в #394 намеренно пуст.
 
-- [ ] **Шаг 6: слить только проверенный SHA**
+- [ ] **Шаг 6: слить только проверенный `SHA`**
 
 ```bash
 gh api --method PUT repos/netkeep80/repo-guard/pulls/395/merge \
@@ -860,23 +766,25 @@ gh api --method PUT repos/netkeep80/repo-guard/pulls/395/merge \
   -f sha="$READY_HEAD"
 ```
 
-Ответ должен сообщить успешное слияние. Если SHA изменился или merge отклонён, не повторять команду без повторной полной проверки нового состояния.
+Ответ должен сообщить успешное слияние. Если `SHA` изменился или операция отклонена, не повторять её без полной проверки нового состояния.
 
-- [ ] **Шаг 7: проверить новый `main` и post-merge CI**
+- [ ] **Шаг 7: проверить новый `main` и проверку после слияния**
 
 ```bash
 git fetch origin main
 git rev-parse origin/main
 ```
 
-Новый `main` должен быть merge commit, содержащим проверенный `READY_HEAD`. Post-merge CI на этом коммите должен завершиться зелёными `validate` и `smoke-pack`.
+Новый `main` должен быть коммитом слияния, содержащим проверенный `READY_HEAD`. Проверка после слияния должна завершиться зелёными `validate` и `smoke-pack`.
 
 - [ ] **Шаг 8: закрыть контрольный цикл**
 
-Убедиться, что #394 закрыта как `completed` через `Fixes #394`, PR #395 имеет состояние `merged`, а #374 остаётся открытой. В #374 зафиксировать только следующий факт программы:
+Убедиться, что #394 закрыта как `completed` через `Fixes #394`, `PR` #395 имеет состояние `merged`, а #374 остаётся открытой.
+
+В #374 зафиксировать только следующий итог:
 
 ```text
 C3.3c accepted: workflow_path_coverage deleted without replacement; runtime kinds 7 -> 6; descriptors 10; FactRef sources 4. Next architectural subject: C3.3d integration convergence.
 ```
 
-Не начинать C3.3d в этой ветке или PR.
+Не начинать C3.3d в этой ветке или `PR`.
