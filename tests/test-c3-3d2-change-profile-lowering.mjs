@@ -94,6 +94,12 @@ console.log("\n--- surface semantics lower without a dedicated evaluator ---");
   });
   expect("unclassified paths are ignored when no surface constraints exist", profileOutcome(unconstrainedPolicy, "feature", [file("misc/a.txt")]).ok, true);
 
+  const emptyAllowSurfacePolicy = policy({
+    surfaces: { code: ["src/**"] },
+    profile: { allow_surfaces: [] },
+  });
+  expect("empty allow_surfaces preserves historical no-restriction semantics", profileOutcome(emptyAllowSurfacePolicy, "feature", [file("src/a.mjs"), file("misc/a.txt")]).ok, true);
+
   const partialSurfacePolicy = policy({
     surfaces: { code: ["src/**"] },
     profile: { allow_surfaces: ["code"], allow_unclassified_surfaces: true },
@@ -170,14 +176,15 @@ console.log("\n--- profile budgets reuse canonical diff metrics ---");
   expect("profile max_net_added_lines is enforced", profileOutcome(lineBudgetPolicy, "feature", [file("src/a.mjs", "modified", 3, 0)]).ok, false);
 }
 
-console.log("\n--- selection is fail-closed but governance remains delegated ---");
+console.log("\n--- selection is fail-closed frontend compilation, governance remains delegated ---");
 {
   const selectionPolicy = policy({
     surfaces: { code: ["src/**"] },
     profile: { allow_surfaces: ["code"] },
   });
-  expect("missing change_type fails closed", profileOutcome(selectionPolicy, null, [file("src/a.mjs")]).ok, false);
-  expect("unknown non-governance change_type fails closed", profileOutcome(selectionPolicy, "unknown", [file("src/a.mjs")]).ok, false);
+  expect("missing change_type fails frontend compilation", compileChangeProfiles(selectionPolicy, null).some((item) => /declared change_type/.test(item.message)), true);
+  expect("unknown non-governance change_type fails frontend compilation", compileChangeProfiles(selectionPolicy, "unknown").some((item) => /not defined in change_profiles/.test(item.message)), true);
+  expect("governance change_type is accepted by frontend compilation", compileChangeProfiles(selectionPolicy, "governance").length, 0);
   expect("governance change_type emits no ordinary profile runtime", runtimeConstraints(compileConstraintProgram(selectionPolicy, { change_type: "governance" }))
     .some((item) => item.kind === "change_profile" || String(item.relation_id || "").startsWith("change-profile:")), false);
 }
