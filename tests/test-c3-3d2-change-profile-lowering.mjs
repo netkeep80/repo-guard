@@ -144,7 +144,7 @@ console.log("\n--- new-file class semantics lower through added-path facts ---")
     classes: { code: ["src/**"] },
     profile: { new_files: { allow_classes: ["code"], max_new_files: 1 } },
   });
-  expect("new_files.max_new_files is enforced", profileOutcome(maxFilesPolicy, "feature", [file("src/a.mjs", "added"), file("docs/a.md", "added")]).ok, false);
+  expect("new_files.max_new_files is enforced", profileOutcome(maxFilesPolicy, "feature", [file("src/a.mjs", "added"), file("src/b.mjs", "added")]).ok, false);
 }
 
 console.log("\n--- profile budgets reuse canonical diff metrics ---");
