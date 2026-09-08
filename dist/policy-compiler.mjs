@@ -2,6 +2,7 @@ import { normalizeDocumentFact } from "./document-facts.mjs";
 import { relationDescriptor } from "./checks/relation-kernel.mjs";
 const list = (value) => Array.isArray(value) ? value : [];
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+const STATIC_PROFILE_VALIDATION = Symbol("static-profile-validation");
 export function compileForbidRegex(contentRules = []) {
     const errors = [];
     for (const rule of list(contentRules))
@@ -15,7 +16,7 @@ export function compileForbidRegex(contentRules = []) {
         }
     return errors;
 }
-export function compileChangeProfiles(policy = {}) {
+export function compileChangeProfiles(policy = {}, selectedChangeType = STATIC_PROFILE_VALIDATION) {
     const errors = [], profiles = object(policy.change_profiles);
     const surfaces = new Set(Object.keys(object(policy.surfaces)));
     const classes = new Set(Object.keys(object(policy.new_file_classes)));
@@ -34,6 +35,16 @@ export function compileChangeProfiles(policy = {}) {
             if (!classes.has(fileClass)) {
                 errors.push({ change_type: changeType, class: fileClass, message: `change_profiles["${changeType}"].new_files references unknown class "${fileClass}"` });
             }
+    }
+    if (selectedChangeType !== STATIC_PROFILE_VALIDATION && Object.keys(profiles).length) {
+        if (selectedChangeType === "governance")
+            return errors;
+        if (typeof selectedChangeType !== "string" || !selectedChangeType) {
+            errors.push({ change_type: selectedChangeType, message: "change_profiles require a declared change_type" });
+        }
+        else if (!Object.hasOwn(profiles, selectedChangeType)) {
+            errors.push({ change_type: selectedChangeType, message: `change_type "${selectedChangeType}" is not defined in change_profiles` });
+        }
     }
     return errors;
 }

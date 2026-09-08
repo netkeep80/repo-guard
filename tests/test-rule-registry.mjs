@@ -204,7 +204,6 @@ for (const name of [
   "advisory-text-rules",
   "anchor-extraction",
   "trace-rule: evidence-ok",
-  "change-profiles",
   "cochange: src/** -> tests/**",
   "content-rules",
   "must-touch",

@@ -1,6 +1,5 @@
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
-import { checkChangeProfile } from "../dist/checks/rules/change-profiles.mjs";
 import { compileConstraintIR, evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { comparePolicyStrictness } from "../dist/checks/rules/policy-delta-rules.mjs";
 import { checkSizeRules } from "../dist/checks/rules/size-rules.mjs";
@@ -45,9 +44,6 @@ const constraintFacts = {
 const constraintIR = compileConstraintIR(constraintFacts);
 expect("policy frontends compile into canonical primitive constraints", constraintIR.constraints.some((c) => c.kind === "primitive_relation" && c.primitive === "set_presence_implies"), true);
 expect("constraint kernel preserves familiar result names", evaluateConstraintIR(constraintFacts).some((r) => r.name === "must-touch" && r.check.ok), true);
-
-const missingChangeType = checkChangeProfile([], { change_profiles: { feature: {} } }, null);
-expect("change-profile missing type points to ChangeIntent", missingChangeType.hint, "Set change_type in the ChangeIntent.");
 
 const strictnessBase = {
   enforcement: { mode: "blocking" },

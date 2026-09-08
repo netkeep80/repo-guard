@@ -1,11 +1,9 @@
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { integrationConstraintEntries } from "../integration-constraints.mjs";
 import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
-import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
 const CONSTRAINT_PHASES = {
     size_rules: "both",
-    change_profile: "transaction",
     integration: "state",
 };
 function requestedExecutionPhase(context) {
@@ -78,8 +76,6 @@ export function evaluateConstraintIR(facts, context = {}) {
                 results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
             continue;
         }
-        else if (constraint.kind === "change_profile")
-            check = checkChangeProfile(files, facts.policy, facts.changeIntent?.change_type, facts.derived);
         else if (constraint.kind === "integration") {
             results.push(...integrationConstraintEntries(facts.integration));
             continue;

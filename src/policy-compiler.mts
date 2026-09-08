@@ -27,6 +27,7 @@ interface IntegrationReference { section: IntegrationSection; index: number; fie
 
 const list = <T = unknown,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
 const object = (value: unknown): LooseObject => value && typeof value === "object" && !Array.isArray(value) ? value as LooseObject : {};
+const STATIC_PROFILE_VALIDATION = Symbol("static-profile-validation");
 
 export function compileForbidRegex(contentRules: unknown = []): SemanticDiagnostic[] {
   const errors: SemanticDiagnostic[] = [];
@@ -37,7 +38,7 @@ export function compileForbidRegex(contentRules: unknown = []): SemanticDiagnost
   return errors;
 }
 
-export function compileChangeProfiles(policy: PolicyProjection = {}): SemanticDiagnostic[] {
+export function compileChangeProfiles(policy: PolicyProjection = {}, selectedChangeType: unknown = STATIC_PROFILE_VALIDATION): SemanticDiagnostic[] {
   const errors: SemanticDiagnostic[] = [], profiles = object(policy.change_profiles);
   const surfaces = new Set<unknown>(Object.keys(object(policy.surfaces)));
   const classes = new Set<unknown>(Object.keys(object(policy.new_file_classes)));
@@ -50,6 +51,14 @@ export function compileChangeProfiles(policy: PolicyProjection = {}): SemanticDi
     const newFiles = object(p.new_files);
     for (const fileClass of [...list(newFiles.allow_classes), ...Object.keys(object(newFiles.max_per_class))]) if (!classes.has(fileClass)) {
       errors.push({ change_type: changeType, class: fileClass, message: `change_profiles["${changeType}"].new_files references unknown class "${fileClass}"` });
+    }
+  }
+  if (selectedChangeType !== STATIC_PROFILE_VALIDATION && Object.keys(profiles).length) {
+    if (selectedChangeType === "governance") return errors;
+    if (typeof selectedChangeType !== "string" || !selectedChangeType) {
+      errors.push({ change_type: selectedChangeType, message: "change_profiles require a declared change_type" });
+    } else if (!Object.hasOwn(profiles, selectedChangeType)) {
+      errors.push({ change_type: selectedChangeType, message: `change_type "${selectedChangeType}" is not defined in change_profiles` });
     }
   }
   return errors;

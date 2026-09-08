@@ -187,10 +187,66 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
             }));
         }
     }
+    const changeType = changeIntent?.change_type, profiles = object(policy.change_profiles);
+    if (changeType && changeType !== "governance" && Object.hasOwn(profiles, changeType)) {
+        const profile = object(profiles[changeType]);
+        const surfaceEntries = Object.entries(object(policy.surfaces)).map(([name, patterns]) => [name, strings(patterns)]);
+        const classEntries = Object.entries(object(policy.new_file_classes)).map(([name, patterns]) => [name, strings(patterns)]);
+        const addPathBound = (suffix, patterns, parameters, options = {}) => {
+            const relationId = `change-profile:${changeType}:${suffix}`;
+            add(relationId, primitiveRuntime(`change-profile: ${changeType} ${suffix}`, relationId, "numeric_bound", {
+                source: diffFact("repository_path_set", {
+                    kind: "changed_paths",
+                    patterns,
+                    ...(options.outside ? { mode: "outside" } : {}),
+                    ...(options.addedOnly ? { exclude_statuses: ["modified", "deleted"] } : {}),
+                }),
+            }, parameters, "transaction"));
+        };
+        const addMetricBound = (suffix, metric, max, excludePaths = []) => {
+            const relationId = `change-profile:${changeType}:${suffix}`;
+            add(relationId, primitiveRuntime(`change-profile: ${changeType} ${suffix}`, relationId, "numeric_bound", {
+                source: diffFact("scalar", { kind: "metric", metric, ...(excludePaths.length ? { exclude_paths: excludePaths } : {}) }),
+            }, { max }, "transaction"));
+        };
+        const allowedSurfaces = strings(profile.allow_surfaces), forbiddenSurfaces = strings(profile.forbid_surfaces), requiredSurfaces = strings(profile.require_surfaces);
+        const surfacesByName = new Map(surfaceEntries), surfaceForbids = new Set(forbiddenSurfaces);
+        for (const name of requiredSurfaces)
+            addPathBound(`surface-required:${name}`, surfacesByName.get(name) || [], { min: 1 });
+        if (allowedSurfaces.length) {
+            const allowed = new Set(allowedSurfaces);
+            for (const [name] of surfaceEntries)
+                if (!allowed.has(name))
+                    surfaceForbids.add(name);
+        }
+        for (const name of surfaceForbids)
+            addPathBound(`surface-forbidden:${name}`, surfacesByName.get(name) || [], { max: 0 });
+        if ((allowedSurfaces.length || forbiddenSurfaces.length || requiredSurfaces.length) && profile.allow_unclassified_surfaces !== true) {
+            addPathBound("surface-unclassified", surfaceEntries.flatMap(([, patterns]) => patterns), { max: 0 }, { outside: true });
+        }
+        if (profile.new_files !== undefined) {
+            const newFiles = object(profile.new_files), allowedClasses = new Set(strings(newFiles.allow_classes)), classesByName = new Map(classEntries);
+            for (const [name, patterns] of classEntries)
+                if (!allowedClasses.has(name))
+                    addPathBound(`new-class-forbidden:${name}`, patterns, { max: 0 }, { addedOnly: true });
+            addPathBound("new-class-unclassified", classEntries.flatMap(([, patterns]) => patterns), { max: 0 }, { outside: true, addedOnly: true });
+            for (const [name, limit] of Object.entries(object(newFiles.max_per_class)))
+                if (typeof limit === "number") {
+                    addPathBound(`new-class-max:${name}`, classesByName.get(name) || [], { max: limit }, { addedOnly: true });
+                }
+            if (typeof newFiles.max_new_files === "number")
+                addMetricBound("new-files-max", "new_files", newFiles.max_new_files);
+        }
+        const profileBudgets = object(profile.budgets);
+        if (typeof profileBudgets.max_new_docs === "number")
+            addMetricBound("budget:max-new-docs", "new_docs", profileBudgets.max_new_docs, strings(policy.paths?.canonical_docs));
+        if (typeof profileBudgets.max_new_files === "number")
+            addMetricBound("budget:max-new-files", "new_files", profileBudgets.max_new_files);
+        if (typeof profileBudgets.max_net_added_lines === "number")
+            addMetricBound("budget:max-net-added-lines", "net_added_lines", profileBudgets.max_net_added_lines);
+    }
     if (array(policy.size_rules).length)
         add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
-    if (policy.change_profiles)
-        add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
     if (policy.integration)
         add("runtime:integration", { kind: "integration", name: "integration" });
     for (const group of array(policy.cochange_groups)) {

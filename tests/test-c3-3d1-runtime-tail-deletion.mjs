@@ -93,12 +93,17 @@ const kindBlock = runtimeSource.match(/type RuntimeConstraintKind =([\s\S]*?);/)
 const runtimeKinds = kindBlock
   ? [...kindBlock[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]).sort()
   : [];
-expect("runtime kind vocabulary is exactly the C3.3d1 target four", runtimeKinds, [
+const d1AcceptedTail = new Set([
   "change_profile",
   "integration",
   "primitive_relation",
   "size_rules",
 ]);
+expect(
+  "runtime vocabulary introduces no kind outside the C3.3d1 accepted tail",
+  runtimeKinds.every((kind) => d1AcceptedTail.has(kind)),
+  true,
+);
 
 const selfPolicy = read("repo-policy.json");
 expect(

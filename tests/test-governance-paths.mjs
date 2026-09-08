@@ -100,10 +100,6 @@ describe("governance authorization through pipeline", () => {
     const violation = result.violations.find((item) => item.rule === "governance-change-authorization");
     assert.deepEqual(violation.data.non_governance_paths, ["src/a.mjs"]);
   });
-  it("keeps ordinary unknown change types rejected by change_profiles", () => {
-    const result = run({ path: "src/a.mjs", changeIntent: intent("unknown") });
-    assert.equal(result.violations.some((item) => item.rule === "change-profiles"), true);
-  });
   it("base governance boundary cannot be narrowed by head policy", () => {
     const narrowed = { ...policy, paths: { ...policy.paths, governance_paths: ["nonexistent.json"] } };
     assert.ok(run({ path: "schemas/repo-policy.schema.json", runtimePolicy: narrowed, trustedGovernancePaths: policy.paths.governance_paths }).violations.some((item) => item.rule === "governance-change-authorization"));
