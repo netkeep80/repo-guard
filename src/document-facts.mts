@@ -78,13 +78,23 @@ export type DiffFactSelector =
     }
   | {
       kind: "metric";
-      metric: "new_docs" | "new_files" | "net_added_lines";
+      metric: "new_docs" | "new_files" | "net_added_lines" | "net_files";
+      patterns?: readonly string[];
       exclude_paths?: readonly string[];
     };
-export type RepositoryFactSelector = {
-  kind: "anchor_values";
-  anchor_type: string;
-};
+export type RepositoryFactSelector =
+  | {
+      kind: "anchor_values";
+      anchor_type: string;
+    }
+  | {
+      kind: "path_metric";
+      patterns: readonly string[];
+      exclude_paths?: readonly string[];
+      population: "tracked" | "changed";
+      metric: "lines" | "bytes" | "files";
+      aggregate: "max" | "sum";
+    };
 export type ChangeIntentFactSelector = {
   pointer: string;
   projection?: DocumentProjection;
@@ -105,7 +115,7 @@ export type FactRef =
       type: DocumentFactType;
     }
   | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType }
-  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" }
+  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "scalar" }
   | { source: "change_intent"; selector: ChangeIntentFactSelector; type: DocumentFactType };
 
 type DocumentRef = Extract<FactRef, { source: "document" }>;
@@ -131,11 +141,23 @@ export interface AnchorFactProvenance {
   instances: AnchorFactInstance[];
 }
 
+export interface PathMetricFactProvenance {
+  kind: "path_metric";
+  matched_paths: string[];
+  measurements: Array<{ path: string; value: number }>;
+  aggregate: "max" | "sum";
+  value: number;
+}
+
+export type FactProvenance = AnchorFactProvenance | PathMetricFactProvenance;
+
 export interface FactReadContext {
   documents?: DocumentReader;
   baseRef?: string | null;
   headRef?: string | null;
   readFileAtRef?: (ref: string, filePath: string) => unknown;
+  readFile?: (filePath: string) => unknown;
+  trackedFiles?: string[];
   diff?: { files?: { checked?: ParsedDiffFile[] } };
   anchors?: { byType?: Record<string, AnchorFactInputInstance[]> };
   changeIntent?: unknown;
@@ -149,7 +171,7 @@ export interface DocumentFactError {
 }
 
 export type DocumentFactResult =
-  | { ok: true; value: NormalizedDocumentFact; provenance?: AnchorFactProvenance }
+  | { ok: true; value: NormalizedDocumentFact; provenance?: FactProvenance }
   | { ok: false; error: DocumentFactError };
 
 export class DocumentFactFailure extends Error implements DocumentFactError {
@@ -358,17 +380,22 @@ function snapshotFactSource(context: FactReadContext, selector: DocumentSelector
   return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
 
+function matchesPathScope(path: string, patterns: readonly string[] | undefined, excludePaths: readonly string[] | undefined): boolean {
+  return (!patterns?.length || matchesAny(path, patterns)) && !(excludePaths?.length && matchesAny(path, excludePaths));
+}
+
 function diffFactSource(context: FactReadContext, selector: DiffFactSelector): unknown {
   const files = context.diff?.files?.checked;
   if (!Array.isArray(files)) return failDocumentFact("document_read_error", "diff facts are unavailable");
 
   if (selector.kind === "metric") {
-    const excludedPaths = new Set(selector.exclude_paths || []);
-    if (selector.metric === "new_files") return files.filter((file) => file.status === "added").length;
-    if (selector.metric === "new_docs") {
-      return files.filter((file) => file.status === "added" && /\.md$/i.test(file.path) && !excludedPaths.has(file.path)).length;
+    const candidates = files.filter((file) => matchesPathScope(file.path, selector.patterns, selector.exclude_paths));
+    if (selector.metric === "new_files") return candidates.filter((file) => file.status === "added").length;
+    if (selector.metric === "new_docs") return candidates.filter((file) => file.status === "added" && /\.md$/i.test(file.path)).length;
+    if (selector.metric === "net_files") {
+      return candidates.reduce((sum, file) => sum + (file.status === "added" ? 1 : file.status === "deleted" ? -1 : 0), 0);
     }
-    return files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
+    return candidates.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
   }
 
   const patterns = [...selector.patterns];
@@ -398,7 +425,50 @@ function compareAnchorFactInstances(left: AnchorFactInstance, right: AnchorFactI
     || left.value.localeCompare(right.value);
 }
 
+function countTextLines(content: string): number {
+  if (!content.length) return 0;
+  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = (normalized.match(/\n/g) || []).length + 1;
+  return normalized.endsWith("\n") ? lines - 1 : lines;
+}
+
+function currentRepositoryPaths(context: FactReadContext): string[] {
+  const changedCurrent = (context.diff?.files?.checked || []).filter((file) => file.status !== "deleted").map((file) => file.path);
+  return uniqueSorted([...(context.trackedFiles || []), ...changedCurrent].map(normalizePathEntry).filter(Boolean));
+}
+
+function changedRepositoryPaths(context: FactReadContext): string[] {
+  return uniqueSorted((context.diff?.files?.checked || []).filter((file) => file.status !== "deleted").map((file) => normalizePathEntry(file.path)).filter(Boolean));
+}
+
+function repositoryPathMetric(context: FactReadContext, selector: Extract<RepositoryFactSelector, { kind: "path_metric" }>): DocumentFactResult {
+  const universe = selector.population === "tracked" ? currentRepositoryPaths(context) : changedRepositoryPaths(context);
+  const matchedPaths = universe.filter((path) => matchesPathScope(path, selector.patterns, selector.exclude_paths));
+  const measurements = matchedPaths.map((path) => {
+    if (selector.metric === "files") return { path, value: 1 };
+    if (!context.readFile) return failDocumentFact("document_read_error", `repository reader unavailable for "${path}"`);
+    let raw: unknown;
+    try {
+      raw = context.readFile(path);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return failDocumentFact("document_read_error", `repository read failed for "${path}": ${collapseMessage(message)}`);
+    }
+    if (raw === null || raw === undefined) return failDocumentFact("document_read_error", `repository file "${path}" is unavailable`);
+    const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf-8");
+    return { path, value: selector.metric === "bytes" ? bytes.length : countTextLines(bytes.toString("utf-8")) };
+  });
+  const values = measurements.map((item) => item.value);
+  const value = selector.aggregate === "max" ? (values.length ? Math.max(...values) : 0) : values.reduce((sum, item) => sum + item, 0);
+  return {
+    ok: true,
+    value,
+    provenance: { kind: "path_metric", matched_paths: matchedPaths, measurements, aggregate: selector.aggregate, value },
+  };
+}
+
 function repositoryFact(context: FactReadContext, ref: Extract<FactRef, { source: "repository" }>): DocumentFactResult {
+  if (ref.selector.kind === "path_metric") return repositoryPathMetric(context, ref.selector);
   const byType = context.anchors?.byType;
   if (!byType) return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
   const instances = (byType[ref.selector.anchor_type] || []).map(anchorFactInstance).sort(compareAnchorFactInstances);

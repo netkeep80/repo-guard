@@ -191,18 +191,23 @@ function snapshotFactSource(context, selector) {
     const exhaustive = selector.format;
     return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
+function matchesPathScope(path, patterns, excludePaths) {
+    return (!patterns?.length || matchesAny(path, patterns)) && !(excludePaths?.length && matchesAny(path, excludePaths));
+}
 function diffFactSource(context, selector) {
     const files = context.diff?.files?.checked;
     if (!Array.isArray(files))
         return failDocumentFact("document_read_error", "diff facts are unavailable");
     if (selector.kind === "metric") {
-        const excludedPaths = new Set(selector.exclude_paths || []);
+        const candidates = files.filter((file) => matchesPathScope(file.path, selector.patterns, selector.exclude_paths));
         if (selector.metric === "new_files")
-            return files.filter((file) => file.status === "added").length;
-        if (selector.metric === "new_docs") {
-            return files.filter((file) => file.status === "added" && /\.md$/i.test(file.path) && !excludedPaths.has(file.path)).length;
+            return candidates.filter((file) => file.status === "added").length;
+        if (selector.metric === "new_docs")
+            return candidates.filter((file) => file.status === "added" && /\.md$/i.test(file.path)).length;
+        if (selector.metric === "net_files") {
+            return candidates.reduce((sum, file) => sum + (file.status === "added" ? 1 : file.status === "deleted" ? -1 : 0), 0);
         }
-        return files.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
+        return candidates.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
     }
     const patterns = [...selector.patterns];
     const excluded = new Set(selector.exclude_statuses || []);
@@ -230,7 +235,52 @@ function compareAnchorFactInstances(left, right) {
         || (left.column || 0) - (right.column || 0)
         || left.value.localeCompare(right.value);
 }
+function countTextLines(content) {
+    if (!content.length)
+        return 0;
+    const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = (normalized.match(/\n/g) || []).length + 1;
+    return normalized.endsWith("\n") ? lines - 1 : lines;
+}
+function currentRepositoryPaths(context) {
+    const changedCurrent = (context.diff?.files?.checked || []).filter((file) => file.status !== "deleted").map((file) => file.path);
+    return uniqueSorted([...(context.trackedFiles || []), ...changedCurrent].map(normalizePathEntry).filter(Boolean));
+}
+function changedRepositoryPaths(context) {
+    return uniqueSorted((context.diff?.files?.checked || []).filter((file) => file.status !== "deleted").map((file) => normalizePathEntry(file.path)).filter(Boolean));
+}
+function repositoryPathMetric(context, selector) {
+    const universe = selector.population === "tracked" ? currentRepositoryPaths(context) : changedRepositoryPaths(context);
+    const matchedPaths = universe.filter((path) => matchesPathScope(path, selector.patterns, selector.exclude_paths));
+    const measurements = matchedPaths.map((path) => {
+        if (selector.metric === "files")
+            return { path, value: 1 };
+        if (!context.readFile)
+            return failDocumentFact("document_read_error", `repository reader unavailable for "${path}"`);
+        let raw;
+        try {
+            raw = context.readFile(path);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return failDocumentFact("document_read_error", `repository read failed for "${path}": ${collapseMessage(message)}`);
+        }
+        if (raw === null || raw === undefined)
+            return failDocumentFact("document_read_error", `repository file "${path}" is unavailable`);
+        const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf-8");
+        return { path, value: selector.metric === "bytes" ? bytes.length : countTextLines(bytes.toString("utf-8")) };
+    });
+    const values = measurements.map((item) => item.value);
+    const value = selector.aggregate === "max" ? (values.length ? Math.max(...values) : 0) : values.reduce((sum, item) => sum + item, 0);
+    return {
+        ok: true,
+        value,
+        provenance: { kind: "path_metric", matched_paths: matchedPaths, measurements, aggregate: selector.aggregate, value },
+    };
+}
 function repositoryFact(context, ref) {
+    if (ref.selector.kind === "path_metric")
+        return repositoryPathMetric(context, ref.selector);
     const byType = context.anchors?.byType;
     if (!byType)
         return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
