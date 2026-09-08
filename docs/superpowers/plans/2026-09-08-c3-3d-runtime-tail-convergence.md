@@ -1,12 +1,10 @@
 # C3.3d — план реализации сжатия оставшегося исполняемого хвоста
 
-> **Для исполнителя:** перед рабочими изменениями обязателен навык `test-driven-development`, а перед утверждением завершения каждого среза — `verification-before-completion`. Каждый срез выполняется отдельным запросом на слияние от фактически принятого `main`.
+> **Для исполнителя:** перед рабочими изменениями обязателен навык `test-driven-development`, перед завершением каждого среза — `verification-before-completion`. Каждый срез выполняется отдельным запросом на слияние от фактически принятого `main`.
 
 **Цель:** убрать самостоятельные исполняемые виды `surface_debt`, `registry_rules`, `change_profile`, `size_rules`, сохранив полезные возможности только как чистое разворачивание в канонические факты и существующую алгебру отношений.
 
-**Архитектура:** пользовательский высокоуровневый синтаксис может оставаться только там, где он полезен. После `compileConstraintProgram` семантика должна течь через один `FactRef`, десять канонических дескрипторов отношений и один исполнитель `primitive_relation`. C3.3d не меняет `integration`.
-
-**Технологии:** `Node.js 24`, `TypeScript .mts`, сгенерированный `dist/*.mjs`, `JSON Schema draft-07`, встроенный `node:test`, собственный `repo-guard`, `GitHub Actions`.
+**Архитектура:** после `compileConstraintProgram` семантика должна течь через один `FactRef`, десять канонических дескрипторов и один исполнитель `primitive_relation`. C3.3d не меняет `integration`.
 
 Связанные задачи:
 
@@ -17,17 +15,17 @@
 #400 — C3.3d1 delete surface_debt + registry_rules
 ```
 
-Утверждённый архитектурный документ:
+Утверждённый проект:
 
 ```text
 docs/superpowers/specs/2026-09-08-c3-3d-runtime-tail-convergence-design.md
 ```
 
-Исходное принятое состояние на момент планирования:
+Исходное принятое состояние:
 
 ```text
 main = 712ebec3d8040b42b0cf7ff4f0eaf9ed78fa0f35
-canonical C3.0 measurement baseline = 92432809fcddc290080beb51ba151e13a5761869
+C3.0 baseline = 92432809fcddc290080beb51ba151e13a5761869
 runtime kinds = 6
 ```
 
@@ -38,12 +36,12 @@ C3.3d1: 6 -> 4
 C3.3d2: 4 -> 3
 C3.3d3: 3 -> 2
 
-final runtime kinds:
+final:
 integration
 primitive_relation
 ```
 
-На всём пути должны оставаться:
+На всём пути:
 
 ```text
 FactRef models = 1
@@ -53,25 +51,15 @@ primitive descriptor registries = 1
 new relation descriptors = 0
 ```
 
----
+## Общий протокол каждого среза
 
-## Общий порядок работы
-
-- [ ] Перед каждым срезом заново прочитать `main`, родительскую задачу, дочернюю задачу и состояние открытых запросов на слияние.
-- [ ] Ветвить следующий срез только от фактически принятого `main` после предыдущего среза.
-- [ ] Первый коммит каждого исполняемого среза содержит только тесты и намеренно остаётся красным.
-- [ ] Зафиксировать точную причину красного `CI`; красный должен доказывать отсутствие целевой архитектуры, а не случайную поломку окружения.
-- [ ] Затем делать минимальное изменение рабочего кода и схем.
-- [ ] Сгенерировать `dist` обычной сборкой; не редактировать его смысл вручную.
-- [ ] Мигрировать старые тесты только после зелёного целевого теста.
-- [ ] Выполнить полный набор тестов, самопроверку и метрики сжатия от канонической базовой точки.
-- [ ] Держать запрос на слияние черновиком до полного зелёного состояния на точной голове.
-- [ ] Перевести его в готовое состояние без изменения головы и получить успешный `Run PR policy check`.
-- [ ] Слить только точную проверенную голову.
-- [ ] Проверить полный `CI` уже на новом `main`.
-- [ ] Только после этого создавать следующую дочернюю задачу и ветку.
-
-Базовые команды проверки для каждого среза:
+1. Перечитать точный `main`, родительскую и дочернюю задачи, открытые запросы на слияние.
+2. Создать ветку только от принятого `main`.
+3. Первый коммит — только целевой красный тест.
+4. Зафиксировать в дочерней задаче точную ожидаемую причину красного `CI`.
+5. Сделать минимальное рабочее изменение; `dist` получать обычной сборкой.
+6. После целевого зелёного результата мигрировать исторические тесты.
+7. Выполнить полный набор:
 
 ```bash
 npm run build
@@ -83,205 +71,139 @@ node dist/repo-guard.mjs doctor
 npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
 ```
 
-Перед каждой записью в репозиторий дополнительно проверять точную голову и набор изменённых файлов. В среде без локального `git` эти факты брать через чтение `main`, головы ветки и сравнение коммитов в GitHub.
+8. Держать запрос на слияние черновиком до полного зелёного состояния.
+9. Перевести в готовое состояние без изменения головы; получить успешные `validate`, `smoke-pack`, `Run PR policy check` на одной голове.
+10. Слить только точную проверенную голову и проверить полный `CI` на новом `main`.
+11. Только после этого создавать следующую дочернюю задачу и ветку.
+
+Если утверждённая семантика требует нового источника фактов, нового дескриптора или второго исполнителя, остановиться на красном доказательстве и обновить #398; архитектуру молча не расширять.
 
 ---
 
-# Часть I — C3.3d1: удалить `surface_debt` и `registry_rules`
+# I. C3.3d1 — удалить `surface_debt` и `registry_rules`
 
-## Задача 1.1 — независимый красный архитектурный тест
+## 1. Красный архитектурный тест
 
-**Файлы:**
+Создать:
 
-- создать `tests/test-c3-3d1-runtime-tail-deletion.mjs`;
-- пока не менять рабочий код, схемы, `dist` и старые тесты.
+```text
+tests/test-c3-3d1-runtime-tail-deletion.mjs
+```
 
-- [ ] Сначала зафиксировать реальный остаток:
+До рабочих изменений зафиксировать остаток:
 
 ```bash
 git grep -n -I -E 'surface_debt|surface-debt|registry_rules|registry-rules|checkSurfaceDebt|checkRegistryRules|RegistryRule' -- ':!dist/**'
 ```
 
-- [ ] Новый тест должен читать публичные схемы и исходники, импортировать `compileConstraintProgram`, `runtimeConstraints`, `relationDescriptors` и проверять конечное состояние.
-
-Минимальные утверждения:
+Тест обязан утверждать конечное состояние:
 
 ```text
-1. ChangeIntent schema rejects surface_debt.
-2. repo-policy schema rejects registry_rules.
-3. compiled program emits neither surface_debt nor registry_rules.
-4. runtime kind union contains neither kind.
-5. runtime evaluator contains neither dedicated dispatch/helper.
-6. src/checks/rules/registry-rules.mts is absent.
-7. dist/checks/rules/registry-rules.mjs is absent after build.
-8. self repo-policy.json consumes neither concept.
-9. relation descriptor count remains 10.
-10. FactRef source vocabulary remains change_intent,diff,document,repository.
-11. runtime kind target after d1 is exactly change_profile,size_rules,integration,primitive_relation.
+ChangeIntent schema rejects surface_debt
+repo-policy schema rejects registry_rules
+compiled program emits neither kind
+runtime union/dispatch contains neither kind
+src/checks/rules/registry-rules.mts absent
+dist/checks/rules/registry-rules.mjs absent after build
+self repo-policy consumes neither concept
+runtime kinds exactly change_profile,size_rules,integration,primitive_relation
+relation descriptors exactly 10
+FactRef sources exactly change_intent,diff,document,repository
 ```
 
-- [ ] Для проверки схем использовать реальные валидные базовые объекты и добавлять только удаляемое поле; текстовый поиск не заменяет проверку схемы.
+Проверки схем должны использовать валидный базовый объект плюс одно удаляемое поле, а не текстовый поиск.
 
-Пример удаляемого `surface_debt`:
-
-```js
-const removedDebtIntent = {
-  change_type: "feature",
-  scope: ["src/**"],
-  budgets: {},
-  must_touch: [],
-  must_not_touch: [],
-  expected_effects: ["test"],
-  surface_debt: {
-    kind: "temporary_growth",
-    reason: "temporary",
-    expected_delta: { max_new_files: 1 },
-    repayment_issue: 1,
-  },
-};
-```
-
-Пример удаляемого `registry_rules`:
-
-```js
-const removedRegistryPolicy = {
-  ...validPolicy,
-  registry_rules: [{
-    id: "legacy-registry",
-    kind: "set_equality",
-    left: { type: "json_array", file: "a.json", json_pointer: "/items" },
-    right: { type: "json_array", file: "b.json", json_pointer: "/items" },
-  }],
-};
-```
-
-- [ ] Запустить только новый тест:
+До удаления первые архитектурные утверждения должны быть красными, последние инварианты — зелёными.
 
 ```bash
 node tests/test-c3-3d1-runtime-tail-deletion.mjs
-```
-
-До удаления рабочего кода проверки 1–7 и 11 должны быть красными, а инварианты 8–10 — зелёными.
-
-- [ ] Запустить полный набор, чтобы подтвердить, что новый тест является единственным намеренным источником красного:
-
-```bash
 npm test
 ```
 
-- [ ] Коммит только теста:
-
-```bash
-git add tests/test-c3-3d1-runtime-tail-deletion.mjs
-git commit -m "test(c3.3d1): falsify runtime-tail deletion"
-```
-
-- [ ] Зафиксировать намеренно красный `CI` в #400.
-
-## Задача 1.2 — удалить публичный `surface_debt`
-
-**Файлы:**
-
-- изменить `schemas/change-intent.schema.json`;
-- изменить `src/checks/constraint-program.mts`;
-- изменить `src/checks/rules/constraints.mts`;
-- соответствующие файлы в `dist/` получить обычной сборкой.
-
-- [ ] Из `schemas/change-intent.schema.json` физически удалить свойство `surface_debt` целиком.
-- [ ] Поскольку используется `additionalProperties: false`, старая форма после этого должна отвергаться автоматически.
-- [ ] Не добавлять пометки устаревания, псевдонимы и отдельную ветвь совместимости.
-- [ ] Из `ChangeIntentProjection` удалить `surface_debt?: unknown`.
-- [ ] Удалить безусловное добавление:
-
-```ts
-add("surface-debt", {
-  kind: "surface_debt",
-  name: "surface-debt",
-  debt: changeIntent?.surface_debt,
-});
-```
-
-- [ ] В `src/checks/rules/constraints.mts` удалить:
+Коммит содержит только новый тест:
 
 ```text
+test(c3.3d1): falsify runtime-tail deletion
+```
+
+Зафиксировать красный `CI` в #400.
+
+## 2. Удалить `surface_debt`
+
+Изменить:
+
+```text
+schemas/change-intent.schema.json
+src/checks/constraint-program.mts
+src/checks/rules/constraints.mts
+dist/checks/constraint-program.mjs
+dist/checks/rules/constraints.mjs
+```
+
+Удалить:
+
+```text
+ChangeIntent.surface_debt
+surface_debt schema property
+surface_debt from ChangeIntentProjection
+runtime emission surface-debt
 SurfaceDebt interface
-calculateDiffGrowth import, if unused afterwards
 surface_debt from RuntimeConstraintKind
 surface_debt from CONSTRAINT_PHASES
-debt field from RuntimeConstraint
+debt field
 checkSurfaceDebt
-surface_debt dispatch branch
+surface_debt dispatch
+calculateDiffGrowth import if it becomes unused
 ```
 
-- [ ] Не менять `GovernanceGrant`, `diff_rules` и обычные бюджеты. Удаление `surface_debt` не должно давать новый способ обхода ограничений.
+`additionalProperties: false` должен сам отвергать старую форму. Не добавлять пометки устаревания, псевдонимы и отдельную совместимость. Не менять `GovernanceGrant`, `diff_rules` и обычные бюджеты.
 
-## Задача 1.3 — удалить публичный и исполняемый `registry_rules`
+## 3. Удалить `registry_rules`
 
-**Файлы:**
+Изменить/удалить:
 
-- изменить `schemas/repo-policy.schema.json`;
-- изменить `src/checks/constraint-program.mts`;
-- изменить `src/checks/rules/constraints.mts`;
-- удалить `src/checks/rules/registry-rules.mts`;
-- соответствующий `dist/checks/rules/registry-rules.mjs` удалить через обычную генерацию `dist`.
-
-- [ ] Из `schemas/repo-policy.schema.json` удалить верхнеуровневое свойство `registry_rules`.
-- [ ] Из `definitions` удалить `registry_source` и другие определения, которые используются только этим разделом. Перед удалением подтвердить отсутствие других ссылок поиском.
-- [ ] Не переносить `markdown_section_links` в новый селектор.
-- [ ] Из `ConstraintPolicyProjection` удалить `registry_rules?: unknown[]`.
-- [ ] Удалить добавление исполняемой записи:
-
-```ts
-if (array(policy.registry_rules).length) {
-  add("runtime:registry-rules", {
-    kind: "registry_rules",
-    name: "registry-rules",
-    rules: policy.registry_rules,
-  });
-}
+```text
+schemas/repo-policy.schema.json
+src/checks/constraint-program.mts
+src/checks/rules/constraints.mts
+src/checks/rules/registry-rules.mts  DELETE
+dist/checks/rules/registry-rules.mjs DELETE
 ```
 
-- [ ] В `constraints.mts` удалить импорт `checkRegistryRules`, вид `registry_rules`, его фазу и ветвь выполнения.
-- [ ] Физически удалить `src/checks/rules/registry-rules.mts`.
-- [ ] Не добавлять новую обёртку вокруг `compareSets`.
+Удалить:
 
-## Задача 1.4 — сборка и первый зелёный результат d1
+```text
+top-level registry_rules
+registry_source and definitions used only by registry_rules
+registry_rules from ConstraintPolicyProjection
+runtime:registry-rules emission
+checkRegistryRules import/dispatch
+registry_rules RuntimeConstraintKind/phase
+```
 
-- [ ] Собрать:
+Перед удалением schema definitions подтвердить отсутствие других ссылок поиском. `markdown_section_links` в новый селектор не переносить. Новую обёртку вокруг `compareSets` не создавать.
+
+Собрать и проверить:
 
 ```bash
 npm run build
 npm run check:dist
-```
-
-- [ ] Проверить новый целевой тест:
-
-```bash
 node tests/test-c3-3d1-runtime-tail-deletion.mjs
-```
-
-- [ ] Проверить предыдущие храповики C3:
-
-```bash
 node tests/test-c3-3-historical-lowering.mjs
 node tests/test-c3-3b-trace-anchor-lowering.mjs
 node tests/test-c3-3c-workflow-path-coverage-deletion.mjs
 node tests/test-canonical-relation-kernel.mjs
 ```
 
-- [ ] Коммит удаления рабочего кода, схем и `dist`:
+Рабочий коммит:
 
-```bash
-git add schemas/change-intent.schema.json schemas/repo-policy.schema.json
-git add src/checks/constraint-program.mts src/checks/rules/constraints.mts
-git add dist/checks/constraint-program.mjs dist/checks/rules/constraints.mjs
-git add -u src/checks/rules/registry-rules.mts dist/checks/rules/registry-rules.mjs
-git commit -m "refactor(c3.3d1): delete debt and registry runtimes"
+```text
+refactor(c3.3d1): delete debt and registry runtimes
 ```
 
-## Задача 1.5 — мигрировать исторические тесты и пользовательские описания d1
+## 4. Мигрировать исторические тесты
 
-Проверить и при необходимости изменить:
+Проверить минимум:
 
 ```text
 tests/validate-schemas.mjs
@@ -291,95 +213,59 @@ tests/test-policy-delta-rules.mjs
 tests/test-compression-rules.mjs
 tests/test-execution-phases.mjs
 tests/test-structured-output.mjs
+tests/test-rule-registry.mjs
+tests/test-enforcement-mode.mjs
 README.md
-RELEASING.md
-PORTFOLIO.md
 examples/**
 ```
 
-- [ ] Точный поиск:
+Поиск:
 
 ```bash
-git grep -n -I -E 'surface_debt|surface-debt|registry_rules|registry-rules|checkSurfaceDebt|checkRegistryRules|markdown_section_links|set_equality' -- \
-  tests README.md RELEASING.md PORTFOLIO.md examples schemas src
+git grep -n -I -E 'surface_debt|surface-debt|registry_rules|registry-rules|checkSurfaceDebt|checkRegistryRules|markdown_section_links|set_equality' -- tests README.md examples schemas src
 ```
 
-- [ ] Удалить тесты поведения удалённых исполнителей.
-- [ ] Вместо них оставить явные отрицательные проверки схем:
+Удалить поведенческие тесты удалённых исполнителей; оставить отрицательные проверки:
 
 ```text
 surface_debt rejected
 registry_rules rejected
 ```
 
-- [ ] Не добавлять пользовательские разделы об устаревании. История остаётся в системе контроля версий и задачах.
-- [ ] Если старая #35 относится только к `surface_debt`, после принятия d1 закрыть её как поглощённую удалением концепта.
+Не создавать пользовательскую документацию «устарело». Если #35 относится только к `surface_debt`, после принятия d1 закрыть её как поглощённую удалением концепта.
 
-- [ ] Полный тест:
+Тестовый коммит:
 
-```bash
-npm test
+```text
+test(c3.3d1): enforce deleted public concepts
 ```
 
-- [ ] Коммит миграции:
+## 5. Приёмка d1
 
-```bash
-git add tests README.md RELEASING.md PORTFOLIO.md examples
-git commit -m "test(c3.3d1): enforce deleted public concepts"
-```
-
-Добавлять только реально изменённые файлы.
-
-## Задача 1.6 — приёмка d1
-
-- [ ] Метрики:
-
-```bash
-npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
-```
-
-Требуемые факты:
+Метрики должны дать:
 
 ```text
 runtime_constraint_kinds = 4
 runtime_constraint_kind_names = change_profile,integration,primitive_relation,size_rules
-primitive_descriptor_kinds = existing 10
-canonical_fact_sources = change_intent,diff,document,repository
+relation descriptors = 10
+FactRef sources = 4
 ```
 
-- [ ] Полная самопроверка:
-
-```bash
-npm run check:dist
-npm test
-node dist/repo-guard.mjs
-node dist/repo-guard.mjs validate-integration
-node dist/repo-guard.mjs doctor
-```
-
-- [ ] Проверить набор изменённых файлов: `repo-policy.json`, `.github/**`, `action.yml` и семантика `integration` не должны меняться.
-- [ ] Дождаться зелёного `CI` в черновом состоянии.
-- [ ] Перевести запрос на слияние в готовое состояние без изменения точной головы.
-- [ ] Убедиться, что `validate`, `smoke-pack`, `Run PR policy check` зелёные на одной голове.
-- [ ] Слить только эту голову.
-- [ ] Проверить `CI` после слияния на новом `main`.
-- [ ] Закрыть #400 как выполненную, если это не сделал `Fixes #400`.
-- [ ] Записать в #398 принятую контрольную точку: `6 -> 4`, десять дескрипторов, четыре источника `FactRef`.
+`repo-policy.json`, `.github/**`, `action.yml` и семантика `integration` в d1 не меняются. После общего протокола приёмки записать в #398 контрольную точку `6 -> 4`.
 
 ---
 
-# Часть II — C3.3d2: чистое разворачивание `change_profiles`
+# II. C3.3d2 — чистое разворачивание `change_profiles`
 
-## Задача 2.0 — открыть работу только от принятого d1
+## 1. Открыть работу только после принятого d1
 
-- [ ] Заново прочитать новый `main` после d1 и записать его точный хеш в новую дочернюю задачу.
-- [ ] Создать дочернюю задачу с названием:
+Создать дочернюю задачу:
 
 ```text
 [C3.3d2] Pure-lower change profiles into canonical diff relations
 ```
 
-- [ ] В ней зафиксировать цель:
+Зафиксировать новый точный `main` и цель:
 
 ```text
 runtime kinds 4 -> 3
@@ -389,86 +275,66 @@ FactRef sources = 4
 new selector = NONE
 ```
 
-- [ ] Создать ветку только от нового принятого `main`; не переиспользовать ветку проекта C3.3d1.
-- [ ] Открыть черновой запрос на слияние с `Fixes #<d2 issue>` и узким `ChangeIntent`.
+Новая ветка и новый черновой запрос на слияние создаются только от этого принятого `main`.
 
-## Задача 2.1 — красный тест эквивалентности и архитектуры
+## 2. Красный тест эквивалентности
 
-**Файл:** создать `tests/test-c3-3d2-change-profile-lowering.mjs`.
+Создать:
 
-- [ ] Новый тест не использует `checkChangeProfile` как целевой механизм. Он строит политику и `ChangeIntent`, вызывает каноническую компиляцию/оценку и проверяет итоговое решение.
+```text
+tests/test-c3-3d2-change-profile-lowering.mjs
+```
 
-Обязательная матрица:
+Тест строит политику и `ChangeIntent`, вызывает каноническую компиляцию/оценку и проверяет минимум:
 
 ```text
 allowed surface passes
 forbidden surface fails
-required surface present passes
-required surface missing fails
+required surface present/missing
 overlapping allowed+disallowed surface fails
-unclassified path checked only when surface constraints exist
+unclassified checked only when surface constraints exist
 allow_unclassified_surfaces=true permits unclassified
-new allowed class passes
-new disallowed class fails
-empty allow_classes forbids every touched declared class
-unclassified new file fails when new_files block exists
-max_per_class enforced
-new_files.max_new_files enforced
-profile max_new_docs enforced with canonical_docs exclusion
-profile max_new_files enforced
-profile max_net_added_lines enforced
-governance change_type emits no profile constraints
-missing change_type fails closed when profiles exist
+new allowed/disallowed class
+empty allow_classes forbids touched declared classes
+unclassified new file fails when new_files exists
+max_per_class
+new_files.max_new_files
+profile max_new_docs with canonical_docs exclusion
+profile max_new_files
+profile max_net_added_lines
+governance emits no profile constraints
+missing change_type fails closed
 unknown non-governance change_type fails closed
-unknown surface/class reference fails in semantic compilation
-runtime program contains no change_profile kind
-src/dist change-profiles evaluator absent after implementation
-relation descriptors stay 10
-FactRef sources stay 4
+unknown surface/class reference fails compilation
+runtime contains no change_profile
+change-profiles evaluator absent after implementation
+relation descriptors = 10
+FactRef sources = 4
 ```
 
-- [ ] До изменения рабочего кода тест должен быть красным прежде всего из-за отсутствия чистого разворачивания и наличия отдельного вида `change_profile`.
-- [ ] Хранить небольшие исходные данные прямо в тесте; не создавать новый каркас тестовых данных.
-- [ ] Коммит только теста:
+Первый коммит содержит только этот тест:
 
-```bash
-git add tests/test-c3-3d2-change-profile-lowering.mjs
-git commit -m "test(c3.3d2): falsify change-profile lowering"
+```text
+test(c3.3d2): falsify change-profile lowering
 ```
 
-- [ ] Зафиксировать красный `CI` в дочерней задаче d2.
+## 3. Типизированное представление и выбор профиля
 
-## Задача 2.2 — типизированное представление профилей в `constraint-program`
+Основной файл:
 
-**Файлы:**
-
-- изменить `src/checks/constraint-program.mts`;
-- при необходимости изменить только проверку ссылочной целостности в `src/policy-compiler.mts`;
-- ядро отношений не менять.
-
-- [ ] Заменить `change_profiles?: unknown` минимальными типизированными представлениями:
-
-```ts
-interface ChangeProfileNewFilesProjection {
-  allow_classes?: unknown;
-  max_per_class?: Record<string, number>;
-  max_new_files?: number;
-}
-
-interface ChangeProfileProjection {
-  require_surfaces?: unknown;
-  allow_surfaces?: unknown;
-  forbid_surfaces?: unknown;
-  allow_unclassified_surfaces?: boolean;
-  new_files?: ChangeProfileNewFilesProjection;
-  budgets?: DiffRulesProjection;
-}
+```text
+src/checks/constraint-program.mts
 ```
 
-- [ ] Добавить соответствующие отображения `surfaces`, `new_file_classes`, `change_profiles` в `ConstraintPolicyProjection`.
-- [ ] Добавить `change_type?: string` в `ChangeIntentProjection`, если на принятом d1 его там ещё нет.
-- [ ] Не добавлять новый источник или селектор `FactRef`.
-- [ ] Использовать существующие конструкции:
+При необходимости только ссылочную проверку менять в:
+
+```text
+src/policy-compiler.mts
+```
+
+Заменить `change_profiles?: unknown` минимальными типизированными представлениями профиля, блока `new_files`, `surfaces`, `new_file_classes`; добавить `change_type?: string`, если его нет после d1.
+
+Использовать только существующие факты и отношение:
 
 ```text
 diff.changed_paths(patterns, mode, exclude_statuses)
@@ -476,66 +342,59 @@ diff.metric(new_docs|new_files|net_added_lines)
 numeric_bound(min|max)
 ```
 
-## Задача 2.3 — чистое разворачивание поверхностей
+Не добавлять селектор или дескриптор.
 
-В `compileConstraintProgram`:
-
-- [ ] Если `policy.change_profiles` отсутствует, ничего не добавлять.
-- [ ] Если `change_type === "governance"`, не создавать ограничения профиля.
-- [ ] Если профили существуют, а `change_type` отсутствует, завершать компиляцию запрещающей диагностикой через существующую границу компилятора, не создавая нового исполняемого вида.
-- [ ] Если ненормативный `change_type` неизвестен, аналогично закрывать проверку до исполнения.
-
-Для выбранного профиля:
-
-`forbid_surfaces`:
+Правила выбора:
 
 ```text
-diff.changed_paths(patterns = surface patterns, exclude deleted)
-  -> numeric_bound(max = 0)
+no change_profiles -> no profile constraints
+change_type=governance -> no ordinary profile constraints
+profiles + missing change_type -> compile-time blocking error
+unknown non-governance change_type -> compile-time blocking error
 ```
 
-`require_surfaces`:
+Отдельного исполняемого вида для этих ошибок не создавать.
+
+## 4. Развернуть поверхности
+
+Для каждой `forbid_surfaces`:
 
 ```text
-diff.changed_paths(patterns = surface patterns, exclude deleted)
-  -> numeric_bound(min = 1)
+diff.changed_paths(surface patterns, exclude deleted)
+  -> numeric_bound(max=0)
 ```
 
-`allow_surfaces`:
+Для каждой `require_surfaces`:
 
-- [ ] Вычислить все объявленные поверхности, которых нет в разрешённом наборе.
-- [ ] Для каждой такой поверхности создать отдельный `numeric_bound(max=0)`.
-- [ ] Не заменять это проверкой «путь входит хотя бы в одну разрешённую поверхность», потому что она ломает семантику пересечений.
+```text
+diff.changed_paths(surface patterns, exclude deleted)
+  -> numeric_bound(min=1)
+```
 
-`allow_unclassified_surfaces = false`:
+Для `allow_surfaces` создать отдельный запрет для каждой объявленной поверхности, которой нет в разрешённом наборе. Это сохраняет семантику пересечений; проверка «входит хотя бы в одну разрешённую» запрещена.
 
-- [ ] Создавать запрет только если профиль реально задаёт хотя бы одно из `require_surfaces`, `allow_surfaces`, `forbid_surfaces`.
+`allow_unclassified_surfaces=false` действует только если задано хотя бы одно из:
+
+```text
+require_surfaces
+allow_surfaces
+forbid_surfaces
+```
+
+Тогда:
 
 ```text
 diff.changed_paths(
-  patterns = union(all declared surface patterns),
+  patterns = union(all surface patterns),
   mode = outside,
   exclude deleted
 )
-  -> numeric_bound(max = 0)
+  -> numeric_bound(max=0)
 ```
 
-## Задача 2.4 — чистое разворачивание новых файлов
+## 5. Развернуть новые файлы
 
-- [ ] Если `new_files` отсутствует, не создавать ограничений классов.
-- [ ] Если блок присутствует, добавленные пути проверять относительно всех `new_file_classes`.
-
-Для каждого класса, не входящего в `allow_classes`:
-
-```text
-diff.changed_paths(
-  patterns = class patterns,
-  exclude_statuses = modified,deleted
-)
-  -> numeric_bound(max = 0)
-```
-
-Текущий `DiffFileStatus` на принятой базе имеет ровно:
+Текущий `DiffFileStatus`:
 
 ```text
 modified
@@ -543,9 +402,20 @@ added
 deleted
 ```
 
-Поэтому выбор только добавленных файлов выражается существующим `exclude_statuses = ["modified", "deleted"]`; новый селектор ради этого не нужен.
+Поэтому только добавленные файлы выбираются существующим:
 
-Неклассифицированный добавленный путь:
+```text
+exclude_statuses = modified,deleted
+```
+
+Для каждого класса вне `allow_classes`:
+
+```text
+added paths matching class
+  -> numeric_bound(max=0)
+```
+
+Неклассифицированный новый файл:
 
 ```text
 diff.changed_paths(
@@ -553,26 +423,26 @@ diff.changed_paths(
   mode = outside,
   exclude_statuses = modified,deleted
 )
-  -> numeric_bound(max = 0)
+  -> numeric_bound(max=0)
 ```
 
 `max_per_class[class]`:
 
 ```text
 added paths matching class
-  -> numeric_bound(max = configured limit)
+  -> numeric_bound(max=configured limit)
 ```
 
 `new_files.max_new_files`:
 
 ```text
 diff.metric(new_files)
-  -> numeric_bound(max = configured limit)
+  -> numeric_bound(max=configured limit)
 ```
 
-## Задача 2.5 — развернуть бюджеты профиля
+## 6. Развернуть бюджеты профиля
 
-Использовать те же канонические метрики изменения, что и верхнеуровневые `diff_rules`:
+Переиспользовать верхнеуровневые метрики:
 
 ```text
 max_new_docs -> diff.metric(new_docs, exclude_paths=canonical_docs)
@@ -580,26 +450,31 @@ max_new_files -> diff.metric(new_files)
 max_net_added_lines -> diff.metric(net_added_lines)
 ```
 
-Каждая метрика проверяется через `numeric_bound(max=...)`.
+Все через `numeric_bound(max=...)`. Не дублировать подсчёты и не использовать `classifyNewFiles`/`detectTouchedSurfaces` как отдельный семантический исполнитель.
 
-- [ ] Не дублировать вычисление роста строк вручную.
-- [ ] Не использовать `classifyNewFiles` или `detectTouchedSurfaces` как отдельный семантический исполнитель решения.
+## 7. Удалить отдельный `change_profile`
 
-## Задача 2.6 — удалить отдельный исполнитель `change_profile`
+Изменить/удалить:
 
-**Файлы:**
+```text
+src/checks/constraint-program.mts
+src/checks/rules/constraints.mts
+src/checks/rules/change-profiles.mts DELETE
+dist/checks/rules/change-profiles.mjs DELETE
+```
 
-- изменить `src/checks/rules/constraints.mts`;
-- удалить `src/checks/rules/change-profiles.mts`;
-- удалить соответствующий `dist/checks/rules/change-profiles.mjs` обычной сборкой;
-- изменить `src/checks/constraint-program.mts`.
+Удалить:
 
-- [ ] Удалить добавление `runtime:change-profile`.
-- [ ] Удалить импорт `checkChangeProfile`.
-- [ ] Удалить `change_profile` из `RuntimeConstraintKind`, `CONSTRAINT_PHASES` и ветви выполнения.
-- [ ] Если `facts.derived` после этого больше не нужен этой семье ограничений, убрать его из локального представления. Не удалять получение производных фактов глобально, пока отдельный аудит не докажет отсутствие других потребителей.
+```text
+runtime:change-profile emission
+checkChangeProfile import
+change_profile RuntimeConstraintKind
+change_profile phase/dispatch
+```
 
-- [ ] Собрать и выполнить целевой тест:
+`facts.derived` удалять глобально нельзя без отдельного доказательства отсутствия потребителей.
+
+Сборка и целевой тест:
 
 ```bash
 npm run build
@@ -607,19 +482,15 @@ npm run check:dist
 node tests/test-c3-3d2-change-profile-lowering.mjs
 ```
 
-- [ ] Коммит рабочего разворачивания:
+Рабочий коммит:
 
-```bash
-git add src/checks/constraint-program.mts src/checks/rules/constraints.mts
-git add dist/checks/constraint-program.mjs dist/checks/rules/constraints.mjs
-git add -u src/checks/rules/change-profiles.mts dist/checks/rules/change-profiles.mjs
-# добавить policy-compiler только если он действительно изменён
-git commit -m "refactor(c3.3d2): lower change profiles into relations"
+```text
+refactor(c3.3d2): lower change profiles into relations
 ```
 
-## Задача 2.7 — мигрировать старые тесты профилей без потери семантики
+## 8. Мигрировать старые тесты и принять d2
 
-Основные файлы:
+Основные тесты:
 
 ```text
 tests/test-policy-profiles.mjs
@@ -628,37 +499,22 @@ tests/test-policy-compiler-boundary.mjs
 tests/test-execution-phases.mjs
 tests/test-structured-output.mjs
 tests/test-self-hosting.mjs
+tests/test-governance-paths.mjs
 ```
 
-- [ ] Удалить прямые импорты `checkChangeProfile`.
-- [ ] Перенести полезные поведенческие случаи на `compileConstraintProgram` и канонические результаты отношений.
-- [ ] Не сохранять старую форму диагностического объекта как контракт. Проверять решение, происхождение ограничения, выбранные факты и причину закрывающей ошибки.
-- [ ] `repo-policy.json` не переписывать: тот же публичный `change_profiles` должен пройти самопроверку уже через новое разворачивание.
+Удалить прямые импорты `checkChangeProfile`; полезные случаи перенести на `compileConstraintProgram` и канонические результаты отношений. Старую форму диагностического объекта контрактом не считать.
 
-- [ ] Точный поиск:
+`repo-policy.json` не переписывать: его пять `change_profiles` должны пройти самопроверку через новое разворачивание.
+
+Поиск:
 
 ```bash
 git grep -n -I -E 'checkChangeProfile|change_profile|change-profiles.mjs' -- tests src dist
 ```
 
-После миграции `change_profiles` допустим как публичный высокоуровневый синтаксис; `change_profile` как исполняемый вид и прямой импорт исполнителя запрещены.
+После миграции `change_profiles` допустим как публичный синтаксис; отдельный исполняемый `change_profile` запрещён.
 
-- [ ] Полный набор:
-
-```bash
-npm test
-```
-
-- [ ] Коммит тестовой миграции:
-
-```bash
-git add tests
-git commit -m "test(c3.3d2): prove canonical profile equivalence"
-```
-
-## Задача 2.8 — приёмка d2
-
-Требуемые метрики:
+Цель метрик:
 
 ```text
 runtime_constraint_kinds = 3
@@ -667,26 +523,21 @@ relation descriptors = 10
 FactRef sources = 4
 ```
 
-- [ ] Повторить полный набор тестов, самопроверку и канонические метрики.
-- [ ] Проверить, что `repo-policy.json` по-прежнему использует свои пять `change_profiles` и проходит без отдельного исполнителя.
-- [ ] Получить зелёный `CI` на точной голове в готовом к проверке состоянии.
-- [ ] Слить только эту голову и проверить `CI` после слияния.
-- [ ] Записать принятую контрольную точку в #398.
+После общего протокола приёмки записать контрольную точку в #398.
 
 ---
 
-# Часть III — C3.3d3: `size_rules` через канонические факты
+# III. C3.3d3 — `size_rules` через канонические факты
 
-## Задача 3.0 — открыть d3 только от принятого d2
+## 1. Открыть d3 только после принятого d2
 
-- [ ] Создать дочернюю задачу только после зелёного `CI` на `main` после d2:
+Создать дочернюю задачу:
 
 ```text
 [C3.3d3] Lower size rules through canonical repository and diff facts
 ```
 
-- [ ] Зафиксировать точный новый `main`.
-- [ ] Цель задачи:
+Зафиксировать новый `main` и цель:
 
 ```text
 runtime kinds 3 -> 2
@@ -696,21 +547,17 @@ FactRef sources = 4
 RepositoryFactSelector may grow by at most one finite kind, only if RED proves need
 ```
 
-- [ ] Создать новую ветку только от принятого d2 `main` и новый черновой запрос на слияние.
+Новая ветка создаётся только от принятого d2.
 
-## Задача 3.1 — первый красный тест: сначала доказать необходимость расширения получения фактов
+## 2. Красный тест сначала доказывает необходимость получения факта
 
-**Файл:** создать `tests/test-c3-3d3-size-rule-lowering.mjs`.
+Создать:
 
-Тест содержит две группы.
+```text
+tests/test-c3-3d3-size-rule-lowering.mjs
+```
 
-### Группа A — каноническое чтение фактов
-
-- [ ] Попытаться выразить абсолютный размер файла/каталога через текущий `FactRef` без нового селектора.
-- [ ] Зафиксировать красное доказательство, если текущий словарь не умеет получить числовой факт текущего состояния репозитория.
-- [ ] Только этот красный результат разрешает добавить `repository.path_metric`.
-
-Требуемые случаи после реализации:
+Группа чтения фактов должна проверить возможность получить:
 
 ```text
 tracked file line max
@@ -719,52 +566,56 @@ directory sum lines
 directory file count
 ignore patterns
 changed-only file population
-empty selected set -> deterministic zero where aggregate permits it
+empty selected set -> deterministic zero
 matching unreadable file -> fail closed
 ```
 
-### Группа B — разворачивание `size_rules`
+Сначала попытаться выразить это текущим `FactRef`. Только доказанная невозможность получить числовой факт текущего состояния разрешает `repository.path_metric`.
 
-Проверить:
+Группа разворачивания должна проверить:
 
 ```text
 file lines absolute pass/fail
 directory lines absolute pass/fail
 file count absolute pass/fail
 ignore patterns
-file changed_only pass/fail
+file changed_only
 applies_to_change_types selected/not-selected
-state phase only for unconditional all_tracked absolute max
+state phase for unconditional all_tracked absolute max
 transaction phase for max_growth
 transaction phase for applies_to_change_types
 transaction phase for file changed_only
 line growth pass/fail
 file-count growth pass/fail
 negative max_growth
-advisory violation remains non-blocking
-blocking violation remains blocking
-measurement failure fails closed
+advisory non-blocking
+blocking blocking
+measurement failure fail-closed
 metric=files + file scope rejected before runtime
 max_growth + file scope rejected before runtime
 max_growth + bytes rejected before runtime
-directory + changed_only rejected unless a simpler canonical proof is found
-runtime program contains no size_rules kind
-size-rules evaluator file absent after implementation
+directory + changed_only rejected unless simple existing expression is proven
+no size_rules runtime kind
+no size-rules evaluator after implementation
 ```
 
-- [ ] Первый коммит d3 содержит только этот тест.
-- [ ] Зафиксировать намеренно красный `CI`.
+Первый коммит — только тест:
 
-## Задача 3.2 — при доказанной необходимости добавить один `repository.path_metric`
+```text
+test(c3.3d3): falsify size-rule lowering
+```
 
-**Основные файлы:**
+## 3. Если красный доказал необходимость — добавить один `repository.path_metric`
 
-- `src/document-facts.mts`;
-- при необходимости `src/facts/input.mts`, только если существующий контекст чтения действительно не предоставляет нужные факты текущего состояния;
-- соответствующие файлы в `dist/`;
-- ядро отношений не менять.
+Основной файл:
 
-Целевой конечный тип:
+```text
+src/document-facts.mts
+```
+
+`src/facts/input.mts` менять только если существующий контекст чтения действительно не даёт нужных данных.
+
+Допустимый конечный тип:
 
 ```ts
 export type RepositoryFactSelector =
@@ -779,42 +630,47 @@ export type RepositoryFactSelector =
     };
 ```
 
-- [ ] Вариант `repository` в `FactRef` должен оставаться конечным типизированным объединением: `anchor_values -> string_set`, `path_metric -> scalar`.
-- [ ] Не ослаблять тип до произвольного значения.
-- [ ] Предпочесть дискриминируемое объединение внутри варианта `repository`, чтобы тип результата был связан с видом селектора.
-- [ ] Минимально расширить `FactReadContext` только реально нужными данными текущего состояния и переиспользовать существующие поля, если они уже появились к d3.
-- [ ] Для `population=tracked` выбирать текущие отслеживаемые и не удалённые пути.
-- [ ] Для `population=changed` выбирать текущие изменённые и не удалённые пути.
-- [ ] Применять `patterns` и `ignore` существующими утилитами сопоставления путей.
-- [ ] `metric=files` не читает содержимое и возвращает количество путей.
-- [ ] `metric=lines|bytes` обязан прочитать каждый выбранный файл; `null`, исключение или невозможность чтения должны давать закрывающую ошибку чтения, а не молчаливый пропуск.
-- [ ] `aggregate=sum` для пустого множества возвращает 0.
-- [ ] `aggregate=max` для пустого множества также возвращает 0; не использовать `-Infinity`.
-- [ ] Использовать одну маленькую общую функцию подсчёта строк. Если `countTextLines` удаляется вместе со старым исполнителем, перенести её в подходящую каноническую границу, не создавая новую подсистему размеров.
+Вариант `repository` в `FactRef` должен оставаться конечным дискриминируемым объединением:
 
-- [ ] Целевые проверки чтения:
+```text
+anchor_values -> string_set
+path_metric -> scalar
+```
+
+Не ослаблять тип до произвольного значения.
+
+Семантика:
+
+```text
+population=tracked -> current tracked non-deleted paths
+population=changed -> current changed non-deleted paths
+metric=files -> count without reading contents
+metric=lines|bytes -> every selected file must be readable
+read failure -> fail closed
+sum(empty) = 0
+max(empty) = 0
+```
+
+Использовать существующие утилиты сопоставления путей. Маленькую чистую функцию подсчёта строк можно перенести из удаляемого исполнителя в каноническую границу; новую подсистему размеров не создавать.
+
+Целевые проверки:
 
 ```bash
 node tests/test-document-facts-boundary.mjs
 node tests/test-c3-3d3-size-rule-lowering.mjs
 ```
 
-- [ ] Отдельный коммит получения факта:
+Отдельный коммит получения факта:
 
-```bash
-git add src/document-facts.mts dist/document-facts.mjs
-git add tests/test-document-facts-boundary.mjs tests/test-c3-3d3-size-rule-lowering.mjs
-# добавить facts/input только если он действительно изменён
-git commit -m "refactor(c3.3d3): add canonical repository path metric"
+```text
+refactor(c3.3d3): add canonical repository path metric
 ```
 
-Если красный тест закрывается без `path_metric`, эту задачу пропустить и явно зафиксировать в d3, что новый селектор не потребовался.
+Если тест закрывается без `path_metric`, этот шаг пропустить и зафиксировать отсутствие нового селектора в d3.
 
-## Задача 3.3 — расширить существующий `diff.metric` только при доказанной необходимости роста по области
+## 4. Расширить `diff.metric` только при доказанной необходимости
 
-**Файл:** `src/document-facts.mts`.
-
-Текущий селектор до d3 имеет глобальные метрики:
+Текущие метрики:
 
 ```text
 new_docs
@@ -822,32 +678,33 @@ new_files
 net_added_lines
 ```
 
-- [ ] Сначала попытаться переиспользовать `net_added_lines` и факты изменённых путей без расширения.
-- [ ] Если рост по выбранной области нельзя выразить, расширить существующий селектор `metric` полями:
+Сначала попытаться переиспользовать их и факты изменённых путей. Если рост по выбранной области иначе не выражается, допускается расширить существующий селектор:
 
 ```ts
 patterns?: readonly string[];
 ignore?: readonly string[];
 ```
 
-и конечным словарём метрик только для реально нужной семантики, например:
+и конечным именем:
 
 ```text
-net_added_lines
 net_files
 ```
 
-- [ ] `net_files` считать как число добавленных минус число удалённых файлов на выбранной поверхности.
-- [ ] `net_added_lines` при наличии `patterns`/`ignore` считать разницу строк только для выбранных файлов.
-- [ ] Существующие верхнеуровневые бюджеты без `patterns` должны сохранить прежнее поведение.
-- [ ] Не вводить второй источник `diff` и отдельную подсистему снимков.
+`net_files = added - deleted` на выбранной поверхности. `net_added_lines` с `patterns/ignore` считает дельту строк только выбранных файлов. Верхнеуровневые бюджеты без этих полей должны сохранить прежнюю семантику.
 
-## Задача 3.4 — сузить публичную схему `size_rule` до реально поддерживаемого поднабора
+Новый источник `diff` или отдельная подсистема снимков запрещены.
 
-**Файл:** `schemas/repo-policy.schema.json`.
+## 5. Сузить публичную схему `size_rule`
 
-- [ ] Сохранить поля, для которых каноническое разворачивание имеет однозначную семантику.
-- [ ] Добавить ограничения схемы или семантического компилятора так, чтобы до исполнения отвергались:
+Изменить:
+
+```text
+schemas/repo-policy.schema.json
+tests/validate-schemas.mjs
+```
+
+До исполнения отвергать:
 
 ```text
 scope=file + metric=files
@@ -856,17 +713,13 @@ metric=bytes + max_growth
 scope=directory + count=changed_only
 ```
 
-Последнюю форму можно сохранить только если работа от красного теста найдёт простое выражение уже существующими фактами и отношениями без нового условного режима получения фактов. По утверждённому проекту исходное решение — отвергать её.
+Последнюю форму сохранять только если красный тест докажет простое выражение существующими фактами/отношениями без условного режима получения фактов. Исходное решение — отвергать.
 
-- [ ] Для `max` и `max_growth` сохранить текущие числовые диапазоны, включая отрицательный `max_growth`, если текущая схема его допускает.
-- [ ] Не добавлять псевдонимы совместимости.
-- [ ] В `tests/validate-schemas.mjs` добавить явные отрицательные проверки всех удалённых сочетаний.
+Сохранить текущие допустимые числовые диапазоны, включая отрицательный `max_growth`, если он уже разрешён. Псевдонимы совместимости не добавлять.
 
-## Задача 3.5 — скомпилировать абсолютные `size_rules` в `primitive_relation`
+## 6. Развернуть абсолютные ограничения
 
-**Файл:** `src/checks/constraint-program.mts`.
-
-- [ ] Сохранить существующую модель строгости для сущности `size_rule`: форма, `max`, `level`, `count`, `ignore`, `max_growth` остаются частью сравнения политики. Удаление отдельного исполнителя не должно ослабить контроль изменения политики.
+В `src/checks/constraint-program.mts` сохранить модель строгости `size_rule`, но runtime строить как отношения.
 
 Для `scope=file`:
 
@@ -875,68 +728,70 @@ repository.path_metric(
   population = all_tracked ? tracked : changed,
   metric = lines|bytes,
   aggregate = max,
-  patterns = [glob || "**"],
+  patterns = rule glob,
   ignore = operational_paths + rule.ignore
 )
-  -> numeric_bound(max = rule.max)
+  -> numeric_bound(max=rule.max)
 ```
 
-Для `scope=directory` абсолютный предел:
+Для `scope=directory`:
 
 ```text
 repository.path_metric(
   population = tracked,
   metric = lines|bytes|files,
   aggregate = sum,
-  patterns = [glob || "**"],
+  patterns = rule glob,
   ignore = operational_paths + rule.ignore
 )
-  -> numeric_bound(max = rule.max)
+  -> numeric_bound(max=rule.max)
 ```
 
-- [ ] Если `applies_to_change_types` существует и текущий `change_type` не входит в список, ограничение не создавать.
-- [ ] Если входит, фаза отношения — `transaction`.
-- [ ] Безусловный абсолютный `all_tracked` — фаза `state`.
-- [ ] `changed_only` для файла — фаза `transaction`.
+Фазы:
 
-## Задача 3.6 — скомпилировать рост через факт `diff` и `numeric_bound`
-
-- [ ] Для `max_growth` создать отдельную `primitive_relation` с фазой `transaction`.
-- [ ] `metric=lines` использует ограниченную по области `diff.metric(net_added_lines)`.
-- [ ] `metric=files` использует ограниченную по области `diff.metric(net_files)`.
-- [ ] Параметр отношения:
-
-```ts
-{ max: rule.max_growth }
+```text
+unconditional all_tracked absolute -> state
+applies_to_change_types match -> transaction
+file changed_only -> transaction
 ```
 
-- [ ] Для истинности не нужны отдельные объекты `before/after/delta`. Диагностика должна показывать фактическую дельту, предел и происхождение `size_rule:<id>`.
+Если `applies_to_change_types` не содержит текущий `change_type`, отношение не создавать.
 
-## Задача 3.7 — сделать `advisory` общей метаинформацией исполнения
+## 7. Развернуть рост
 
-Сначала перечитать принятое состояние d2 и проверить, существует ли уже общий путь метаданных уровня и происхождения у канонического исполнения/отчётности.
+Для каждого `max_growth` создать отдельную `primitive_relation` фазы `transaction`:
 
-- [ ] Если существует, переиспользовать его.
-- [ ] Если нет, минимально расширить `primitiveRuntime`/`RuntimeConstraint` метаданными:
+```text
+lines -> scoped diff.metric(net_added_lines)
+files -> scoped diff.metric(net_files)
+      -> numeric_bound(max=rule.max_growth)
+```
+
+Для истинности не создавать специальные объекты `before/after/delta`; каноническая диагностика показывает фактическое значение, предел и происхождение `size_rule:<id>`.
+
+## 8. Сделать `advisory` общей метаинформацией
+
+Сначала проверить принятое d2: если общий путь уровня/происхождения уже существует, переиспользовать его. Иначе минимально добавить к исполняемой записи:
 
 ```ts
 level?: "blocking" | "advisory";
 origin?: string;
 ```
 
-- [ ] `level` не передавать в `evaluatePrimitiveRelation` как семантический параметр.
-- [ ] Отношение сначала вычисляет обычный результат `ok`; затем общий слой отчётности решает, блокирует ли нарушение принятие изменения.
-- [ ] Удалить специальный побочный путь `size-rules-advisory`, если происхождение и уровень можно выразить общей метаинформацией.
-- [ ] Добавить целевой тест: одно и то же ложное отношение при `blocking` блокирует, а при `advisory` остаётся нарушением, но не блокирует код выхода.
+`level` не является параметром `evaluatePrimitiveRelation`. Одно и то же отношение вычисляется одинаково; общий слой отчётности решает, блокирует ли нарушение код выхода.
 
-## Задача 3.8 — удалить отдельный исполнитель `size_rules`
+Добавить тест, где одно ложное отношение при `blocking` блокирует, а при `advisory` остаётся нарушением без блокирующего выхода.
 
-**Файлы:**
+## 9. Удалить отдельный `size_rules`
 
-- изменить `src/checks/rules/constraints.mts`;
-- изменить `src/checks/constraint-program.mts`;
-- удалить `src/checks/rules/size-rules.mts`;
-- соответствующий `dist/checks/rules/size-rules.mjs` удалить обычной сборкой.
+Изменить/удалить:
+
+```text
+src/checks/constraint-program.mts
+src/checks/rules/constraints.mts
+src/checks/rules/size-rules.mts DELETE
+dist/checks/rules/size-rules.mjs DELETE
+```
 
 Удалить:
 
@@ -944,13 +799,12 @@ origin?: string;
 SizeRule import
 checkSizeRules import
 projectSizeRules
-size_rules runtime kind
-size_rules fixed phase
-size_rules dispatch
+size_rules RuntimeConstraintKind
+size_rules fixed phase/dispatch
 size-rules-advisory special branch
 ```
 
-- [ ] После удаления `constraints.mts` должен знать только два вида:
+После этого:
 
 ```ts
 type RuntimeConstraintKind =
@@ -958,9 +812,7 @@ type RuntimeConstraintKind =
   | "primitive_relation";
 ```
 
-- [ ] Для `primitive_relation` фаза продолжает браться из дескриптора или конкретной записи, а не из нового специального переключателя.
-
-- [ ] Собрать:
+Сборка и целевой тест:
 
 ```bash
 npm run build
@@ -968,9 +820,9 @@ npm run check:dist
 node tests/test-c3-3d3-size-rule-lowering.mjs
 ```
 
-## Задача 3.9 — мигрировать старые тесты размеров и пример
+## 10. Мигрировать старые тесты и принять C3.3d
 
-Основные файлы:
+Основные места:
 
 ```text
 tests/test-compression-rules.mjs
@@ -978,30 +830,23 @@ tests/test-execution-phases.mjs
 tests/test-policy-delta-rules.mjs
 tests/test-self-hosting.mjs
 tests/test-structured-output.mjs
+tests/test-pipeline.mjs
 tests/validate-schemas.mjs
 examples/size-rules-policy.json
 README.md
 ```
 
-- [ ] Удалить прямой импорт `checkSizeRules`.
-- [ ] Перенести полезные случаи роста строк/файлов на каноническую программу и единый исполнитель отношений.
-- [ ] Сохранить проверки строгости `size_rule_max_increased`, ослабления `max_growth` и аналогичные.
-- [ ] Обновить `examples/size-rules-policy.json`, только если он использует форму, которая теперь сознательно отвергается.
-- [ ] Собственная `repo-policy.json` должна остаться семантически прежней, если её три правила входят в сохраняемый поднабор.
-- [ ] Если хотя бы одна собственная форма оказывается удаляемой, остановить работу и зафиксировать расхождение проекта в #398; не менять собственную политику молча.
+Удалить прямой импорт `checkSizeRules`; полезные случаи перенести на каноническую программу. Проверки строгости ослабления `max`, `level`, `count`, `max_growth` сохранить.
 
-- [ ] Точный поиск:
+Собственная `repo-policy.json` должна остаться семантически прежней, если её три правила входят в сохраняемый поднабор. Если одна собственная форма требует удаления, остановиться и зафиксировать расхождение в #398; молча менять self-policy нельзя.
+
+Поиск:
 
 ```bash
-git grep -n -I -E 'checkSizeRules|size_rules|size-rules.mjs|changed_only|max_growth' -- \
-  tests examples README.md src dist repo-policy.json
+git grep -n -I -E 'checkSizeRules|size_rules|size-rules.mjs|changed_only|max_growth' -- tests examples README.md src dist repo-policy.json
 ```
 
-`size_rules` может остаться как публичный высокоуровневый синтаксис; отдельный исполняемый вид, импорт и исполнитель запрещены.
-
-## Задача 3.10 — финальная приёмка C3.3d
-
-- [ ] Архитектурный тест должен доказать:
+Финальная архитектурная проверка:
 
 ```text
 runtime_constraint_kinds = 2
@@ -1014,44 +859,18 @@ surface_debt absent public/runtime
 registry_rules absent public/runtime
 change_profile dedicated runtime absent
 size_rules dedicated runtime absent
-src/dist change-profiles evaluator absent
-src/dist registry-rules evaluator absent
-src/dist size-rules evaluator absent
+registry/change-profile/size evaluator files absent
 integration unchanged
 ```
 
-- [ ] Если `repository.path_metric` был добавлен, проверить, что `RepositoryFactSelector` имеет ровно два конечных вида:
+Если `repository.path_metric` добавлен, `RepositoryFactSelector` имеет ровно:
 
 ```text
 anchor_values
 path_metric
 ```
 
-- [ ] Проверить, что дескрипторы отношений не выросли:
-
-```bash
-node tests/test-canonical-relation-kernel.mjs
-npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
-```
-
-- [ ] Полная проверка:
-
-```bash
-npm run check:dist
-npm test
-node dist/repo-guard.mjs
-node dist/repo-guard.mjs validate-integration
-node dist/repo-guard.mjs doctor
-```
-
-- [ ] Проверить физическое сжатие `src + schemas` относительно базовой точки; прирост строк получения фактов должен быть перекрыт удалением отдельных исполнителей и `surface_debt`.
-- [ ] Финальный поиск не должен находить старые исполняемые идентификаторы вне отрицательных тестов и исторических документов проекта.
-- [ ] Получить зелёный `CI` на точной голове в готовом состоянии.
-- [ ] Слить только эту голову.
-- [ ] Проверить `CI` после слияния на `main`.
-- [ ] Закрыть d3.
-- [ ] Закрыть #398 только после доказательства состояния `integration + primitive_relation`.
-- [ ] Обновить #374 контрольной точкой:
+После общего протокола приёмки закрыть d3 и #398, затем обновить #374:
 
 ```text
 C3.3d accepted:
@@ -1067,9 +886,9 @@ next = C3.3e integration / parallel convergence audit
 
 ---
 
-# Запреты на всём C3.3d
+# Запреты C3.3d
 
-Ни один срез не имеет права добавлять:
+Ни один срез не добавляет:
 
 ```text
 new FactRef source
@@ -1084,33 +903,15 @@ integration semantic redesign
 parallel/control-plane redesign
 ```
 
-`repository.path_metric` — единственное заранее допустимое потенциальное расширение словаря селекторов, и только после красного доказательства d3.
+`repository.path_metric` — единственное заранее допустимое потенциальное расширение словаря селекторов и только после красного доказательства d3.
 
-Если при реализации обнаруживается, что утверждённая семантика требует чего-то большего, работу остановить на красном доказательстве и обновить #398; архитектуру молча не расширять.
+# Документный бюджет
 
----
-
-# Контроль документов и бюджета
-
-В #399 создаются ровно два новых документа C3.3d:
+В #399 создаются ровно два документа:
 
 ```text
 docs/superpowers/specs/2026-09-08-c3-3d-runtime-tail-convergence-design.md
 docs/superpowers/plans/2026-09-08-c3-3d-runtime-tail-convergence.md
 ```
 
-Это исчерпывает текущий `max_new_docs = 2` для данного изменения. Третий итоговый документ не создавать. Принятые доказательства хранить в #398, дочерних задачах, запросах на слияние и существующих двух документах.
-
----
-
-# Финальная проверка плана перед исполнением
-
-- [ ] Нет незаполненных мест и неразрешённых архитектурных решений.
-- [ ] d1 удаляет, а не заменяет `surface_debt` и `registry_rules`.
-- [ ] d2 не добавляет селектор или примитив и сохраняет пересечения поверхностей, `governance`, неклассифицированные пути и семантику новых файлов.
-- [ ] d3 сначала доказывает необходимость расширения получения фактов, затем использует максимум один новый селектор `repository`.
-- [ ] Неподдерживаемые сочетания `size_rules` отвергаются до исполнения.
-- [ ] `advisory`/`blocking` не становится второй семантикой исполнителя отношений.
-- [ ] `integration` остаётся нетронутым до C3.3e.
-- [ ] Все метрики сравниваются только с `92432809fcddc290080beb51ba151e13a5761869`.
-- [ ] Каждый следующий срез начинается только после принятия предыдущего.
+Третий итоговый документ не создавать. Доказательства хранить в #398, дочерних задачах, запросах на слияние и этих двух документах.
