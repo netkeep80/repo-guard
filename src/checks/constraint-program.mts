@@ -5,7 +5,7 @@ import {
   type FactFormat,
   type FactRef,
 } from "../document-facts.mjs";
-import { relationDescriptor, type RelationDocumentTarget } from "./relation-kernel.mjs";
+import { relationDescriptor, relationDescriptorForSetComparison, type RelationDocumentTarget } from "./relation-kernel.mjs";
 
 type EnforcementMode = "advisory" | "blocking";
 type CountMode = "changed_only" | "all_tracked";
@@ -130,6 +130,7 @@ const scalar = (relation: RankRelation, value: number, metadata: StrictnessMetad
 const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata): SetStrictness => compare(relation, array(value as Array<string | number> | undefined), metadata) as SetStrictness;
 const exact = (value: unknown, metadata: StrictnessMetadata): ExactStrictness => compare("equal_or_incomparable", value, metadata) as ExactStrictness;
 const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("required_entity", true, metadata) as EntityStrictness;
+const leftSubsetPrimitive = relationDescriptorForSetComparison("left_subset").kind;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -291,7 +292,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
       kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
       workflow: binding.workflow, covers: array(binding.covers as string[] | undefined),
     } : binding.kind === "anchor_value_coverage"
-      ? primitiveRuntime(owner, `evidence:${id}`, "set_subset", {
+      ? primitiveRuntime(owner, `evidence:${id}`, leftSubsetPrimitive, {
         left: source,
         right: repositoryAnchorFact(binding.target_anchor_type),
       })
@@ -304,7 +305,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   for (const rule of array(policy.trace_rules)) {
     const id = String(rule.id ?? ""), relationId = `trace:${id}`, name = `trace-rule: ${id}`;
     if (rule.kind === "must_resolve") {
-      add(relationId, primitiveRuntime(name, relationId, "set_subset", {
+      add(relationId, primitiveRuntime(name, relationId, leftSubsetPrimitive, {
         left: repositoryAnchorFact(rule.from_anchor_type),
         right: repositoryAnchorFact(rule.to_anchor_type),
       }, {}, "transaction"));
