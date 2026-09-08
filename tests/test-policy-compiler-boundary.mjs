@@ -286,26 +286,28 @@ describe("anchor value evidence public/runtime boundary", () => {
     };
     const failed = run(["case-b", "case-a", "case-a"], anchors);
     assert.equal(failed.ok, false);
-    assert.deepEqual(failed.data.source_values, ["case-a", "case-b"]);
+    assert.equal(failed.data.kind, "set_subset");
+    assert.deepEqual(failed.data.left.value, ["case-a", "case-b"]);
     assert.deepEqual(failed.data.missing_values, ["case-b"]);
-    assert.deepEqual(failed.data.evidence_locations, [{
-      value: "case-a",
-      locations: [
-        { file: "tests/a.test", line: 10, column: 3 },
-        { file: "tests/b.test", line: 20, column: 7 },
-      ],
-    }]);
+    assert.deepEqual(failed.data.right.provenance.instances.filter((item) => item.value === "case-a"), [
+      { value: "case-a", file: "tests/a.test", line: 10, column: 3 },
+      { value: "case-a", file: "tests/b.test", line: 20, column: 7 },
+    ]);
+    assert.deepEqual(failed.data.extra_values, ["extra-case"]);
 
     const passed = run(["case-a"], anchors);
     assert.equal(passed.ok, true);
     assert.deepEqual(passed.data.missing_values, []);
+    assert.equal(passed.data.right.provenance.instances.filter((item) => item.value === "case-a").length, 2);
   });
 
   it("fails closed when canonical anchor facts are unavailable", () => {
     const result = run(["case-a"], undefined);
     assert.equal(result.ok, false);
-    assert.equal(result.data.anchor_facts_available, false);
-    assert.deepEqual(result.data.missing_values, ["case-a"]);
+    assert.equal(result.data.kind, "set_subset");
+    assert.equal(result.data.right.ok, false);
+    assert.equal(result.data.right.error.code, "document_read_error");
+    assert.match(result.data.right.error.message, /repository anchor facts are unavailable/);
   });
 
   it("reuses evidence-binding strictness for adoption, removal, and target changes", async () => {

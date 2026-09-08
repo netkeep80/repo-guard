@@ -290,6 +290,7 @@ const DESCRIPTORS = [
         evaluate: (facts, relation) => setRelation(facts, relation, "equal"),
         strictness: "incomparable",
         identity: ["id"],
+        setComparison: "equal",
     },
     {
         kind: "set_subset",
@@ -299,6 +300,7 @@ const DESCRIPTORS = [
         evaluate: (facts, relation) => setRelation(facts, relation, "left_subset"),
         strictness: "incomparable",
         identity: ["id"],
+        setComparison: "left_subset",
     },
     {
         kind: "referenced_pointer_exists",
@@ -347,6 +349,12 @@ export function relationDescriptor(kind) {
     if (!descriptor)
         throw new Error(`unknown relation "${kind}"`);
     return descriptor;
+}
+export function relationDescriptorForSetComparison(comparison) {
+    const matches = DESCRIPTORS.filter((descriptor) => descriptor.setComparison === comparison);
+    if (matches.length !== 1)
+        throw new Error(`expected exactly one relation for set comparison "${comparison}", found ${matches.length}`);
+    return matches[0];
 }
 export function evaluatePrimitiveRelation(facts, relation) {
     return relationDescriptor(relation.primitive).evaluate(facts, relation);

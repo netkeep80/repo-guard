@@ -45,6 +45,7 @@ export interface RelationDescriptor {
   identity: readonly string[];
   literal?: { source: string; value: string };
   evidenceSource?: "repository_paths_exist";
+  setComparison?: "equal" | "left_subset";
 }
 
 const set = <T,>(values: readonly T[] = []): Set<T> => new Set(values);
@@ -331,6 +332,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
     evaluate: (facts, relation) => setRelation(facts, relation, "equal"),
     strictness: "incomparable",
     identity: ["id"],
+    setComparison: "equal",
   },
   {
     kind: "set_subset",
@@ -340,6 +342,7 @@ const DESCRIPTORS: readonly RelationDescriptor[] = [
     evaluate: (facts, relation) => setRelation(facts, relation, "left_subset"),
     strictness: "incomparable",
     identity: ["id"],
+    setComparison: "left_subset",
   },
   {
     kind: "referenced_pointer_exists",
@@ -390,6 +393,12 @@ export function relationDescriptor(kind: string): RelationDescriptor {
   const descriptor = DESCRIPTOR_BY_KIND.get(kind);
   if (!descriptor) throw new Error(`unknown relation "${kind}"`);
   return descriptor;
+}
+
+export function relationDescriptorForSetComparison(comparison: "equal" | "left_subset"): RelationDescriptor {
+  const matches = DESCRIPTORS.filter((descriptor) => descriptor.setComparison === comparison);
+  if (matches.length !== 1) throw new Error(`expected exactly one relation for set comparison "${comparison}", found ${matches.length}`);
+  return matches[0]!;
 }
 
 export function evaluatePrimitiveRelation(facts: RelationEvaluationFacts, relation: PrimitiveRelation): unknown {

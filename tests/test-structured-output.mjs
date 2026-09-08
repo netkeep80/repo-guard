@@ -180,9 +180,16 @@ console.log("\n--- ChangeIntent anchors are exposed in JSON and summary output -
   expect("detected anchor count is exposed", parsed?.anchors?.stats?.detected, 6);
   expect("changed anchor count is exposed", parsed?.anchors?.stats?.changed, 4);
   expect("declared ChangeIntent anchors are exposed", parsed?.anchors?.stats?.declaredByChangeIntent, 3);
-  expect("unresolved anchor count is exposed", parsed?.anchors?.stats?.unresolved, 2);
+  expect("anchor stats do not duplicate semantic unresolved state", parsed?.anchors?.stats?.unresolved, undefined);
   expect("declared affects value is exposed", parsed?.anchors?.declaredByChangeIntent?.affects?.[0], "FR-001");
-  expect("trace diagnostics remain structured", parsed?.traceRuleResults?.length, 2);
+  expect("legacy trace result side channel is absent", parsed?.traceRuleResults, undefined);
+
+  const codeTrace = parsed?.ruleResults.find((item) => item.rule === "trace-rule: code-refs-must-resolve");
+  const docTrace = parsed?.ruleResults.find((item) => item.rule === "trace-rule: doc-refs-must-resolve");
+  expect("code trace remains a canonical relation result", codeTrace?.data?.kind, "set_subset");
+  expect("code trace exposes unresolved value through relation data", codeTrace?.data?.missing_values?.[0], "FR-999");
+  expect("doc trace remains a canonical relation result", docTrace?.data?.kind, "set_subset");
+  expect("doc trace exposes unresolved value through relation data", docTrace?.data?.missing_values?.[0], "FR-404");
 
   const summary = runGuard([
     "--repo-root", repo.dir,
@@ -192,8 +199,9 @@ console.log("\n--- ChangeIntent anchors are exposed in JSON and summary output -
     "--head", repo.head,
     "--change-intent", "change-intent.json",
   ]);
-  expectIncludes("summary exposes anchor totals", summary.output, "6 detected, 4 changed, 3 declared, 2 unresolved");
-  expectIncludes("summary exposes unresolved value", summary.output, "FR-999");
+  expectIncludes("summary exposes factual anchor totals", summary.output, "6 detected, 4 changed, 3 declared");
+  expectIncludes("summary exposes canonical trace rule", summary.output, "trace-rule: code-refs-must-resolve");
+  expect("summary does not recreate unresolved anchor side channel", summary.output.includes("unresolved anchor"), false);
   rmSync(repo.dir, { recursive: true });
 }
 

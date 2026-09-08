@@ -68,7 +68,7 @@ export type DocumentScalar = string | number | boolean | null;
 export type NormalizedDocumentFact = DocumentScalar | string[];
 export type FactSnapshot = "state" | "base" | "head";
 export type FactFormat = "json" | "yaml" | "plain_text";
-export type FactSource = "document" | "diff";
+export type FactSource = "document" | "diff" | "repository" | "change_intent";
 export type DiffFactSelector =
   | {
       kind: "changed_paths";
@@ -81,6 +81,14 @@ export type DiffFactSelector =
       metric: "new_docs" | "new_files" | "net_added_lines";
       exclude_paths?: readonly string[];
     };
+export type RepositoryFactSelector = {
+  kind: "anchor_values";
+  anchor_type: string;
+};
+export type ChangeIntentFactSelector = {
+  pointer: string;
+  projection?: DocumentProjection;
+};
 export type DocumentFactErrorCode =
   | "malformed_pointer"
   | "missing_pointer_segment"
@@ -96,10 +104,32 @@ export type FactRef =
       selector: { path: string; format: FactFormat; snapshot: FactSnapshot; pointer: string; projection?: DocumentProjection };
       type: DocumentFactType;
     }
-  | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType };
+  | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType }
+  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" }
+  | { source: "change_intent"; selector: ChangeIntentFactSelector; type: DocumentFactType };
 
 type DocumentRef = Extract<FactRef, { source: "document" }>;
 type DocumentSelector = DocumentRef["selector"];
+
+interface AnchorFactInputInstance {
+  value?: unknown;
+  file?: unknown;
+  line?: unknown;
+  column?: unknown;
+}
+
+export interface AnchorFactInstance {
+  value: string;
+  file: string;
+  line?: number;
+  column?: number;
+}
+
+export interface AnchorFactProvenance {
+  kind: "anchor_instances";
+  anchor_type: string;
+  instances: AnchorFactInstance[];
+}
 
 export interface FactReadContext {
   documents?: DocumentReader;
@@ -107,6 +137,8 @@ export interface FactReadContext {
   headRef?: string | null;
   readFileAtRef?: (ref: string, filePath: string) => unknown;
   diff?: { files?: { checked?: ParsedDiffFile[] } };
+  anchors?: { byType?: Record<string, AnchorFactInputInstance[]> };
+  changeIntent?: unknown;
 }
 
 export interface DocumentFactError {
@@ -117,7 +149,7 @@ export interface DocumentFactError {
 }
 
 export type DocumentFactResult =
-  | { ok: true; value: NormalizedDocumentFact }
+  | { ok: true; value: NormalizedDocumentFact; provenance?: AnchorFactProvenance }
   | { ok: false; error: DocumentFactError };
 
 export class DocumentFactFailure extends Error implements DocumentFactError {
@@ -278,7 +310,7 @@ export function normalizeDocumentFact(value: unknown, type: DocumentFactType, po
 }
 
 function factPointer(ref: FactRef): string {
-  return ref.source === "document" ? ref.selector.pointer : "";
+  return ref.source === "document" || ref.source === "change_intent" ? ref.selector.pointer : "";
 }
 
 function documentSelector(ref: FactRef): DocumentSelector {
@@ -348,11 +380,54 @@ function diffFactSource(context: FactReadContext, selector: DiffFactSelector): u
   return paths;
 }
 
+function anchorFactInstance(instance: AnchorFactInputInstance): AnchorFactInstance {
+  if (typeof instance.value !== "string") failDocumentFact("fact_type_mismatch", "repository anchor fact requires string values");
+  if (typeof instance.file !== "string") failDocumentFact("fact_type_mismatch", "repository anchor fact requires source files");
+  return {
+    value: instance.value,
+    file: instance.file,
+    ...(typeof instance.line === "number" ? { line: instance.line } : {}),
+    ...(typeof instance.column === "number" ? { column: instance.column } : {}),
+  };
+}
+
+function compareAnchorFactInstances(left: AnchorFactInstance, right: AnchorFactInstance): number {
+  return left.file.localeCompare(right.file)
+    || (left.line || 0) - (right.line || 0)
+    || (left.column || 0) - (right.column || 0)
+    || left.value.localeCompare(right.value);
+}
+
+function repositoryFact(context: FactReadContext, ref: Extract<FactRef, { source: "repository" }>): DocumentFactResult {
+  const byType = context.anchors?.byType;
+  if (!byType) return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
+  const instances = (byType[ref.selector.anchor_type] || []).map(anchorFactInstance).sort(compareAnchorFactInstances);
+  return {
+    ok: true,
+    value: normalizeDocumentFact(instances.map((instance) => instance.value), ref.type),
+    provenance: { kind: "anchor_instances", anchor_type: ref.selector.anchor_type, instances },
+  };
+}
+
+function changeIntentFactSource(context: FactReadContext, ref: Extract<FactRef, { source: "change_intent" }>): unknown {
+  const projection = ref.selector.projection ?? "value";
+  try {
+    return projectDocumentValue(context.changeIntent ?? {}, ref.selector.pointer, projection);
+  } catch (error) {
+    if (error instanceof DocumentFactFailure && error.code === "missing_pointer_segment" && projection !== "value") return [];
+    throw error;
+  }
+}
+
 export function readFact(context: FactReadContext, ref: FactRef): DocumentFactResult {
   const pointer = factPointer(ref);
   try {
     if (ref.source === "diff") {
       return { ok: true, value: normalizeDocumentFact(diffFactSource(context, ref.selector), ref.type, pointer) };
+    }
+    if (ref.source === "repository") return repositoryFact(context, ref);
+    if (ref.source === "change_intent") {
+      return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
     }
     const selector = documentSelector(ref);
     const source = selector.snapshot === "state"

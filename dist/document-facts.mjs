@@ -138,7 +138,7 @@ export function normalizeDocumentFact(value, type, pointer = "") {
     return failDocumentFact("fact_type_mismatch", `unsupported document fact type "${String(exhaustive)}"`, pointer);
 }
 function factPointer(ref) {
-    return ref.source === "document" ? ref.selector.pointer : "";
+    return ref.source === "document" || ref.source === "change_intent" ? ref.selector.pointer : "";
 }
 function documentSelector(ref) {
     if (ref.source !== "document")
@@ -212,11 +212,56 @@ function diffFactSource(context, selector) {
         : selectPaths(candidates, patterns);
     return paths;
 }
+function anchorFactInstance(instance) {
+    if (typeof instance.value !== "string")
+        failDocumentFact("fact_type_mismatch", "repository anchor fact requires string values");
+    if (typeof instance.file !== "string")
+        failDocumentFact("fact_type_mismatch", "repository anchor fact requires source files");
+    return {
+        value: instance.value,
+        file: instance.file,
+        ...(typeof instance.line === "number" ? { line: instance.line } : {}),
+        ...(typeof instance.column === "number" ? { column: instance.column } : {}),
+    };
+}
+function compareAnchorFactInstances(left, right) {
+    return left.file.localeCompare(right.file)
+        || (left.line || 0) - (right.line || 0)
+        || (left.column || 0) - (right.column || 0)
+        || left.value.localeCompare(right.value);
+}
+function repositoryFact(context, ref) {
+    const byType = context.anchors?.byType;
+    if (!byType)
+        return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
+    const instances = (byType[ref.selector.anchor_type] || []).map(anchorFactInstance).sort(compareAnchorFactInstances);
+    return {
+        ok: true,
+        value: normalizeDocumentFact(instances.map((instance) => instance.value), ref.type),
+        provenance: { kind: "anchor_instances", anchor_type: ref.selector.anchor_type, instances },
+    };
+}
+function changeIntentFactSource(context, ref) {
+    const projection = ref.selector.projection ?? "value";
+    try {
+        return projectDocumentValue(context.changeIntent ?? {}, ref.selector.pointer, projection);
+    }
+    catch (error) {
+        if (error instanceof DocumentFactFailure && error.code === "missing_pointer_segment" && projection !== "value")
+            return [];
+        throw error;
+    }
+}
 export function readFact(context, ref) {
     const pointer = factPointer(ref);
     try {
         if (ref.source === "diff") {
             return { ok: true, value: normalizeDocumentFact(diffFactSource(context, ref.selector), ref.type, pointer) };
+        }
+        if (ref.source === "repository")
+            return repositoryFact(context, ref);
+        if (ref.source === "change_intent") {
+            return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
         }
         const selector = documentSelector(ref);
         const source = selector.snapshot === "state"

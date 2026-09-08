@@ -21,7 +21,7 @@ const declaration = (start, end) => {
   return from >= 0 && to > from ? documentFacts.slice(from, to) : "";
 };
 const factRef = declaration("export type FactRef =", "\ntype DocumentRef");
-const diffSelector = declaration("export type DiffFactSelector =", "\nexport type DocumentFactErrorCode");
+const diffSelector = declaration("export type DiffFactSelector =", "\nexport type RepositoryFactSelector");
 
 const historicalRuntimeKinds = [
   "max_metric",
@@ -37,12 +37,12 @@ for (const kind of historicalRuntimeKinds) {
 }
 
 const factSources = [...factRef.matchAll(/\bsource\s*:\s*"([^"]+)"/g)].map((match) => match[1]).sort();
-expect("canonical FactRef has exactly the finite document/diff source alternatives", factSources.join(","), "diff,document");
-expect("canonical FactRef keeps one selector per source alternative", (factRef.match(/\bselector\s*:/g) || []).length, 2);
+expect("canonical FactRef has exactly the finite accepted source alternatives", factSources.join(","), "change_intent,diff,document,repository");
+expect("canonical FactRef keeps one selector per source alternative", (factRef.match(/\bselector\s*:/g) || []).length, 4);
 const diffSelectorKinds = [...diffSelector.matchAll(/\bkind\s*:\s*([^;]+);/g)]
   .flatMap((match) => [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]))
   .sort();
-expect("diff selector vocabulary is finite", diffSelectorKinds.join(","), "changed_paths,metric");
+expect("diff selector vocabulary remains finite and unchanged", diffSelectorKinds.join(","), "changed_paths,metric");
 expect("no compatibility document selector model is reintroduced", documentFacts.includes("DocumentFactSelector"), false);
 
 const descriptorKinds = new Set(relationDescriptors().map((descriptor) => descriptor.kind));

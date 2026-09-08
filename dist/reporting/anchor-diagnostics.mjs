@@ -1,4 +1,3 @@
-import { buildTraceRuleDiagnostics } from "../checks/trace-rules.mjs";
 const CHANGE_INTENT_ANCHOR_FIELDS = ["affects", "implements", "verifies"];
 function cloneAnchorInstance(instance) {
     return { ...instance };
@@ -37,49 +36,27 @@ function declaredChangeIntentAnchors(changeIntent) {
     declared.all = all;
     return declared;
 }
-function flattenUnresolved(traceRuleResults) {
-    const unresolved = [];
-    for (const result of traceRuleResults) {
-        for (const item of result.unresolved || []) {
-            unresolved.push({
-                rule: result.id,
-                kind: result.kind,
-                fromAnchorType: result.fromAnchorType,
-                toAnchorType: result.toAnchorType,
-                value: item.value,
-                instances: item.instances,
-            });
-        }
-    }
-    return unresolved;
-}
 export function buildAnchorDiagnostics(facts) {
-    const traceRuleResults = buildTraceRuleDiagnostics(facts);
-    if (!facts.policy.anchors) {
-        return traceRuleResults.length > 0 ? { traceRuleResults } : {};
-    }
+    if (!facts.policy.anchors)
+        return {};
     const detected = (facts.anchors?.instances || []).map(cloneAnchorInstance);
     const changedPaths = new Set(facts.derived.changedPaths || []);
     const changed = detected
         .filter((instance) => changedPaths.has(instance.file))
         .map(cloneAnchorInstance);
     const declaredByChangeIntent = declaredChangeIntentAnchors(facts.changeIntent);
-    const unresolved = flattenUnresolved(traceRuleResults);
     return {
         anchors: {
             detected,
             changed,
             declaredByChangeIntent,
-            unresolved,
             stats: {
                 detected: detected.length,
                 changed: changed.length,
                 declaredByChangeIntent: declaredByChangeIntent.all.length,
-                unresolved: unresolved.length,
                 extractionErrors: (facts.anchors?.errors || []).length,
                 byType: groupByType(facts.policy.anchors.types, { detected, changed }),
             },
         },
-        traceRuleResults,
     };
 }
