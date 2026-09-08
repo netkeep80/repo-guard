@@ -199,5 +199,5 @@ console.log("\n--- relation algebra stays finite ---");
   ]);
 }
 
-console.log(`\n${failures === 0 ? "C3.3b falsifier unexpectedly passed" : `C3.3b RED confirmed by ${failures} failing probe(s)`}`);
+console.log(`\n${failures === 0 ? "C3.3b canonical lowering contract passed" : `C3.3b RED confirmed by ${failures} failing probe(s)`}`);
 process.exit(failures === 0 ? 0 : 1);
