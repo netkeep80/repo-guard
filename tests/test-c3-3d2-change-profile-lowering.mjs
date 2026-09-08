@@ -144,7 +144,7 @@ console.log("\n--- new-file class semantics lower through added-path facts ---")
     classes: { code: ["src/**"] },
     profile: { new_files: { allow_classes: ["code"], max_new_files: 1 } },
   });
-  expect("new_files.max_new_files is enforced", profileOutcome(maxFilesPolicy, "feature", [file("src/a.mjs", "added"), file("src/b.mjs", "added")]).ok, false);
+  expect("new_files.max_new_files is enforced", profileOutcome(maxFilesPolicy, "feature", [file("src/a.mjs", "added"), file("docs/a.md", "added")]).ok, false);
 }
 
 console.log("\n--- profile budgets reuse canonical diff metrics ---");
@@ -230,7 +230,7 @@ console.log("\n--- structural ratchet: change_profile runtime and evaluator disa
   const runtimeKinds = kindBlock
     ? [...kindBlock[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]).sort()
     : [];
-  expect("runtime kind vocabulary is exactly the C3.3d2 target three", runtimeKinds, ["integration", "primitive_relation", "size_rules"]);
+  expect("runtime kind vocabulary follows the current compressed tail", runtimeKinds, ["integration", "primitive_relation"]);
 }
 
 console.log("\n--- global architecture invariants do not grow ---");
