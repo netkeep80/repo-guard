@@ -111,7 +111,34 @@ RepositoryFactSelector.anchor_values
 
 Само наличие этого пункта не является разрешением добавить `path_metric` заранее. Сначала должен существовать RED, который невозможно корректно закрыть существующим словарём.
 
-## 3. Почему работа разбита на три принимаемых среза
+## 3. Уровень требуемой эквивалентности
+
+Для сохраняемых возможностей C3.3d сохраняет семантическое решение:
+
+```text
+pass / fail
+blocking / advisory
+transaction / state applicability
+fail-closed conditions
+```
+
+Не требуется сохранять побайтно прежний диагностический объект, старые имена внутренних результатов или historical aggregation shape.
+
+Причина: сохранение старой формы отчёта не должно вынуждать оставить старый evaluator.
+
+Канонический relation result обязан сохранять достаточную диагностику:
+
+```text
+source fact provenance
+actual value or selected values
+bound / expected relation
+rule or lowering origin metadata
+read/evaluation failure
+```
+
+Высокоуровневое происхождение ограничения может переноситься как обычная метаинформация compiled entry. Оно не даёт отдельной семантики.
+
+## 4. Почему работа разбита на три принимаемых среза
 
 Четыре исторических вида `runtime` имеют разную природу:
 
@@ -132,9 +159,9 @@ C3.3d3: lower size_rules through canonical facts
 
 Каждый срез имеет собственный RED-first PR, собственный точный head и post-merge проверку.
 
-## 4. C3.3d1 — удалить `surface_debt`
+## 5. C3.3d1 — удалить `surface_debt`
 
-### 4.1. Наблюдаемая текущая семантика
+### 5.1. Наблюдаемая текущая семантика
 
 `surface_debt` объявляется в `ChangeIntent` и содержит:
 
@@ -165,7 +192,7 @@ declared_debt_exceeded
 
 Это отдельный исторический диагностический путь.
 
-### 4.2. Решение
+### 5.2. Решение
 
 Удалить без замены:
 
@@ -188,9 +215,9 @@ debt compatibility alias
 
 Если в будущем понадобится формальная временная санкция на рост, она должна проектироваться как отдельная доверенная governance-модель, а не восстанавливать этот диагностический объект.
 
-## 5. C3.3d1 — удалить `registry_rules`
+## 6. C3.3d1 — удалить `registry_rules`
 
-### 5.1. Наблюдаемая текущая форма
+### 6.1. Наблюдаемая текущая форма
 
 `registry_rules` содержит собственный язык источников:
 
@@ -211,7 +238,7 @@ right_subset_of_left
 
 Уже существует архитектурный дрейф: публичная схема использует имя `set_equality`, а внутренний тип исполнителя — `equal`; equality продолжает работать через fallback-ветку. Это показатель случайной совместимости, а не канонического контракта.
 
-### 5.2. Решение
+### 6.2. Решение
 
 Удалить без legacy-слоя:
 
@@ -239,7 +266,7 @@ document_relations
 
 Если реальный consumer позже предъявит use case, он должен стать новым falsifier для generic document acquisition, а не причиной сохранить старый `registry_rules` DSL.
 
-### 5.3. Цель среза
+### 6.3. Цель среза
 
 После C3.3d1:
 
@@ -258,9 +285,9 @@ primitive_relation
 
 Число источников `FactRef` остаётся 4.
 
-## 6. C3.3d2 — `change_profiles` как чистый high-level lowering
+## 7. C3.3d2 — `change_profiles` как чистый high-level lowering
 
-### 6.1. Что сохраняется
+### 7.1. Что сохраняется
 
 Публичный раздел `change_profiles` сохраняется, потому что он полезен и используется self-policy.
 
@@ -274,7 +301,7 @@ change_profile runtime kind
 change_profile dispatch
 ```
 
-### 6.2. Каноническая цель
+### 7.2. Каноническая цель
 
 Высокоуровневый профиль должен компилироваться до обычных `primitive_relation` через существующие `diff` facts.
 
@@ -282,7 +309,34 @@ change_profile dispatch
 
 Новый relation primitive не нужен.
 
-### 6.3. Сохранение semantics пересекающихся поверхностей
+Существующий `numeric_bound` уже поддерживает обе границы:
+
+```text
+min
+max
+```
+
+Поэтому `require_surfaces` не требует нового relation kind.
+
+### 7.3. Выбор профиля
+
+Выбор профиля по `ChangeIntent.change_type` является frontend compilation concern.
+
+Текущая особая semantics сохраняется:
+
+```text
+change_type = governance
+```
+
+не выбирает обычный `change_profile` и не создаёт profile constraints. Управляющее разрешение по-прежнему определяется отдельным `GovernanceGrant` и base-policy control plane.
+
+Если профили существуют и `change_type` отсутствует, compilation должен завершаться fail-closed diagnostic.
+
+Если `change_type` не равен `governance` и не существует среди `change_profiles`, compilation должен завершаться fail-closed diagnostic.
+
+Эти ошибки не являются отдельным runtime evaluator.
+
+### 7.4. Сохранение semantics пересекающихся поверхностей
 
 Один изменённый путь может соответствовать нескольким поверхностям.
 
@@ -306,7 +360,7 @@ numeric_bound(max = 0)
 
 Это сохраняет текущую overlap-semantics.
 
-### 6.4. Полное lowering
+### 7.5. Полное lowering
 
 `forbid_surfaces`:
 
@@ -324,9 +378,17 @@ matching changed paths
 numeric_bound(min = 1)
 ```
 
-Если relation kernel хранит `numeric_bound` через другой параметризированный вид нижней границы, реализация должна переиспользовать текущий descriptor contract, а не создавать новый вид relation.
+`allow_unclassified_surfaces = false` проверяется только если профиль действительно задаёт хотя бы одно surface-ограничение:
 
-`allow_unclassified_surfaces = false`:
+```text
+require_surfaces
+or allow_surfaces
+or forbid_surfaces
+```
+
+Это сохраняет текущую семантику `usesConstraints`.
+
+При наличии таких ограничений lowering:
 
 ```text
 diff.changed_paths(
@@ -336,6 +398,8 @@ diff.changed_paths(
         ↓
 numeric_bound(max = 0)
 ```
+
+Если surface-ограничения отсутствуют, одно поле `allow_unclassified_surfaces = false` само по себе не создаёт запрет.
 
 `new_files.allow_classes`:
 
@@ -350,7 +414,9 @@ diff.changed_paths(
 numeric_bound(max = 0)
 ```
 
-Не классифицированные новые файлы:
+Если `allow_classes` пуст, любая затронутая объявленная class считается неразрешённой, как и сейчас.
+
+Не классифицированные новые файлы запрещаются при наличии блока `new_files` независимо от непустоты `allow_classes`:
 
 ```text
 diff.changed_paths(
@@ -362,7 +428,7 @@ diff.changed_paths(
 numeric_bound(max = 0)
 ```
 
-`max_per_class`:
+`new_files.max_per_class`:
 
 ```text
 added paths matching class
@@ -370,21 +436,29 @@ added paths matching class
 numeric_bound(max = configured_limit)
 ```
 
+`new_files.max_new_files`:
+
+```text
+diff.metric(new_files)
+        ↓
+numeric_bound(max = configured_limit)
+```
+
 Профильные бюджеты:
 
 ```text
-existing diff metric FactRef
-        ↓
-numeric_bound
+max_new_docs
+max_new_files
+max_net_added_lines
 ```
 
-### 6.5. Выбор профиля и ошибки
+компилируются через существующие `diff.metric` facts и `numeric_bound`.
 
-Выбор конкретного профиля по `ChangeIntent.change_type` является frontend compilation concern.
+`max_new_docs` продолжает учитывать исключение `paths.canonical_docs`, как текущий общий budget lowering.
 
-Неизвестный или отсутствующий `change_type`, если `change_profiles` требует выбора профиля, должен завершаться fail-closed compilation diagnostic.
+### 7.6. Ссылочная целостность
 
-Проверки ссылочной целостности:
+Следующие ссылки проверяются до runtime evaluation:
 
 ```text
 allow_surfaces -> known surface
@@ -394,11 +468,9 @@ allow_classes -> known class
 max_per_class keys -> known class
 ```
 
-также остаются в semantic frontend validation.
+Они остаются semantic frontend validation и не превращаются во второй evaluator.
 
-Они не становятся вторым runtime evaluator.
-
-### 6.6. Цель среза
+### 7.7. Цель среза
 
 После C3.3d2:
 
@@ -414,11 +486,11 @@ primitive_relation
 
 `change_profiles` остаётся публичным high-level syntax, но после компиляции его имя отсутствует в runtime program.
 
-## 7. C3.3d3 — `size_rules` через канонические факты
+## 8. C3.3d3 — `size_rules` через канонические факты
 
-### 7.1. Что сохраняется
+### 8.1. Что сохраняется
 
-`size_rules` реально используется self-policy и предоставляет две различные категории ограничений:
+`size_rules` реально используется self-policy и предоставляет две категории ограничений:
 
 ```text
 absolute repository-state size
@@ -436,15 +508,15 @@ size_rules dispatch
 special runtime-only invalid-combination handling
 ```
 
-### 7.2. Сначала доказать нехватку словаря
+### 8.2. Сначала доказать нехватку словаря
 
-До изменения `FactRef` необходимо написать RED, выражающий полную требуемую семантику `size_rules` через будущую каноническую программу.
+До изменения `FactRef` необходимо написать RED, выражающий требуемую поддерживаемую семантику `size_rules` через будущую каноническую программу.
 
-Если существующие факты неожиданно позволяют закрыть RED без нового селектора, `path_metric` не добавляется.
+Если существующие факты позволяют закрыть RED без нового селектора, `path_metric` не добавляется.
 
 Если не позволяют, допускается ровно одно минимальное расширение существующего `repository` source.
 
-### 7.3. Предлагаемый `repository.path_metric`
+### 8.3. Предлагаемый `repository.path_metric`
 
 Концептуальная typed-форма:
 
@@ -459,7 +531,7 @@ selector.aggregate = max | sum
 type = scalar
 ```
 
-Это acquisition primitive: он только измеряет выбранную поверхность репозитория и возвращает число.
+Это acquisition primitive: он только выбирает измеряемые пути из уже доступных repository/diff facts, читает текущее содержимое и возвращает число.
 
 Он ничего не знает о:
 
@@ -474,7 +546,7 @@ change_type
 
 Эти понятия принадлежат frontend lowering и execution metadata.
 
-### 7.4. Абсолютные ограничения
+### 8.4. Абсолютные ограничения и фаза исполнения
 
 Для file scope:
 
@@ -495,7 +567,7 @@ every matching source file <= 900 lines
 max(lines(each matching file)) <= 900
 ```
 
-Для directory scope:
+Для directory scope абсолютная метрика считается по всей выбранной текущей поверхности:
 
 ```text
 aggregate = sum
@@ -505,20 +577,91 @@ aggregate = sum
 
 После acquisition всегда используется существующий `numeric_bound`.
 
-### 7.5. Рост транзакции
+Фаза primitive constraint должна сохранять текущую модель:
+
+```text
+all_tracked absolute max without change-type condition -> state
+max_growth -> transaction
+applies_to_change_types absolute max -> transaction
+changed_only file absolute max -> transaction
+```
+
+При выполнении общего режима `both` соответствующие state и transaction constraints оцениваются вместе обычным phase mechanism.
+
+### 8.5. `applies_to_change_types`
+
+Эта форма не требует нового fact selector.
+
+`compileConstraintProgram` уже получает `ChangeIntent`, поэтому frontend либо компилирует size constraint для текущего `change_type`, либо не компилирует его.
+
+Для directory rule с `all_tracked` и подходящим `change_type` измеряется вся текущая matching surface, но constraint имеет transaction phase.
+
+Это сохраняет текущую semantics self-policy для refactor-only no-growth/absolute rules.
+
+### 8.6. `changed_only`
+
+Текущая semantics различается по scope.
+
+Для file scope:
+
+```text
+count = changed_only
+```
+
+означает измерять только текущие изменённые, не удалённые matching files. Это чисто выражается через:
+
+```text
+repository.path_metric(population = changed)
+```
+
+и может быть сохранено.
+
+Для directory scope текущая semantics иная:
+
+```text
+if no matching path changed -> skip rule
+if any matching path changed -> measure entire current matching directory surface
+```
+
+Это условная историческая форма, которую нельзя маскировать значением `population = changed`.
+
+Базовое решение C3.3d3:
+
+```text
+scope = directory + count = changed_only
+```
+
+удалить из поддерживаемого публичного поднабора и отвергать на schema/compiler boundary, если RED не обнаружит уже существующее простое каноническое выражение без нового relation primitive и без специального conditional acquisition mode.
+
+Запрещено добавлять ради этой формы селектор наподобие:
+
+```text
+tracked_if_changed
+```
+
+или отдельный conditional evaluator.
+
+### 8.7. Рост транзакции
 
 Рост не должен создавать repository snapshot subsystem.
 
 Он относится к `diff` source.
 
-Существующий `diff.metric` уже измеряет общие transaction metrics. При доказанной необходимости допустимо расширить его параметрами `patterns` и `ignore` и добавить только недостающие конечные metric names, например:
+Существующий `diff.metric` уже измеряет общие transaction metrics. При доказанной необходимости допустимо расширить его pattern-scoped параметрами:
+
+```text
+patterns
+ignore
+```
+
+и добавить только недостающие конечные metric names, например:
 
 ```text
 net_added_lines
 net_files
 ```
 
-Конкретные имена должны быть минимальными и закрепляться implementation plan после RED-аудита.
+Конкретные имена закрепляются implementation plan после focused RED-аудита.
 
 Не допускается:
 
@@ -528,11 +671,17 @@ size-growth relation
 base repository snapshot evaluator
 ```
 
-После получения числового transaction fact применяется существующий `numeric_bound(max = max_growth)`.
+После получения числового transaction fact применяется существующий:
 
-### 7.6. Невалидные исторические сочетания
+```text
+numeric_bound(max = max_growth)
+```
 
-Если форма `size_rules` не имеет однозначной поддерживаемой semantics, она должна быть отвергнута на schema/compiler boundary.
+Отрицательный `max_growth` сохраняется и может требовать реального сжатия.
+
+### 8.8. Невалидные исторические сочетания
+
+Если форма `size_rules` не имеет однозначной поддерживаемой semantics в canonical facts + relations, она должна быть отвергнута на schema/compiler boundary.
 
 Нельзя сохранять модель:
 
@@ -548,27 +697,38 @@ dedicated runtime detects unsupported combination
 schema/compiler rejects unsupported combination
 ```
 
-Это относится, в частности, к комбинациям, для которых невозможно точно восстановить transaction delta имеющимися фактами.
+Минимум должны быть явно проверены текущие ограничения:
 
-Поддерживаемый публичный поднабор должен быть ровно тем, который можно выразить canonical facts + relations.
+```text
+metric = files -> directory scope only
+max_growth -> directory scope only
+max_growth + bytes -> unsupported
+```
 
-### 7.7. Уровень исполнения
+Дополнительно, как определено выше, `directory + changed_only` по умолчанию становится unsupported, если equivalence RED не докажет простое каноническое выражение.
+
+### 8.9. Уровень исполнения
 
 Self-policy использует как blocking, так и advisory size checks.
 
-Поэтому primitive runtime entry может нести execution/reporting metadata:
+Поэтому primitive runtime entry может нести общую execution/reporting metadata:
 
 ```text
 level = blocking | advisory
+origin = size_rule:<id>
 ```
 
 `level` не изменяет истинность relation и не создаёт новый evaluator.
 
-Один primitive relation сначала вычисляется одинаково; затем reporting/enforcement слой решает, является ли нарушение blocking или advisory.
+Один primitive relation сначала вычисляется одинаково; затем общий reporting/enforcement слой решает, является ли нарушение blocking или advisory.
 
-Если в текущей архитектуре уже есть более общий эквивалентный execution metadata mechanism, необходимо переиспользовать его вместо добавления второго механизма.
+Если в текущей архитектуре уже есть более общий эквивалентный механизм метаданных, необходимо переиспользовать его вместо добавления второго механизма.
 
-### 7.8. Fail-closed measurement
+### 8.10. Fail-closed measurement
+
+Текущий historical evaluator может молча пропустить файл, если чтение вернуло `null`.
+
+C3.3d3 намеренно ужесточает эту границу.
 
 Если путь входит в измеряемое множество, но содержимое нельзя прочитать или измерить, этот путь нельзя молча пропускать.
 
@@ -581,9 +741,9 @@ matching path
 = relation evaluation failure
 ```
 
-Это устраняет fail-open поведение измерителя.
+Это fail-closed изменение считается архитектурным исправлением, а не compatibility regression.
 
-### 7.9. Цель среза
+### 8.11. Цель среза
 
 После C3.3d3:
 
@@ -596,7 +756,7 @@ integration
 primitive_relation
 ```
 
-## 8. Что C3.3d не делает
+## 9. Что C3.3d не делает
 
 Строго вне области:
 
@@ -619,7 +779,7 @@ validate-integration redesign
 C3.3e — integration / parallel convergence audit
 ```
 
-## 9. Порядок доказательства
+## 10. Порядок доказательства
 
 Каждый принимаемый срез выполняется только RED-first.
 
@@ -646,7 +806,7 @@ post-merge main CI
 
 Никакой transitional evaluator не остаётся после merge.
 
-## 10. Требования к equivalence для сохраняемых возможностей
+## 11. Требования к equivalence для сохраняемых возможностей
 
 Для `change_profiles` необходимо доказать минимум:
 
@@ -655,17 +815,20 @@ allowed surface pass
 forbidden surface fail
 required surface pass/fail
 overlapping allowed+disallowed surface fail
-unclassified surface pass/fail according to flag
+unclassified behavior only when surface constraints exist
 allowed/disallowed new-file class
+empty allow_classes behavior
 unclassified new file
 per-class budget
-profile budget
+new_files.max_new_files
+profile budgets
+governance bypass
 missing change_type
 unknown change_type
 unknown surface/class reference
 ```
 
-Сравнение должно проверять observable result, а не только форму compiled program.
+Сравнение проверяет семантическое решение и fail-closed условия. Exact historical diagnostic shape сохранять не требуется.
 
 Для `size_rules` необходимо доказать минимум:
 
@@ -674,19 +837,21 @@ file lines absolute pass/fail
 directory lines absolute pass/fail
 file count absolute pass/fail
 ignore patterns
-changed_only vs all_tracked where retained
-change-type applicability
+file changed_only where retained
+applies_to_change_types
+state/transaction phase split
 line growth pass/fail
 file-count growth pass/fail
+negative max_growth
 advisory violation remains non-blocking
 blocking violation remains blocking
 measurement read failure is fail-closed
 unsupported combinations are rejected before runtime
 ```
 
-Если какая-либо существующая форма не может быть корректно сохранена без нового специального механизма, она должна быть явно удалена из публичной схемы, а regression test должен проверять rejection.
+Если какая-либо существующая форма не может быть корректно сохранена без нового специального механизма, она явно удаляется из публичной схемы, а regression test проверяет rejection.
 
-## 11. Измеримые критерии сжатия
+## 12. Измеримые критерии сжатия
 
 После каждого среза запускается canonical comparison:
 
@@ -715,7 +880,7 @@ FactRef models = 1 throughout
 
 Количество `RepositoryFactSelector` variants может увеличиться с 1 до 2 только в C3.3d3 и только после RED proof.
 
-## 12. Документация и публичная граница
+## 13. Документация и публичная граница
 
 Удалённые публичные концепты удаляются в том же срезе из:
 
@@ -735,7 +900,7 @@ dist
 
 `change_profiles` и `size_rules` сохраняют пользовательские имена только пока они остаются полезным high-level syntax. В runtime program эти имена после соответствующего lowering отсутствуют.
 
-## 13. Разбиение будущего implementation plan
+## 14. Разбиение будущего implementation plan
 
 После письменного review этого spec создаётся один master plan, который не реализуется одним PR.
 
@@ -751,7 +916,9 @@ C3.3d3 — lowering: size_rules
 
 Не создавать заранее implementation branches для d2/d3: фактический accepted state предыдущего среза является их source of truth.
 
-## 14. Финальная приёмка C3.3d
+Self-policy разрешает не более двух новых документов в одном изменении. Первый слот уже занимает этот spec; второй предназначается master implementation plan. Дополнительный итоговый документ C3.3d не создаётся.
+
+## 15. Финальная приёмка C3.3d
 
 C3.3d считается завершённым только если одновременно доказано:
 
