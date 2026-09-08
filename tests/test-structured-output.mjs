@@ -230,38 +230,6 @@ console.log("\n--- malformed ChangeIntent uses canonical validation diagnostic -
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- registry diagnostics keep relation evidence structured ---");
-{
-  const policy = basePolicy({
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md", "docs/policy.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    registry_rules: [{
-      id: "canonical-docs-sync",
-      kind: "set_equality",
-      left: { type: "json_array", file: "repo-policy.json", json_pointer: "/paths/canonical_docs" },
-      right: { type: "markdown_section_links", file: "docs/index.md", section: "Canonical Documents", prefix: "docs/" },
-    }],
-  });
-  const repo = makeRepo({
-    policy,
-    baseFiles: {
-      "docs/policy.md": "# Policy\n",
-      "docs/index.md": "# Docs\n\n## Canonical Documents\n\n- [Readme](../README.md)\n- [Architecture](architecture.md)\n",
-    },
-    headFiles: { "README.md": "# Test\n\nChanged.\n" },
-  });
-  const { result, parsed } = runJson(repo);
-  expect("registry mismatch blocks", result.code, 1);
-  const violation = parsed?.violations.find((item) => item.rule === "registry-rules");
-  expect("registry violation is present", Boolean(violation), true);
-  expect("missing relation entry is exposed", violation?.data?.results?.[0]?.missing_from_right?.[0], "docs/policy.md");
-  expect("extra relation entry is exposed", violation?.data?.results?.[0]?.extra_in_right?.[0], "docs/architecture.md");
-  rmSync(repo.dir, { recursive: true });
-}
-
 console.log("\n--- size violations retain machine-readable measurements ---");
 {
   const repo = makeRepo({
@@ -276,35 +244,6 @@ console.log("\n--- size violations retain machine-readable measurements ---");
   expect("size rule id is exposed", measurement?.ruleId, "max-src-lines");
   expect("measured line count is exposed", measurement?.actual, 3);
   expect("configured maximum is exposed", measurement?.max, 2);
-  rmSync(repo.dir, { recursive: true });
-}
-
-console.log("\n--- surface debt status is exposed without duplicating debt semantics ---");
-{
-  const changeIntent = {
-    change_type: "feature",
-    scope: ["src/**"],
-    budgets: {},
-    surface_debt: {
-      kind: "temporary_growth",
-      reason: "Temporary extraction seam",
-      expected_delta: { max_new_files: 1, max_net_added_lines: 20 },
-      repayment_issue: 123,
-    },
-    must_touch: [],
-    must_not_touch: [],
-    expected_effects: ["Make temporary growth explicit"],
-  };
-  const repo = makeRepo({
-    policy: basePolicy(),
-    baseFiles: { "change-intent.json": JSON.stringify(changeIntent, null, 2) },
-    headFiles: { "src/growth.mjs": `${new Array(12).fill("export const value = 1;").join("\n")}\n` },
-  });
-  const { result, parsed } = runJson(repo, ["--change-intent", "change-intent.json"]);
-  expect("declared debt stays within budget", result.code, 0);
-  const debt = parsed?.ruleResults.find((item) => item.rule === "surface-debt");
-  expect("surface debt rule passes", debt?.ok, true);
-  expect("declared status is exposed", debt?.details.includes("status: declared"), true);
   rmSync(repo.dir, { recursive: true });
 }
 

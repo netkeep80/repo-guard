@@ -130,20 +130,6 @@ else console.log(JSON.stringify({labels:[]}));
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("rejects a broken registry rule in the policy adoption PR", () => {
-    const root = tinyRepo("rg-pr-head-registry-", []);
-    writeFileSync(join(root, "facts.json"), JSON.stringify({ expected: ["a"], actual: ["b"] })); git(root, "add", "-A"); git(root, "commit", "-m", "fixture");
-    rewritePolicy(root, (policy) => { policy.registry_rules = [{
-      id: "same-pr-registry", kind: "set_equality",
-      left: { type: "json_array", file: "facts.json", json_pointer: "/expected" },
-      right: { type: "json_array", file: "facts.json", json_pointer: "/actual" },
-    }]; });
-    git(root, "add", "repo-policy.json"); git(root, "commit", "-m", "add registry rule");
-    const result = run(root, intent(["repo-policy.json"])), output = `${result.stdout || ""}${result.stderr || ""}`;
-    assert.equal(result.status, 1, output); assert.match(output, /FAIL: proposed-policy:registry-rules/);
-    rmSync(root, { recursive: true, force: true });
-  });
-
   it("rejects a broken integration expectation in the policy adoption PR", () => {
     const root = tinyRepo("rg-pr-head-integration-", []);
     rewritePolicy(root, (policy) => { policy.integration = { workflows: [{

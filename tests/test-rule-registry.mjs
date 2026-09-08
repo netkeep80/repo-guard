@@ -93,22 +93,6 @@ const facts = {
     size_rules: [
       { id: "max-feature-lines", scope: "file", metric: "lines", glob: "src/feature.mjs", max: 10, count: "changed_only" },
     ],
-    registry_rules: [
-      {
-        id: "canonical-docs-sync",
-        kind: "set_equality",
-        left: {
-          type: "json_array",
-          file: "repo-policy.json",
-          json_pointer: "/paths/canonical_docs",
-        },
-        right: {
-          type: "markdown_section_links",
-          file: "docs/index.md",
-          section: "Canonical Documents",
-        },
-      },
-    ],
     advisory_text_rules: {
       canonical_files: ["docs/canonical.md"],
       warn_on_similarity_above: 0.8,
@@ -216,9 +200,7 @@ for (const name of [
   "canonical-docs-budget",
   "max-new-files",
   "max-net-added-lines",
-  "surface-debt",
   "size-rules",
-  "registry-rules",
   "advisory-text-rules",
   "anchor-extraction",
   "trace-rule: evidence-ok",

@@ -93,7 +93,6 @@ export interface ConstraintPolicyProjection {
   enforcement?: { mode?: EnforcementMode };
   size_rules?: SizeRuleProjection[];
   integration?: IntegrationProjection;
-  registry_rules?: unknown[];
   trace_rules?: TraceRuleProjection[];
   change_profiles?: unknown;
   cochange_rules?: CochangeRuleProjection[];
@@ -104,7 +103,6 @@ export interface ConstraintPolicyProjection {
 
 interface ChangeIntentProjection {
   budgets?: DiffRulesProjection;
-  surface_debt?: unknown;
   scope?: unknown;
   must_touch?: unknown;
   must_not_touch?: unknown;
@@ -316,10 +314,8 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
   }
 
   if (array(policy.size_rules).length) add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
-  if (array(policy.registry_rules).length) add("runtime:registry-rules", { kind: "registry_rules", name: "registry-rules", rules: policy.registry_rules });
   if (policy.change_profiles) add("runtime:change-profile", { kind: "change_profile", name: "change-profiles" });
   if (policy.integration) add("runtime:integration", { kind: "integration", name: "integration" });
-  add("surface-debt", { kind: "surface_debt", name: "surface-debt", debt: changeIntent?.surface_debt });
 
   for (const group of array(policy.cochange_groups)) {
     const id = String(group.id ?? ""), owner = `cochange-group:${id}`, pointer = `/cochange_groups/${id}`;

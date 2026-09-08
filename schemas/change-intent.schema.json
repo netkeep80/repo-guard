@@ -16,21 +16,6 @@
         "max_net_added_lines": { "type": "integer", "minimum": 0 }
       }
     },
-    "surface_debt": {
-      "type": "object", "required": ["kind", "reason", "expected_delta", "repayment_issue"], "additionalProperties": false,
-      "properties": {
-        "kind": { "const": "temporary_growth" },
-        "reason": { "type": "string", "minLength": 1 },
-        "expected_delta": {
-          "type": "object", "minProperties": 1, "additionalProperties": false,
-          "properties": {
-            "max_new_files": { "type": "integer", "minimum": 0 },
-            "max_net_added_lines": { "type": "integer", "minimum": 0 }
-          }
-        },
-        "repayment_issue": { "type": "integer", "minimum": 1 }
-      }
-    },
     "anchors": {
       "type": "object", "additionalProperties": false,
       "properties": {

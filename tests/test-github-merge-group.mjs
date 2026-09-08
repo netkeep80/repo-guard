@@ -38,12 +38,13 @@ function basePolicy() {
       max_new_files: 0,
       max_net_added_lines: 0,
     },
-    registry_rules: [
+    size_rules: [
       {
         id: "merge-group-state",
-        kind: "set_equality",
-        left: { type: "json_array", file: "left.json", json_pointer: "/items" },
-        right: { type: "json_array", file: "right.json", json_pointer: "/items" },
+        scope: "directory",
+        metric: "files",
+        glob: "src/**",
+        max: 1,
       },
     ],
     content_rules: [],
@@ -71,13 +72,11 @@ function makeRepo({ brokenState = false } = {}) {
   execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
   writeTree(dir, {
     "repo-policy.json": JSON.stringify(basePolicy(), null, 2),
-    "left.json": JSON.stringify({ items: ["alpha"] }),
-    "right.json": JSON.stringify({ items: ["alpha"] }),
   });
   const base = commit(dir, "base");
   writeTree(dir, {
     "src/new.mjs": "export const combined = true;\n",
-    ...(brokenState ? { "right.json": JSON.stringify({ items: ["beta"] }) } : {}),
+    ...(brokenState ? { "src/extra.mjs": "export const extra = true;\n" } : {}),
   });
   const head = commit(dir, "merge group candidate");
   const eventPath = join(dir, "merge-group-event.json");
@@ -184,7 +183,7 @@ console.log("\n--- state-only canonical pipeline over exact group candidate ---"
     expect("exact candidate SHA is machine-visible", result.parsed?.candidateSha, repo.head);
     expect("exact base SHA is machine-visible", result.parsed?.baseSha, repo.base);
     expect("base ref is machine-visible", result.parsed?.baseRef, "refs/heads/main");
-    expect("state relation executes", result.parsed?.ruleResults?.some((entry) => entry.rule === "registry-rules"), true);
+    expect("state invariant executes", result.parsed?.ruleResults?.some((entry) => entry.rule === "size-rules"), true);
     expect("transaction diff budget is excluded", result.parsed?.ruleResults?.some((entry) => entry.rule === "max-new-files"), false);
     expect("merge-group path invents no ChangeIntent check", result.parsed?.ruleResults?.some((entry) => entry.rule === "change-intent"), false);
   } finally {
@@ -198,7 +197,7 @@ console.log("\n--- combined candidate repository-state failure ---");
   try {
     const result = runMergeGroup(repo);
     expect("broken combined repository state blocks exact candidate", result.code, 1);
-    expect("state failure remains structured", result.parsed?.violations?.some((entry) => entry.rule === "registry-rules"), true);
+    expect("state failure remains structured", result.parsed?.violations?.some((entry) => entry.rule === "size-rules"), true);
     expect("failed group still reports exact candidate", result.parsed?.candidateSha, repo.head);
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });
