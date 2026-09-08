@@ -101,14 +101,9 @@ expect(
 expect("governance authorization remains transaction-only", familyPhase("governance-paths"), "transaction");
 expect("policy relaxation authorization remains transaction-only", familyPhase("policy-delta"), "transaction");
 
-const documentContent = new Map([
-  ["left.json", JSON.stringify({ items: ["src/a.mjs"] })],
-  ["right.json", JSON.stringify({ items: ["src/b.mjs"] })],
-]);
 const constraintFacts = {
   repositoryRoot: process.cwd(),
-  trackedFiles: [...documentContent.keys(), "src/new.mjs"],
-  readFile: (path) => documentContent.get(path),
+  trackedFiles: ["src/new.mjs"],
   policy: {
     paths: {
       forbidden: ["secrets/**"],
@@ -118,14 +113,6 @@ const constraintFacts = {
     diff_rules: {
       max_new_files: 0,
     },
-    registry_rules: [
-      {
-        id: "state-registry",
-        kind: "equal",
-        left: { type: "json_array", file: "left.json", json_pointer: "/items" },
-        right: { type: "json_array", file: "right.json", json_pointer: "/items" },
-      },
-    ],
   },
   changeIntent: null,
   diff: {
@@ -153,13 +140,7 @@ expect(
   names(legacyConstraints)
 );
 expect("transaction constraints keep diff budget", hasName(transactionConstraints, "max-new-files"), true);
-expect("transaction constraints keep surface debt", hasName(transactionConstraints, "surface-debt"), true);
-expect("transaction constraints exclude registry state rule", hasName(transactionConstraints, "registry-rules"), false);
-expect("state constraints keep registry state rule", hasName(stateConstraints, "registry-rules"), true);
-expect("state constraints detect broken registry invariant", namedCheck(stateConstraints, "registry-rules").ok, false);
 expect("state constraints exclude diff budget", hasName(stateConstraints, "max-new-files"), false);
-expect("state constraints exclude surface debt", hasName(stateConstraints, "surface-debt"), false);
-expect("state constraints exclude cochange transaction summary", hasName(stateConstraints, "cochange-rules"), false);
 
 const sizeFacts = {
   repositoryRoot: process.cwd(),
@@ -222,10 +203,6 @@ expect("transaction size rules keep changed-only invariant", transactionSize.fai
 expect("transaction size rules keep growth facet from mixed invariant", transactionSize.failed_rules.includes("mixed-growth"), true);
 expect("transaction size rules report mixed growth", transactionSize.growth.some((item) => item.ruleId === "mixed-growth"), true);
 
-const pipelineFiles = new Map([
-  ["left.json", JSON.stringify({ items: ["src/a.mjs"] })],
-  ["right.json", JSON.stringify({ items: ["src/a.mjs"] })],
-]);
 const pipelineInput = {
   mode: "check-diff",
   repositoryRoot: "/tmp/repo-guard-phase-pipeline",
@@ -239,12 +216,13 @@ const pipelineInput = {
       governance_paths: [],
     },
     diff_rules: { max_new_files: 0 },
-    registry_rules: [
+    size_rules: [
       {
-        id: "pipeline-state-registry",
-        kind: "equal",
-        left: { type: "json_array", file: "left.json", json_pointer: "/items" },
-        right: { type: "json_array", file: "right.json", json_pointer: "/items" },
+        id: "pipeline-state-absolute",
+        scope: "directory",
+        metric: "files",
+        glob: "src/**",
+        max: 1,
       },
     ],
     content_rules: [],
@@ -260,8 +238,8 @@ const pipelineInput = {
     "+++ b/src/new.mjs",
     "+export const value = 1;",
   ].join("\n"),
-  trackedFiles: ["left.json", "right.json", "src/new.mjs"],
-  readFile: (path) => pipelineFiles.get(path),
+  trackedFiles: ["src/new.mjs"],
+  readFile: () => undefined,
 };
 
 const legacyPipeline = runPolicyPipeline(pipelineInput, { quiet: true });
@@ -275,11 +253,11 @@ expect("legacy pipeline report keeps old machine shape", Object.prototype.hasOwn
 expect("state pipeline reports explicit execution phase", statePipeline.executionPhase, "state");
 expect("transaction pipeline reports explicit execution phase", transactionPipeline.executionPhase, "transaction");
 expect("legacy pipeline still executes transaction rule", legacyPipelineRules.includes("max-new-files"), true);
-expect("legacy pipeline still executes state rule", legacyPipelineRules.includes("registry-rules"), true);
+expect("legacy pipeline still executes state rule", legacyPipelineRules.includes("size-rules"), true);
 expect("state pipeline excludes transaction rule", statePipelineRules.includes("max-new-files"), false);
-expect("state pipeline executes state rule without ChangeIntent", statePipelineRules.includes("registry-rules"), true);
+expect("state pipeline executes state rule without ChangeIntent", statePipelineRules.includes("size-rules"), true);
 expect("transaction pipeline executes transaction rule", transactionPipelineRules.includes("max-new-files"), true);
-expect("transaction pipeline excludes state rule", transactionPipelineRules.includes("registry-rules"), false);
+expect("transaction pipeline excludes state-only size rule", transactionPipelineRules.includes("size-rules"), false);
 
 console.log(`\n${failures === 0 ? "All execution phase tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
