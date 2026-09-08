@@ -74,6 +74,7 @@ console.log("\n--- surface semantics lower without a dedicated evaluator ---");
     profile: { forbid_surfaces: ["docs"] },
   });
   expect("forbidden surface fails", profileOutcome(forbiddenPolicy, "feature", [file("docs/a.md")]).ok, false);
+  expect("deleted files still count as touched forbidden surfaces", profileOutcome(forbiddenPolicy, "feature", [file("docs/old.md", "deleted", 0, 1)]).ok, false);
 
   const requiredPolicy = policy({
     surfaces: { code: ["src/**"], tests: ["tests/**"] },
