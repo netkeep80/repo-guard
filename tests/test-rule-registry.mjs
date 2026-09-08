@@ -200,7 +200,7 @@ for (const name of [
   "canonical-docs-budget",
   "max-new-files",
   "max-net-added-lines",
-  "size-rules",
+  "size:max-feature-lines:max",
   "advisory-text-rules",
   "anchor-extraction",
   "trace-rule: evidence-ok",
