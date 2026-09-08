@@ -2,6 +2,7 @@ import type { RepositoryFactsInput } from "../facts/input.mjs";
 import { buildPolicyFacts } from "../facts/input.mjs";
 import { runPolicyChecks } from "../checks/orchestrator.mjs";
 import type { ExecutionPhase } from "../checks/rule-registry.mjs";
+import { compileChangeProfiles } from "../policy-compiler.mjs";
 import { buildAnchorDiagnostics } from "../reporting/anchor-diagnostics.mjs";
 import { createAnalysisCollector } from "./analysis-report.mjs";
 import {
@@ -28,6 +29,8 @@ export interface PolicyPipelineOptions {
   executionPhase?: ExecutionPhase;
 }
 
+const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
 export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPipelineOptions = {}) {
   const quiet = options.quiet || false;
   if (!quiet && options.printEnforcement !== false) {
@@ -41,6 +44,18 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
 
   for (const initialCheck of input.initialChecks || []) {
     report(initialCheck.name, initialCheck.check);
+  }
+
+  if (options.executionPhase !== "state") {
+    const profileErrors = compileChangeProfiles(
+      input.policy as Parameters<typeof compileChangeProfiles>[0],
+      object(input.changeIntent).change_type ?? null,
+    );
+    if (profileErrors.length) report("change-profile-selection", {
+      ok: false,
+      message: "change profile selection compilation failed",
+      details: profileErrors.map((error) => error.message),
+    });
   }
 
   const { changeIntent = null, changeIntentSource = "none", ...runtimeInput } = input;

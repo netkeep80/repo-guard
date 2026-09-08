@@ -9,13 +9,11 @@ import {
   type RelationEvaluationFacts,
 } from "../relation-kernel.mjs";
 import type { ExecutionPhase, RuleFamily } from "../rule-registry.mjs";
-import { checkChangeProfile } from "./change-profiles.mjs";
 import type { SizeRule } from "./size-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
 
 type RuntimeConstraintKind =
   | "size_rules"
-  | "change_profile"
   | "integration"
   | "primitive_relation";
 
@@ -54,7 +52,6 @@ interface RuleResult { name: string; check: unknown; }
 
 const CONSTRAINT_PHASES: Record<FixedPhaseConstraintKind, ExecutionPhase> = {
   size_rules: "both",
-  change_profile: "transaction",
   integration: "state",
 };
 
@@ -124,8 +121,7 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
       results.push({ name: constraint.name, check: result });
       if (result.advisory_violations.length) results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
       continue;
-    } else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy as Parameters<typeof checkChangeProfile>[1], facts.changeIntent?.change_type, facts.derived as Parameters<typeof checkChangeProfile>[3]);
-    else if (constraint.kind === "integration") {
+    } else if (constraint.kind === "integration") {
       results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
       continue;
     } else if (constraint.kind === "primitive_relation") check = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
