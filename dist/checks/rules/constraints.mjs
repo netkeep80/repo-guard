@@ -1,14 +1,10 @@
-import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { integrationConstraintEntries } from "../integration-constraints.mjs";
 import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
-import { checkRegistryRules } from "./registry-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
 const CONSTRAINT_PHASES = {
-    surface_debt: "transaction",
     size_rules: "both",
-    registry_rules: "state",
     change_profile: "transaction",
     integration: "state",
 };
@@ -48,21 +44,6 @@ function projectSizeRules(rules, requested) {
         return [{ ...rule, max: undefined }];
     });
 }
-export function checkSurfaceDebt(files, debt) {
-    const growth = calculateDiffGrowth(files);
-    if (growth.new_files <= 0 && growth.net_added_lines <= 0)
-        return { ok: true, status: "not_needed", growth };
-    if (!debt)
-        return { ok: true, status: "undeclared", growth, details: [`new files: ${growth.new_files}`, `net added lines: ${growth.net_added_lines}`] };
-    if (!debt.repayment_issue)
-        return { ok: false, status: "missing_repayment_target", message: "declared surface debt is missing repayment target: repayment_issue", growth, surface_debt: debt, details: ["missing repayment_issue"], hint: "Set repayment_issue to the issue number where the temporary growth will be repaid." };
-    const expected = debt.expected_delta || {}, exceeded = [];
-    if (expected.max_new_files !== undefined && growth.new_files > expected.max_new_files)
-        exceeded.push(`new files ${growth.new_files} exceeds declared debt ${expected.max_new_files}`);
-    if (expected.max_net_added_lines !== undefined && growth.net_added_lines > expected.max_net_added_lines)
-        exceeded.push(`net added lines ${growth.net_added_lines} exceeds declared debt ${expected.max_net_added_lines}`);
-    return { ok: !exceeded.length, status: exceeded.length ? "declared_debt_exceeded" : "declared", message: exceeded.length ? "declared surface debt is smaller than actual diff growth" : undefined, growth, surface_debt: debt, details: exceeded, hint: exceeded.length ? "Update expected_delta to match intentional temporary growth or reduce the diff." : undefined };
-}
 export function compileConstraintIR(facts) {
     return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) };
 }
@@ -84,9 +65,7 @@ export function evaluateConstraintIR(facts, context = {}) {
         if (!constraintAppliesToPhase(constraint, executionPhase))
             continue;
         let check;
-        if (constraint.kind === "surface_debt")
-            check = checkSurfaceDebt(files, constraint.debt);
-        else if (constraint.kind === "size_rules") {
+        if (constraint.kind === "size_rules") {
             const rules = projectSizeRules(constraint.rules, executionPhase);
             if (!rules.length)
                 continue;
@@ -99,8 +78,6 @@ export function evaluateConstraintIR(facts, context = {}) {
                 results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
             continue;
         }
-        else if (constraint.kind === "registry_rules")
-            check = checkRegistryRules(constraint.rules, { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
         else if (constraint.kind === "change_profile")
             check = checkChangeProfile(files, facts.policy, facts.changeIntent?.change_type, facts.derived);
         else if (constraint.kind === "integration") {

@@ -1,5 +1,4 @@
 import type { ParsedDiffFile } from "../../diff/parser.mjs";
-import { calculateDiffGrowth } from "../../diff/growth.mjs";
 import type { DocumentReader } from "../../document-facts.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { integrationConstraintEntries } from "../integration-constraints.mjs";
@@ -11,20 +10,11 @@ import {
 } from "../relation-kernel.mjs";
 import type { ExecutionPhase, RuleFamily } from "../rule-registry.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
-import { checkRegistryRules } from "./registry-rules.mjs";
 import type { SizeRule } from "./size-rules.mjs";
 import { checkSizeRules } from "./size-rules.mjs";
 
-interface SurfaceDebt {
-  repayment_issue?: unknown;
-  expected_delta?: { max_new_files?: number; max_net_added_lines?: number };
-  [key: string]: unknown;
-}
-
 type RuntimeConstraintKind =
-  | "surface_debt"
   | "size_rules"
-  | "registry_rules"
   | "change_profile"
   | "integration"
   | "primitive_relation";
@@ -35,7 +25,6 @@ interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
   name: string;
   phase?: ExecutionPhase;
-  debt?: SurfaceDebt | null;
   rules?: unknown;
   relation_id?: string;
   primitive?: string;
@@ -64,9 +53,7 @@ interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint
 interface RuleResult { name: string; check: unknown; }
 
 const CONSTRAINT_PHASES: Record<FixedPhaseConstraintKind, ExecutionPhase> = {
-  surface_debt: "transaction",
   size_rules: "both",
-  registry_rules: "state",
   change_profile: "transaction",
   integration: "state",
 };
@@ -105,17 +92,6 @@ function projectSizeRules(rules: SizeRule[], requested: ExecutionPhase): SizeRul
   });
 }
 
-export function checkSurfaceDebt(files: ParsedDiffFile[], debt: SurfaceDebt | null | undefined) {
-  const growth = calculateDiffGrowth(files);
-  if (growth.new_files <= 0 && growth.net_added_lines <= 0) return { ok: true, status: "not_needed", growth };
-  if (!debt) return { ok: true, status: "undeclared", growth, details: [`new files: ${growth.new_files}`, `net added lines: ${growth.net_added_lines}`] };
-  if (!debt.repayment_issue) return { ok: false, status: "missing_repayment_target", message: "declared surface debt is missing repayment target: repayment_issue", growth, surface_debt: debt, details: ["missing repayment_issue"], hint: "Set repayment_issue to the issue number where the temporary growth will be repaid." };
-  const expected = debt.expected_delta || {}, exceeded: string[] = [];
-  if (expected.max_new_files !== undefined && growth.new_files > expected.max_new_files) exceeded.push(`new files ${growth.new_files} exceeds declared debt ${expected.max_new_files}`);
-  if (expected.max_net_added_lines !== undefined && growth.net_added_lines > expected.max_net_added_lines) exceeded.push(`net added lines ${growth.net_added_lines} exceeds declared debt ${expected.max_net_added_lines}`);
-  return { ok: !exceeded.length, status: exceeded.length ? "declared_debt_exceeded" : "declared", message: exceeded.length ? "declared surface debt is smaller than actual diff growth" : undefined, growth, surface_debt: debt, details: exceeded, hint: exceeded.length ? "Update expected_delta to match intentional temporary growth or reduce the diff." : undefined };
-}
-
 export function compileConstraintIR(facts: ConstraintFacts): ConstraintIR {
   return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
 }
@@ -138,8 +114,7 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
   for (const constraint of constraints) {
     if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
     let check: unknown;
-    if (constraint.kind === "surface_debt") check = checkSurfaceDebt(files, constraint.debt);
-    else if (constraint.kind === "size_rules") {
+    if (constraint.kind === "size_rules") {
       const rules = projectSizeRules(constraint.rules as SizeRule[], executionPhase);
       if (!rules.length) continue;
       const result = checkSizeRules(files, rules, {
@@ -149,8 +124,7 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
       results.push({ name: constraint.name, check: result });
       if (result.advisory_violations.length) results.push({ name: "size-rules-advisory", check: { ok: false, advisory: true, size_violations: result.advisory_violations, details: result.advisory_details, growth: result.growth } });
       continue;
-    } else if (constraint.kind === "registry_rules") check = checkRegistryRules(constraint.rules as Parameters<typeof checkRegistryRules>[0], { repoRoot: facts.repositoryRoot, readFile: facts.readFile, documents: facts.documents });
-    else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy as Parameters<typeof checkChangeProfile>[1], facts.changeIntent?.change_type, facts.derived as Parameters<typeof checkChangeProfile>[3]);
+    } else if (constraint.kind === "change_profile") check = checkChangeProfile(files, facts.policy as Parameters<typeof checkChangeProfile>[1], facts.changeIntent?.change_type, facts.derived as Parameters<typeof checkChangeProfile>[3]);
     else if (constraint.kind === "integration") {
       results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
       continue;

@@ -221,24 +221,6 @@
         }
       }
     },
-    "registry_rules": {
-      "type": "array",
-      "description": "Rules that compare canonical registries from structured files or markdown sections.",
-      "items": {
-        "type": "object",
-        "required": ["id", "kind", "left", "right"],
-        "additionalProperties": false,
-        "properties": {
-          "id": { "type": "string", "minLength": 1 },
-          "kind": {
-            "type": "string",
-            "enum": ["set_equality", "left_subset_of_right", "right_subset_of_left"]
-          },
-          "left": { "$ref": "#/definitions/registry_source" },
-          "right": { "$ref": "#/definitions/registry_source" }
-        }
-      }
-    },
     "document_relations": {
       "$ref": "#/definitions/document_relations"
     },
@@ -938,31 +920,6 @@
             "kind": { "const": "regex" },
             "glob": { "type": "string", "minLength": 1 },
             "pattern": { "type": "string", "minLength": 1 }
-          }
-        }
-      ]
-    },
-    "registry_source": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": ["type", "file", "json_pointer"],
-          "additionalProperties": false,
-          "properties": {
-            "type": { "const": "json_array" },
-            "file": { "type": "string", "minLength": 1 },
-            "json_pointer": { "type": "string" }
-          }
-        },
-        {
-          "type": "object",
-          "required": ["type", "file", "section"],
-          "additionalProperties": false,
-          "properties": {
-            "type": { "const": "markdown_section_links" },
-            "file": { "type": "string", "minLength": 1 },
-            "section": { "type": "string", "minLength": 1 },
-            "prefix": { "type": "string" }
           }
         }
       ]
