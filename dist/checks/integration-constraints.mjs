@@ -1,6 +1,5 @@
 import { compareSets } from "./relation-kernel.mjs";
 import { evaluateParallelReadiness } from "../parallel-readiness.mjs";
-import { matchesAny } from "../utils/path-patterns.mjs";
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const array = (value) => Array.isArray(value) ? value : [];
 const lower = (value) => String(value || "").toLowerCase();
@@ -149,15 +148,6 @@ function parallelReadinessDetails(integration) {
             .filter((blocker) => blocker.source === "repository")
             .map((blocker) => `${provider} [${blocker.id}]: ${blocker.message}`)
         : []);
-}
-export function checkWorkflowPathCoverage(integration, binding, referencedPaths) {
-    const workflow = array(integration.workflows).find((item) => item.id === binding.workflow);
-    if (!workflow)
-        return { ok: false, message: `evidence workflow "${binding.workflow}" is unavailable in extracted integration facts`, data: { workflow: binding.workflow, covers: binding.covers, referenced_paths: referencedPaths, uncovered_paths: referencedPaths } };
-    if (workflow.expect?.enforcement !== "blocking")
-        return { ok: false, message: `evidence workflow "${binding.workflow}" is not configured as blocking`, data: { workflow: binding.workflow, workflow_role: workflow.role, covers: binding.covers, referenced_paths: referencedPaths, uncovered_paths: [] } };
-    const uncoveredPaths = referencedPaths.filter((path) => !matchesAny(path, binding.covers)).sort();
-    return { ok: uncoveredPaths.length === 0, message: uncoveredPaths.length ? `evidence workflow "${binding.workflow}" does not cover all declared repository paths` : undefined, data: { workflow: binding.workflow, workflow_role: workflow.role, covers: binding.covers, referenced_paths: referencedPaths, uncovered_paths: uncoveredPaths } };
 }
 function templateDetails(template) {
     if (template.present === false && template.optional)

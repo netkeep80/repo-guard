@@ -51,9 +51,19 @@ const referencedPathsRule = {
   source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
 };
 const evidencePolicy = () => {
-  const policy = relationPolicy([structuredClone(referencedPathsRule)]);
-  policy.integration.workflows = [{ id: "project-ci", role: "ci_gate", path: ".github/workflows/ci.yml", expect: { enforcement: "blocking", events: ["pull_request"] } }];
-  policy.evidence_bindings = [{ id: "owners-covered", kind: "workflow_path_coverage", source: structuredClone(referencedPathsRule.source), workflow: "project-ci", covers: ["tests/**"] }];
+  const policy = relationPolicy([]);
+  policy.anchors = {
+    types: {
+      case_evidence: { sources: [{ kind: "regex", glob: "tests/**", pattern: "CASE:([a-z-]+)" }] },
+      other_evidence: { sources: [{ kind: "regex", glob: "tests/**", pattern: "OTHER:([a-z-]+)" }] },
+    },
+  };
+  policy.evidence_bindings = [{
+    id: "cases-have-evidence",
+    kind: "anchor_value_coverage",
+    source: { document: "contract", pointer: "/requiredCases", projection: "array_items", type: "string_set" },
+    target_anchor_type: "case_evidence",
+  }];
   return policy;
 };
 const macroPolicy = () => ({
@@ -196,15 +206,22 @@ describe("evidence binding strictness projection", () => {
     delete base.evidence_bindings;
     assert.equal(compareConstraintPrograms(base, head).relation, "stricter");
     const removal = computePolicyDelta(head, base);
-    assert.ok(removal.relaxations.some((item) => item.kind === "evidence_binding_removed" && item.evidence_binding_id === "owners-covered"));
+    assert.ok(removal.relaxations.some((item) => item.kind === "evidence_binding_removed" && item.evidence_binding_id === "cases-have-evidence"));
   });
 
-  it("treats binding source/workflow/coverage edits as incomparable", () => {
-    const base = evidencePolicy(), head = structuredClone(base);
-    head.evidence_bindings[0].covers = ["src/**"];
-    const comparison = compareConstraintPrograms(base, head);
-    assert.equal(comparison.relation, "incomparable");
-    assert.ok(comparison.incomparable.some((item) => item.pointer === "/evidence_bindings/owners-covered"));
+  it("treats anchor coverage source and target edits as incomparable", () => {
+    const base = evidencePolicy();
+    const sourceHead = structuredClone(base);
+    sourceHead.evidence_bindings[0].source.pointer = "/otherCases";
+    const sourceComparison = compareConstraintPrograms(base, sourceHead);
+    assert.equal(sourceComparison.relation, "incomparable");
+    assert.ok(sourceComparison.incomparable.some((item) => item.pointer === "/evidence_bindings/cases-have-evidence"));
+
+    const targetHead = structuredClone(base);
+    targetHead.evidence_bindings[0].target_anchor_type = "other_evidence";
+    const targetComparison = compareConstraintPrograms(base, targetHead);
+    assert.equal(targetComparison.relation, "incomparable");
+    assert.ok(targetComparison.incomparable.some((item) => item.pointer === "/evidence_bindings/cases-have-evidence"));
   });
 });
 

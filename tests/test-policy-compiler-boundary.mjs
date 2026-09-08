@@ -43,16 +43,6 @@ const ciWorkflow = (enforcement = "blocking") => ({
   id: "project-ci", kind: "github_actions", path: ".github/workflows/ci.yml", role: "ci_gate",
   expect: { events: ["pull_request"], enforcement, disallow: ["continue_on_error"] },
 });
-const evidencePolicy = (overrides = {}) => ({
-  ...basePolicy,
-  integration: { workflows: [ciWorkflow()] },
-  document_relations: {
-    documents: { contract: structuredClone(documents.contract) },
-    rules: [structuredClone(referencedPaths)],
-  },
-  evidence_bindings: [{ id: "owners-covered", kind: "workflow_path_coverage", source: structuredClone(referencedPaths.source), workflow: "project-ci", covers: ["tests/**"] }],
-  ...overrides,
-});
 
 describe("semantic policy compiler boundary", () => {
   it("keeps non-array nested values inert before semantic compilation", () => {
@@ -109,18 +99,6 @@ describe("semantic policy compiler boundary", () => {
     assert.ok(messages.some((message) => /literal is incompatible/.test(message)));
   });
 
-  it("requires evidence bindings to reuse known blocking workflows and exact R2 existence selectors", () => {
-    assert.deepEqual(compileEvidenceBindingsPolicy(evidencePolicy()), []);
-    const missingWorkflow = evidencePolicy();
-    missingWorkflow.evidence_bindings[0].workflow = "missing";
-    assert.ok(compileEvidenceBindingsPolicy(missingWorkflow).some((error) => /unknown integration workflow/.test(error.message)));
-    const advisory = evidencePolicy({ integration: { workflows: [ciWorkflow("advisory")] } });
-    assert.ok(compileEvidenceBindingsPolicy(advisory).some((error) => /expect\.enforcement "blocking"/.test(error.message)));
-    const noExistence = evidencePolicy();
-    noExistence.document_relations.rules = [];
-    assert.ok(compileEvidenceBindingsPolicy(noExistence).some((error) => /equivalent referenced_paths_exist/.test(error.message)));
-  });
-
   it("rejects repo-guard-specific expectations on generic ci_gate", () => {
     assert.ok(compileIntegrationPolicy({ integration: { workflows: [{ ...ciWorkflow(), expect: { ...ciWorkflow().expect, mode: "check-pr" } }] } }).some((error) => /not supported for ci_gate/.test(error.message)));
     assert.ok(compileIntegrationPolicy({ integration: { workflows: [{ ...ciWorkflow(), expect: { ...ciWorkflow().expect, disallow: ["manual_clone"] } }] } }).some((error) => /repo-guard-specific/.test(error.message)));
@@ -167,40 +145,6 @@ describe("document relation public schema boundary", () => {
       documents: { contract: structuredClone(documents.contract) },
       rules: [{ ...structuredClone(referencedPaths), source: { ...referencedPaths.source, projection: "array_items" } }],
     }).ok, true);
-  });
-});
-
-describe("workflow path evidence public/runtime boundary", () => {
-  it("accepts the narrow binding schema and rejects executable fields", () => {
-    assert.equal(loadPolicyRuntimeFromObject({ packageRoot: projectRoot, repoRoot: projectRoot }, evidencePolicy(), { quiet: true }).ok, true);
-    const executable = evidencePolicy();
-    executable.evidence_bindings[0].command = "npm test";
-    assert.equal(loadPolicyRuntimeFromObject({ packageRoot: projectRoot, repoRoot: projectRoot }, executable, { quiet: true }).ok, false);
-  });
-
-  const integrationFacts = {
-    errors: [], templates: [], docs: [], profiles: [],
-    workflows: [{
-      id: "project-ci", path: ".github/workflows/ci.yml", role: "ci_gate", expect: { events: ["pull_request"], enforcement: "blocking", disallow: ["continue_on_error"] },
-      stepInputs: [], actionUses: [], runCommands: [], envVars: [], permissions: { jobs: [] },
-      triggerEvents: ["pull_request"], triggerEventTypes: [], summaryPublishing: [], continueOnError: [],
-    }],
-  };
-  const run = (owners, trackedFiles) => {
-    const policy = evidencePolicy();
-    const documentsReader = createDocumentReader({ readFile: (path) => path === "contracts/contract.json" ? JSON.stringify({ owners }) : "" });
-    return evaluateConstraintIR({ policy, changeIntent: null, diff: { files: { checked: [] } }, trackedFiles, documents: documentsReader, integration: integrationFacts });
-  };
-
-  it("keeps path existence and CI coverage as independent diagnostics", () => {
-    const uncovered = run({ gate: "tests/gate.mjs", doc: "docs/readme.md" }, ["tests/gate.mjs", "docs/readme.md"]);
-    assert.equal(uncovered.find((entry) => entry.name === "document-relation:owners-exist")?.check.ok, true);
-    assert.equal(uncovered.find((entry) => entry.name === "evidence-binding:owners-covered")?.check.ok, false);
-    assert.deepEqual(uncovered.find((entry) => entry.name === "evidence-binding:owners-covered")?.check.data.uncovered_paths, ["docs/readme.md"]);
-
-    const missing = run({ gate: "tests/missing.mjs" }, []);
-    assert.equal(missing.find((entry) => entry.name === "document-relation:owners-exist")?.check.ok, false);
-    assert.equal(missing.find((entry) => entry.name === "evidence-binding:owners-covered")?.check.ok, true);
   });
 });
 

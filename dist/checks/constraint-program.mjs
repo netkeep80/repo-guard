@@ -155,13 +155,8 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
     for (const binding of array(policy.evidence_bindings)) {
         const id = String(binding.id ?? ""), owner = `evidence-binding:${id}`, pointer = `/evidence_bindings/${id}`;
         const source = compileFactRef(binding.source, documents);
-        const shape = binding.kind === "anchor_value_coverage"
-            ? { kind: binding.kind, source, target_anchor_type: binding.target_anchor_type }
-            : { kind: binding.kind, source, workflow: binding.workflow, covers: binding.covers };
-        const runtime = binding.kind === "workflow_path_coverage" ? {
-            kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
-            workflow: binding.workflow, covers: array(binding.covers),
-        } : binding.kind === "anchor_value_coverage"
+        const shape = { kind: binding.kind, source, target_anchor_type: binding.target_anchor_type };
+        const runtime = binding.kind === "anchor_value_coverage"
             ? primitiveRuntime(owner, `evidence:${id}`, leftSubsetPrimitive, {
                 left: source,
                 right: repositoryAnchorFact(binding.target_anchor_type),

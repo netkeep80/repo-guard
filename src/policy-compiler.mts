@@ -134,10 +134,6 @@ function normalizeDeclaredDocumentPath(name: string, definition: LooseObject, er
     return null;
   }
 }
-function documentSelectorKey(value: unknown): string {
-  const selector = object(value);
-  return JSON.stringify({ document: selector.document, pointer: selector.pointer, projection: selector.projection, type: selector.type });
-}
 
 export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
   if (!policy.document_relations) return [];
@@ -188,18 +184,7 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
   const bindings = list<LooseObject>(policy.evidence_bindings);
   if (!bindings.length) return [];
   const errors: SemanticDiagnostic[] = [], seenIds = new Set<unknown>();
-  const relationSection = object(policy.document_relations), documents = object(relationSection.documents), relationRules = list<LooseObject>(relationSection.rules);
-  const pathExistenceSelectors = new Set(relationRules.flatMap((rule) => {
-    try {
-      const descriptor = relationDescriptor(String(rule.kind ?? ""));
-      if (descriptor.evidenceSource !== "repository_paths_exist") return [];
-      return [documentSelectorKey(rule[descriptor.operands[0]!] )];
-    } catch {
-      return [];
-    }
-  }));
-  const workflows = new Map<string, LooseObject>();
-  for (const workflow of list<LooseObject>(object(policy.integration).workflows)) if (typeof workflow.id === "string" && workflow.id) workflows.set(workflow.id, workflow);
+  const relationSection = object(policy.document_relations), documents = object(relationSection.documents);
   const anchorTypes = new Set(Object.keys(object(policy.anchors?.types)));
 
   for (const [index, binding] of bindings.entries()) {
@@ -209,13 +194,7 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
     const source = object(binding.source), document = source.document;
     if (typeof document !== "string" || !Object.hasOwn(documents, document)) errors.push({ evidence_binding: id, document, message: `evidence binding "${id}" source references unknown document "${document}"` });
 
-    if (binding.kind === "workflow_path_coverage") {
-      const workflowId = binding.workflow;
-      const workflow = typeof workflowId === "string" ? workflows.get(workflowId) : undefined;
-      if (!workflow) errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" references unknown integration workflow "${workflowId}"` });
-      else if (object(workflow.expect).enforcement !== "blocking") errors.push({ evidence_binding: id, workflow: workflowId, message: `evidence binding "${id}" requires integration workflow "${workflowId}" to declare expect.enforcement "blocking"` });
-      if (!pathExistenceSelectors.has(documentSelectorKey(source))) errors.push({ evidence_binding: id, message: `evidence binding "${id}" requires an equivalent referenced_paths_exist relation for the same source selector` });
-    } else if (binding.kind === "anchor_value_coverage") {
+    if (binding.kind === "anchor_value_coverage") {
       const target = binding.target_anchor_type;
       if (typeof target !== "string" || !anchorTypes.has(target)) errors.push({ evidence_binding: id, target_anchor_type: target, message: `evidence binding "${id}" references unknown anchor type "${target}"` });
     }

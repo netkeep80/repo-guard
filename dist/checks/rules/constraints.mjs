@@ -1,7 +1,6 @@
 import { calculateDiffGrowth } from "../../diff/growth.mjs";
-import { readFact } from "../../document-facts.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
-import { checkWorkflowPathCoverage, integrationConstraintEntries } from "../integration-constraints.mjs";
+import { integrationConstraintEntries } from "../integration-constraints.mjs";
 import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
 import { checkChangeProfile } from "./change-profiles.mjs";
 import { checkRegistryRules } from "./registry-rules.mjs";
@@ -12,7 +11,6 @@ const CONSTRAINT_PHASES = {
     registry_rules: "state",
     change_profile: "transaction",
     integration: "state",
-    evidence_workflow_path_coverage: "state",
 };
 function requestedExecutionPhase(context) {
     const phase = context.executionPhase ?? "both";
@@ -68,20 +66,6 @@ export function checkSurfaceDebt(files, debt) {
 export function compileConstraintIR(facts) {
     return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) };
 }
-function factOperand(facts, ref) {
-    if (!ref)
-        return { ok: false, error: { code: "document_read_error", pointer: "", message: "fact reference is unavailable" } };
-    return readFact(facts, ref);
-}
-function checkEvidenceWorkflowPathCoverage(facts, constraint) {
-    const source = factOperand(facts, constraint.source);
-    if (!source.ok)
-        return { ok: false, message: `evidence binding "${constraint.binding_id}" could not read repository path references`, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source } };
-    if (!Array.isArray(source.value))
-        return { ok: false, message: `evidence binding "${constraint.binding_id}" did not produce a repository path set`, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source } };
-    const coverage = checkWorkflowPathCoverage(facts.integration, { workflow: constraint.workflow || "", covers: constraint.covers || [] }, source.value);
-    return { ...coverage, data: { kind: "workflow_path_coverage", binding_id: constraint.binding_id, source, ...coverage.data } };
-}
 function primitiveRelation(constraint) {
     if (!constraint.relation_id || !constraint.primitive || !constraint.operands || !constraint.parameters) {
         throw new Error(`runtime primitive relation "${constraint.name}" is incomplete`);
@@ -125,8 +109,6 @@ export function evaluateConstraintIR(facts, context = {}) {
         }
         else if (constraint.kind === "primitive_relation")
             check = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
-        else if (constraint.kind === "evidence_workflow_path_coverage")
-            check = checkEvidenceWorkflowPathCoverage(facts, constraint);
         else
             throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);
         results.push({ name: constraint.name, check });

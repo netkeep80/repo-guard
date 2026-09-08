@@ -651,18 +651,6 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["id", "kind", "source", "workflow", "covers"],
-          "additionalProperties": false,
-          "properties": {
-            "id": { "$ref": "#/definitions/non_empty_string" },
-            "kind": { "const": "workflow_path_coverage" },
-            "source": { "$ref": "#/definitions/document_repository_path_set_selector" },
-            "workflow": { "$ref": "#/definitions/non_empty_string" },
-            "covers": { "$ref": "#/definitions/non_empty_string_array" }
-          }
-        },
-        {
-          "type": "object",
           "required": ["id", "kind", "source", "target_anchor_type"],
           "additionalProperties": false,
           "properties": {
