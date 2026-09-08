@@ -183,7 +183,7 @@ console.log("\n--- state-only canonical pipeline over exact group candidate ---"
     expect("exact candidate SHA is machine-visible", result.parsed?.candidateSha, repo.head);
     expect("exact base SHA is machine-visible", result.parsed?.baseSha, repo.base);
     expect("base ref is machine-visible", result.parsed?.baseRef, "refs/heads/main");
-    expect("state invariant executes", result.parsed?.ruleResults?.some((entry) => entry.rule === "size-rules"), true);
+    expect("state invariant executes", result.parsed?.ruleResults?.some((entry) => entry.rule === "size:merge-group-state:max"), true);
     expect("transaction diff budget is excluded", result.parsed?.ruleResults?.some((entry) => entry.rule === "max-new-files"), false);
     expect("merge-group path invents no ChangeIntent check", result.parsed?.ruleResults?.some((entry) => entry.rule === "change-intent"), false);
   } finally {
@@ -197,7 +197,7 @@ console.log("\n--- combined candidate repository-state failure ---");
   try {
     const result = runMergeGroup(repo);
     expect("broken combined repository state blocks exact candidate", result.code, 1);
-    expect("state failure remains structured", result.parsed?.violations?.some((entry) => entry.rule === "size-rules"), true);
+    expect("state failure remains structured", result.parsed?.violations?.some((entry) => entry.rule === "size:merge-group-state:max"), true);
     expect("failed group still reports exact candidate", result.parsed?.candidateSha, repo.head);
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });
