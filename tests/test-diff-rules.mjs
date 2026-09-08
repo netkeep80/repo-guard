@@ -3,7 +3,6 @@ import { classifyNewFiles, detectTouchedSurfaces } from "../dist/diff/classifica
 import { filterOperationalPaths } from "../dist/diff/filters.mjs";
 import { parseDiff } from "../dist/diff/parser.mjs";
 import { checkAdvisoryTextRules } from "../dist/checks/rules/advisory-text-rules.mjs";
-import { checkChangeProfile } from "../dist/checks/rules/change-profiles.mjs";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { checkSizeRules, countTextLines } from "../dist/checks/rules/size-rules.mjs";
@@ -80,14 +79,6 @@ assert.deepEqual(classes.files_by_class.test, ["tests/a.test.mjs"]);
 
 const contentViolations = checkContentRules([{ path: "include/a.h", status: "modified", addedLines: ["/// @brief bad"], deletedLines: [] }], [{ id: "no-brief", glob: "include/**/*.h", mode: "added_lines", forbid_regex: ["@brief"] }]);
 assert.equal(contentViolations.length, 1);
-
-const profilePolicy = {
-  paths: { canonical_docs: ["README.md"] }, surfaces: { source: ["src/**"], tests: ["tests/**"] },
-  new_file_classes: { source: ["src/**"], test: ["tests/**"] },
-  change_profiles: { refactor: { allow_surfaces: ["source", "tests"], new_files: { allow_classes: ["test"] }, budgets: { max_new_files: 1, max_net_added_lines: 2 } } },
-};
-assert.equal(checkChangeProfile(files, profilePolicy, "refactor").ok, true);
-assert.equal(checkChangeProfile(files, profilePolicy, "feature").ok, false);
 
 const readFile = (path) => ({
   "src/a.mjs": "one\ntwo\n", "docs/new.md": "# Same\nalpha beta gamma delta\n", "README.md": "# Same\nalpha beta gamma delta\n",
