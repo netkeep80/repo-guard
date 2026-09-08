@@ -4,6 +4,7 @@ import {
   type DocumentFactType,
   type FactFormat,
   type FactRef,
+  type RepositoryFactSelector,
 } from "../document-facts.mjs";
 import { relationDescriptor, relationDescriptorForSetComparison, type RelationDocumentTarget } from "./relation-kernel.mjs";
 
@@ -156,6 +157,9 @@ function diffFact(type: DocumentFactType, selector: DiffFactSelector): FactRef {
 function repositoryAnchorFact(anchorType: unknown): FactRef {
   return { source: "repository", selector: { kind: "anchor_values", anchor_type: String(anchorType ?? "") }, type: "string_set" };
 }
+function repositoryPathMetricFact(selector: Extract<RepositoryFactSelector, { kind: "path_metric" }>): FactRef {
+  return { source: "repository", selector, type: "scalar" };
+}
 function pointerFromDottedField(value: unknown): string {
   const parts = String(value ?? "").split(".").filter(Boolean);
   return parts.length ? `/${parts.map((part) => part.replace(/~/g, "~0").replace(/\//g, "~1")).join("/")}` : "";
@@ -174,11 +178,59 @@ function primitiveRuntime(
   operands: Record<string, FactRef | RelationDocumentTarget>,
   parameters: Record<string, unknown> = {},
   phase?: RuntimePhase,
+  advisory = false,
 ): RuntimeConstraint {
-  return { kind: "primitive_relation", name, relation_id: relationId, primitive, operands, parameters, ...(phase ? { phase } : {}) };
+  return { kind: "primitive_relation", name, relation_id: relationId, primitive, operands, parameters, ...(phase ? { phase } : {}), ...(advisory ? { advisory: true } : {}) };
 }
 function strings(value: unknown): string[] {
   return array(value as string[] | undefined).map(String);
+}
+function selectedSizeRule(rule: SizeRuleProjection, changeIntent: ChangeIntentProjection | null): boolean {
+  if (!Array.isArray(rule.applies_to_change_types)) return true;
+  return (rule.applies_to_change_types as Array<string | null>).includes(changeIntent?.change_type ?? null);
+}
+function sizeRuleExclusions(policy: ConstraintPolicyProjection, rule: SizeRuleProjection): string[] {
+  return [...new Set([...strings(policy.paths?.operational_paths), ...strings(rule.ignore)])];
+}
+function addSizeRuleRuntime(
+  add: (key: string, runtime?: RuntimeConstraint | null, strictness?: StrictnessConstraint | null) => void,
+  policy: ConstraintPolicyProjection,
+  rule: SizeRuleProjection,
+  changeIntent: ChangeIntentProjection | null,
+): void {
+  if (!selectedSizeRule(rule, changeIntent)) return;
+  const id = String(rule.id), scope = String(rule.scope ?? ""), metric = String(rule.metric ?? ""), glob = String(rule.glob ?? "**");
+  const count = rule.count || "all_tracked", advisory = rule.level === "advisory", excludePaths = sizeRuleExclusions(policy, rule);
+  if (typeof rule.max !== "number") throw new Error(`size rule "${id}" requires max`);
+  if (scope === "file") {
+    if (metric !== "lines" && metric !== "bytes") throw new Error(`size rule "${id}" file scope supports only lines or bytes`);
+    if (rule.max_growth !== undefined) throw new Error(`size rule "${id}" file scope does not support max_growth`);
+    const phase: RuntimePhase = count === "changed_only" || Array.isArray(rule.applies_to_change_types) ? "transaction" : "state";
+    const relationId = `size:${id}:max`;
+    add(relationId, primitiveRuntime(relationId, relationId, "numeric_bound", {
+      source: repositoryPathMetricFact({ kind: "path_metric", patterns: [glob], exclude_paths: excludePaths, population: count === "changed_only" ? "changed" : "tracked", metric, aggregate: "max" }),
+    }, { max: rule.max }, phase, advisory));
+    return;
+  }
+  if (scope !== "directory") throw new Error(`size rule "${id}" has unsupported scope "${scope}"`);
+  if (count === "changed_only") throw new Error(`size rule "${id}" directory scope does not support count=changed_only`);
+  if (metric !== "lines" && metric !== "bytes" && metric !== "files") throw new Error(`size rule "${id}" has unsupported metric "${metric}"`);
+  const absolutePhase: RuntimePhase = Array.isArray(rule.applies_to_change_types) ? "transaction" : "state";
+  const absoluteId = `size:${id}:max`;
+  add(absoluteId, primitiveRuntime(absoluteId, absoluteId, "numeric_bound", {
+    source: repositoryPathMetricFact({ kind: "path_metric", patterns: [glob], exclude_paths: excludePaths, population: "tracked", metric, aggregate: "sum" }),
+  }, { max: rule.max }, absolutePhase, advisory));
+  if (rule.max_growth === undefined) return;
+  if (metric === "bytes") throw new Error(`size rule "${id}" directory bytes do not support max_growth`);
+  const growthId = `size:${id}:max-growth`;
+  add(growthId, primitiveRuntime(growthId, growthId, "numeric_bound", {
+    source: diffFact("scalar", {
+      kind: "metric",
+      metric: metric === "files" ? "net_files" : "net_added_lines",
+      patterns: [glob],
+      exclude_paths: excludePaths,
+    }),
+  }, { max: rule.max_growth }, "transaction", advisory));
 }
 
 export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}, changeIntent: ChangeIntentProjection | null = null): ConstraintProgramEntry[] {
@@ -233,6 +285,7 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
       owner, pointer: `${pointer}/max_growth`, weakenKind: "size_rule_max_growth_increased", removeKind: "size_rule_max_growth_removed", rule_id: rule.id,
       message: (a, b) => `size_rules[${rule.id}].max_growth: ${a} -> ${b}`, removeMessage: `size_rules[${rule.id}].max_growth removed (was ${rule.max_growth})`,
     }));
+    addSizeRuleRuntime(add, policy, rule, changeIntent);
   }
 
   for (const workflow of array(policy.integration?.workflows)) {
@@ -367,7 +420,6 @@ export function compileConstraintProgram(policy: ConstraintPolicyProjection = {}
     if (typeof profileBudgets.max_net_added_lines === "number") addMetricBound("budget:max-net-added-lines", "net_added_lines", profileBudgets.max_net_added_lines);
   }
 
-  if (array(policy.size_rules).length) add("runtime:size-rules", { kind: "size_rules", name: "size-rules", rules: policy.size_rules });
   if (policy.integration) add("runtime:integration", { kind: "integration", name: "integration" });
 
   for (const group of array(policy.cochange_groups)) {
