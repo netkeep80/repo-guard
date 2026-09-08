@@ -1,44 +1,44 @@
-# C3.3d3 Size-rule Lowering Implementation Plan
+# C3.3d3 — план реализации сведения `size_rules`
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Для агентных исполнителей:** при реализации по задачам использовать навык `superpowers:subagent-driven-development` (предпочтительно) или `superpowers:executing-plans`. Для отслеживания шагов используется синтаксис флажков (`- [ ]`).
 
-**Goal:** Remove the dedicated `size_rules` runtime/evaluator and lower the supported language into canonical repository/diff scalar facts plus existing `numeric_bound` relations.
+**Цель:** удалить выделенный рантайм и вычислитель `size_rules`, а поддерживаемый язык свести к каноническим скалярным фактам репозитория/диффа и существующим отношениям `numeric_bound`.
 
-**Architecture:** `size_rules` remains only a policy frontend. Repository-state measurement is acquired through one generic `repository.path_metric` selector; diff growth is acquired through the existing `diff.metric` selector extended with path scoping and `net_files`. All limits execute through the existing primitive relation kernel; no new relation kind or FactRef source is introduced.
+**Архитектура:** `size_rules` остаётся только фронтендом политики. Измерение состояния репозитория выполняется через один универсальный селектор `repository.path_metric`; рост диффа — через существующий селектор `diff.metric`, расширенный ограничением по путям и `net_files`. Все лимиты исполняются существующим ядром примитивных отношений; новые виды отношений и источники `FactRef` не вводятся.
 
-**Tech Stack:** TypeScript `.mts`, generated `dist/*.mjs`, Node.js tests, Ajv JSON Schema, GitHub Actions.
+**Технологии:** `TypeScript` `.mts`, генерируемый `dist/*.mjs`, тесты `Node.js`, `Ajv JSON Schema`, `GitHub Actions`.
 
-**Spec:** `docs/superpowers/specs/2026-09-08-c3-3d3-size-rule-lowering.md`
+**Спецификация:** `docs/superpowers/specs/2026-09-08-c3-3d3-size-rule-lowering.md`
 
-## Global Constraints
+## Глобальные ограничения
 
-- Accepted base is exactly `9ff00319f9828261ff997796bdb906b95e7a281f`.
-- Issue authority is #409; parent is #398.
+- Принятая база строго равна `9ff00319f9828261ff997796bdb906b95e7a281f`.
+- Ответственная issue — #409; родительская — #398.
 - `FactRef models = 1`.
 - `FactRef sources = 4`.
 - `relation descriptors = 10`.
-- No new relation descriptor.
-- No new FactRef source.
-- No second evaluator or second FactStore.
-- No compatibility alias.
-- Final runtime kinds must be exactly `integration`, `primitive_relation`.
-- RED-first: no production change before a failing D3 contract test is committed and observed failing for the intended missing behavior.
-- Do not close #398 or #374 in D3.
+- Новый descriptor отношения не вводится.
+- Новый источник `FactRef` не вводится.
+- Второй вычислитель или второй `FactStore` не вводятся.
+- Совместимый alias не вводится.
+- Итоговые виды рантайма должны быть строго `integration`, `primitive_relation`.
+- `RED-first`: production-изменения запрещены до коммита с падающим контрактным тестом D3 и наблюдаемого падения именно по отсутствующему требуемому поведению.
+- В D3 не закрывать #398 или #374.
 
 ---
 
-### Task 1: RED D3 architectural contract
+### Задача 1: архитектурный контракт D3 в состоянии `RED`
 
-**Files:**
-- Create: `tests/test-c3-3d3-size-rule-lowering.mjs`
+**Файлы:**
+- Создать: `tests/test-c3-3d3-size-rule-lowering.mjs`
 
-**Interfaces:**
-- Consumes: current `compileConstraintIR`, `evaluateConstraintIR`, canonical FactRef/relation exports, current schema through ordinary test surfaces.
-- Produces: one fail-closed D3 contract test that proves the required architecture before production changes.
+**Интерфейсы:**
+- Использует текущие `compileConstraintIR`, `evaluateConstraintIR`, канонические экспорты `FactRef`/отношений и текущую схему через обычные тестовые поверхности.
+- Даёт один fail-closed контрактный тест D3, доказывающий требуемую архитектуру до production-изменений.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Шаг 1: написать падающий тест**
 
-The test must assert all of these through real public/internal runtime behavior, not source-text snapshots:
+Тест должен проверять всё перечисленное через реальное публичное/внутреннее поведение рантайма, а не снимки текста исходников:
 
 ```text
 A. a supported file rule compiles to primitive_relation/numeric_bound using repository.path_metric
@@ -51,38 +51,38 @@ G. runtime kinds no longer include size_rules
 H. relation descriptor count stays 10 and FactRef source count stays 4
 ```
 
-Use a minimal facts fixture with `trackedFiles`, normalized diff entries and `readFile`. Include one unreadable matched file case.
+Использовать минимальный набор фактов с `trackedFiles`, нормализованными элементами диффа и `readFile`. Включить один случай совпавшего, но нечитаемого файла.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [ ] **Шаг 2: запустить фокусный тест и подтвердить `RED`**
 
-Run:
+Запуск:
 
 ```bash
 node tests/test-c3-3d3-size-rule-lowering.mjs
 ```
 
-Expected: FAIL because the accepted base still emits `kind=size_rules` and lacks `repository.path_metric`/scoped `diff.metric` acquisition.
+Ожидание: `FAIL`, потому что принятая база ещё выдаёт `kind=size_rules` и не имеет получения `repository.path_metric`/ограниченного по путям `diff.metric`.
 
-- [ ] **Step 3: Commit only the RED test**
+- [ ] **Шаг 3: закоммитить только `RED`-тест**
 
 ```bash
 git add tests/test-c3-3d3-size-rule-lowering.mjs
 git commit -m "test(c3.3d3): add size-rule lowering falsifier"
 ```
 
-No production files in this commit.
+В этом коммите не должно быть production-файлов.
 
 ---
 
-### Task 2: Canonical scalar acquisition
+### Задача 2: каноническое получение скалярных фактов
 
-**Files:**
-- Modify: `src/document-facts.mts`
-- Modify only if reuse is needed: `src/diff/classification.mts`
-- Test: `tests/test-c3-3d3-size-rule-lowering.mjs`
+**Файлы:**
+- Изменить: `src/document-facts.mts`
+- Изменить только при необходимости повторного использования: `src/diff/classification.mts`
+- Тест: `tests/test-c3-3d3-size-rule-lowering.mjs`
 
-**Interfaces:**
-- Produces repository selector shape:
+**Интерфейсы:**
+- Добавляет форму селектора репозитория:
 
 ```ts
 {
@@ -95,11 +95,11 @@ No production files in this commit.
 }
 ```
 
-- Extends existing diff metric selector with `metric: "net_files"`, optional `patterns`, optional `exclude_paths`.
+- Расширяет существующий селектор метрик диффа значением `metric: "net_files"` и необязательными `patterns`, `exclude_paths`.
 
-- [ ] **Step 1: Implement `repository.path_metric` acquisition minimally**
+- [ ] **Шаг 1: минимально реализовать получение `repository.path_metric`**
 
-Selection rules:
+Правила выбора:
 
 ```text
 tracked population -> facts.trackedFiles
@@ -113,68 +113,68 @@ max -> maximum measurement, empty set = 0
 sum -> sum measurements, empty set = 0
 ```
 
-If a selected `lines`/`bytes` file cannot be read, return a structured fact failure. Do not skip it.
+Если выбранный файл для `lines`/`bytes` невозможно прочитать, вернуть структурированную ошибку факта. Не пропускать файл.
 
-Return generic provenance containing selector kind, matched paths, measurements, aggregate and final value.
+Вернуть универсальное происхождение факта: вид селектора, совпавшие пути, измерения, агрегат и итоговое значение.
 
-- [ ] **Step 2: Extend existing `diff.metric`**
+- [ ] **Шаг 2: расширить существующий `diff.metric`**
 
-Apply optional `patterns`/`exclude_paths` before metric computation. Preserve existing behavior when those fields are absent.
+Применять необязательные `patterns`/`exclude_paths` до вычисления метрики. Если эти поля отсутствуют, сохранить прежнее поведение.
 
-Implement:
+Реализовать:
 
 ```text
 net_files = count(added) - count(deleted)
 ```
 
-Modified files contribute zero.
+Изменённые файлы дают нулевой вклад.
 
-- [ ] **Step 3: Run focused D3 test**
+- [ ] **Шаг 3: запустить фокусный тест D3**
 
 ```bash
 node tests/test-c3-3d3-size-rule-lowering.mjs
 ```
 
-Expected: still FAIL at compiler/runtime-kind assertions; acquisition-specific assertions may now pass.
+Ожидание: тест всё ещё `FAIL` на assertions компилятора/вида рантайма; assertions получения фактов уже могут проходить.
 
-- [ ] **Step 4: Run canonical fact tests**
+- [ ] **Шаг 4: запустить тесты канонических фактов**
 
 ```bash
 node tests/test-document-facts-boundary.mjs
 node tests/test-canonical-relation-kernel.mjs
 ```
 
-Expected: PASS.
+Ожидание: `PASS`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Шаг 5: закоммитить**
 
 ```bash
 git add src/document-facts.mts src/diff/classification.mts tests/test-c3-3d3-size-rule-lowering.mjs
 git commit -m "feat(c3.3d3): add canonical path metric facts"
 ```
 
-Omit `src/diff/classification.mts` if unchanged.
+Если `src/diff/classification.mts` не изменён, не включать его.
 
 ---
 
-### Task 3: Lower `size_rules` in the Constraint Program
+### Задача 3: свести `size_rules` в `Constraint Program`
 
-**Files:**
-- Modify: `src/checks/constraint-program.mts`
-- Modify: `src/checks/rules/constraints.mts`
-- Test: `tests/test-c3-3d3-size-rule-lowering.mjs`
+**Файлы:**
+- Изменить: `src/checks/constraint-program.mts`
+- Изменить: `src/checks/rules/constraints.mts`
+- Тест: `tests/test-c3-3d3-size-rule-lowering.mjs`
 
-**Interfaces:**
-- Existing `primitiveRelation(...)` remains the emitted runtime shape.
-- Add only generic primitive metadata if necessary:
+**Интерфейсы:**
+- Существующий `primitiveRelation(...)` остаётся формой выдаваемого рантайма.
+- При необходимости добавить только универсальную метаинформацию примитива:
 
 ```ts
 advisory?: boolean
 ```
 
-- [ ] **Step 1: Compile selected size rules into primitive relations**
+- [ ] **Шаг 1: компилировать выбранные правила размера в примитивные отношения**
 
-For each rule selected by `applies_to_change_types`:
+Для каждого правила, выбранного через `applies_to_change_types`:
 
 ```text
 file absolute -> repository.path_metric(max) -> numeric_bound(max)
@@ -183,13 +183,13 @@ directory growth lines -> diff.metric(net_added_lines, scoped) -> numeric_bound(
 directory growth files -> diff.metric(net_files, scoped) -> numeric_bound(max_growth)
 ```
 
-Use phase `state` for all-tracked absolute constraints and `transaction` for changed-only file constraints and growth constraints.
+Использовать фазу `state` для абсолютных ограничений по всем отслеживаемым файлам, а `transaction` — для file-ограничений `changed_only` и ограничений роста.
 
-A mixed directory rule emits two constraints. Do not emit `kind=size_rules`.
+Смешанное правило каталога порождает два ограничения. `kind=size_rules` не выдавать.
 
-- [ ] **Step 2: Remove dedicated size-rule execution branch**
+- [ ] **Шаг 2: удалить выделенную ветвь исполнения правил размера**
 
-Delete from `constraints.mts`:
+Удалить из `constraints.mts`:
 
 ```text
 size_rules runtime kind
@@ -199,17 +199,17 @@ checkSizeRules import/call
 size-rules-advisory special result
 ```
 
-For primitive constraints with `advisory=true`, copy `{ advisory: true }` into the evaluated check result generically after relation evaluation.
+Для примитивных ограничений с `advisory=true` после вычисления отношения универсально копировать `{ advisory: true }` в результат проверки.
 
-- [ ] **Step 3: Run focused D3 test**
+- [ ] **Шаг 3: запустить фокусный тест D3**
 
 ```bash
 node tests/test-c3-3d3-size-rule-lowering.mjs
 ```
 
-Expected: GREEN except schema-cut assertions not yet added/applied.
+Ожидание: `GREEN`, кроме ещё не добавленных/применённых assertions сужения схемы.
 
-- [ ] **Step 4: Run execution/pipeline tests**
+- [ ] **Шаг 4: запустить тесты исполнения и pipeline**
 
 ```bash
 node tests/test-execution-phases.mjs
@@ -217,9 +217,9 @@ node tests/test-pipeline.mjs
 node tests/test-rule-registry.mjs
 ```
 
-Expected: identify only stale assertions that pin the deleted runtime topology. Do not change production to satisfy stale topology.
+Ожидание: выявить только устаревшие assertions, фиксирующие удалённую топологию рантайма. Не менять production ради удовлетворения устаревшей топологии.
 
-- [ ] **Step 5: Commit**
+- [ ] **Шаг 5: закоммитить**
 
 ```bash
 git add src/checks/constraint-program.mts src/checks/rules/constraints.mts tests/test-c3-3d3-size-rule-lowering.mjs
@@ -228,20 +228,20 @@ git commit -m "refactor(c3.3d3): lower size rules to primitive relations"
 
 ---
 
-### Task 4: Move unsupported combinations to schema/frontend failure
+### Задача 4: перенести неподдерживаемые сочетания в ошибку схемы/фронтенда
 
-**Files:**
-- Modify: `schemas/repo-policy.schema.json`
-- Modify: `tests/validate-schemas.mjs`
-- Modify: `examples/size-rules-policy.json` only if needed to stay within the approved subset
-- Test: `tests/test-c3-3d3-size-rule-lowering.mjs`
+**Файлы:**
+- Изменить: `schemas/repo-policy.schema.json`
+- Изменить: `tests/validate-schemas.mjs`
+- Изменить `examples/size-rules-policy.json` только если это необходимо для попадания в утверждённое подмножество.
+- Тест: `tests/test-c3-3d3-size-rule-lowering.mjs`
 
-**Interfaces:**
-- Public supported subset is exactly the spec; unsupported combinations are rejected before runtime.
+**Интерфейсы:**
+- Публичное поддерживаемое подмножество строго соответствует спецификации; неподдерживаемые сочетания отклоняются до рантайма.
 
-- [ ] **Step 1: Add RED schema assertions**
+- [ ] **Шаг 1: добавить `RED`-assertions схемы**
 
-Assert invalid:
+Проверить как недопустимые:
 
 ```text
 file + metric=files
@@ -250,61 +250,61 @@ directory + bytes + max_growth
 directory + count=changed_only
 ```
 
-Assert valid representative forms for file lines, file bytes changed-only, directory lines growth, directory files growth, directory bytes absolute.
+Проверить как допустимые репрезентативные формы: file lines, file bytes `changed_only`, directory lines growth, directory files growth, directory bytes absolute.
 
-- [ ] **Step 2: Run schema validation and verify RED**
-
-```bash
-node tests/validate-schemas.mjs
-```
-
-Expected: FAIL because current schema is broader.
-
-- [ ] **Step 3: Tighten only `definitions.size_rule`**
-
-Use structural `oneOf`/conditional schema so invalid combinations cannot reach runtime. Do not add compatibility fields.
-
-- [ ] **Step 4: Run schema validation**
+- [ ] **Шаг 2: запустить валидацию схемы и подтвердить `RED`**
 
 ```bash
 node tests/validate-schemas.mjs
 ```
 
-Expected: PASS.
+Ожидание: `FAIL`, потому что текущая схема шире утверждённого подмножества.
 
-- [ ] **Step 5: Commit**
+- [ ] **Шаг 3: сузить только `definitions.size_rule`**
+
+Использовать структурную схему `oneOf`/условия так, чтобы недопустимые сочетания не могли дойти до рантайма. Поля совместимости не добавлять.
+
+- [ ] **Шаг 4: запустить валидацию схемы**
+
+```bash
+node tests/validate-schemas.mjs
+```
+
+Ожидание: `PASS`.
+
+- [ ] **Шаг 5: закоммитить**
 
 ```bash
 git add schemas/repo-policy.schema.json tests/validate-schemas.mjs examples/size-rules-policy.json
 git commit -m "refactor(c3.3d3): bound size-rule surface at schema"
 ```
 
-Omit example file if unchanged.
+Если файл примера не изменён, не включать его.
 
 ---
 
-### Task 5: Delete the dedicated evaluator and migrate stale tests
+### Задача 5: удалить выделенный вычислитель и мигрировать только доказанно устаревшие тесты
 
-**Files:**
-- Delete: `src/checks/rules/size-rules.mts`
-- Modify only proven stale consumers, likely: `tests/test-compression-rules.mjs`, `tests/test-execution-phases.mjs`, `tests/test-pipeline.mjs`, `tests/test-rule-registry.mjs`
-- Modify generated counterparts under `dist/**` through the repository build step, not manual semantic divergence.
+**Файлы:**
+- Удалить: `src/checks/rules/size-rules.mts`
+- Изменять только доказанно устаревших потребителей; вероятные кандидаты: `tests/test-compression-rules.mjs`, `tests/test-execution-phases.mjs`, `tests/test-pipeline.mjs`, `tests/test-rule-registry.mjs`.
+- Генерируемые аналоги в `dist/**` изменять через стандартную сборку репозитория, а не ручным семантическим расхождением.
 
-**Interfaces:**
-- No exported `checkSizeRules` remains.
-- No runtime result named `size-rules` is required as a topology contract; lowered constraints use their stable rule-derived names.
+**Интерфейсы:**
+- Экспорт `checkSizeRules` должен исчезнуть.
+- Результат рантайма с именем `size-rules` больше не требуется как контракт топологии; сведённые ограничения используют стабильные имена, производные от правил.
 
-- [ ] **Step 1: Delete `size-rules.mts` and stale direct imports**
+- [ ] **Шаг 1: удалить `size-rules.mts` и доказанно устаревшие прямые импорты**
 
-Migrate tests toward canonical behavior only when they still prove useful semantics. Delete assertions whose only purpose is pinning the removed evaluator/result topology.
+Мигрировать тесты к каноническому поведению только когда они всё ещё доказывают полезную семантику. Assertions, единственная цель которых — закреплять удалённый вычислитель/топологию результата, удалить.
 
-For the historical transaction test, replace `directory + changed_only` with a valid `file + changed_only` case; do not recreate conditional subtree semantics.
+Для исторического транзакционного теста заменить `directory + changed_only` на допустимый случай `file + changed_only`; не воссоздавать семантику условного поддерева.
 
-- [ ] **Step 2: Build generated dist**
+- [ ] **Шаг 2: собрать генерируемый `dist`**
 
-Run the repository's standard build command from `package.json` that regenerates `dist`.
+Использовать стандартную команду сборки из текущего `package.json`, регенерирующую `dist`.
 
-- [ ] **Step 3: Run focused tests one failure at a time**
+- [ ] **Шаг 3: запускать фокусные тесты по одному падению за раз**
 
 ```bash
 node tests/test-c3-3d3-size-rule-lowering.mjs
@@ -314,9 +314,9 @@ node tests/test-pipeline.mjs
 node tests/test-rule-registry.mjs
 ```
 
-Expected: PASS after only evidence-backed migrations.
+Ожидание: `PASS` после только доказанных evidence-backed миграций.
 
-- [ ] **Step 4: Commit**
+- [ ] **Шаг 4: закоммитить**
 
 ```bash
 git add -A src/checks/rules/size-rules.mts dist tests
@@ -325,70 +325,70 @@ git commit -m "refactor(c3.3d3): delete size-rule runtime evaluator"
 
 ---
 
-### Task 6: Ratchet compression invariants and full verification
+### Задача 6: зафиксировать инварианты сжатия и выполнить полную проверку
 
-**Files:**
-- Modify: `tests/test-c3-3d1-runtime-tail-deletion.mjs` or create a D3-specific ratchet if clearer
-- Modify compression metric expectations only where they represent accepted architectural counts.
+**Файлы:**
+- Изменить `tests/test-c3-3d1-runtime-tail-deletion.mjs` или создать отдельный ratchet D3, если так яснее.
+- Ожидания метрик сжатия изменять только там, где они представляют принятые архитектурные значения.
 
-**Interfaces:**
-- Runtime kinds exactly: `integration`, `primitive_relation`.
-- Relation descriptors exactly 10.
-- FactRef sources exactly 4.
+**Интерфейсы:**
+- Виды рантайма строго: `integration`, `primitive_relation`.
+- Descriptors отношений строго 10.
+- Источники `FactRef` строго 4.
 
-- [ ] **Step 1: Add/adjust exact structural ratchets**
+- [ ] **Шаг 1: добавить/скорректировать точные структурные ratchets**
 
-Assert physical absence of source/dist `size-rules` evaluator and exact runtime kind count `2`.
+Проверить физическое отсутствие source/dist-вычислителя `size-rules` и точное число видов рантайма `2`.
 
-- [ ] **Step 2: Run dist freshness and compression metrics**
+- [ ] **Шаг 2: проверить свежесть `dist` и метрики сжатия**
 
 ```bash
 npm run check:dist
 npm run check:compression
 ```
 
-If script names differ, use the exact commands defined in current `package.json`; do not invent replacement gates.
+Если имена скриптов отличаются, использовать точные команды из текущего `package.json`; не придумывать заменяющие gates.
 
-- [ ] **Step 3: Run full discovered suite**
+- [ ] **Шаг 3: запустить полный обнаруживаемый набор тестов**
 
 ```bash
 node tests/run.mjs
 ```
 
-Expected: all discovered test files GREEN.
+Ожидание: все обнаруженные тестовые файлы `GREEN`.
 
-- [ ] **Step 4: Commit ratchet changes**
+- [ ] **Шаг 4: закоммитить изменения ratchet**
 
 ```bash
 git add tests scripts docs
 git commit -m "test(c3.3d3): ratchet two-kind runtime tail"
 ```
 
-Only add files actually changed.
+Добавлять только действительно изменённые файлы.
 
 ---
 
-### Task 7: Draft PR, exact-head review, Ready acceptance and merge
+### Задача 7: draft `PR`, ревью точной головы, приёмка `Ready` и merge
 
-**Files:** none unless review finds a defect.
+**Файлы:** отсутствуют, если ревью не обнаружит дефект.
 
-- [ ] **Step 1: Open draft PR**
+- [ ] **Шаг 1: открыть draft `PR`**
 
-PR title:
+Заголовок `PR`:
 
 ```text
 C3.3d3: lower size rules into canonical scalar facts
 ```
 
-Body must include `Fixes #409`, exact accepted base, RED evidence, semantic cuts, invariant counts and explicit statement that #398/#374 remain open.
+Описание должно содержать `Fixes #409`, точную принятую базу, evidence `RED`, семантические срезы, значения инвариантов и явное указание, что #398/#374 остаются открытыми.
 
-- [ ] **Step 2: Wait for draft CI and review the exact head**
+- [ ] **Шаг 2: дождаться draft `CI` и проверить точную голову**
 
-Require `validate` and `smoke-pack` GREEN on the reviewed head. Review changed files for hidden size-specific evaluator logic, second FactStore, new relation kinds/sources and compatibility aliases.
+На проверяемой голове требуются `validate` и `smoke-pack` в состоянии `GREEN`. Проверить изменённые файлы на скрытую size-specific логику вычислителя, второй `FactStore`, новые виды отношений/источников и aliases совместимости.
 
-- [ ] **Step 3: Mark Ready and require PR policy evidence**
+- [ ] **Шаг 3: перевести в `Ready` и потребовать evidence политики `PR`**
 
-On the exact Ready head require:
+На точной голове `Ready` требуются:
 
 ```text
 validate = SUCCESS
@@ -396,17 +396,17 @@ smoke-pack = SUCCESS
 Run PR policy check = SUCCESS
 ```
 
-- [ ] **Step 4: Race-check and merge**
+- [ ] **Шаг 4: выполнить race-check и merge**
 
-Verify PR head/base SHAs immediately before merge. Merge only that exact head.
+Непосредственно перед merge проверить SHA головы и базы `PR`. Merge разрешён только для этой точной головы.
 
-- [ ] **Step 5: Verify post-merge exact SHA**
+- [ ] **Шаг 5: проверить точный SHA после merge**
 
-Require push CI:
+Для push-`CI` требуются:
 
 ```text
 validate = SUCCESS
 smoke-pack = SUCCESS
 ```
 
-Only then call C3.3d3 accepted, synchronize #409/#398/#374/#370, and leave overall C3.3 open for the integration audit.
+Только после этого считать C3.3d3 принятой, синхронизировать #409/#398/#374/#370 и оставить общую C3.3 открытой для аудита интеграции.

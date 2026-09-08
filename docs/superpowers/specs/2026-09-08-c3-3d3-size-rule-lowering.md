@@ -1,23 +1,23 @@
-# C3.3d3 Size-rule lowering specification
+# C3.3d3 — спецификация сведения `size_rules`
 
-Issue authority: #409  
-Parent: #398  
-Accepted base: `9ff00319f9828261ff997796bdb906b95e7a281f`
+Ответственная issue: #409  
+Родительская issue: #398  
+Принятая база: `9ff00319f9828261ff997796bdb906b95e7a281f`
 
-## Goal
+## Цель
 
-Remove the dedicated `size_rules` runtime kind and `checkSizeRules` evaluator. Supported `size_rules` compile into existing `primitive_relation` constraints whose semantics are provided by `numeric_bound` over canonical scalar facts.
+Удалить выделенный рантайм-вид `size_rules` и вычислитель `checkSizeRules`. Поддерживаемые правила `size_rules` компилируются в существующие ограничения `primitive_relation`, семантика которых задаётся `numeric_bound` над каноническими скалярными фактами.
 
-Target runtime kinds:
+Целевые виды рантайма:
 
 ```text
 integration
 primitive_relation
 ```
 
-## Canonical acquisition delta
+## Изменение канонического получения фактов
 
-No new FactRef source. Extend only existing sources.
+Новый источник `FactRef` не вводится. Расширяются только существующие источники.
 
 ### `repository.path_metric`
 
@@ -29,13 +29,13 @@ metric: lines | bytes | files
 aggregate: max | sum
 ```
 
-This selector is acquisition only. It must not know about policy rule IDs, `size_rules`, limits, advisory behavior, ChangeIntent, or execution phases.
+Этот селектор отвечает только за получение факта. Он не должен знать об идентификаторах правил политики, `size_rules`, лимитах, рекомендательном режиме, `ChangeIntent` или фазах исполнения.
 
-Selected repository paths that require content measurement and cannot be read fail closed as a fact-read failure. Provenance is generic: matched paths, per-path measurements, aggregate, final value.
+Если выбранный путь репозитория требует измерения содержимого, но файл невозможно прочитать, чтение факта должно завершаться закрытой структурированной ошибкой. Происхождение факта остаётся универсальным: совпавшие пути, измерения по путям, агрегат и итоговое значение.
 
 ### `diff.metric`
 
-Keep the existing selector kind. Extend it with optional path scoping and one scalar metric:
+Сохраняется существующий вид селектора. Он расширяется необязательным ограничением по путям и одной скалярной метрикой:
 
 ```text
 metric = new_docs | new_files | net_added_lines | net_files
@@ -43,11 +43,11 @@ patterns?: string[]
 exclude_paths?: string[]
 ```
 
-`net_files`: added `+1`, deleted `-1`, modified `0` after path scoping.
+Для `net_files` добавленный файл даёт `+1`, удалённый `-1`, изменённый `0` после ограничения по путям.
 
-## Lowering
+## Сведение
 
-File absolute rule:
+Абсолютное правило для файла:
 
 ```text
 repository.path_metric(population=all_tracked?tracked:changed,
@@ -56,7 +56,7 @@ repository.path_metric(population=all_tracked?tracked:changed,
 -> numeric_bound(max=rule.max)
 ```
 
-Directory absolute rule:
+Абсолютное правило для каталога:
 
 ```text
 repository.path_metric(population=tracked,
@@ -65,7 +65,7 @@ repository.path_metric(population=tracked,
 -> numeric_bound(max=rule.max)
 ```
 
-Directory growth rule:
+Правило роста каталога:
 
 ```text
 diff.metric(metric=net_added_lines|net_files,
@@ -74,13 +74,13 @@ diff.metric(metric=net_added_lines|net_files,
 -> numeric_bound(max=rule.max_growth)
 ```
 
-A directory rule containing both `max` and `max_growth` compiles into two independent constraints: state absolute and transaction growth.
+Правило каталога, содержащее одновременно `max` и `max_growth`, компилируется в два независимых ограничения: абсолютное для фазы состояния и ограничение роста для фазы транзакции.
 
-`applies_to_change_types` is frontend selection only. A non-selected rule emits no primitive constraint.
+`applies_to_change_types` используется только для выбора на фронтенде. Невыбранное правило не порождает ни одного примитивного ограничения.
 
-`level=advisory` is generic runtime/reporting metadata applied after primitive evaluation; no advisory evaluator or size-specific result family is allowed.
+`level=advisory` — универсальная метаинформация рантайма и отчётности, применяемая после вычисления примитива; отдельный рекомендательный вычислитель или семейство результатов для размера не допускаются.
 
-## Supported public subset
+## Поддерживаемое публичное подмножество
 
 ```text
 file:
@@ -88,7 +88,6 @@ file:
   max = required
   count = all_tracked | changed_only
   max_growth = forbidden
-
 directory:
   metric = lines | bytes | files
   max = required
@@ -96,7 +95,7 @@ directory:
   max_growth = allowed only for lines | files
 ```
 
-The following are invalid before runtime:
+Следующие сочетания должны быть недопустимы ещё до рантайма:
 
 ```text
 file + metric=files
@@ -105,9 +104,9 @@ directory + bytes + max_growth
 directory + count=changed_only
 ```
 
-No compatibility translation for these forms.
+Совместимый перевод этих форм не вводится.
 
-## Invariants
+## Инварианты
 
 ```text
 FactRef models = 1
@@ -120,10 +119,10 @@ compatibility alias = NONE
 runtime kinds = 2
 ```
 
-Do not preserve `size_violations[]`, `growth[]`, or the `size-rules-advisory` topology as a compatibility API. Diagnostics come from generic fact provenance plus `numeric_bound` result data.
+Не сохранять `size_violations[]`, `growth[]` или топологию `size-rules-advisory` как совместимый интерфейс. Диагностика должна формироваться из универсального происхождения факта и данных результата `numeric_bound`.
 
-## Acceptance
+## Приёмка
 
-RED-first is mandatory. The first production commit must have a preceding failing D3 test commit on the accepted base.
+Последовательность `RED-first` обязательна. До первого production-коммита должен существовать предшествующий падающий тест D3 на принятой базе, причём падение должно подтверждать именно отсутствующее требуемое поведение.
 
-Ready-head acceptance requires `validate`, `smoke-pack`, and `Run PR policy check` GREEN on the exact head. Final acceptance additionally requires post-merge `validate` and `smoke-pack` GREEN on the exact merge SHA.
+Приёмка точной головы `Ready` требует `validate`, `smoke-pack` и `Run PR policy check` в состоянии `GREEN` на одном и том же точном коммите. Финальная приёмка дополнительно требует post-merge `validate` и `smoke-pack` в состоянии `GREEN` на точном SHA merge-коммита.
