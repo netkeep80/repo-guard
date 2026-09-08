@@ -180,10 +180,10 @@ console.log("\n--- check-pr style pipeline evaluates size rules ---");
     readFile: (path) => path === "src/feature.mjs" ? "export const value = 1;\n" : "",
   });
 
-  const violation = sizeResult.violations.find((item) => item.rule === "size-rules");
-  expect("check-pr pipeline reports size-rules violation", Boolean(violation), true);
-  expect("check-pr pipeline reports offending file", violation?.data?.size_violations?.[0]?.path, "src/feature.mjs");
-  expect("check-pr pipeline reports measured lines", violation?.data?.size_violations?.[0]?.actual, 1);
+  const violation = sizeResult.violations.find((item) => item.rule === "size:max-feature-lines:max");
+  expect("check-pr pipeline reports canonical size violation", Boolean(violation), true);
+  expect("check-pr pipeline reports offending path through fact provenance", violation?.data?.source?.provenance?.matched_paths?.[0], "src/feature.mjs");
+  expect("check-pr pipeline reports measured lines through numeric_bound", violation?.data?.actual, 1);
 }
 
 console.log("\n--- scalar document relations execute through Constraint Program ---");
