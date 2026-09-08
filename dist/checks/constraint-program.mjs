@@ -1,5 +1,5 @@
 import { normalizeDocumentFact, } from "../document-facts.mjs";
-import { relationDescriptor } from "./relation-kernel.mjs";
+import { relationDescriptor, relationDescriptorForSetComparison } from "./relation-kernel.mjs";
 const RANKS = {
     enforcement: { advisory: 0, blocking: 1 },
     count: { changed_only: 0, all_tracked: 1 },
@@ -10,6 +10,7 @@ const scalar = (relation, value, metadata) => compare(relation, value, metadata)
 const set = (relation, value, metadata) => compare(relation, array(value), metadata);
 const exact = (value, metadata) => compare("equal_or_incomparable", value, metadata);
 const entity = (metadata) => compare("required_entity", true, metadata);
+const leftSubsetPrimitive = relationDescriptorForSetComparison("left_subset").kind;
 function object(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -161,7 +162,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
             kind: "evidence_workflow_path_coverage", name: owner, binding_id: id, source,
             workflow: binding.workflow, covers: array(binding.covers),
         } : binding.kind === "anchor_value_coverage"
-            ? primitiveRuntime(owner, `evidence:${id}`, "set_subset", {
+            ? primitiveRuntime(owner, `evidence:${id}`, leftSubsetPrimitive, {
                 left: source,
                 right: repositoryAnchorFact(binding.target_anchor_type),
             })
@@ -173,7 +174,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null) {
     for (const rule of array(policy.trace_rules)) {
         const id = String(rule.id ?? ""), relationId = `trace:${id}`, name = `trace-rule: ${id}`;
         if (rule.kind === "must_resolve") {
-            add(relationId, primitiveRuntime(name, relationId, "set_subset", {
+            add(relationId, primitiveRuntime(name, relationId, leftSubsetPrimitive, {
                 left: repositoryAnchorFact(rule.from_anchor_type),
                 right: repositoryAnchorFact(rule.to_anchor_type),
             }, {}, "transaction"));
