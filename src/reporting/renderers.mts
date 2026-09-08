@@ -8,18 +8,6 @@ interface PresenterEvent {
   mode: unknown;
   outcome: PresenterOutcome;
 }
-interface AnchorLocation {
-  file: string;
-  line?: number;
-  column?: number;
-}
-interface UnresolvedAnchor {
-  rule: string;
-  fromAnchorType?: string;
-  toAnchorType?: string;
-  value: string;
-  instances: AnchorLocation[];
-}
 interface ResultEntry {
   rule: string;
   details?: string[];
@@ -57,9 +45,7 @@ interface ReportProjection {
       detected: number;
       changed: number;
       declaredByChangeIntent: number;
-      unresolved: number;
     };
-    unresolved: UnresolvedAnchor[];
   };
   diagnostics?: {
     declared: IntegrationCounts;
@@ -95,12 +81,6 @@ function renderMarkdownTableCell(value: unknown) {
   return String(value || "")
     .replaceAll("|", "\\|")
     .replaceAll("\n", "<br>");
-}
-
-function formatAnchorLocation(instance: AnchorLocation) {
-  const line = instance.line ? `:${instance.line}` : "";
-  const column = instance.column ? `:${instance.column}` : "";
-  return `${instance.file}${line}${column}`;
 }
 
 export function renderEnforcementMode(enforcement: { mode?: unknown }) {
@@ -158,19 +138,7 @@ function renderCheckExtraLines(report: ReportProjection) {
 
   if (report.anchors) {
     const stats = report.anchors.stats;
-    lines.push(`- Anchors: ${stats.detected} detected, ${stats.changed} changed, ${stats.declaredByChangeIntent} declared, ${stats.unresolved} unresolved`);
-
-    if (report.anchors.unresolved.length > 0) {
-      lines.push("", "| Trace rule | Anchor | Locations |", "|---|---|---|");
-      for (const unresolved of report.anchors.unresolved.slice(0, 10)) {
-        const anchor = `${unresolved.fromAnchorType} -> ${unresolved.toAnchorType}: ${unresolved.value}`;
-        const locations = unresolved.instances.map(formatAnchorLocation).join(", ");
-        lines.push(`| ${renderMarkdownTableCell(unresolved.rule)} | ${renderMarkdownTableCell(anchor)} | ${renderMarkdownTableCell(locations)} |`);
-      }
-      if (report.anchors.unresolved.length > 10) {
-        lines.push(`| ... | ... | ${report.anchors.unresolved.length - 10} more unresolved anchor(s) |`);
-      }
-    }
+    lines.push(`- Anchors: ${stats.detected} detected, ${stats.changed} changed, ${stats.declaredByChangeIntent} declared`);
   }
 
   return lines;
