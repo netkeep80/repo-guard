@@ -33,6 +33,6 @@ assert.doesNotMatch(readme, /Constraint IR|contract\.overrides/, "README не д
 for (const marker of ["Constraint Program", "repo-guard-grant", "GovernanceGrant", "schemas/governance-grant.schema.json"]) assert.match(readme, new RegExp(marker.replaceAll(".", "\\.")), `README должен содержать ${marker}`);
 assert.match(read("templates/issue-change-intent-example.md"), /repo-guard-grant/, "issue example должен показывать отдельный GovernanceGrant");
 assert.doesNotMatch(read("templates/pr-change-intent-example.md"), /```repo-guard-grant/, "PR example не должен выдавать GovernanceGrant");
-assert.match(read(".github/workflows/ci.yml"), /--compare 94f702271f6fe27672102f5271046151b023f94c/, "CI должен измерять Compression 2.0 от его baseline");
+assert.match(read(".github/workflows/ci.yml"), /--compare 92432809fcddc290080beb51ba151e13a5761869/, "CI должен измерять Compression 3.0 от канонического C3.0 baseline");
 
 console.log(`Проверено Markdown-файлов: ${markdownFiles.length}. Язык и архитектурные инварианты актуальны.`);
