@@ -26,6 +26,24 @@ expect("profile overrides require profile", policy({ ...validPolicy, profile_ove
 expect("anchors + trace", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", field: "id" }] } } }, trace_rules: [{ id: "resolve", kind: "must_resolve", from_anchor_type: "id", to_anchor_type: "id" }] }));
 expect("invalid anchor source", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", pattern: "id" }] } } } }), false);
 expect("evidence trace", policy({ ...validPolicy, trace_rules: [{ id: "evidence", kind: "changed_files_require_evidence", if_changed: ["requirements/**"], must_touch_any: ["tests/**"] }] }));
+expect("removed workflow_path_coverage rejected", policy({
+  ...validPolicy,
+  document_relations: {
+    documents: { contract: { path: "contracts/contract.json", format: "json" } },
+    rules: [{
+      id: "owners-exist",
+      kind: "referenced_paths_exist",
+      source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+    }],
+  },
+  evidence_bindings: [{
+    id: "owners-covered",
+    kind: "workflow_path_coverage",
+    source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+    workflow: "gate",
+    covers: ["tests/**"],
+  }],
+}), false);
 
 const integration = {
   workflows: [{ id: "gate", kind: "github_actions", path: ".github/workflows/ci.yml", role: "repo_guard_pr_gate", expect: { events: ["pull_request"], action: { uses: "netkeep80/repo-guard", ref_pinning: "semver" }, mode: "check-pr", enforcement: "blocking", permissions: { contents: "read" }, token_env: ["GH_TOKEN"], summary: true, disallow: ["continue_on_error"] } }],
