@@ -1,12 +1,10 @@
-# C3.4a — план реализации гранулярности остаточной strictness
+# C3.4a — план гранулярности остаточной строгости
 
-> Для агентной реализации обязателен пошаговый режим по этому плану с `TDD`: сначала доказанный `RED`, затем минимальный `GREEN`, затем полная приёмка.
+> Реализация идёт строго через `TDD`: сначала доказанный `RED`, затем минимальный `GREEN`, затем полная приёмка.
 
-**Цель:** заменить один широкий остаточный указатель `/` детерминированными указателями на изменившиеся верхнеуровневые секции политики, сохранив запрет по умолчанию и существующую границу текущего словаря схемы.
+**Цель:** заменить один широкий остаточный указатель `/` отдельными указателями на изменившиеся верхнеуровневые секции политики.
 
-**Архитектура:** `unknownProjection()` остаётся единственным владельцем понятия «части политики, не представленные в strictness программы ограничений». Меняется только сравнение двух уже построенных остаточных проекций: берётся объединение их верхнеуровневых ключей, ключи сортируются, каждое значение сравнивается атомарно, а для каждого изменившегося ключа создаётся отдельный `policy_incomparable`. Вложенная структура не рекурсирует. Код не знает имён предметных секций.
-
-**Технологии:** `TypeScript 7`, `Node.js 24`, `node:test`, сгенерированный `ESM dist`, `GitHub Actions`.
+**Принцип:** проще и универсальнее. Новый код не знает имён предметных секций, не рекурсирует по произвольному `JSON` и не создаёт новой семантической подсистемы.
 
 **Спецификация:** `docs/superpowers/specs/2026-09-09-c3-4-canonical-self-policy-exemplar-design.md`
 
@@ -18,13 +16,15 @@
 48359c19dce0e4028c6991c21fbcf0f5f02e52bd
 ```
 
-**Каноническая база метрик C3.0:**
+**База метрик C3.0:**
 
 ```text
 92432809fcddc290080beb51ba151e13a5761869
 ```
 
-## Жёсткие границы всего среза
+## Жёсткие границы
+
+Должны сохраниться:
 
 ```text
 runtime constraint kinds = 1
@@ -33,13 +33,12 @@ FactRef models = 1
 FactRef sources = 4
 relation descriptors = 10
 primitive descriptor registries = 1
-new evaluator = NONE
-new arbitrary expression language = NONE
-compatibility alias = NONE
+second evaluator = NONE
+compatibility aliases = NONE
 repo-specific bypass = NONE
 ```
 
-Нельзя менять в C3.4a:
+В C3.4a запрещено менять:
 
 ```text
 repo-policy.json
@@ -58,53 +57,49 @@ dist/checks/constraint-program.mjs
 tests/test-current-policy-vocabulary-projection.mjs
 ```
 
-`dist` меняется только результатом обычной сборки из `src`.
+`dist` меняется только обычной сборкой из `src`.
 
 ---
 
-## Задача 1. Зафиксировать целевую семантику тестовым RED
+## Задача 1. Зафиксировать тестовый `RED`
 
-**Файлы:**
+**Файл:** `tests/test-current-policy-vocabulary-projection.mjs`
 
-- Изменить: `tests/test-current-policy-vocabulary-projection.mjs`
-- Не менять: production-файлы
+### Шаг 1.1. Добавить прямой импорт сравнения
 
-### Шаг 1.1. Расширить импорт только для прямой проверки comparator
-
-- [ ] Добавить импорт:
+Добавить:
 
 ```js
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 ```
 
-Существующий импорт `computePolicyDelta` сохранить.
+Существующий `computePolicyDelta` сохранить.
 
-### Шаг 1.2. Уточнить существующий fail-closed тест
+### Шаг 1.2. Уточнить существующее ожидание
 
-Сейчас тест для изменения `content_rules` ожидает:
+Сейчас изменение `content_rules` даёт:
 
-```js
-assert.equal(relaxations[0]?.pointer, "/");
+```text
+/
 ```
 
-- [ ] Изменить только ожидаемый указатель на целевой:
+Целевое ожидание:
 
-```js
-assert.equal(relaxations[0]?.pointer, "/content_rules");
+```text
+/content_rules
 ```
 
-Это обязано стать первым доказанным `RED` на принятой базе.
+Изменить только ожидаемый указатель. На принятой базе тест обязан стать красным именно из-за текущего корневого сравнения.
 
-### Шаг 1.3. Добавить проверку независимых верхнеуровневых секций
+### Шаг 1.3. Проверить две независимые секции
 
-- [ ] Добавить тест, который одновременно меняет две текущие остаточные секции.
-
-Пример формы:
+Добавить тест, в котором одновременно меняются две текущие остаточные секции, например:
 
 ```js
 it("reports independent residual sections with independent pointers", () => {
   const base = currentPolicy();
   const head = currentPolicy();
+
   head.content_rules = [{
     id: "no-debug",
     glob: "src/**",
@@ -121,13 +116,11 @@ it("reports independent residual sections with independent pointers", () => {
 });
 ```
 
-Тест не утверждает вложенную гранулярность. Один верхнеуровневый ключ — одна единица остаточного сравнения.
+Один верхнеуровневый ключ остаётся одной единицей сравнения.
 
-### Шаг 1.4. Добавить проверку экранирования JSON Pointer
+### Шаг 1.4. Проверить экранирование указателя
 
-`computePolicyDelta` специально фильтрует поля через текущую схему, поэтому для произвольного имени ключа здесь нужно вызвать `compareConstraintPrograms` напрямую.
-
-- [ ] Добавить тест:
+Для произвольного имени ключа вызвать `compareConstraintPrograms` напрямую:
 
 ```js
 it("escapes residual top-level keys as JSON Pointer tokens", () => {
@@ -144,9 +137,16 @@ it("escapes residual top-level keys as JSON Pointer tokens", () => {
 });
 ```
 
-### Шаг 1.5. Сохранить исторический schema-vocabulary ratchet
+Требуемое экранирование:
 
-- [ ] Не ослаблять существующий тест:
+```text
+~ -> ~0
+/ -> ~1
+```
+
+### Шаг 1.5. Сохранить защиту от удалённого словаря
+
+Не менять существующий тест:
 
 ```text
 retired BASE-only integration
@@ -154,33 +154,33 @@ retired BASE-only integration
 → no policy delta
 ```
 
-Он доказывает, что C3.4a не возвращает семантические полномочия удалённому словарю.
+Он доказывает, что удалённые поля старой базовой схемы не получают семантических полномочий.
 
-### Шаг 1.6. Запустить focused test и зафиксировать RED
+### Шаг 1.6. Доказать `RED`
 
-- [ ] Выполнить:
+Запустить:
 
 ```bash
 node tests/test-current-policy-vocabulary-projection.mjs
 ```
 
-Ожидаемый результат на принятой реализации:
+Ожидаемая причина падения:
 
 ```text
-FAIL: expected /content_rules, got /
-FAIL: expected two pointers, got one /
-FAIL: expected escaped top-level pointer, got /
+/content_rules expected, / actual
+two pointers expected, one / actual
+escaped pointer expected, / actual
 ```
 
-Точная формулировка `node:test` может отличаться. Важно, чтобы причина падения была только старой root-wide семантикой.
+Если локальная среда не позволяет честный запуск, создать черновой `PR` с тестовым коммитом и использовать `CI` как доказательство.
 
-- [ ] Если локальная среда не позволяет честно выполнить тест, создать draft PR с test-only head и использовать CI как доказательство `RED`.
-- [ ] Не писать production-код до зафиксированного `RED`.
+До доказанного `RED` рабочий код не менять.
 
-### Шаг 1.7. Первый commit должен быть test-only
+### Шаг 1.7. Зафиксировать тестовый коммит
 
-- [ ] Проверить diff: изменён только `tests/test-current-policy-vocabulary-projection.mjs`.
-- [ ] Commit:
+Изменён только один тестовый файл.
+
+Коммит:
 
 ```text
 test(c3.4a): require residual pointer granularity
@@ -188,17 +188,15 @@ test(c3.4a): require residual pointer granularity
 
 ---
 
-## Задача 2. Реализовать минимальное универсальное сравнение
+## Задача 2. Реализовать минимальный `GREEN`
 
-**Файлы:**
+**Исходник:** `src/checks/constraint-program.mts`
 
-- Изменить: `src/checks/constraint-program.mts`
-- Сгенерировать: `dist/checks/constraint-program.mjs`
-- Не менять: другие production-файлы
+**Генерируемый файл:** `dist/checks/constraint-program.mjs`
 
-### Шаг 2.1. Добавить только универсальное экранирование токена
+### Шаг 2.1. Добавить экранирование одного токена
 
-- [ ] Рядом с небольшими comparator helpers добавить функцию уровня файла:
+Добавить небольшую функцию:
 
 ```ts
 const jsonPointerToken = (value: string): string =>
@@ -207,39 +205,23 @@ const jsonPointerToken = (value: string): string =>
 
 Функция не знает имён секций политики.
 
-### Шаг 2.2. Не менять unknownProjection
+### Шаг 2.2. Не менять `unknownProjection()`
 
-- [ ] Оставить `unknownProjection()` владельцем существующей остаточной проекции.
+`unknownProjection()` остаётся единственным владельцем остаточной проекции.
 
-Не надо:
+Запрещено:
 
 ```text
-добавлять туда специальные delete для C3.4b
+добавлять специальные исключения ради C3.4b
 читать схему из canonical kernel
-переносить current-vocabulary projection из policy-delta-rules
+переносить schema vocabulary logic в constraint-program
 ```
 
-Schema-derived фильтрация текущего словаря уже находится на правильной внешней границе в `policy-delta-rules.mts`.
+Фильтрация текущего словаря схемы остаётся на существующей внешней границе `policy-delta-rules.mts`.
 
-### Шаг 2.3. Заменить один root-wide compare на цикл по верхнеуровневым ключам
+### Шаг 2.3. Сравнивать верхнеуровневые ключи отдельно
 
-Текущий блок:
-
-```ts
-const beforeUnknown = unknownProjection(basePolicy), afterUnknown = unknownProjection(headPolicy);
-if (!same(beforeUnknown, afterUnknown)) {
-  incomparableChanges.push({
-    kind: "policy_incomparable",
-    pointer: "/",
-    before: beforeUnknown,
-    after: afterUnknown,
-    message: "policy sections outside the Constraint Program changed and require explicit governance review",
-  });
-  changed = true;
-}
-```
-
-- [ ] Заменить его минимальной универсальной логикой концептуально следующей формы:
+Заменить один общий блок для `/` на универсальный цикл:
 
 ```ts
 const beforeUnknown = unknownProjection(basePolicy) as Record<string, unknown>;
@@ -268,103 +250,83 @@ for (const key of keys) {
 }
 ```
 
-`Object.hasOwn` нужен, чтобы различать:
+Почему нужны отдельные детали:
 
-```text
-ключ отсутствует
-```
-
-и:
-
-```json
-{ "key": null }
-```
-
-Сортировка нужна для детерминированного порядка диагностик.
+- `Object.hasOwn` отличает отсутствующий ключ от явного `null`;
+- сортировка делает порядок диагностик детерминированным;
+- экранирование формирует корректный указатель;
+- значение одного ключа сравнивается атомарно.
 
 ### Шаг 2.4. Не вводить рекурсию
 
-- [ ] Убедиться, что изменение:
-
-```json
-{
-  "content_rules": {
-    "a": 1,
-    "b": 2
-  }
-}
-```
-
-остаётся одним указателем:
+Изменение внутри:
 
 ```text
 /content_rules
 ```
 
-Не создавать:
+остаётся одним указателем.
+
+Не создавать автоматически:
 
 ```text
-/content_rules/a
-/content_rules/b
+/content_rules/0
+/content_rules/0/id
 ```
 
-Это отдельный будущий semantic design, если когда-либо появится реальная необходимость.
+Более глубокая гранулярность не нужна текущей задаче.
 
-### Шаг 2.5. Собрать generated dist
+### Шаг 2.5. Собрать `dist`
 
-- [ ] Выполнить:
+Запустить:
 
 ```bash
 npm run build
 ```
 
-- [ ] Проверить, что ожидаемое generated изменение появилось только в:
+Ожидаемое изменение среди генерируемых файлов:
 
 ```text
 dist/checks/constraint-program.mjs
 ```
 
-### Шаг 2.6. Запустить focused GREEN
+### Шаг 2.6. Проверить сфокусированный `GREEN`
 
-- [ ] Выполнить:
+Запустить:
 
 ```bash
 node tests/test-current-policy-vocabulary-projection.mjs
 ```
 
-Ожидается полный `GREEN`.
+Ожидается полный успех.
 
-### Шаг 2.7. Проверить соседний strictness contract
+### Шаг 2.7. Проверить соседние контракты
 
-- [ ] Выполнить:
+Запустить:
 
 ```bash
 node tests/test-policy-delta-rules.mjs
 node tests/test-compression-rules.mjs
 ```
 
-Ожидается `GREEN`.
+Если исторический тест ожидает корневой `/` именно для остаточной семантики, изменить только ожидаемый указатель. Смысл запрета по умолчанию не ослаблять.
 
-Если старый общий тест явно ожидает `/` для residual semantics, изменить только эту историческую ожидаемую диагностику на узкий указатель. Не менять смысл fail-closed проверки.
+### Шаг 2.8. Проверить чистоту изменения
 
-### Шаг 2.8. Проверить архитектурную чистоту diff
-
-- [ ] В production diff должны отсутствовать:
+В рабочем `diff` не должно появиться:
 
 ```text
-новая предметная ветка
-новый runtime kind
-новый FactRef source
-новый relation descriptor
-новый evaluator
-новый policy field
+new runtime kind
+new FactRef source
+new relation descriptor
+new evaluator
+new policy field
+repo-specific branch
 ```
 
-- [ ] Новый comparator-код должен работать только через `Object.keys`, `same`, `Object.hasOwn`, сортировку и JSON Pointer escaping.
+Новый код сравнения использует только существующую проекцию, сравнение значений, объединение ключей, сортировку и экранирование.
 
-### Шаг 2.9. Commit реализации
-
-- [ ] Commit:
+### Шаг 2.9. Зафиксировать рабочий коммит
 
 ```text
 feat(c3.4a): report residual policy changes by top-level pointer
@@ -372,11 +334,9 @@ feat(c3.4a): report residual policy changes by top-level pointer
 
 ---
 
-## Задача 3. Полная локальная и архитектурная проверка
+## Задача 3. Полная проверка
 
-### Шаг 3.1. Проверить generated boundary
-
-- [ ] Выполнить:
+### Шаг 3.1. Проверить свежесть `dist`
 
 ```bash
 npm run check:dist
@@ -390,13 +350,11 @@ Generated dist is current.
 
 ### Шаг 3.2. Проверить архитектурные метрики
 
-- [ ] Выполнить:
-
 ```bash
 npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
 ```
 
-Обязательные инварианты:
+Обязательные значения:
 
 ```text
 runtime constraint kinds = 1
@@ -407,41 +365,35 @@ canonical FactRef model count = 1
 primitive descriptor registry count = 1
 ```
 
-C3.4a не обязана уменьшать строки. Она обязана не увеличивать semantic surface.
+C3.4a не обязана уменьшить число строк. Она обязана не увеличить семантическую поверхность.
 
-### Шаг 3.3. Проверить собственную policy
-
-- [ ] Выполнить:
+### Шаг 3.3. Проверить собственную политику
 
 ```bash
 node dist/repo-guard.mjs
 ```
 
-Ожидается `GREEN`.
+Ожидается успех.
 
-### Шаг 3.4. Проверить doctor
-
-- [ ] Выполнить:
+### Шаг 3.4. Проверить `doctor`
 
 ```bash
 node dist/repo-guard.mjs doctor
 ```
 
-Ожидается отсутствие blocking failure.
+Блокирующего сбоя быть не должно.
 
-### Шаг 3.5. Запустить весь discovered suite
-
-- [ ] Выполнить:
+### Шаг 3.5. Запустить весь набор тестов
 
 ```bash
 npm test
 ```
 
-Ожидается полный `GREEN`.
+Ожидается полный успех.
 
-### Шаг 3.6. Проверить exact diff
+### Шаг 3.6. Проверить точный `diff`
 
-- [ ] Diff C3.4a implementation PR до Ready должен содержать только:
+Перед готовностью запроса на слияние должны изменяться только:
 
 ```text
 src/checks/constraint-program.mts
@@ -449,26 +401,23 @@ dist/checks/constraint-program.mjs
 tests/test-current-policy-vocabulary-projection.mjs
 ```
 
-Дополнительный тестовый файл допустим только если существующая test boundary объективно недостаточна. Предпочтение — не создавать новый файл.
+Новый тестовый файл не создавать без доказанной необходимости.
 
 ---
 
-## Задача 4. GitHub-приёмка C3.4a
+## Задача 4. Приёмка через GitHub
 
-### Шаг 4.1. Создать implementation branch от принятого main
+### Шаг 4.1. Создать ветку реализации от принятой `main`
 
-- [ ] Использовать exact base:
+Перед началом повторно проверить живой GitHub.
 
-```text
-48359c19dce0e4028c6991c21fbcf0f5f02e52bd
-```
+Если `main` уже сдвинулась, использовать новый принятый SHA и не работать поверх устаревшей базы.
 
-Если `main` сдвинулся до начала реализации, сначала повторно проверить live GitHub и ребазировать смысл плана на новый accepted base. Не реализовывать поверх устаревшего состояния молча.
+### Шаг 4.2. Создать черновой `PR` после тестового `RED`
 
-### Шаг 4.2. Создать draft PR после test-only RED commit
+Запрос должен ссылаться на #420 и #375.
 
-- [ ] PR должен ссылаться на #420 и #375.
-- [ ] PR ChangeIntent:
+Намерение изменения:
 
 ```repo-guard-yaml
 change_type: feature
@@ -497,20 +446,19 @@ expected_effects:
   - каноническая runtime-архитектура не растёт
 ```
 
-- [ ] Первый draft CI должен доказать ожидаемый `RED` именно test-only head.
+Первый запуск `CI` обязан доказать красное состояние именно на тестовом коммите.
 
-### Шаг 4.3. После RED добавить production commit
+### Шаг 4.3. После `RED` добавить рабочий коммит
 
-- [ ] Реализовать только задачу 2.
-- [ ] Дождаться draft CI полного `GREEN`.
+Реализовать только задачу 2.
 
-В draft `Run PR policy check` может быть пропущен по существующему CI-контракту; это нормально.
+Черновой запуск должен стать полностью зелёным. Проверка готового PR в черновом состоянии может быть пропущена существующим рабочим процессом.
 
-### Шаг 4.4. Перевести PR в Ready только после draft GREEN
+### Шаг 4.4. Перевести `PR` в готовое состояние
 
-- [ ] Зафиксировать exact head SHA.
-- [ ] Mark Ready.
-- [ ] Требовать на том же exact head:
+Только после зелёного чернового запуска.
+
+На одном точном SHA требуются:
 
 ```text
 validate = SUCCESS
@@ -518,34 +466,34 @@ smoke-pack = SUCCESS
 Run PR policy check = SUCCESS
 ```
 
-### Шаг 4.5. Merge только exact ready head
+### Шаг 4.5. Слить только проверенную вершину
 
-- [ ] Перед merge повторно проверить:
+Перед слиянием повторно проверить:
 
 ```text
 PR OPEN
 PR READY
 mergeable = true
-head SHA не изменился
+head SHA unchanged
 required checks GREEN
 ```
 
-- [ ] Merge с `expected_head_sha`.
+Слияние выполнять с `expected_head_sha`.
 
-### Шаг 4.6. Post-merge acceptance
+### Шаг 4.6. Проверить состояние после слияния
 
-- [ ] Проверить новый exact `main` SHA.
-- [ ] Найти push-run этого SHA.
-- [ ] Требовать:
+Для нового SHA `main` найти запуск после отправки и требовать:
 
 ```text
 validate = SUCCESS
 smoke-pack = SUCCESS
 ```
 
-### Шаг 4.7. Закрыть #420 только после post-merge GREEN
+### Шаг 4.7. Закрыть #420
 
-- [ ] Добавить в #420 итоговое evidence:
+Только после зелёной проверки после слияния.
+
+В задаче зафиксировать:
 
 ```text
 accepted merge SHA
@@ -557,23 +505,20 @@ FactRef sources = 4
 relation descriptors = 10
 ```
 
-- [ ] Закрыть #420 как `completed`.
-
-- [ ] Вернуться к #375.
-- [ ] Только после этого перепроверить live self-policy и написать отдельный точный план C3.4b.
+После этого вернуться к #375, заново прочитать живую собственную политику и только тогда составить отдельный точный план C3.4b.
 
 ---
 
 ## Самопроверка плана
 
-- [x] План не содержит production implementation до test-only `RED`.
-- [x] C3.4a не меняет self-policy, схему, CI или Action.
+- [x] Рабочий код запрещён до доказанного `RED`.
+- [x] C3.4a не меняет собственную политику, схему, `CI` или `Action`.
 - [x] Новый алгоритм универсален и не знает имён будущих удаляемых секций.
-- [x] Гранулярность ограничена одним верхнеуровневым ключом; рекурсивный язык не вводится.
-- [x] JSON Pointer escaping определён явно.
-- [x] Отсутствие ключа отличается от явного `null`.
-- [x] Порядок диагностик детерминирован сортировкой ключей.
-- [x] Current-schema vocabulary projection остаётся на внешней границе `policy-delta-rules`.
-- [x] Retired BASE-only vocabulary остаётся без семантических полномочий.
-- [x] Полная приёмка включает generated dist, self-policy, метрики, весь suite, Ready PR и post-merge checks.
-- [x] C3.4b намеренно не спроектирована на уровне implementation до принятия C3.4a.
+- [x] Гранулярность ограничена одним верхнеуровневым ключом.
+- [x] Экранирование указателя определено явно.
+- [x] Отсутствующий ключ отличается от явного `null`.
+- [x] Порядок диагностик детерминирован.
+- [x] Проекция текущего словаря схемы остаётся на внешней границе `policy-delta-rules`.
+- [x] Удалённый словарь старой базы остаётся без семантических полномочий.
+- [x] Полная приёмка включает `dist`, собственную политику, метрики, весь набор тестов и проверки после слияния.
+- [x] План C3.4b намеренно откладывается до принятия C3.4a.
