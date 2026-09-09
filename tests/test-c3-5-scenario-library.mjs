@@ -155,4 +155,9 @@ for (const required of ["surgical-change", "version-transition"]) {
   assert.ok(scenarioIds.includes(required), `C3.5b: отсутствует ${required}`);
 }
 
+assert.ok(
+  scenarioIds.includes("contract-evidence"),
+  "C3.5c: отсутствует contract-evidence",
+);
+
 console.log(`C3.5 scenario library passed: ${scenarioIds.length} scenario(s)`);
