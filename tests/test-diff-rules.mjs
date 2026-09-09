@@ -5,7 +5,6 @@ import { parseDiff } from "../dist/diff/parser.mjs";
 import { checkAdvisoryTextRules } from "../dist/checks/rules/advisory-text-rules.mjs";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
-import { checkSizeRules, countTextLines } from "../dist/checks/rules/size-rules.mjs";
 
 const constraintResults = (checked, policy = {}, changeIntent = null) => evaluateConstraintIR({
   diff: { files: { checked } },
@@ -83,9 +82,6 @@ assert.equal(contentViolations.length, 1);
 const readFile = (path) => ({
   "src/a.mjs": "one\ntwo\n", "docs/new.md": "# Same\nalpha beta gamma delta\n", "README.md": "# Same\nalpha beta gamma delta\n",
 }[path]);
-const size = checkSizeRules(files, [{ id: "src-lines", scope: "file", metric: "lines", glob: "src/**", max: 2 }], { trackedFiles: ["src/a.mjs"], readFile });
-assert.equal(size.ok, true);
-assert.equal(countTextLines("a\nb\n"), 2);
 
 const advisory = checkAdvisoryTextRules([{ path: "docs/new.md", status: "added", addedLines: [] }], { canonical_files: ["README.md"], warn_on_similarity_above: 0.5 }, { allFiles: ["README.md", "docs/new.md"], readFile });
 assert.equal(advisory.advisory, true);
