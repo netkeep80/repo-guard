@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
 import { COMMANDS } from "../dist/repo-guard.mjs";
-import { computePolicyDelta } from "../dist/checks/rules/policy-delta-rules.mjs";
 
 const root = resolve(new URL(".", import.meta.url).pathname, "..");
 const read = (path) => readFileSync(resolve(root, path), "utf-8");
@@ -27,22 +26,11 @@ for (const token of ["ParallelProvider", "--parallel", "parallelIntegration", "p
 }
 
 const policy = json("repo-policy.json");
-assert.equal(policy.integration.workflows.some((item) => item.id === "repo-guard-portable-coordinator"), false);
-const baseLike = structuredClone(policy);
-baseLike.integration.workflows.push({
-  id: "repo-guard-portable-coordinator", kind: "github_actions",
-  path: ".github/workflows/repo-guard-portable-coordinator.yml",
-  role: "repo_guard_portable_coordinator",
-  expect: { enforcement: "blocking" },
-});
-const delta = computePolicyDelta(baseLike, policy).relaxations.map((item) => item.pointer);
-assert.deepEqual(delta, ["/integration/workflows/repo-guard-portable-coordinator"]);
-
+assert.equal(Object.hasOwn(policy, "integration"), false, "self policy must not retain the deleted integration product container");
 const schema = json("schemas/repo-policy.schema.json");
 const validate = new Ajv({ allErrors: true }).compile(schema);
-const invalid = structuredClone(policy);
-invalid.integration.workflows.push({ id: "old-provider", kind: "github_actions", path: "x.yml", role: "repo_guard_portable_coordinator", expect: {} });
-assert.equal(validate(invalid), false);
+assert.equal(validate(policy), true);
+assert.equal(validate({ ...policy, integration: {} }), false, "public schema must reject the deleted integration product surface");
 
 const providerResiduePattern = [
   "portable-coordinator", "check-merge-group", "--parallel",
