@@ -14,7 +14,8 @@ type AjvSchema = unknown;
 type RuntimePolicyProjection = Parameters<typeof compileChangeProfiles>[0] & { content_rules?: unknown };
 type SemanticGroup = readonly [string, readonly unknown[], (error: unknown) => string];
 interface RuntimeRoots { packageRoot: string; repoRoot: string; }
-interface RuntimeValidationOptions { quiet?: boolean; label?: string; }
+interface RuntimeSchemas { repoPolicy?: AjvSchema; changeIntent?: AjvSchema; governanceGrant?: AjvSchema; }
+interface RuntimeValidationOptions { quiet?: boolean; label?: string; schemas?: RuntimeSchemas; }
 interface QuietOption { quiet?: boolean; }
 
 export const loadJSON = (path: string): unknown => JSON.parse(readFileSync(path, "utf-8"));
@@ -35,8 +36,8 @@ export function validationCheck(ajv: AjvRuntime, schema: AjvSchema, data: unknow
 }
 
 export function loadPolicyRuntimeFromObject(roots: RuntimeRoots, rawPolicy: unknown, options: RuntimeValidationOptions = {}) {
-  const schema = (name: string): AjvSchema => loadJSON(resolve(roots.packageRoot, `schemas/${name}.schema.json`));
-  const policySchema = schema("repo-policy"), changeIntentSchema = schema("change-intent"), governanceGrantSchema = schema("governance-grant");
+  const schema = (key: keyof RuntimeSchemas, name: string): AjvSchema => options.schemas?.[key] ?? loadJSON(resolve(roots.packageRoot, `schemas/${name}.schema.json`));
+  const policySchema = schema("repoPolicy", "repo-policy"), changeIntentSchema = schema("changeIntent", "change-intent"), governanceGrantSchema = schema("governanceGrant", "governance-grant");
   const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
   let ok = validate(ajv, policySchema, rawPolicy, label, { quiet });
   const profile = resolvePolicyProfile(rawPolicy), policy = profile.policy as RuntimePolicyProjection;

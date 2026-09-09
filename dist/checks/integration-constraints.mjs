@@ -1,5 +1,4 @@
 import { compareSets } from "./relation-kernel.mjs";
-import { evaluateParallelReadiness } from "../parallel-readiness.mjs";
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const array = (value) => Array.isArray(value) ? value : [];
 const lower = (value) => String(value || "").toLowerCase();
@@ -138,17 +137,6 @@ function workflowDetails(workflow) {
                 details.push(detail(workflow, fact, "repo_guard_pr_gate workflow must not run repo-guard directly from a temporary clone"));
     return details;
 }
-function parallelReadinessDetails(integration) {
-    const providerRoles = [
-        ["github_merge_queue", "repo_guard_merge_group_gate"],
-        ["portable", "repo_guard_portable_coordinator"],
-    ];
-    return providerRoles.flatMap(([provider, role]) => array(integration.workflows).some((workflow) => workflow.role === role)
-        ? evaluateParallelReadiness({ provider, integrationFacts: integration, controlPlaneFacts: {} }).blockers
-            .filter((blocker) => blocker.source === "repository")
-            .map((blocker) => `${provider} [${blocker.id}]: ${blocker.message}`)
-        : []);
-}
 function templateDetails(template) {
     if (template.present === false && template.optional)
         return [];
@@ -167,7 +155,7 @@ function templateDetails(template) {
 function missingMentions(doc, facts, label) { return (facts || []).filter((mention) => !mention.present).map((mention) => `${doc.path}: missing required ${label} "${mention.term}"`); }
 export function integrationConstraintEntries(integration = {}) {
     const artifacts = array(integration.errors).map((error) => `${error.section}${error.id ? `:${error.id}` : ""}${error.path ? ` (${error.path})` : ""}: ${error.message}`);
-    const workflows = [...array(integration.workflows).flatMap(workflowDetails), ...parallelReadinessDetails(integration)];
+    const workflows = array(integration.workflows).flatMap(workflowDetails);
     const templates = array(integration.templates).flatMap(templateDetails);
     const docs = array(integration.docs).flatMap((doc) => [...missingMentions(doc, doc.mentions, "mention"), ...missingMentions(doc, doc.fileReferences, "file reference"), ...missingMentions(doc, doc.profileMentions, "profile mention"), ...missingMentions(doc, doc.changeIntentFieldMentions, "ChangeIntent field mention")]);
     const profiles = array(integration.profiles).flatMap((profile) => profile.profileNameReferences?.length ? [] : [`${profile.docPath}: profile "${profile.id}" is not mentioned`]);

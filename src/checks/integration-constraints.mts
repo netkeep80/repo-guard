@@ -1,5 +1,4 @@
 import { compareSets } from "./relation-kernel.mjs";
-import { evaluateParallelReadiness } from "../parallel-readiness.mjs";
 
 type RefPinning = "any" | "local" | "sha" | "semver" | "tag" | "ref" | string;
 
@@ -188,18 +187,6 @@ function workflowDetails(workflow: WorkflowFact): string[] {
   return details;
 }
 
-function parallelReadinessDetails(integration: IntegrationFacts): string[] {
-  const providerRoles = [
-    ["github_merge_queue", "repo_guard_merge_group_gate"],
-    ["portable", "repo_guard_portable_coordinator"],
-  ] as const;
-  return providerRoles.flatMap(([provider, role]) => array(integration.workflows).some((workflow) => workflow.role === role)
-    ? evaluateParallelReadiness({ provider, integrationFacts: integration, controlPlaneFacts: {} }).blockers
-      .filter((blocker) => blocker.source === "repository")
-      .map((blocker) => `${provider} [${blocker.id}]: ${blocker.message}`)
-    : []);
-}
-
 function templateDetails(template: TemplateFact): string[] {
   if (template.present === false && template.optional) return [];
   const details: string[] = [], blocks = template.changeIntentBlocks || [];
@@ -214,7 +201,7 @@ function missingMentions(doc: DocFact, facts: MentionFact[] | undefined, label: 
 
 export function integrationConstraintEntries(integration: IntegrationFacts = {}): IntegrationCheckEntry[] {
   const artifacts = array(integration.errors).map((error) => `${error.section}${error.id ? `:${error.id}` : ""}${error.path ? ` (${error.path})` : ""}: ${error.message}`);
-  const workflows = [...array(integration.workflows).flatMap(workflowDetails), ...parallelReadinessDetails(integration)];
+  const workflows = array(integration.workflows).flatMap(workflowDetails);
   const templates = array(integration.templates).flatMap(templateDetails);
   const docs = array(integration.docs).flatMap((doc) => [...missingMentions(doc, doc.mentions, "mention"), ...missingMentions(doc, doc.fileReferences, "file reference"), ...missingMentions(doc, doc.profileMentions, "profile mention"), ...missingMentions(doc, doc.changeIntentFieldMentions, "ChangeIntent field mention")]);
   const profiles = array(integration.profiles).flatMap((profile) => profile.profileNameReferences?.length ? [] : [`${profile.docPath}: profile "${profile.id}" is not mentioned`]);

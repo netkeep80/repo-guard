@@ -2,8 +2,6 @@
 import { realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runParallelDoctor } from "./parallel-doctor.mjs";
-import { runPortableCoordinatorCommand } from "./portable-integration/public-command.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(__dirname, "..");
 const valueOptions = (...names) => Object.fromEntries(names.map((name) => [name, true]));
@@ -20,25 +18,15 @@ const COMMAND_SPECS = {
         options: {}, positionals: 0,
         run: async (roots, args) => (await import("./github-pr.mjs")).runCheckPR(roots, args),
     },
-    "check-merge-group": {
-        options: valueOptions("--format"), positionals: 0,
-        run: async (roots, args) => (await import("./github-merge-group.mjs")).runCheckMergeGroup(roots, args),
-    },
     init: {
-        options: { ...valueOptions("--preset", "--mode", "--action-ref", "--parallel"), "--help": false }, positionals: 0,
+        options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0,
         run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
     },
     doctor: {
-        options: { "--integration": false, ...valueOptions("--format", "--parallel", "--persistent-branch") }, positionals: 0,
+        options: { "--integration": false, ...valueOptions("--format") }, positionals: 0,
         run: async (roots, args) => args.includes("--integration")
             ? (await import("./integration-validator.mjs")).runValidateIntegration(roots, args)
-            : args.includes("--parallel")
-                ? runParallelDoctor(roots, args)
-                : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
-    },
-    "portable-coordinator": {
-        options: valueOptions("--repository", "--ready-label", "--merge-method", "--transaction-check", "--state-check", "--format"), positionals: 0,
-        run: (roots, args) => runPortableCoordinatorCommand(roots, args),
+            : ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0),
     },
     "validate-integration": {
         options: valueOptions("--format"), positionals: 0,
