@@ -5,8 +5,7 @@ import { resolve } from "node:path";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "../dist/change-intent.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
-const selfPolicy = JSON.parse(readFileSync(resolve(root, "repo-policy.json"), "utf-8"));
-const issueTemplatePath = selfPolicy.integration.templates.find((entry) => entry.kind === "github_issue_form").path;
+const issueTemplatePath = ".github/ISSUE_TEMPLATE/change-intent.yml";
 const intent = (type = "bugfix") => `\`\`\`repo-guard-yaml
 change_type: ${type}
 scope: ["src/**"]
