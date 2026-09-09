@@ -14,6 +14,9 @@ const acceptedSha = execFileSync(
   ["rev-parse", "HEAD"],
   { cwd: repoRoot, encoding: "utf8" },
 ).trim();
+const packageJson = JSON.parse(
+  readFileSync(resolve(repoRoot, "package.json"), "utf8"),
+);
 
 const release404 = async () => ({
   status: 404,
@@ -43,8 +46,8 @@ assert.equal(first.accepted.sha, acceptedSha);
 assert.equal(first.accepted.ci.conclusion, "success");
 assert.equal(first.accepted.provenance.origin, "accepted_ci");
 assert.equal(first.accepted.provenance.sha, acceptedSha);
-assert.equal(first.version.package_version, "2.0.0");
-assert.equal(first.version.matching_release_tag, "v2.0.0");
+assert.equal(first.version.package_version, packageJson.version);
+assert.equal(first.version.matching_release_tag, `v${packageJson.version}`);
 assert.equal(first.version.matching_published_release, false);
 assert.equal(first.version.release_truth_status, "package_only");
 assert.equal(first.version.provenance.origin, "github_observation");
