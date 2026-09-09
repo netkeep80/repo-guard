@@ -243,7 +243,7 @@ console.log("\n--- size violations retain machine-readable measurements ---");
   const measurement = parsed?.violations.find((item) => item.rule === "size:max-src-lines:max");
   expect("size rule identity is carried by canonical relation name", measurement?.rule, "size:max-src-lines:max");
   expect("measured line count is exposed through numeric_bound", measurement?.data?.actual, 3);
-  expect("configured maximum is exposed through relation parameters", measurement?.data?.parameters?.max, 2);
+  expect("configured maximum is exposed through numeric_bound", measurement?.data?.max, 2);
   rmSync(repo.dir, { recursive: true });
 }
 
