@@ -41,10 +41,14 @@ const second = await collectObservatorySnapshot(input);
 assert.equal(first.schema_version, 1);
 assert.equal(first.accepted.sha, acceptedSha);
 assert.equal(first.accepted.ci.conclusion, "success");
+assert.equal(first.accepted.provenance.origin, "accepted_ci");
+assert.equal(first.accepted.provenance.sha, acceptedSha);
 assert.equal(first.version.package_version, "2.0.0");
 assert.equal(first.version.matching_release_tag, "v2.0.0");
 assert.equal(first.version.matching_published_release, false);
 assert.equal(first.version.release_truth_status, "package_only");
+assert.equal(first.version.provenance.origin, "github_observation");
+assert.equal(first.version.provenance.sha, acceptedSha);
 
 assert.deepEqual(
   first.architecture.current.architecture.canonical_fact_sources,
@@ -58,6 +62,11 @@ assert.equal(
   first.architecture.current.architecture.primitive_descriptor_registry_count,
   1,
 );
+assert.deepEqual(first.architecture.provenance, {
+  origin: "accepted_commit",
+  source: "scripts/compression-metrics.mjs",
+  sha: acceptedSha,
+});
 
 assert.equal(first.scenarios.length, 5);
 assert.deepEqual(
@@ -71,6 +80,11 @@ assert.deepEqual(
   ],
 );
 assert.ok(first.scenarios.every((item) => item.cases.length === 2));
+assert.ok(first.scenarios.every((item) => (
+  item.provenance?.origin === "accepted_commit"
+  && item.provenance?.sha === acceptedSha
+  && item.provenance?.source === `examples/scenarios/${item.id}/scenario.json`
+)));
 
 assert.ok(first.policy.constraint_program.length > 0);
 assert.ok(
@@ -78,6 +92,10 @@ assert.ok(
     .filter((entry) => entry.runtime)
     .every((entry) => entry.runtime.kind === "primitive_relation"),
 );
+assert.equal(first.policy.provenance.origin, "accepted_commit");
+assert.equal(first.policy.provenance.sha, acceptedSha);
+assert.equal(first.ci.provenance.origin, "accepted_commit");
+assert.equal(first.ci.provenance.sha, acceptedSha);
 
 assert.equal(stableJson(first), stableJson(second));
 assert.ok(!stableJson(first).includes(repoRoot));
