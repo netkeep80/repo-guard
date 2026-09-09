@@ -10,7 +10,7 @@ const root = resolve(new URL(".", import.meta.url).pathname, "..");
 const read = (path) => readFileSync(resolve(root, path), "utf-8");
 const json = (path) => JSON.parse(read(path));
 
-assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "init", "doctor", "validate-integration"]);
+assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "init", "doctor"]);
 for (const path of [
   "src/parallel-readiness.mts", "src/parallel-doctor.mts", "src/parallel-control-plane.mts",
   "src/github-control-plane.mts", "src/github-merge-group.mts", "src/portable-integration/public-command.mts",
