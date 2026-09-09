@@ -160,4 +160,12 @@ assert.ok(
   "C3.5c: отсутствует contract-evidence",
 );
 
+assert.deepEqual(scenarioIds, [
+  "contract-evidence",
+  "governance-cutover",
+  "minimal-diff-policy",
+  "surgical-change",
+  "version-transition",
+], "C3.5d: финальный корпус должен содержать ровно пять принятых сценариев");
+
 console.log(`C3.5 scenario library passed: ${scenarioIds.length} scenario(s)`);
