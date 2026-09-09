@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { compileConstraintIR, evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { relationDescriptors } from "../dist/checks/relation-kernel.mjs";
 
@@ -59,6 +60,8 @@ console.log("\n--- C3.3d3 canonical lowering ---");
   const primitives = primitiveConstraints(facts);
 
   expect("size_rules is not a runtime kind", ir.constraints.some((constraint) => constraint.kind === "size_rules"), false);
+  expect("source size-rules evaluator is physically deleted", existsSync(new URL("../src/checks/rules/size-rules.mts", import.meta.url)), false);
+  expect("dist size-rules evaluator is physically deleted", existsSync(new URL("../dist/checks/rules/size-rules.mjs", import.meta.url)), false);
 
   const changedFile = primitives.find((constraint) => {
     const selector = sourceSelector(constraint);
