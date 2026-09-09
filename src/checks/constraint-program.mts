@@ -448,10 +448,29 @@ const comparisonConstraints = (policy: ConstraintPolicyProjection): StrictnessPr
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])])); return value; }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
-function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
-  const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.cochange_rules; delete copy.cochange_groups; delete copy.document_relations; delete copy.evidence_bindings;
-  if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
-  return copy;
+const CURRENT_UNMODELED_POLICY_FIELDS = [
+  "policy_format_version",
+  "repository_kind",
+  "profile",
+  "profile_overrides",
+  "surfaces",
+  "new_file_classes",
+  "change_profiles",
+  "contract_conformance",
+  "advisory_text_rules",
+  "anchors",
+  "trace_rules",
+  "content_rules",
+] as const;
+function unknownProjection(policy: ConstraintPolicyProjection = {}): Record<string, unknown> {
+  const source = policy as ConstraintPolicyProjection & Record<string, unknown>;
+  const projected: Record<string, unknown> = {};
+  for (const field of CURRENT_UNMODELED_POLICY_FIELDS) {
+    if (source[field] !== undefined) projected[field] = clone(source[field]);
+  }
+  const publicApi = object(source.paths).public_api;
+  if (publicApi !== undefined) projected.paths = { public_api: clone(publicApi) };
+  return projected;
 }
 const relaxation = (entry: StrictnessProgramEntry, before: unknown, after: unknown = null, kind = entry.weakenKind as string, message: string | null = null, extra: Record<string, unknown> = {}): PolicyRelaxation => ({
   kind, ...(entry.rule_id ? { rule_id: entry.rule_id } : {}), ...(entry.field ? { field: entry.field } : {}), ...(entry.evidence_binding_id ? { evidence_binding_id: entry.evidence_binding_id } : {}), pointer: entry.pointer, before, after,
