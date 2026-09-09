@@ -102,6 +102,18 @@ await assert.rejects(
 await assert.rejects(
   () => collectObservatorySnapshot({
     ...input,
+    fetchImpl: async () => ({
+      status: 200,
+      ok: true,
+      async json() { return {}; },
+    }),
+  }),
+  /malformed GitHub release observation/,
+);
+
+await assert.rejects(
+  () => collectObservatorySnapshot({
+    ...input,
     acceptedSha: "0".repeat(40),
   }),
   /accepted SHA mismatch/,
