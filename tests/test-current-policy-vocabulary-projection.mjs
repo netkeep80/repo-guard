@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { computePolicyDelta } from "../dist/checks/rules/policy-delta-rules.mjs";
 
 const currentPolicy = () => ({
@@ -38,6 +39,37 @@ describe("current policy vocabulary strictness projection", () => {
 
     const relaxations = computePolicyDelta(base, head).relaxations;
     assert.equal(relaxations.length, 1);
-    assert.equal(relaxations[0]?.pointer, "/");
+    assert.equal(relaxations[0]?.pointer, "/content_rules");
+  });
+
+  it("reports independent residual sections with independent pointers", () => {
+    const base = currentPolicy();
+    const head = currentPolicy();
+    head.content_rules = [{
+      id: "no-debug",
+      glob: "src/**",
+      mode: "added_lines",
+      forbid_regex: ["debug"],
+    }];
+    head.surfaces = { source: ["src/**"] };
+
+    const pointers = computePolicyDelta(base, head).relaxations
+      .map((item) => item.pointer)
+      .sort();
+
+    assert.deepEqual(pointers, ["/content_rules", "/surfaces"]);
+  });
+
+  it("escapes residual top-level keys as JSON Pointer tokens", () => {
+    const key = "future/semantic~v1";
+    const base = { [key]: { mode: "strict" } };
+    const head = { [key]: { mode: "changed" } };
+
+    const comparison = compareConstraintPrograms(base, head);
+
+    assert.deepEqual(
+      comparison.incomparable.map((item) => item.pointer),
+      ["/future~1semantic~0v1"],
+    );
   });
 });
