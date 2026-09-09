@@ -40,17 +40,9 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     options: valueOptions("--format"), positionals: 0,
     run: async (roots, args) => (await import("./github-merge-group.mjs")).runCheckMergeGroup(roots, args),
   },
-  status: {
-    options: valueOptions("--input", "--format"), positionals: 0,
-    run: async (roots, args) => (await import("./status.mjs")).runStatus(roots, args),
-  },
   init: {
     options: { ...valueOptions("--preset", "--mode", "--action-ref", "--parallel"), "--help": false }, positionals: 0,
     run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args),
-  },
-  migrate: {
-    options: { ...valueOptions("--parallel", "--action-ref", "--format"), "--dry-run": false, "--apply": false, "--rollback": false, "--help": false }, positionals: 0,
-    run: async (roots, args) => (await import("./migrate.mjs")).runMigrate(roots, args),
   },
   doctor: {
     options: { "--integration": false, ...valueOptions("--format", "--parallel", "--persistent-branch") }, positionals: 0,
