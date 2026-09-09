@@ -81,7 +81,7 @@ export function classifyChangedFiles(files: ParsedDiffFile[], basePolicy: Policy
   return { protectedFiles, governanceFiles, otherFiles, protectedPatterns: patterns };
 }
 
-function pointerCovers(grant: unknown, delta: unknown): boolean {
+export function policyPointerCovers(grant: unknown, delta: unknown): boolean {
   if (typeof grant !== "string" || typeof delta !== "string") return false;
   if (grant === delta || delta.startsWith(`${grant}/`)) return true;
   if (!grant.endsWith("/*")) return false;
@@ -92,7 +92,7 @@ function grantCoversRelaxation(governanceGrant: GovernanceGrantProjection | null
   if (!governanceGrant) return { ok: false, reason: "governance_grant_missing" };
   const allowed = array(governanceGrant.allow_policy_relaxation);
   if (!allowed.length) return { ok: false, reason: "governance_grant_missing_allow_policy_relaxation" };
-  const uncovered = relaxations.map((item) => item.pointer).filter((pointer) => !allowed.some((entry) => pointerCovers(entry, pointer)));
+  const uncovered = relaxations.map((item) => item.pointer).filter((pointer) => !allowed.some((entry) => policyPointerCovers(entry, pointer)));
   return uncovered.length
     ? { ok: false, reason: "governance_grant_does_not_cover_all_relaxations", uncovered_pointers: uncovered, allowed_pointers: allowed }
     : { ok: true, allowed_pointers: allowed };
