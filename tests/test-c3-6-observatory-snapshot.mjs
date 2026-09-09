@@ -42,6 +42,9 @@ const first = await collectObservatorySnapshot(input);
 const second = await collectObservatorySnapshot(input);
 
 assert.equal(first.schema_version, 1);
+assert.equal(first.repository.full_name, input.repository);
+assert.equal(first.repository.provenance.origin, "accepted_commit");
+assert.equal(first.repository.provenance.sha, acceptedSha);
 assert.equal(first.accepted.sha, acceptedSha);
 assert.equal(first.accepted.ci.conclusion, "success");
 assert.equal(first.accepted.provenance.origin, "accepted_ci");
