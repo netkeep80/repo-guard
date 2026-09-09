@@ -130,14 +130,17 @@ else console.log(JSON.stringify({labels:[]}));
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("rejects a broken integration expectation in the policy adoption PR", () => {
+  it("rejects the deleted integration surface in a policy adoption PR", () => {
     const root = tinyRepo("rg-pr-head-integration-", []);
     rewritePolicy(root, (policy) => { policy.integration = { workflows: [{
       id: "same-pr-missing-workflow", kind: "github_actions", path: ".github/workflows/missing.yml", role: "repo_guard_pr_gate",
     }] }; });
-    git(root, "add", "repo-policy.json"); git(root, "commit", "-m", "add integration expectation");
+    git(root, "add", "repo-policy.json"); git(root, "commit", "-m", "add deleted integration surface");
     const result = run(root, intent(["repo-policy.json"])), output = `${result.stdout || ""}${result.stderr || ""}`;
-    assert.equal(result.status, 1, output); assert.match(output, /FAIL: proposed-policy:integration-artifacts/);
+    assert.equal(result.status, 1, output);
+    assert.match(output, /FAIL: repo-policy\.json \(PR head\)/);
+    assert.match(output, /must NOT have additional properties/);
+    assert.doesNotMatch(output, /proposed-policy:integration-artifacts/);
     rmSync(root, { recursive: true, force: true });
   });
 });
