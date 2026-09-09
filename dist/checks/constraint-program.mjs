@@ -325,6 +325,7 @@ function canonical(value) { if (Array.isArray(value))
     return value.map(canonical); if (value && typeof value === "object")
     return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])); return value; }
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+const jsonPointerToken = (value) => value.replace(/~/g, "~0").replace(/\//g, "~1");
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy = {}) {
     const copy = clone(policy) || {};
@@ -401,8 +402,19 @@ export function compareConstraintPrograms(basePolicy, headPolicy) {
                 incomparableChanges.push(incomparable(item, null, item.value));
         }
     const beforeUnknown = unknownProjection(basePolicy), afterUnknown = unknownProjection(headPolicy);
-    if (!same(beforeUnknown, afterUnknown)) {
-        incomparableChanges.push({ kind: "policy_incomparable", pointer: "/", before: beforeUnknown, after: afterUnknown, message: "policy sections outside the Constraint Program changed and require explicit governance review" });
+    const unknownKeys = [...new Set([...Object.keys(beforeUnknown), ...Object.keys(afterUnknown)])].sort();
+    for (const key of unknownKeys) {
+        const beforePresent = Object.hasOwn(beforeUnknown, key), afterPresent = Object.hasOwn(afterUnknown, key);
+        const before = beforePresent ? beforeUnknown[key] : null, after = afterPresent ? afterUnknown[key] : null;
+        if (beforePresent === afterPresent && same(before, after))
+            continue;
+        incomparableChanges.push({
+            kind: "policy_incomparable",
+            pointer: `/${jsonPointerToken(key)}`,
+            before,
+            after,
+            message: `policy section "${key}" outside the Constraint Program changed and requires explicit governance review`,
+        });
         changed = true;
     }
     const relation = relaxations.length ? "weaker" : incomparableChanges.length ? "incomparable" : tightened || changed ? "stricter" : "equal";
