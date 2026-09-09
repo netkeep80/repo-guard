@@ -447,6 +447,7 @@ export const runtimeConstraints = (program: ConstraintProgramEntry[]): RuntimePr
 const comparisonConstraints = (policy: ConstraintPolicyProjection): StrictnessProgramEntry[] => compileConstraintProgram(policy, null, { emitRuntime: false }).flatMap((entry) => entry.strictness ? [{ key: entry.key, ...entry.strictness }] : []) as StrictnessProgramEntry[];
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])])); return value; }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+const jsonPointerToken = (value: string): string => value.replace(/~/g, "~0").replace(/\//g, "~1");
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
   const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.cochange_rules; delete copy.cochange_groups; delete copy.document_relations; delete copy.evidence_bindings;
@@ -485,8 +486,21 @@ export function compareConstraintPrograms(basePolicy: ConstraintPolicyProjection
     else if (item.relation === "subset_stricter" && (item as SetStrictness).value.length) for (const added of (item as SetStrictness).value) incomparableChanges.push(incomparable(item, [], [added]));
     else if (item.relation === "equal_or_incomparable" && !item.owner) incomparableChanges.push(incomparable(item, null, item.value));
   }
-  const beforeUnknown = unknownProjection(basePolicy), afterUnknown = unknownProjection(headPolicy);
-  if (!same(beforeUnknown, afterUnknown)) { incomparableChanges.push({ kind: "policy_incomparable", pointer: "/", before: beforeUnknown, after: afterUnknown, message: "policy sections outside the Constraint Program changed and require explicit governance review" }); changed = true; }
+  const beforeUnknown = unknownProjection(basePolicy) as Record<string, unknown>, afterUnknown = unknownProjection(headPolicy) as Record<string, unknown>;
+  const unknownKeys = [...new Set([...Object.keys(beforeUnknown), ...Object.keys(afterUnknown)])].sort();
+  for (const key of unknownKeys) {
+    const beforePresent = Object.hasOwn(beforeUnknown, key), afterPresent = Object.hasOwn(afterUnknown, key);
+    const before = beforePresent ? beforeUnknown[key] : null, after = afterPresent ? afterUnknown[key] : null;
+    if (beforePresent === afterPresent && same(before, after)) continue;
+    incomparableChanges.push({
+      kind: "policy_incomparable",
+      pointer: `/${jsonPointerToken(key)}`,
+      before,
+      after,
+      message: `policy section "${key}" outside the Constraint Program changed and requires explicit governance review`,
+    });
+    changed = true;
+  }
   const relation: ComparisonRelation = relaxations.length ? "weaker" : incomparableChanges.length ? "incomparable" : tightened || changed ? "stricter" : "equal";
   return { relation, relaxations, incomparable: incomparableChanges };
 }
