@@ -240,6 +240,7 @@ import {
   execFileSync,
 } from "node:child_process";
 import {
+  mkdirSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -547,6 +548,7 @@ export async function collectObservatorySnapshot({
 После сборки:
 
 ```js
+mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, stableJson(snapshot), "utf8");
 ```
 
@@ -696,11 +698,11 @@ const snapshot = {
     summary_ru: "Текст & данные",
     command: "check-diff",
     cases: [
-      { id: "pass", title_ru: "Проходит", expected_exit: 0 },
+      { id: "pass", title_ru: "Проходит", expected_exit_code: 0 },
       {
         id: "fail",
         title_ru: "Блокируется",
-        expected_exit: 1,
+        expected_exit_code: 1,
         expected_diagnostics: ["forbidden-paths"],
       },
     ],
@@ -975,7 +977,7 @@ const build = workflow.jobs.build;
 const deploy = workflow.jobs.deploy;
 
 assert.equal(build.permissions.contents, "read");
-assert.equal(build.permissions.actions, "read");
+assert.equal(build.permissions.actions, undefined);
 assert.equal(build.permissions.pages, "read");
 assert.equal(build.permissions.issues, undefined);
 assert.equal(build.permissions["pull-requests"], undefined);
@@ -987,9 +989,8 @@ assert.equal(deploy.permissions["id-token"], "write");
 assert.match(raw, /workflow_run\.conclusion == 'success'/);
 assert.match(raw, /github\.event\.workflow_run\.head_sha/);
 assert.match(raw, /git rev-parse HEAD/);
-assert.equal(
-  (raw.match(/git ls-remote origin refs\/heads\/main/g) || []).length,
-  2,
+assert.ok(
+  (raw.match(/git ls-remote origin refs\/heads\/main/g) || []).length >= 2,
 );
 
 assert.match(raw, /actions\/checkout@v6/);
@@ -1041,7 +1042,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
       pages: read
     steps:
       - uses: actions/checkout@v6
@@ -1130,19 +1130,7 @@ jobs:
 
 Здесь нет запуска произвольного кода из PR: `workflow_run` ограничен успешным процессом `CI` на `main`, а исходники берутся по его точному принятому коммиту.
 
-#### Шаг 3.4: исправить формулировку теста свежести
-
-В спецификации требуются две проверки удалённой ветки: перед загрузкой и перед публикацией. В приведённом процессе есть дополнительная ранняя проверка перед сборкой. Тест должен требовать **не менее двух**, а не ровно две:
-
-```js
-assert.ok(
-  (raw.match(/git ls-remote origin refs\/heads\/main/g) || []).length >= 2,
-);
-```
-
-Так тест защищает инвариант, а не случайное число защитных проверок.
-
-#### Шаг 3.5: проверить отсутствие лишних разрешений
+#### Шаг 3.4: проверить отсутствие лишних разрешений
 
 Добавить:
 
@@ -1158,7 +1146,7 @@ for (const permissions of [
 }
 ```
 
-#### Шаг 3.6: запустить целевой и полный набор
+#### Шаг 3.5: запустить целевой и полный набор
 
 ```bash
 node tests/test-c3-6-pages-workflow.mjs
@@ -1173,7 +1161,7 @@ node dist/repo-guard.mjs check-pr
 
 в реальном контексте PR через основной процесс. Ожидаемый диагностический результат — управляющее изменение разрешено санкцией из #440 и других нарушений нет.
 
-#### Шаг 3.7: перевести PR в готовое состояние только после зелёного чернового запуска
+#### Шаг 3.6: перевести PR в готовое состояние только после зелёного чернового запуска
 
 Проверить точную голову PR:
 
@@ -1188,7 +1176,7 @@ smoke-pack = SUCCESS
 Run PR policy check = SUCCESS
 ```
 
-#### Шаг 3.8: слить только с защитой головы
+#### Шаг 3.7: слить только с защитой головы
 
 Перед merge заново проверить:
 
@@ -1205,7 +1193,7 @@ Run PR policy check = SUCCESS
 
 После merge проверить основной процесс на новом `main`.
 
-#### Шаг 3.9: зафиксировать срез
+#### Шаг 3.8: зафиксировать срез
 
 Коммит до PR:
 
