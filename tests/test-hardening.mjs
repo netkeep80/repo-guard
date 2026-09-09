@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, compileIntegrationPolicy, warnReservedPolicyFields } from "../dist/policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, warnReservedPolicyFields } from "../dist/policy-compiler.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../dist/github-pr.mjs";
 
@@ -57,14 +57,6 @@ describe("semantic compiler hardening", () => {
       { id: "same", kind: "must_resolve", from_anchor_type: "requirement_id", to_anchor_type: "requirement_id" },
     ] }).some((e) => e.message.includes("duplicates")));
     assert.equal(compileAnchorPolicy({ anchors: { types: { ref: { sources: [{ kind: "regex", glob: "src/**", pattern: "[bad" }] } } } }).length, 1);
-  });
-  it("keeps integration compiler focused on ids and cross-references", () => {
-    assert.deepEqual(compileIntegrationPolicy({ integration: {
-      workflows: [{ id: "gate", kind: "github_actions", path: "ci.yml", role: "repo_guard_pr_gate", profiles: ["strict"] }],
-      profiles: [{ id: "strict", doc_path: "README.md" }],
-    } }), []);
-    const invalid = compileIntegrationPolicy({ integration: { workflows: [{ id: "dup" }, { id: "dup", profiles: ["missing"] }] } });
-    assert.ok(invalid.some((e) => e.message.includes("duplicates"))); assert.ok(invalid.some((e) => e.message.includes("missing")));
   });
   it("keeps only the remaining policy reservation visible", () => assert.equal(warnReservedPolicyFields({ paths: { public_api: ["src/api/**"] } }).length, 1));
 });
