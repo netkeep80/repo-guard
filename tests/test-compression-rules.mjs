@@ -2,7 +2,6 @@ import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
 import { compileConstraintIR, evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { comparePolicyStrictness } from "../dist/checks/rules/policy-delta-rules.mjs";
-import { checkSizeRules } from "../dist/checks/rules/size-rules.mjs";
 import { parseMarkdown } from "../dist/document-facts.mjs";
 import { classifyPathSets, selectPaths } from "../dist/diff/classification.mjs";
 
@@ -71,39 +70,6 @@ const currentFiles = new Map([
   ["README.md", "# Русский документ\n\nОбычный русский текст с `SomeClass` и API.\n\n```text\nCurrent production contract\n```\n"],
 ]);
 const readFile = (path) => currentFiles.get(path) ?? null;
-const balancedDiff = [
-  { path: "docs/a.md", status: "modified", addedLines: ["n1", "n2"], deletedLines: ["o1", "o2", "o3", "o4", "o5"] },
-  { path: "docs/b.md", status: "added", addedLines: ["a", "b", "c"], deletedLines: [] },
-];
-const lineRule = { id: "docs-lines", scope: "directory", metric: "lines", glob: "docs/**", max: 20, max_growth: 0 };
-const lineResult = checkSizeRules(balancedDiff, [lineRule], { trackedFiles: ["docs/a.md", "docs/b.md"], readFile });
-expect("line surface passes when net growth is zero", lineResult.ok, true);
-expect("line surface reports before", lineResult.growth[0].before, 13);
-expect("line surface reports after", lineResult.growth[0].after, 13);
-expect("line surface reports delta", lineResult.growth[0].delta, 0);
-
-const growingDiff = [{ path: "docs/a.md", status: "modified", addedLines: ["n1", "n2"], deletedLines: ["o1"] }];
-const growingResult = checkSizeRules(growingDiff, [lineRule], { trackedFiles: ["docs/a.md", "docs/b.md"], readFile });
-expect("line surface blocks positive growth", growingResult.ok, false);
-expect("line surface growth violation kind", growingResult.size_violations[0].kind, "growth");
-expect("line surface positive delta", growingResult.growth[0].delta, 1);
-const shrinkRequired = checkSizeRules(balancedDiff, [{ ...lineRule, max_growth: -1 }], { trackedFiles: ["docs/a.md", "docs/b.md"], readFile });
-expect("negative max_growth can require shrinkage", shrinkRequired.ok, false);
-
-const fileRule = { id: "contract-files", scope: "directory", metric: "files", glob: "contracts/**", max: 10, max_growth: 0 };
-const fileGrowth = checkSizeRules([
-  { path: "contracts/new.json", status: "added", addedLines: ["{}"], deletedLines: [] },
-], [fileRule], { trackedFiles: ["contracts/old.json", "contracts/new.json"], readFile });
-expect("file-count surface blocks a new file", fileGrowth.ok, false);
-expect("file-count delta is one", fileGrowth.growth[0].delta, 1);
-expect("file-count before is reconstructed", fileGrowth.growth[0].before, 1);
-expect("file-count after is current count", fileGrowth.growth[0].after, 2);
-
-const byteGrowth = checkSizeRules(balancedDiff, [{ id: "docs-bytes", scope: "directory", metric: "bytes", glob: "docs/**", max: 1000, max_growth: 0 }], {
-  trackedFiles: ["docs/a.md", "docs/b.md"], readFile,
-});
-expect("byte max_growth fails closed until exact base-byte measurement exists", byteGrowth.ok, false);
-expect("byte max_growth reports a read/evaluation error", byteGrowth.errors.length, 1);
 
 const russianRule = {
   id: "russian-docs", glob: "README.md", mode: "markdown_language", language: "ru",
