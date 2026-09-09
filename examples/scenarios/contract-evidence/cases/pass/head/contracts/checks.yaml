@@ -1,0 +1,6 @@
+contract: spec-v1
+status: accepted
+accepted: true
+requiredGates:
+  - tests/gate.mjs
+revision: 2

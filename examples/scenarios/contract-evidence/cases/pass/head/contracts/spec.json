@@ -1,0 +1,8 @@
+{
+  "schema": "spec-v1",
+  "status": "accepted",
+  "accepted": true,
+  "conformanceCorpus": "contracts/checks.yaml",
+  "owners": { "spec": "docs/spec.md" },
+  "revision": 2
+}
