@@ -3,4 +3,4 @@ status: accepted
 accepted: true
 requiredGates:
   - tests/gate.mjs
-revision: 2
+revision: 1

@@ -4,5 +4,5 @@
   "accepted": true,
   "conformanceCorpus": "contracts/checks.yaml",
   "owners": { "spec": "docs/spec.md" },
-  "revision": 2
+  "revision": 1
 }
