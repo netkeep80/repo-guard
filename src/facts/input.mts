@@ -5,7 +5,6 @@ import { filterOperationalPaths } from "../diff/filters.mjs";
 import { parseDiff } from "../diff/parser.mjs";
 import type { AnchorPolicyProjection } from "../extractors/anchors.mjs";
 import { extractAnchors } from "../extractors/anchors.mjs";
-import { extractIntegration } from "../extractors/integration.mjs";
 import { readFileAtRef as readGitFileAtRef } from "../git.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
 
@@ -15,7 +14,6 @@ export interface RepositoryFactsPolicyProjection extends AnchorPolicyProjection 
   paths: { operational_paths?: readonly string[] | null };
   surfaces?: PathSelectorMap | null;
   new_file_classes?: PathSelectorMap | null;
-  integration?: unknown;
 }
 
 export interface RepositoryFactsEnforcement {
@@ -68,7 +66,7 @@ export function buildPolicyFacts(input: RepositoryFactsInput) {
     trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
     enforcementMode: enforcement.mode, enforcement,
     diff: { files: { all: allFiles, checked: checkedFiles, skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)) } },
-    anchors: extractAnchors(policy, options), integration: extractIntegration(policy, options), trackedFiles: resolvedTrackedFiles,
+    anchors: extractAnchors(policy, options), trackedFiles: resolvedTrackedFiles,
     derived: {
       changedPaths: checkedFiles.map((file) => file.path),
       touchedSurfaces: policy.surfaces ? detectTouchedSurfaces(checkedFiles, policy.surfaces) : null,
