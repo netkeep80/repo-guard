@@ -227,6 +227,14 @@ export async function collectObservatorySnapshot({
 
   return {
     schema_version: 1,
+    repository: {
+      full_name: repository,
+      provenance: {
+        origin: "github_observation",
+        source: "repository",
+        sha: acceptedSha,
+      },
+    },
     accepted: {
       sha: acceptedSha,
       ci: {
