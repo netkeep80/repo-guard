@@ -87,4 +87,24 @@ const policy = JSON.parse(
 );
 assert.deepEqual(first.policy.accepted, policy);
 
+await assert.rejects(
+  () => collectObservatorySnapshot({
+    ...input,
+    fetchImpl: async () => ({
+      status: 500,
+      ok: false,
+      async json() { return {}; },
+    }),
+  }),
+  /release observation failed/,
+);
+
+await assert.rejects(
+  () => collectObservatorySnapshot({
+    ...input,
+    acceptedSha: "0".repeat(40),
+  }),
+  /accepted SHA mismatch/,
+);
+
 console.log("C3.6 Observatory snapshot contract passed");
