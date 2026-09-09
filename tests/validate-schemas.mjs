@@ -70,6 +70,10 @@ expect("invalid integration role", policy({ ...validPolicy, integration: { workf
 expect("invalid integration expectation", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "repo_guard_pr_gate", expect: { mode: "deploy" } }] } }), false);
 expect("valid size rule", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }));
 expect("invalid size metric", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "tokens", glob: "src/**", max: 1 }] }), false);
+expect("directory changed_only size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, count: "changed_only" }] }), false);
+expect("file growth size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }), false);
+expect("file files metric size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "files", glob: "src/**", max: 1 }] }), false);
+expect("directory bytes growth size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "bytes", glob: "src/**", max: 100, max_growth: 0 }] }), false);
 expect("old content-rule shape rejected", policy(json("tests/fixtures/invalid-content-rule-old-form.json")), false);
 expect("invalid operational paths rejected", policy(json("tests/fixtures/invalid-operational-paths.json")), false);
 expect("new_files requires allow_classes", policy({ ...validPolicy, change_profiles: { feature: { new_files: { max_per_class: { test: 1 } } } } }), false);

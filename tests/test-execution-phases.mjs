@@ -145,6 +145,10 @@ expect("state constraints exclude diff budget", hasName(stateConstraints, "max-n
 const sizeFacts = {
   repositoryRoot: process.cwd(),
   trackedFiles: ["src/existing.mjs", "src/new.mjs"],
+  readFile: (path) => ({
+    "src/existing.mjs": "export const existing = 1;\n",
+    "src/new.mjs": "export const value = 1;\n",
+  })[path],
   policy: {
     paths: {
       forbidden: [],
@@ -161,9 +165,9 @@ const sizeFacts = {
       },
       {
         id: "transaction-changed",
-        scope: "directory",
-        metric: "files",
-        glob: "src/**",
+        scope: "file",
+        metric: "lines",
+        glob: "src/new.mjs",
         max: 0,
         count: "changed_only",
       },
@@ -192,16 +196,17 @@ const sizeFacts = {
   },
 };
 
-const stateSize = namedCheck(evaluateConstraintIR(sizeFacts, { executionPhase: "state" }), "size-rules");
-const transactionSize = namedCheck(evaluateConstraintIR(sizeFacts, { executionPhase: "transaction" }), "size-rules");
+const stateSize = evaluateConstraintIR(sizeFacts, { executionPhase: "state" });
+const transactionSize = evaluateConstraintIR(sizeFacts, { executionPhase: "transaction" });
 
-expect("state size rules keep absolute repository invariant", stateSize.failed_rules.includes("state-absolute"), true);
-expect("state size rules exclude changed-only invariant", stateSize.failed_rules.includes("transaction-changed"), false);
-expect("state size rules strip growth facet from mixed invariant", stateSize.growth.length, 0);
-expect("transaction size rules exclude pure absolute repository invariant", transactionSize.failed_rules.includes("state-absolute"), false);
-expect("transaction size rules keep changed-only invariant", transactionSize.failed_rules.includes("transaction-changed"), true);
-expect("transaction size rules keep growth facet from mixed invariant", transactionSize.failed_rules.includes("mixed-growth"), true);
-expect("transaction size rules report mixed growth", transactionSize.growth.some((item) => item.ruleId === "mixed-growth"), true);
+expect("state phase executes absolute repository invariant", namedCheck(stateSize, "size:state-absolute:max")?.ok, false);
+expect("state phase excludes changed-only invariant", hasName(stateSize, "size:transaction-changed:max"), false);
+expect("state phase executes absolute facet of mixed invariant", namedCheck(stateSize, "size:mixed-growth:max")?.ok, true);
+expect("state phase excludes growth facet of mixed invariant", hasName(stateSize, "size:mixed-growth:max-growth"), false);
+expect("transaction phase excludes pure absolute repository invariant", hasName(transactionSize, "size:state-absolute:max"), false);
+expect("transaction phase executes changed-only invariant", namedCheck(transactionSize, "size:transaction-changed:max")?.ok, false);
+expect("transaction phase excludes absolute facet of mixed invariant", hasName(transactionSize, "size:mixed-growth:max"), false);
+expect("transaction phase executes growth facet of mixed invariant", namedCheck(transactionSize, "size:mixed-growth:max-growth")?.ok, false);
 
 const pipelineInput = {
   mode: "check-diff",
@@ -253,11 +258,11 @@ expect("legacy pipeline report keeps old machine shape", Object.prototype.hasOwn
 expect("state pipeline reports explicit execution phase", statePipeline.executionPhase, "state");
 expect("transaction pipeline reports explicit execution phase", transactionPipeline.executionPhase, "transaction");
 expect("legacy pipeline still executes transaction rule", legacyPipelineRules.includes("max-new-files"), true);
-expect("legacy pipeline still executes state rule", legacyPipelineRules.includes("size-rules"), true);
+expect("legacy pipeline still executes state size primitive", legacyPipelineRules.includes("size:pipeline-state-absolute:max"), true);
 expect("state pipeline excludes transaction rule", statePipelineRules.includes("max-new-files"), false);
-expect("state pipeline executes state rule without ChangeIntent", statePipelineRules.includes("size-rules"), true);
+expect("state pipeline executes state size primitive without ChangeIntent", statePipelineRules.includes("size:pipeline-state-absolute:max"), true);
 expect("transaction pipeline executes transaction rule", transactionPipelineRules.includes("max-new-files"), true);
-expect("transaction pipeline excludes state-only size rule", transactionPipelineRules.includes("size-rules"), false);
+expect("transaction pipeline excludes state-only size primitive", transactionPipelineRules.includes("size:pipeline-state-absolute:max"), false);
 
 console.log(`\n${failures === 0 ? "All execution phase tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);

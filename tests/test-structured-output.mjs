@@ -240,10 +240,10 @@ console.log("\n--- size violations retain machine-readable measurements ---");
   });
   const { result, parsed } = runJson(repo);
   expect("size violation blocks", result.code, 1);
-  const measurement = parsed?.violations.find((item) => item.rule === "size-rules")?.data?.size_violations?.[0];
-  expect("size rule id is exposed", measurement?.ruleId, "max-src-lines");
-  expect("measured line count is exposed", measurement?.actual, 3);
-  expect("configured maximum is exposed", measurement?.max, 2);
+  const measurement = parsed?.violations.find((item) => item.rule === "size:max-src-lines:max");
+  expect("size rule identity is carried by canonical relation name", measurement?.rule, "size:max-src-lines:max");
+  expect("measured line count is exposed through numeric_bound", measurement?.data?.actual, 3);
+  expect("configured maximum is exposed through numeric_bound", measurement?.data?.max, 2);
   rmSync(repo.dir, { recursive: true });
 }
 
