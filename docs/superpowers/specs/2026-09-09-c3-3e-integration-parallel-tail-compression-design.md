@@ -1,6 +1,6 @@
-# C3.3e — сжатие integration / parallel / control-plane хвоста
+# C3.3e — сжатие хвоста `integration`, параллельного режима и управляющего слоя
 
-Статус: архитектурное направление для #411 одобрено пользователем в чате 2026-09-09. Этот письменный design должен быть отдельно просмотрен и одобрен до подготовки implementation plan.
+Статус: письменная архитектурная спецификация для #411 просмотрена и одобрена пользователем 2026-09-09. До отдельного плана реализации производственный код не меняется.
 
 Связанные задачи:
 
@@ -25,9 +25,9 @@ broad watchpoint: semantic_edit_sites = 16, rule_families = 12
 
 ## 1. Цель
 
-C3.3e должен удалить последний специальный семантический путь `integration` и одновременно провести breaking-v3 cutover старого parallel/control-plane продукта.
+C3.3e должен удалить последний специальный семантический путь `integration` и одновременно выполнить несовместимый переход третьей версии для старого параллельного и управляющего продукта.
 
-После C3.3e исполняемая policy semantics должна иметь одну форму:
+После C3.3e исполняемая семантика политик должна иметь одну форму:
 
 ```text
 high-level policy syntax
@@ -43,18 +43,18 @@ primitive_relation
 one semantic evaluator
 ```
 
-Целевое runtime-состояние:
+Целевое исполняемое состояние:
 
 ```text
 runtime constraint kinds = 1
 primitive_relation only
 ```
 
-Операционная GitHub-интеграция не должна быть скрытым вторым policy evaluator.
+Операционная интеграция с GitHub не должна быть скрытым вторым интерпретатором политики.
 
-## 2. Почему существующий `integration` — архитектурный хвост
+## 2. Почему существующий `integration` является архитектурным хвостом
 
-В accepted main `evaluateConstraintIR()` имеет два разных semantic dispatch:
+В принятом `main` функция `evaluateConstraintIR()` имеет два независимых семантических перехода:
 
 ```text
 integration
@@ -64,7 +64,7 @@ primitive_relation
   -> evaluatePrimitiveRelation(...)
 ```
 
-`integrationConstraintEntries()` самостоятельно реализует правила для:
+Функция `integrationConstraintEntries()` самостоятельно реализует проверки для нескольких несвязанных областей:
 
 ```text
 workflow events / event types
@@ -73,7 +73,7 @@ step inputs
 permissions
 env/token presence
 continue-on-error
-run-command запретов
+run-command restrictions
 summary publishing
 template ChangeIntent blocks
 doc mentions / file references
@@ -81,15 +81,15 @@ profile mentions
 parallel readiness
 ```
 
-Это второй специальный язык фактов и правил рядом с уже принятым FactRef + relation kernel.
+Это второй специальный язык фактов и правил рядом с уже принятыми `FactRef` и конечной алгеброй отношений.
 
-C3.3e не должен просто переименовать этот путь или спрятать его за другим adapter API.
+C3.3e не должен переименовывать этот путь или прятать его за новым интерфейсом.
 
 ## 3. Коррекция исторических фактов
 
-Историческая parallel-программа #304/#311/#342 не дошла до принятого end-to-end portable self-host proof.
+Историческая параллельная программа #304/#311/#342 не дошла до принятого сквозного доказательства переносимого самоприменения.
 
-В частности, в #342 планировался реальный concurrent proof:
+В #342 планировался реальный конкурентный переход:
 
 ```text
 M0
@@ -99,18 +99,16 @@ A -> M1
 B refresh/revalidate -> M2
 ```
 
-Эта acceptance boundary не была завершена; #342 и #311 впоследствии закрыты `not_planned`.
+Эта граница приёмки не была завершена. Задачи #342 и #311 позднее закрыты как `not_planned`.
 
-Однако это нельзя превращать в утверждение, что текущий `main` не защищён.
-
-На исходном SHA C3.3e GitHub уже сообщает:
+Это не означает, что текущая основная ветка не защищена. На исходном состоянии C3.3e GitHub сообщает:
 
 ```text
 main protected = true
 required checks = validate + smoke-pack
 ```
 
-Поэтому design различает три факта:
+Спецификация различает три факта:
 
 ```text
 historical P6 rollout evidence
@@ -118,13 +116,13 @@ historical P6 rollout evidence
 != proof that portable/parallel product surface is necessary
 ```
 
-Текущая protection остаётся важной operational safety boundary и не является причиной сохранять старый portable coordinator.
+Текущая защита ветки остаётся реальной границей безопасности, но не доказывает необходимость старого переносимого координатора.
 
 ## 4. Принятое архитектурное решение
 
-Выбран максимальный v3 compression approach.
+Выбран вариант максимального сжатия третьей версии.
 
-Каждый компонент старого хвоста классифицируется как одно из:
+Каждый компонент старого хвоста имеет только одну из трёх судеб:
 
 ```text
 DELETE
@@ -132,20 +130,20 @@ LOWER_TO_CANONICAL_FACTS_RELATIONS
 RETAIN_AS_SMALL_OPERATIONAL_UTILITY
 ```
 
-Приоритет:
+Приоритет решений:
 
 ```text
 DELETE
-  > LOWER через существующие facts/relations
-  > RETAIN operational utility с доказанным текущим consumer
-  > новый primitive/source/subsystem
+  > LOWER through existing facts/relations
+  > RETAIN operational utility with proven current consumer
+  > new primitive/source/subsystem
 ```
 
-Последний вариант запрещён без независимого RED, доказывающего generic capability gap.
+Последний вариант запрещён без независимого красного теста, который доказывает общий пробел возможностей.
 
-Наличие исходного кода, тестов, документации или historical issue не является consumer evidence.
+Само наличие исходного кода, тестов, документации или исторической задачи не считается доказательством потребителя.
 
-## 5. Hard invariants
+## 5. Жёсткие инварианты
 
 После C3.3e должны выполняться:
 
@@ -161,7 +159,7 @@ legacy provider/protocol = NONE
 v2 migration/rollback machinery = NONE
 ```
 
-Четыре FactRef source остаются:
+Четыре источника `FactRef` остаются неизменными:
 
 ```text
 change_intent
@@ -170,7 +168,7 @@ document
 repository
 ```
 
-Запрещено добавлять:
+Без отдельного доказательства запрещено добавлять:
 
 ```text
 integration FactRef source
@@ -186,19 +184,15 @@ legacy compatibility alias
 transitional old/new runtime surviving accepted merge
 ```
 
-Если старый integration invariant нельзя выразить текущим finite vocabulary без создания нового специального языка, сначала проверяется, нужен ли этот invariant вообще.
+Если старый инвариант `integration` нельзя выразить текущим конечным словарём без нового специального языка, сначала проверяется необходимость самого инварианта.
 
-## 6. Финальная судьба `integration` policy DSL
+## 6. Финальная судьба языка политики `integration`
 
-### 6.1. Решение
-
-Top-level:
+Поле верхнего уровня удаляется полностью:
 
 ```text
 repo-policy.integration
 ```
-
-удаляется полностью.
 
 Вместе с ним удаляются:
 
@@ -216,28 +210,26 @@ integration runtime dispatch
 validate-integration semantic command
 ```
 
-Не создавать `integration_v3`, `workflow_relations` или иной replacement DSL.
+Нельзя создавать замену вроде `integration_v3`, `workflow_relations` или другого специального языка.
 
-### 6.2. Почему не pure-lower весь DSL
+### 6.1. Почему нельзя механически переносить весь старый язык
 
-Большая часть workflow-проверок технически может быть выражена через direct YAML facts и canonical relations. Но механический перенос всех старых expectation полей дал бы только синтаксическое сжатие, а не архитектурное.
+Большая часть проверок рабочих процессов технически может быть выражена прямыми фактами документов и каноническими отношениями. Но перенос всех старых ожиданий один к одному дал бы лишь переименование, а не архитектурное сжатие.
 
-Например проверки:
+Например следующие проверки не являются необходимыми инвариантами безопасности исполнения:
 
 ```text
-README должен упомянуть слово integration
-profile id должен встречаться в README
-template должен содержать конкретный fenced block
-summary publishing должен существовать
+README must mention integration
+profile id must occur in README
+template must contain a particular fenced block
+summary publishing must exist
 ```
 
-не являются необходимыми runtime safety invariants repo-guard.
+Они удаляются вместе со старым языком, а не переводятся в десятки общих отношений.
 
-Они удаляются вместе с DSL, а не переносятся в десятки generic relations.
+## 7. Что действительно должно пережить самоприменение
 
-## 7. Что действительно должно пережить self-host cutover
-
-Self-host correctness после C3.3e строится не на introspection собственного workflow, а на реально исполняемых границах:
+Корректность самоприменения после C3.3e строится на реально исполняемых границах:
 
 ```text
 GitHub branch protection
@@ -255,42 +247,38 @@ smoke-pack
   -> packaged artifact proof
 ```
 
-Эти checks уже являются реальными обязательными GitHub gates.
+Эти проверки уже являются обязательными воротами GitHub. Политика не должна повторно доказывать текстовое устройство рабочего процесса, который запускает те же проверки.
 
-C3.3e не должен создавать policy rule, который просто повторно доказывает, что workflow содержит текст, предназначенный для запуска этих же checks.
+### 7.1. Структурная политика рабочих процессов
 
-### 7.1. Workflow structural policy
+По умолчанию старые ожидания `integration.workflows` удаляются без заменяющих отношений.
 
-По умолчанию old `integration.workflows` expectations удаляются без replacement relations.
+Сохранить отдельный структурный инвариант можно только после красного теста, если одновременно доказано, что он:
 
-Только если RED докажет конкретный silent-safety failure, который:
+1. не защищён настройкой ветки;
+2. не ловится реальным исполнением непрерывной интеграции;
+3. не ловится схемой или тестами;
+4. имеет самостоятельную ценность для внешних потребителей.
 
-1. не блокируется branch protection;
-2. не ловится реальным CI execution;
-3. не ловится schema/tests;
-4. имеет самостоятельную ценность для downstream users;
+В таком случае используется существующий механизм `document_relations`. Новый селектор или примитив ради поиска произвольного шага рабочего процесса не добавляется.
 
-разрешено выразить этот один invariant существующим `document_relations`.
+### 7.2. Шаблоны запросов на изменение и задач
 
-Новый generic selector/primitive не добавляется ради удобства поиска произвольного Action step.
+Команда `repo-guard init` продолжает генерировать шаблоны как удобную заготовку.
 
-### 7.2. PR/issue templates
+Сам инструмент больше не обязан семантически доказывать, что шаблон содержит блок `ChangeIntent`. Команда `check-pr` проверяет фактически предоставленное намерение изменения.
 
-`repo-guard init` продолжает генерировать PR/issue templates как UX scaffold.
+Генерация шаблона не является семантикой политики шаблона.
 
-Repo-guard больше не обязан семантически проверять, что сами templates содержат ChangeIntent block. Реальный `check-pr` валидирует фактически предоставленный ChangeIntent, а не доказательство происхождения текста из template.
+### 7.3. Упоминания в документации
 
-Template generation != template policy semantics.
+Проверки упоминаний в `README` и профилях удаляются полностью. Документация обновляется вместе с публичным переходом, но сами упоминания не являются исполняемыми ограничениями.
 
-### 7.3. Documentation mentions
+## 8. Параллельная и провайдерная поверхность продукта
 
-README/profile mention checks удаляются полностью. Документация обновляется как часть public cutover, но упоминания не являются runtime constraints.
+### 8.1. Удаление модели провайдеров
 
-## 8. Parallel / provider product surface
-
-### 8.1. Удалить provider model
-
-Удаляются публичные concepts:
+Удаляются публичные понятия:
 
 ```text
 portable
@@ -301,23 +289,23 @@ repo_guard_portable_coordinator role
 repo_guard_merge_group_gate role
 ```
 
-Это не запрещает GitHub Merge Queue как платформенную функцию. Просто repo-guard v3 не содержит собственного provider abstraction без доказанного consumer need.
+Это не запрещает очередь слияния GitHub как внешнюю функцию платформы. Третья версия просто не содержит собственной провайдерной абстракции без доказанного потребителя.
 
-### 8.2. Agent lifecycle
+### 8.2. Жизненный цикл агента
 
-`src/agent-lifecycle.mts` и публичный `status` lifecycle protocol удаляются.
+Файл `src/agent-lifecycle.mts` и публичный протокол команды `status` удаляются.
 
-Причины:
+Основания:
 
-- модель содержит historical `legacy | portable | github_merge_queue`;
-- она не является policy authority;
-- она не получила принятого self-host/product proof;
-- состояние PR уже существует в GitHub control plane;
-- сохранение отдельной state machine создаёт дополнительную концептуальную поверхность.
+- модель содержит исторические варианты `legacy`, `portable` и `github_merge_queue`;
+- она не является источником истины политики;
+- она не получила принятого продуктового доказательства;
+- состояние запроса на изменение уже существует в управляющем слое GitHub;
+- отдельная машина состояний создаёт лишнюю концептуальную поверхность.
 
-Не создавать replacement lifecycle enum.
+Новый перечислимый тип жизненного цикла не создаётся.
 
-### 8.3. Parallel readiness
+### 8.3. Готовность параллельного режима
 
 Удаляются:
 
@@ -329,28 +317,28 @@ provider readiness reports
 --parallel doctor mode
 ```
 
-Current branch protection остаётся внешней реальностью GitHub, но repo-guard v3 не обязан моделировать её как отдельную provider readiness product model.
+Текущая защита ветки остаётся внешним фактом GitHub, но инструмент больше не моделирует её отдельным продуктом готовности провайдера.
 
-### 8.4. Portable coordinator
+### 8.4. Переносимый координатор
 
-Удаляется весь product path:
+Удаляется весь продуктовый путь:
 
 ```text
 portable-integration/coordinator
-planner
-github-read
-github-write
-public-command
-trusted-command
+portable-integration/planner
+portable-integration/github-read
+portable-integration/github-write
+portable-integration/public-command
+portable-integration/trusted-command
 portable-coordinator CLI
 portable-coordinator Action mode/inputs
 self portable coordinator workflow
 READY-label protocol
 ```
 
-Generic GitHub helpers могут быть сохранены только если dependency audit докажет, что они реально используются оставшимся `check-pr`/doctor functionality. Они не сохраняются ради будущего coordinator.
+Общие вспомогательные функции GitHub могут остаться только после аудита достижимости, если они реально нужны сохранённым командам `check-pr` или `doctor`. Они не сохраняются на будущее.
 
-### 8.5. Merge-group path
+### 8.5. Путь группы слияния
 
 Удаляются:
 
@@ -361,11 +349,11 @@ native provider-specific scaffold
 provider-specific tests/docs/schema enums
 ```
 
-Будущий state-phase consumer при реальной необходимости должен вызывать canonical evaluator напрямую через заново спроектированную минимальную boundary, а не восстанавливать старый provider subsystem.
+Если позднее появится реальный потребитель фазы состояния, минимальная граница проектируется заново поверх канонического вычислителя, а старый провайдерный слой не восстанавливается автоматически.
 
-## 9. Migration / compatibility machinery
+## 9. Миграция и совместимость
 
-Breaking v3 не поддерживает migration runtime между v2 и old parallel modes.
+Несовместимая третья версия не поддерживает специальную миграцию между второй версией и старым параллельным режимом.
 
 Удаляются:
 
@@ -380,9 +368,9 @@ provider switch rollback
 legacy fallback semantics
 ```
 
-`repo-guard init` остаётся, но только как generator актуального v3 scaffold.
+Команда `repo-guard init` сохраняется только как генератор актуальной заготовки третьей версии.
 
-Не должно существовать понятия:
+Не должно оставаться понятий:
 
 ```text
 old scaffold -> target scaffold
@@ -390,11 +378,11 @@ parallel -> legacy rollback
 legacy-compatible init
 ```
 
-Для существующего репозитория v3 migration — обычное явное изменение repository files через PR, а не специальный runtime repo-guard.
+Переход существующего внешнего репозитория на третью версию является обычным явным запросом на изменение файлов репозитория, а не отдельной подсистемой инструмента.
 
-## 10. `init` после cutover
+## 10. Команда `init` после перехода
 
-Сохраняется один deterministic scaffold path:
+Сохраняется один детерминированный путь:
 
 ```text
 repo-guard init
@@ -411,7 +399,7 @@ portableCoordinatorWorkflow()
 nativeMergeGroupWorkflow()
 ```
 
-Базовый init продолжает генерировать:
+Базовая команда продолжает генерировать:
 
 ```text
 repo-policy.json
@@ -420,13 +408,11 @@ repo-policy.json
 .github/ISSUE_TEMPLATE/change-intent.yml
 ```
 
-Scaffold должен использовать immutable Action ref согласно уже принятому v3 contract.
+Ссылка на действие должна оставаться неизменяемой согласно уже принятому контракту. Генерируемая политика не содержит раздел `integration`.
 
-Generated policy не содержит `integration` section.
+## 11. Команда `doctor` после перехода
 
-## 11. `doctor` после cutover
-
-Обычный `repo-guard doctor` сохраняется как operational diagnostics для локальной среды и prerequisites.
+Обычная команда `repo-guard doctor` сохраняется как диагностика операционных предпосылок.
 
 Сохраняемые категории:
 
@@ -435,10 +421,10 @@ repository root
 git availability/history
 repo-policy presence/schema/compiler validity
 GitHub event context
-auth/gh availability where реально required
+auth/gh availability where required
 ```
 
-Удаляются integration/parallel-specific paths:
+Удаляются специальные пути интеграции и параллельного режима:
 
 ```text
 compileIntegrationPolicy
@@ -449,15 +435,15 @@ doctor --persistent-branch
 parallel readiness
 ```
 
-Ad-hoc `checkWorkflowConfig()` regex introspection удаляется полностью. После C3.3e doctor не анализирует YAML workflow semantics и не проверяет `fetch-depth`, token wiring или repo-guard invocation через поиск строк в `.github/workflows/**`.
+Функция `checkWorkflowConfig()` с регулярными выражениями удаляется полностью. После C3.3e команда `doctor` не анализирует семантику рабочих процессов и не ищет текстовые признаки `fetch-depth`, токена или вызова инструмента в файлах `.github/workflows/**`.
 
-Причина: это был ещё один специальный workflow semantics path рядом с `integration`. Реальные CI runs + branch protection являются authoritative self-host evidence; generated `init` scaffold остаётся UX convenience, а не основанием для второго validator.
+Причина: это ещё один специальный путь семантики рабочих процессов рядом с `integration`. Реальные исполнения непрерывной интеграции и защита ветки являются авторитетными доказательствами самоприменения.
 
-Doctor после cutover — diagnostics prerequisites, не policy/workflow semantics evaluator.
+После перехода `doctor` проверяет предпосылки, а не интерпретирует политику рабочего процесса.
 
-## 12. Public CLI target
+## 12. Целевая публичная командная строка
 
-После C3.3e целевой CLI surface:
+После C3.3e остаются:
 
 ```text
 validate
@@ -467,7 +453,7 @@ init
 doctor
 ```
 
-Удаляемые команды:
+Удаляются:
 
 ```text
 check-merge-group
@@ -477,7 +463,7 @@ portable-coordinator
 validate-integration
 ```
 
-Удаляемые doctor/init options:
+Удаляются параметры:
 
 ```text
 doctor --integration
@@ -486,18 +472,18 @@ doctor --persistent-branch
 init --parallel
 ```
 
-`--persistent-branch` является частью old `parallel-doctor` branch-hygiene projection и удаляется вместе с этим surface без replacement option.
+Параметр `--persistent-branch` удаляется вместе со старой диагностикой параллельного режима без замены.
 
-## 13. Composite Action target
+## 13. Целевое составное действие
 
-`action.yml` после cutover поддерживает только canonical policy execution modes:
+Файл `action.yml` после перехода поддерживает только два режима канонического исполнения политики:
 
 ```text
 check-pr
 check-diff
 ```
 
-Удаляются portable inputs:
+Удаляются переносимые входы:
 
 ```text
 repository
@@ -508,21 +494,19 @@ state-checks
 portable coordinator format semantics
 ```
 
-Удаляется privileged coordinator branch из composite shell.
+Удаляется привилегированная ветвь оболочки координатора. Пустые или устаревшие входы и псевдонимы совместимости не сохраняются.
 
-Не сохранять пустые/deprecated inputs и compatibility aliases.
+## 14. Собственная политика репозитория после перехода
 
-## 14. Self repository policy после cutover
+Файл `repo-policy.json` должен перестать содержать верхний раздел `integration`.
 
-`repo-policy.json` должен перестать содержать top-level `integration`.
+Это намеренное самоприменение несовместимой третьей версии: инструмент сам использует ту же сжатую архитектуру, которую предлагает внешним потребителям.
 
-Это intentional breaking self-dogfooding proof: repo-guard сам использует ту же compressed architecture, которую предлагает downstream.
+Собственная политика может использовать существующие общие отношения только для инвариантов с самостоятельной доказанной ценностью.
 
-Self policy может использовать существующие generic relations только для тех invariants, которые имеют самостоятельную доказанную ценность.
+Нельзя переносить старые ожидания `integration` один к одному ради сохранения прежнего числа проверок.
 
-Запрещено переносить все старые integration expectations 1:1 ради сохранения прежнего количества checks.
-
-После cutover README/docs объясняют self-host через реальные gates:
+После перехода документация объясняет самоприменение через реальные границы:
 
 ```text
 repo-policy
@@ -531,15 +515,15 @@ canonical relation evaluator
 GitHub required checks
 ```
 
-а не через `integration profile` vocabulary.
+а не через старый словарь профилей `integration`.
 
-## 15. Implementation slicing
+## 15. Разбиение реализации
 
-Implementation выполняется только после отдельного одобрения этого design и отдельного implementation plan.
+Реализация начинается только после принятия этой спецификации и создания отдельного подробного плана.
 
 Предпочтительная последовательность:
 
-### E3a — удалить compatibility / agent / migration surface
+### E3a — удалить совместимость, агентский и миграционный слой
 
 Физически удалить:
 
@@ -551,9 +535,9 @@ parallel init generation
 related schema/docs/tests/dist
 ```
 
-Цель: убрать явно противоречащий v3 compatibility слой до semantic lowering.
+Цель — убрать слой, прямо противоречащий третьей версии, до сжатия семантики.
 
-### E3b — удалить недоказанный provider/control-plane product
+### E3b — удалить недоказанный провайдерный и управляющий продукт
 
 Физически удалить:
 
@@ -566,11 +550,11 @@ self portable workflow
 provider-specific examples/tests/docs/dist
 ```
 
-Сохранить только реально reachable generic GitHub utilities.
+Сохраняются только реально достижимые общие вспомогательные функции GitHub.
 
-### E3c — удалить final `integration` semantic runtime
+### E3c — удалить финальный семантический путь `integration`
 
-В одном acceptance boundary:
+В одной границе приёмки:
 
 ```text
 remove repo-policy.integration from self policy
@@ -582,18 +566,18 @@ remove CI validate-integration/parallel-readiness steps
 update docs/examples/templates/tests/dist
 ```
 
-Target:
+Цель:
 
 ```text
 runtime constraint kinds: 2 -> 1
 primitive_relation only
 ```
 
-Если E3c требует retained structural invariant, сначала RED, затем existing document FactRef + existing relation; не добавлять новый integration primitive.
+Если для E3c нужен сохраняемый структурный инвариант, сначала создаётся красный тест, затем используются существующие `document`-факты и существующее отношение. Новый специальный примитив не добавляется.
 
-### E3d — C3.3 broad closure audit
+### E3d — широкий аудит закрытия C3.3
 
-После физического удаления повторно измерить:
+После физического удаления повторно измеряются:
 
 ```text
 runtime kinds
@@ -608,25 +592,25 @@ FactRef models/sources
 relation descriptors
 ```
 
-C3.3e не закрывает автоматически #374. После E3d требуется отдельный parent acceptance review.
+C3.3e не закрывает автоматически #374. После E3d нужен отдельный обзор принятия родительской задачи.
 
-## 16. TDD и evidence discipline
+## 16. Дисциплина тестирования и доказательств
 
-Каждый implementation slice должен начинаться с тестового RED, фиксирующего именно ожидаемую новую архитектуру.
+Каждый срез реализации начинается с тестового красного состояния, фиксирующего ожидаемую новую архитектуру.
 
-Для deletion slice RED означает, например:
+Для среза удаления красный тест может требовать:
 
 ```text
-public command должен отсутствовать
-schema должен отвергать removed vocabulary
-runtime-kind ratchet должен требовать только primitive_relation
-source reachability test должен запрещать legacy module
-self policy fixture должен не содержать integration
+public command must be absent
+schema must reject removed vocabulary
+runtime-kind ratchet must require primitive_relation only
+source reachability test must reject legacy module
+self policy fixture must not contain integration
 ```
 
-Не писать сначала production deletion, а потом подгонять tests.
+Нельзя сначала удалить производственный код, а затем подогнать тесты.
 
-После GREEN каждый slice требует:
+После зелёного состояния каждый срез требует:
 
 ```text
 focused tests GREEN
@@ -639,11 +623,11 @@ exact-head merge
 post-merge validate + smoke-pack GREEN on exact merge SHA
 ```
 
-## 17. Governance/public-surface discipline
+## 17. Дисциплина управляющих и публичных файлов
 
-В отличие от C3.3d2/d3, C3.3e намеренно должен менять governance/public files, потому что удаляется публичный продуктовый surface.
+C3.3e намеренно меняет управляющие и публичные файлы, потому что удаляется публичная поверхность продукта.
 
-Допустимые по design категории изменений:
+Допустимые по спецификации категории:
 
 ```text
 repo-policy.json
@@ -654,26 +638,26 @@ README/docs/examples/templates
 src/dist/tests
 ```
 
-Но каждый PR должен иметь узкий GovernanceGrant, разрешающий только реально необходимую часть.
+Каждый запрос на изменение должен иметь узкое разрешение `GovernanceGrant`, допускающее только реально необходимые пути.
 
-Public deletion и её schema/docs/Action/CLI отражение выполняются в одном slice. Не допускается финальный «legacy cleanup later».
+Публичное удаление и соответствующие изменения схемы, документации, действия и командной строки выполняются в одном срезе. Финальная отложенная очистка совместимости запрещена.
 
-## 18. Что не является compatibility contract
+## 18. Что не является контрактом совместимости
 
 Не сохраняются:
 
 ```text
-старые CLI команды
-старые Action inputs
-старые integration policy fields
-старые provider names
-старые lifecycle states
-старые migration dry-run outputs
-старые diagnostic result names
-старые generated parallel workflows
+old CLI commands
+old Action inputs
+old integration policy fields
+old provider names
+old lifecycle states
+old migration dry-run outputs
+old diagnostic result names
+old generated parallel workflows
 ```
 
-Это intentional v3 breaking cutover.
+Это намеренный несовместимый переход третьей версии.
 
 Сохраняется смысл ядра:
 
@@ -689,29 +673,29 @@ self-host CI gates
 
 ## 19. Риски и контрмеры
 
-### Риск: удалить реально полезный generic GitHub helper
+### Риск: удалить полезную общую функцию GitHub
 
-Контрмера: E0 reachability audit перед физическим удалением; shared helper сохраняется только если reachable из retained non-parallel command.
+Контрмера: перед физическим удалением выполняется аудит достижимости. Общая функция сохраняется только при реальном вызове из сохраняемой непараллельной команды.
 
-### Риск: ослабить self-host workflow незаметно
+### Риск: незаметно ослабить самоприменение
 
-Контрмера: required GitHub checks `validate` + `smoke-pack` остаются protection boundary; каждый PR проходит их на exact head, post-merge снова проходит их на exact merge SHA.
+Контрмера: обязательные проверки GitHub `validate` и `smoke-pack` остаются границей защиты. Каждый запрос проходит их на точной вершине, а после слияния они повторяются на точном принятом состоянии.
 
-### Риск: заменить integration DSL огромным набором document relations
+### Риск: заменить старый язык огромным набором отношений документов
 
-Контрмера: никаких 1:1 migrations. Generic relation добавляется только для independently justified invariant.
+Контрмера: перенос один к одному запрещён. Новое общее отношение возможно только для независимо доказанного инварианта.
 
-### Риск: спрятать старый readiness engine в doctor
+### Риск: спрятать старый механизм готовности в `doctor`
 
-Контрмера: workflow-config regex introspection и parallel doctor удаляются; doctor остаётся только diagnostics prerequisites.
+Контрмера: текстовый анализ рабочих процессов и параллельная диагностика удаляются. Команда `doctor` остаётся только проверкой предпосылок.
 
-### Риск: future parallel integration снова потребуется
+### Риск: параллельная интеграция понадобится позднее
 
-Контрмера: будущая capability проектируется заново от concrete consumer proof поверх compressed kernel. Historical provider abstractions не сохраняются «на всякий случай».
+Контрмера: будущая возможность проектируется заново от конкретного доказанного потребителя поверх сжатого ядра. Исторические провайдерные абстракции не сохраняются заранее.
 
-## 20. Acceptance C3.3e
+## 20. Приёмка C3.3e
 
-C3.3e может быть объявлен accepted только если одновременно истинно:
+C3.3e может быть объявлен принятым только при одновременном выполнении:
 
 ```text
 runtime kinds = primitive_relation only
@@ -737,19 +721,19 @@ full exact-head and post-merge evidence GREEN
 broad rule-family/edit-site metrics re-measured
 ```
 
-Отдельно должно быть доказано, что current branch protection продолжает требовать реальные accepted checks после workflow cutover.
+Отдельно должно быть доказано, что текущая защита основной ветки продолжает требовать реальные принятые проверки после изменения рабочего процесса.
 
-## 21. Completion boundary относительно #374
+## 21. Граница завершения относительно #374
 
-Даже если C3.3e достигнет:
+Даже достижение:
 
 ```text
 runtime kinds = 1
 ```
 
-это ещё не автоматическое завершение #374.
+не завершает #374 автоматически.
 
-После C3.3e родитель #374 получает отдельный финальный review:
+После C3.3e родительская задача получает отдельный финальный обзор:
 
 ```text
 rule_families
@@ -760,4 +744,4 @@ physical code/schema compression
 self-host exemplar quality
 ```
 
-Только после этого C3.3 считается полностью accepted и можно переходить к следующему этапу Architecture Compression 3.0.
+Только после этого C3.3 считается полностью принятым и можно переходить к следующему этапу Architecture Compression 3.0.
