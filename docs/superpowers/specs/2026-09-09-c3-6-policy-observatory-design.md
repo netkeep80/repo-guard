@@ -1,14 +1,14 @@
-# C3.6 — Russian read-only GitHub Pages Policy Observatory
+# C3.6 — Русскоязычная обсерватория политики `GitHub Pages`
 
 Дата: 2026-09-09  
-Roadmap: #370  
-Parent phase: #377  
-Accepted base before design: `48d1c3c981e1db070961d113fb35560ac7e02179`  
-Dependency #376: CLOSED / completed
+Дорожная карта: #370  
+Родительская фаза: #377  
+Принятая база перед проектированием: `48d1c3c981e1db070961d113fb35560ac7e02179`  
+Зависимость #376: закрыта как завершённая
 
 ## 1. Решение
 
-C3.6 создаёт русскоязычный статический GitHub Pages сайт как **чистую read-only проекцию принятого состояния `repo-guard`**.
+C3.6 создаёт русскоязычный статический сайт `GitHub Pages` как **чистую проекцию принятого состояния `repo-guard` только для чтения**.
 
 Канонический поток:
 
@@ -30,7 +30,7 @@ GitHub Pages artifact
 human observability only
 ```
 
-Pages не является policy authority, semantic runtime, approval surface или control plane.
+Сайт не является источником политики, семантическим исполняемым контуром, поверхностью согласования или управляющим контуром.
 
 Главный архитектурный ответ C3.6:
 
@@ -41,7 +41,7 @@ without inventing any new semantic authority?
 YES.
 ```
 
-Если реализация потребует новый `FactRef` source, relation descriptor, runtime kind, policy DSL или отдельный evaluator, работа должна остановиться и такой gap должен быть классифицирован отдельно от C3.6.
+Если реализация потребует новый источник `FactRef`, новый дескриптор отношения, новый исполняемый вид ограничения, новый язык политики или отдельный вычислитель, работа должна остановиться. Такой разрыв классифицируется отдельно от C3.6.
 
 ## 2. Жёсткие инварианты
 
@@ -77,11 +77,11 @@ NO committed generated HTML tree as authority
 NO branch-protection Administration token in Pages build
 ```
 
-## 3. Authority и provenance
+## 3. Источники истины и происхождение данных
 
-### 3.1 Commit-bound facts
+### 3.1 Факты, связанные с коммитом
 
-Эти факты определяются exact accepted commit и воспроизводятся из Git tree:
+Эти факты определяются точным принятым коммитом и воспроизводятся из дерева Git:
 
 ```text
 package.json
@@ -96,18 +96,18 @@ scripts/compression-metrics.mjs
 accepted generated dist/**
 ```
 
-Provenance:
+Происхождение:
 
 ```text
 origin = accepted_commit
 sha = <exact accepted SHA>
 ```
 
-### 3.2 Accepted CI evidence
+### 3.2 Доказательство принятия в CI
 
-Pages запускается только после успешного post-merge workflow `CI` на `main`.
+Сайт запускается только после успешного послемержевого процесса `CI` на ветке `main`.
 
-Из `workflow_run` используется только acceptance metadata:
+Из события `workflow_run` используется только метаинформация о принятии:
 
 ```text
 workflow name
@@ -117,11 +117,11 @@ head SHA
 conclusion
 ```
 
-Это доказательство приёмки exact commit существующим CI, а не новый semantic source.
+Это доказательство приёмки точного коммита существующим CI, а не новый семантический источник.
 
-### 3.3 Bounded GitHub observations
+### 3.3 Ограниченные наблюдения GitHub
 
-В C3.6 допускаются только read-only наблюдения без расширения privileged trust boundary:
+В C3.6 допускаются только наблюдения для чтения без расширения привилегированной границы доверия:
 
 ```text
 published GitHub Releases / matching release state
@@ -129,7 +129,7 @@ workflow_run acceptance metadata
 Pages deployment URL from deploy action
 ```
 
-Live branch-protection configuration сознательно **не входит** в machine input C3.6. Чтение branch protection требует отдельного `Administration(read)` permission; Observatory не получает такой token только ради визуализации.
+Живая конфигурация защиты ветки сознательно **не входит** в обязательные входные данные C3.6. Чтение защиты ветки требует отдельного разрешения `Administration(read)`; обсерватория не получает такой токен только ради визуализации.
 
 Сайт различает:
 
@@ -141,13 +141,13 @@ accepted CI evidence
   <- successful workflow_run for the same SHA
 ```
 
-Он не утверждает, что live branch protection равен отображаемому wiring, если такой факт не был получен.
+Сайт не утверждает, что живая защита ветки равна отображаемой схеме CI, если такой факт не был получен.
 
-## 4. Existing machine-readable sources
+## 4. Существующие машинные источники
 
-### 4.1 Architecture metrics
+### 4.1 Архитектурные метрики
 
-`scripts/compression-metrics.mjs` остаётся единственным существующим inventory для C3 architecture metrics. Collector не дублирует его анализ.
+`scripts/compression-metrics.mjs` остаётся единственным существующим инвентарём архитектурных метрик C3. Сборщик не дублирует его анализ.
 
 Он вызывается для:
 
@@ -156,7 +156,7 @@ current = <accepted SHA>
 baseline = 92432809fcddc290080beb51ba151e13a5761869
 ```
 
-и даёт:
+и выдаёт:
 
 ```text
 physical metrics
@@ -171,9 +171,9 @@ self-policy metrics
 CI structural metrics
 ```
 
-### 4.2 Production Constraint Program compiler
+### 4.2 Рабочий компилятор программы ограничений
 
-Self-policy topology и lowering строятся production compiler-ом из accepted generated runtime:
+Топология собственной политики и её понижение строятся рабочим компилятором из принятого сгенерированного исполнения:
 
 ```text
 repo-policy.json
@@ -183,7 +183,7 @@ compileConstraintProgram(...)
 canonical Constraint Program entries
 ```
 
-Pages отображает уже скомпилированные данные:
+Сайт отображает уже скомпилированные данные:
 
 ```text
 runtime primitive_relation entries
@@ -195,25 +195,25 @@ execution phase
 advisory metadata
 ```
 
-Renderer не интерпретирует эти entries.
+Отрисовщик не интерпретирует эти записи.
 
-### 4.3 C3.5 executable scenarios
+### 4.3 Исполняемые сценарии C3.5
 
-Единственный scenario source:
+Единственный источник сценариев:
 
 ```text
 examples/scenarios/*/scenario.json
 ```
 
-Discovery generic: любой каталог с valid `scenario.json` автоматически входит в catalog.
+Обнаружение общее: любой каталог с корректным `scenario.json` автоматически входит в каталог.
 
-Нельзя иметь отдельный Pages-массив scenario ids.
+Нельзя иметь отдельный массив идентификаторов сценариев для страниц.
 
-PASS/FAIL cards показывают executable cases и expected diagnostics из manifests. Badge принятого состояния означает, что upstream CI для exact SHA GREEN; Pages build **не повторяет** все scenario executions.
+Карточки PASS/FAIL показывают исполняемые варианты и ожидаемые диагностики из манифестов. Значок принятого состояния означает, что вышестоящий CI для точного SHA зелёный; сборка страниц **не повторяет** все исполнения сценариев.
 
-### 4.4 Package / release state
+### 4.4 Состояние версии и выпуска
 
-Version view различает:
+Представление версии различает:
 
 ```text
 package version
@@ -221,7 +221,7 @@ matching published GitHub Release
 future release truth
 ```
 
-До C3.7 `package.json.version = 2.0.0` не представляется как опубликованный v3 release.
+До C3.7 значение `package.json.version = 2.0.0` не представляется как опубликованный выпуск v3.
 
 Нормализованная модель:
 
@@ -232,11 +232,11 @@ matching_published_release = present | absent
 release_truth_status = published | package_only
 ```
 
-API error не превращается в `absent`: collector завершается ошибкой, чтобы сайт не публиковал ложный release state.
+Ошибка API не превращается в `absent`: сборщик завершается ошибкой, чтобы сайт не публиковал ложное состояние выпуска.
 
-## 5. Generated snapshot
+## 5. Сгенерированный снимок
 
-`observatory.snapshot.json` — internal generated artifact build-а, не authority file и не public v3 API. В Git он не коммитится.
+`observatory.snapshot.json` — внутренний сгенерированный артефакт сборки, а не файл-источник истины и не публичный API v3. В Git он не коммитится.
 
 Минимальная логическая форма:
 
@@ -268,7 +268,7 @@ API error не превращается в `absent`: collector завершае�
 }
 ```
 
-Каждый крупный раздел несёт provenance:
+Каждый крупный раздел несёт происхождение:
 
 ```text
 origin = accepted_commit | accepted_ci | github_observation
@@ -276,13 +276,13 @@ source path/event
 accepted SHA
 ```
 
-Exact SHA постоянно виден в верхней части сайта.
+Точный SHA постоянно виден в верхней части сайта.
 
-## 6. Determinism boundary
+## 6. Граница детерминизма
 
-Determinism определяется не только Git commit, потому что release state является bounded GitHub observation.
+Детерминизм определяется не только коммитом Git, потому что состояние выпуска является ограниченным наблюдением GitHub.
 
-Правильный invariant:
+Правильный инвариант:
 
 ```text
 same accepted commit-bound inputs
@@ -293,20 +293,20 @@ byte-identical snapshot
 + byte-identical rendered site
 ```
 
-Collector обязан нормализовать и стабильно сортировать GitHub observation data до snapshot.
+Сборщик обязан нормализовать и стабильно сортировать данные наблюдений GitHub до формирования снимка.
 
-Wall-clock timestamps, random ids и environment-specific absolute paths не входят в generated content.
+В сгенерированное содержимое не входят текущее время, случайные идентификаторы и абсолютные пути окружения.
 
-## 7. Static renderer
+## 7. Статическая отрисовка
 
-Renderer принимает только validated snapshot и создаёт:
+Отрисовщик принимает только проверенный снимок и создаёт:
 
 ```text
 _site/index.html
 _site/assets/observatory.css
 ```
 
-Допустим один маленький `_site/assets/observatory.js` только для presentation UX:
+Допустим один маленький `_site/assets/observatory.js` только для интерфейсного удобства:
 
 ```text
 filter
@@ -314,7 +314,7 @@ collapse/expand
 client-side navigation
 ```
 
-Client JS не может:
+Клиентский JavaScript не может:
 
 ```text
 fetch policy from GitHub
@@ -324,11 +324,11 @@ mutate repository
 trigger Actions
 ```
 
-Никаких React, Vue, Vite, SSR, backend или database.
+Не используются React, Vue, Vite, SSR, сервер приложений или база данных.
 
-## 8. Required views
+## 8. Обязательные представления
 
-### 8.1 Accepted state
+### 8.1 Принятое состояние
 
 ```text
 exact accepted SHA
@@ -338,9 +338,9 @@ package version
 matching GitHub release status
 ```
 
-### 8.2 Self-policy
+### 8.2 Собственная политика
 
-Read-only projection реального `repo-policy.json`:
+Проекция реального `repo-policy.json` только для чтения:
 
 ```text
 policy_format_version
@@ -354,11 +354,11 @@ cochange rules
 document relations
 ```
 
-Не отображать отсутствующие self-policy fields только ради showcase.
+Не отображать отсутствующие поля собственной политики только ради демонстрации возможностей.
 
-### 8.3 Canonical architecture
+### 8.3 Каноническая архитектура
 
-Из compression metrics / registries:
+Из архитектурных метрик и реестров:
 
 ```text
 FactRef sources
@@ -370,7 +370,7 @@ semantic edit-site metrics
 physical src/schema/tests/docs/examples metrics
 ```
 
-Observatory обязана различать:
+Обсерватория обязана различать:
 
 ```text
 CANONICAL POLICY SEMANTICS
@@ -384,11 +384,11 @@ policy-delta authorization
 content / anchor / advisory/reporting families
 ```
 
-Фраза «в repo-guard вообще только один evaluator» запрещена как неточная.
+Фраза «в `repo-guard` вообще только один вычислитель» запрещена как неточная.
 
-### 8.4 Lowering
+### 8.4 Понижение высокоуровневой конфигурации
 
-Основной live пример:
+Основной живой пример:
 
 ```text
 accepted repo-policy.json
@@ -396,17 +396,17 @@ accepted repo-policy.json
   -> canonical entries
 ```
 
-Если self-policy не использует high-level pack, сайт честно показывает:
+Если собственная политика не использует высокоуровневый пакет, сайт честно показывает:
 
 ```text
 active high-level pack in self-policy: none
 ```
 
-C3.6 не создаёт искусственный pack demo.
+C3.6 не создаёт искусственный пример пакета только ради заполнения раздела.
 
-### 8.5 ChangeIntent / governance / evidence topology
+### 8.5 Топология намерения, управления и доказательств
 
-Human explanation:
+Человеческое объяснение:
 
 ```text
 ChangeIntent
@@ -424,11 +424,11 @@ result
   -> AnalysisReport / blocking decision
 ```
 
-Пояснительная topology может быть hand-written prose/HTML, но конкретные inventories должны быть machine-derived.
+Пояснительная схема может быть написана вручную, но конкретные активные перечни правил и ограничений должны выводиться машинно.
 
-### 8.6 CI wiring
+### 8.6 Схема CI
 
-`.github/workflows/ci.yml` читается generic YAML parser-ом; отображаются:
+`.github/workflows/ci.yml` читается общим разборщиком YAML; отображаются:
 
 ```text
 workflow name
@@ -437,9 +437,9 @@ job ids
 step names where useful
 ```
 
-Accepted `workflow_run` отдельно даёт exact SHA + run URL + success.
+Принятое событие `workflow_run` отдельно даёт точный SHA, ссылку запуска и успешный результат.
 
-### 8.7 Compression metrics
+### 8.7 Метрики сжатия
 
 ```text
 C3.0 baseline
@@ -447,11 +447,11 @@ current accepted state
 delta
 ```
 
-Источник — existing compression metrics output.
+Источник — существующий вывод архитектурных метрик.
 
-### 8.8 Executable scenarios
+### 8.8 Исполняемые сценарии
 
-Для каждого auto-discovered scenario:
+Для каждого автоматически найденного сценария:
 
 ```text
 id
@@ -462,15 +462,15 @@ PASS/FAIL case titles
 expected diagnostic ids
 ```
 
-### 8.9 Canonical links
+### 8.9 Канонические ссылки
 
-Links строятся из repository identity + accepted SHA. Source links по возможности immutable SHA links, не `main`.
+Ссылки строятся из идентичности репозитория и принятого SHA. Ссылки на исходники по возможности указывают на неизменяемый SHA, а не на `main`.
 
-## 9. Deployment topology
+## 9. Схема публикации
 
-C3.6 не создаёт третий full validation cycle.
+C3.6 не создаёт третий полный цикл проверки.
 
-Workflow trigger:
+Триггер рабочего процесса:
 
 ```text
 on:
@@ -480,27 +480,27 @@ on:
     branches: [main]
 ```
 
-Build/deploy разрешены только если:
+Сборка и публикация разрешены только если:
 
 ```text
 workflow_run.conclusion == success
 ```
 
-Checkout выполняется по:
+Получение исходников выполняется по:
 
 ```text
 ref = workflow_run.head_sha
 ```
 
-### 9.1 Freshness gates
+### 9.1 Проверки свежести
 
-До collection:
+До сбора данных:
 
 ```text
 git rev-parse HEAD == workflow_run.head_sha
 ```
 
-Перед upload и повторно непосредственно перед deploy:
+Перед загрузкой артефакта и повторно непосредственно перед публикацией:
 
 ```text
 remote refs/heads/main == workflow_run.head_sha
@@ -512,41 +512,41 @@ remote refs/heads/main == workflow_run.head_sha
 NO DEPLOY OF STALE CANDIDATE
 ```
 
-Ошибка должна быть видна в workflow; старый опубликованный сайт остаётся с собственным явно указанным exact SHA.
+Ошибка должна быть видна в рабочем процессе; старый опубликованный сайт остаётся с собственным явно указанным точным SHA.
 
-### 9.2 Concurrency
+### 9.2 Конкурентные публикации
 
-Один concurrency group:
+Используется одна группа конкурентности:
 
 ```text
 group = pages
 cancel-in-progress = true
 ```
 
-Это сознательно выбирается в пользу freshness: более новый accepted Pages build отменяет старый ещё исполняющийся build/deploy. Freshness gates остаются обязательными и не заменяются concurrency.
+Это сознательный выбор в пользу свежести: более новая принятая сборка страниц отменяет старую ещё исполняющуюся сборку или публикацию. Проверки свежести остаются обязательными и не заменяются конкурентностью.
 
-### 9.3 Pages source precondition
+### 9.3 Предусловие источника публикации
 
-Перед первым deployment repository Pages publishing source должен быть настроен на **GitHub Actions**.
+Перед первой публикацией источник `GitHub Pages` в настройках репозитория должен быть установлен в `GitHub Actions`.
 
-Это одноразовая repository administration setting, не Observatory capability.
+Это одноразовая административная настройка репозитория, а не возможность самой обсерватории.
 
-C3.6 не вводит permanent privileged token для её автоматизации. Если доступный automation surface не умеет безопасно изменить эту setting, enablement выполняется как отдельный явно recorded administration step.
+C3.6 не вводит постоянный привилегированный токен для автоматизации этой настройки. Если доступный контур автоматизации не умеет безопасно изменить настройку, включение выполняется как отдельное явно зафиксированное административное действие.
 
-## 10. Permissions
+## 10. Разрешения
 
-### Build / collect / render
+### Сборка, сбор данных и отрисовка
 
-Точный permission set:
+Точный набор разрешений:
 
 ```text
 contents: read
 pages: read
 ```
 
-Другие permissions у build job = none.
+Остальные разрешения задания сборки равны `none`.
 
-Build job не получает:
+Задание сборки не получает:
 
 ```text
 contents: write
@@ -557,26 +557,26 @@ administration: read/write
 id-token: write
 ```
 
-### Deploy
+### Публикация
 
-Dedicated deploy job:
+Отдельное задание публикации получает:
 
 ```text
 pages: write
 id-token: write
 ```
 
-Environment:
+Окружение:
 
 ```text
 github-pages
 ```
 
-Deploy job не получает repository mutation permissions.
+Задание публикации не получает разрешений на изменение репозитория.
 
-## 11. CI cost boundary
+## 11. Граница стоимости CI
 
-Upstream CI уже доказал exact accepted SHA, поэтому Pages build не запускает повторно:
+Вышестоящий CI уже доказал точный принятый SHA, поэтому сборка страниц не запускает повторно:
 
 ```text
 npm test
@@ -587,13 +587,13 @@ all 10 scenario executions
 npm run check:dist
 ```
 
-Для collector нужен только accepted generated runtime и production dependencies:
+Для сборщика нужен только принятый сгенерированный исполняемый код и рабочие зависимости:
 
 ```text
 npm ci --omit=dev
 ```
 
-Pages-specific работа:
+Работа, специфичная для страниц:
 
 ```text
 checkout exact SHA
@@ -608,34 +608,34 @@ freshness gates
 Pages artifact upload/deploy
 ```
 
-Общая optimization program остаётся C3.8.
+Общая программа оптимизации остаётся C3.8.
 
-## 12. Testing strategy
+## 12. Стратегия тестирования
 
-Первый implementation commit C3.6 — test-only RED falsifier.
+Первый реализационный коммит C3.6 — только тестовый красный фальсификатор.
 
 Минимальные доказательства:
 
-### Authority
+### Источник истины
 
 ```text
-accepted SHA обязателен и валиден
+accepted SHA is required and valid
 wrong checked-out SHA fails
-scenario catalog discovered generically
+scenario catalog is discovered generically
 architecture inventory reuses existing metrics
 self-policy lowering comes from production compiler
 ```
 
-### Determinism
+### Детерминизм
 
-Для одинакового нормализованного input bundle:
+Для одинакового нормализованного набора входов:
 
 ```text
 snapshot bytes identical
 rendered site bytes identical
 ```
 
-### Staleness
+### Устаревание
 
 ```text
 accepted_sha != checked_out_sha -> fail
@@ -643,9 +643,9 @@ accepted_sha != current remote main -> no deploy
 CI conclusion != success -> no build/deploy
 ```
 
-### Read-only boundary
+### Граница только для чтения
 
-Static/focused test подтверждает отсутствие:
+Статический или узкий тест подтверждает отсутствие:
 
 ```text
 repository write API
@@ -656,11 +656,11 @@ merge mutation
 policy mutation endpoint
 ```
 
-### Corpus
+### Каталог сценариев
 
-Все пять accepted C3.5 scenarios появляются автоматически. Добавление будущего valid scenario manifest не требует изменения renderer semantic dispatch.
+Все пять принятых сценариев C3.5 появляются автоматически. Добавление будущего корректного манифеста сценария не требует изменения семантической диспетчеризации отрисовщика.
 
-## 13. Minimal implementation surface
+## 13. Минимальная поверхность реализации
 
 Предпочтительно:
 
@@ -671,37 +671,37 @@ tests/test-c3-6-observatory.mjs
 .github/workflows/pages.yml
 ```
 
-Допустим маленький `scripts/observatory/assets/**` только для presentation assets.
+Допустим маленький каталог `scripts/observatory/assets/**` только для визуальных ресурсов.
 
-Generated `_site/**` и `observatory.snapshot.json` не коммитятся.
+Сгенерированные `_site/**` и `observatory.snapshot.json` не коммитятся.
 
-README получает короткую ссылку на Observatory только после фактического появления Pages.
+README получает короткую ссылку на обсерваторию только после фактического появления страниц.
 
-## 14. Rejected alternatives
+## 14. Отклонённые варианты
 
-### Committed Pages tree
+### Коммитить дерево страниц
 
 ```text
 accepted data -> generator -> committed pages/**
 ```
 
-Отклонён из-за generated-tree churn, новой cochange surface и смешения authority/projection.
+Вариант отклонён из-за шума сгенерированного дерева, новой поверхности совместных изменений и смешения источника истины с проекцией.
 
-### Client-side GitHub reader
+### Читать GitHub из браузера
 
 ```text
 browser -> GitHub API/raw main -> reconstruct state
 ```
 
-Отклонён из-за runtime network dependency, race между GitHub reads и невозможности получить один reproducible exact-SHA artifact.
+Вариант отклонён из-за сетевой зависимости во время просмотра, гонок между чтениями GitHub и невозможности получить единый воспроизводимый артефакт точного SHA.
 
-### New public CLI command
+### Добавить новую публичную команду
 
-Не добавлять `repo-guard observatory/pages/inspect-for-pages`: Observatory — development/documentation projection, не consumer execution capability.
+Не добавлять `repo-guard observatory`, `repo-guard pages` или аналог. Обсерватория — проекция разработки и документации, а не потребительская исполняемая возможность.
 
-## 15. Failure model
+## 15. Модель отказа
 
-Не публиковать candidate site, если:
+Не публиковать кандидат сайта, если:
 
 ```text
 accepted SHA missing/malformed
@@ -717,33 +717,33 @@ remote main advanced
 Pages upload/deploy fails
 ```
 
-Никакой fallback не имеет права подменять неизвестное состояние ложным PASS/absence.
+Никакой запасной путь не имеет права подменять неизвестное состояние ложным успехом или ложным отсутствием.
 
-## 16. Definition of Done C3.6
+## 16. Определение готовности C3.6
 
 C3.6 закрывается только когда:
 
-- Russian-first static Pages site опубликован;
-- site явно связан с exact accepted main SHA;
-- deploy возможен только после successful `CI` на том же SHA;
-- stale candidate не может молча опубликоваться;
-- self-policy view derived from accepted repository data;
-- lowered constraint view derived from production compiler;
-- architecture view derived from existing compression metrics/registries;
-- scenario catalog derived только из `examples/scenarios/**`;
-- package version и published GitHub Release различаются честно;
-- declared CI wiring и accepted CI evidence показаны раздельно;
-- branch-protection admin permission не добавлен;
-- Pages не имеет repository/control-plane mutation surface;
-- deterministic tests GREEN;
-- README ↔ Pages ↔ immutable source links сходятся;
-- runtime kinds / FactRef sources / relation descriptors не выросли;
-- full self gates GREEN;
-- Ready exact-head `Run PR policy check` GREEN;
-- merge выполнен по exact accepted head;
-- post-merge `validate` + `smoke-pack` GREEN.
+- русскоязычный статический сайт опубликован;
+- сайт явно связан с точным принятым SHA ветки `main`;
+- публикация возможна только после успешного `CI` на том же SHA;
+- устаревший кандидат не может молча опубликоваться;
+- представление собственной политики выведено из принятых данных репозитория;
+- представление пониженных ограничений выведено рабочим компилятором;
+- архитектурное представление выведено существующими метриками и реестрами;
+- каталог сценариев выведен только из `examples/scenarios/**`;
+- версия пакета и опубликованный выпуск GitHub различаются честно;
+- объявленная схема CI и доказательство принятия CI показаны раздельно;
+- административное разрешение защиты ветки не добавлено;
+- страницы не имеют поверхности изменения репозитория или управляющего контура;
+- тесты детерминизма зелёные;
+- ссылки README, страниц и неизменяемых исходников сходятся;
+- число исполняемых видов, источников `FactRef` и дескрипторов отношений не выросло;
+- все собственные проверки зелёные;
+- проверка политики на точной готовой голове PR зелёная;
+- слияние выполнено по точной принятой голове;
+- после слияния `validate` и `smoke-pack` зелёные.
 
-## 17. Out of scope
+## 17. Вне области C3.6
 
 ```text
 C3.7 versioning/release truth cutover
@@ -758,9 +758,9 @@ repository mutation from site
 analytics/search backend
 ```
 
-## 18. Следующий шаг после принятия design spec
+## 18. Следующий шаг после принятия спецификации
 
-После review и явного принятия этой спецификации:
+После проверки и явного принятия этой спецификации:
 
 ```text
 write implementation plan
@@ -768,4 +768,4 @@ write implementation plan
 RED-first implementation in bounded slices
 ```
 
-До отдельного одобрения design spec implementation не начинается.
+До отдельного одобрения спецификации реализация не начинается.
