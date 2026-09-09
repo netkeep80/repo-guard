@@ -1,0 +1,98 @@
+name: Policy Observatory Pages
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Checkout accepted CI head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install runtime dependencies
+        run: npm ci --omit=dev
+
+      - name: Verify accepted checkout
+        env:
+          ACCEPTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$ACCEPTED_SHA"
+
+      - name: Collect Observatory snapshot
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/observatory/collect.mjs \
+            --accepted-sha "${{ github.event.workflow_run.head_sha }}" \
+            --ci-run-id "${{ github.event.workflow_run.id }}" \
+            --ci-run-url "${{ github.event.workflow_run.html_url }}" \
+            --ci-conclusion "${{ github.event.workflow_run.conclusion }}" \
+            --repository "${{ github.repository }}" \
+            --output observatory.snapshot.json
+
+      - name: Render Observatory site
+        run: |
+          node scripts/observatory/render.mjs \
+            --snapshot observatory.snapshot.json \
+            --output _site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Verify current main before upload
+        env:
+          ACCEPTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test "$REMOTE_MAIN" = "$ACCEPTED_SHA"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Verify current main before deploy
+        env:
+          ACCEPTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          REMOTE_MAIN="$(git ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main | cut -f1)"
+          test "$REMOTE_MAIN" = "$ACCEPTED_SHA"
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
