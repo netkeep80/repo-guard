@@ -1,0 +1,32 @@
+{
+  "policy_format_version": "0.3.0",
+  "repository_kind": "application",
+  "enforcement": { "mode": "blocking" },
+  "paths": {
+    "forbidden": [],
+    "canonical_docs": [],
+    "governance_paths": ["repo-policy.json"]
+  },
+  "diff_rules": {
+    "max_new_docs": 1,
+    "max_new_files": 2,
+    "max_net_added_lines": 20
+  },
+  "content_rules": [],
+  "cochange_rules": [],
+  "document_relations": {
+    "documents": {
+      "base-revision": { "path": "meta/REVISION", "format": "plain_text", "snapshot": "base" },
+      "head-revision": { "path": "meta/REVISION", "format": "plain_text", "snapshot": "head" }
+    },
+    "rules": [
+      {
+        "id": "release-revision",
+        "kind": "scalar_strictly_greater",
+        "comparator": "semver",
+        "left": { "document": "head-revision", "pointer": "", "type": "string" },
+        "right": { "document": "base-revision", "pointer": "", "type": "string" }
+      }
+    ]
+  }
+}
