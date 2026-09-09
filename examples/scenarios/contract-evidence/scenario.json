@@ -1,0 +1,21 @@
+{
+  "id": "contract-evidence",
+  "title_ru": "Связность контракта и доказательств",
+  "summary_ru": "Показывает согласованность идентификатора контракта, принятого состояния и обязательных исполняемых путей.",
+  "command": "check-diff",
+  "cases": [
+    {
+      "id": "pass",
+      "title_ru": "Связный контракт проходит",
+      "expected_exit_code": 0,
+      "expected_diagnostics": []
+    },
+    {
+      "id": "fail-required-path",
+      "title_ru": "Отсутствующий исполняемый путь блокируется",
+      "expected_exit_code": 1,
+      "expected_diagnostics": ["document-relation:contract-conformance:required-path:1"],
+      "delete_paths": ["tests/gate.mjs"]
+    }
+  ]
+}
