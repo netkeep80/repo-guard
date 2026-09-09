@@ -230,7 +230,7 @@ console.log("\n--- structural ratchet: change_profile runtime and evaluator disa
   const runtimeKinds = kindBlock
     ? [...kindBlock[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]).sort()
     : [];
-  expect("runtime kind vocabulary follows the current compressed tail", runtimeKinds, ["integration", "primitive_relation"]);
+  expect("runtime kind vocabulary follows the current compressed tail", runtimeKinds, ["primitive_relation"]);
 }
 
 console.log("\n--- global architecture invariants do not grow ---");
