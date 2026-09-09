@@ -438,19 +438,22 @@ GitHub event context
 auth/gh availability where реально required
 ```
 
-Удаляются integration-specific paths:
+Удаляются integration/parallel-specific paths:
 
 ```text
 compileIntegrationPolicy
 validate-integration alias
---integration
---parallel
+doctor --integration
+doctor --parallel
+doctor --persistent-branch
 parallel readiness
 ```
 
-Также удаляется или существенно упрощается ad-hoc `workflow-config` regex introspection, если dependency audit подтверждает, что она только дублирует старый integration wiring concern.
+Ad-hoc `checkWorkflowConfig()` regex introspection удаляется полностью. После C3.3e doctor не анализирует YAML workflow semantics и не проверяет `fetch-depth`, token wiring или repo-guard invocation через поиск строк в `.github/workflows/**`.
 
-Doctor не должен становиться вторым workflow semantics engine после удаления `integration`.
+Причина: это был ещё один специальный workflow semantics path рядом с `integration`. Реальные CI runs + branch protection являются authoritative self-host evidence; generated `init` scaffold остаётся UX convenience, а не основанием для второго validator.
+
+Doctor после cutover — diagnostics prerequisites, не policy/workflow semantics evaluator.
 
 ## 12. Public CLI target
 
@@ -483,7 +486,7 @@ doctor --persistent-branch
 init --parallel
 ```
 
-Если `--persistent-branch` dependency audit докажет независимую non-parallel функцию, его судьба должна быть отдельно обоснована в E0 inventory. По умолчанию он относится к old parallel doctor surface и удаляется.
+`--persistent-branch` является частью old `parallel-doctor` branch-hygiene projection и удаляется вместе с этим surface без replacement option.
 
 ## 13. Composite Action target
 
@@ -700,7 +703,7 @@ self-host CI gates
 
 ### Риск: спрятать старый readiness engine в doctor
 
-Контрмера: doctor после cutover — diagnostics prerequisites, не policy/workflow semantics evaluator.
+Контрмера: workflow-config regex introspection и parallel doctor удаляются; doctor остаётся только diagnostics prerequisites.
 
 ### Риск: future parallel integration снова потребуется
 
@@ -722,6 +725,7 @@ no portable coordinator product path
 no parallel readiness/provider model
 no merge-group provider command
 no agent lifecycle/status protocol
+no doctor workflow-config semantics path
 init has one non-parallel scaffold path
 action.yml has no portable coordinator mode/inputs
 self policy has no integration section
