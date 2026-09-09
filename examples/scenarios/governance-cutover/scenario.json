@@ -1,0 +1,24 @@
+{
+  "id": "governance-cutover",
+  "title_ru": "Доверенное изменение управляющей политики",
+  "summary_ru": "Проверяет реальный PR-путь: управляющий файл можно изменить только с санкцией доверенной связанной задачи.",
+  "command": "check-pr",
+  "cases": [
+    {
+      "id": "pass",
+      "title_ru": "Доверенная санкция разрешает ужесточение политики",
+      "expected_exit_code": 0,
+      "expected_diagnostics": [],
+      "pr_body": "pr.md",
+      "issue_body": "cases/pass/issue.md"
+    },
+    {
+      "id": "fail-no-grant",
+      "title_ru": "Без санкции управляющее изменение блокируется",
+      "expected_exit_code": 1,
+      "expected_diagnostics": ["governance-change-authorization"],
+      "pr_body": "pr.md",
+      "issue_body": "cases/fail-no-grant/issue.md"
+    }
+  ]
+}
