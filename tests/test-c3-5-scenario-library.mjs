@@ -198,7 +198,7 @@ else console.log(JSON.stringify({ labels: [] }));
     assert.ifError(result.error);
     const output = `${result.stdout || ""}\n${result.stderr || ""}`;
     assert.equal(result.status, testCase.expected_exit_code, `${scenarioId}/${testCase.id}: неверный код процесса\n${output}`);
-    const actual = [...output.matchAll(/^FAIL:\s+([^\n]+)/gm)]
+    const actual = [...output.matchAll(/^\s*FAIL:\s+([^\n]+)/gm)]
       .map((match) => match[1].trim())
       .sort();
     for (const expected of testCase.expected_diagnostics) {
