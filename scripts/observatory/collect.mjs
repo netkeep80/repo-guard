@@ -61,20 +61,27 @@ function assertScenario(scenario, path) {
   }
 }
 
-function collectScenarios(repoRoot) {
+function collectScenarios(repoRoot, acceptedSha) {
   const root = resolve(repoRoot, "examples/scenarios");
   return readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
-      const path = resolve(root, entry.name, "scenario.json");
-      const scenario = readJson(path);
-      assertScenario(scenario, `examples/scenarios/${entry.name}/scenario.json`);
-      return scenario;
+      const relativePath = `examples/scenarios/${entry.name}/scenario.json`;
+      const scenario = readJson(resolve(repoRoot, relativePath));
+      assertScenario(scenario, relativePath);
+      return {
+        ...scenario,
+        provenance: {
+          origin: "accepted_commit",
+          source: relativePath,
+          sha: acceptedSha,
+        },
+      };
     })
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function collectCompressionMetrics(repoRoot, run) {
+function collectCompressionMetrics(repoRoot, run, acceptedSha) {
   const output = run(
     process.execPath,
     [
@@ -84,10 +91,17 @@ function collectCompressionMetrics(repoRoot, run) {
     ],
     { cwd: repoRoot },
   );
-  return JSON.parse(output);
+  return {
+    ...JSON.parse(output),
+    provenance: {
+      origin: "accepted_commit",
+      source: "scripts/compression-metrics.mjs",
+      sha: acceptedSha,
+    },
+  };
 }
 
-function collectCiWiring(repoRoot) {
+function collectCiWiring(repoRoot, acceptedSha) {
   const source = ".github/workflows/ci.yml";
   const workflow = readYaml(resolve(repoRoot, source));
   const triggerObject = workflow.on && typeof workflow.on === "object"
@@ -110,6 +124,7 @@ function collectCiWiring(repoRoot) {
     provenance: {
       origin: "accepted_commit",
       source,
+      sha: acceptedSha,
     },
   };
 }
@@ -206,8 +221,8 @@ export async function collectObservatorySnapshot({
     token,
     fetchImpl,
   });
-  const scenarios = collectScenarios(repoRoot);
-  const architecture = collectCompressionMetrics(repoRoot, run);
+  const scenarios = collectScenarios(repoRoot, acceptedSha);
+  const architecture = collectCompressionMetrics(repoRoot, run, acceptedSha);
   const constraintProgram = compileConstraintProgram(policy, null);
 
   return {
@@ -250,7 +265,7 @@ export async function collectObservatorySnapshot({
       },
     },
     architecture,
-    ci: collectCiWiring(repoRoot),
+    ci: collectCiWiring(repoRoot, acceptedSha),
     scenarios,
     sources: [
       ".github/workflows/ci.yml",
