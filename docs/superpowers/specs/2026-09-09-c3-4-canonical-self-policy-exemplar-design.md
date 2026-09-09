@@ -1,43 +1,45 @@
-# C3.4 — Canonical self-policy exemplar design
+# C3.4 — каноническая self-policy как живой пример
 
-Date: 2026-09-09
+Дата: 2026-09-09
 
-Parent: #375
-Roadmap: #370
-Depends on accepted C3.3: #374
+Родительская задача: #375
 
-Accepted base before design work:
+Дорожная карта: #370
+
+Зависит от принятой C3.3: #374
+
+Принятая база перед проектированием:
 
 ```text
 main = abd89e9c0ec5d9244756894f970b04db2aa26501
 ```
 
-Canonical C3.0 measurement baseline:
+Каноническая база измерений C3.0:
 
 ```text
 92432809fcddc290080beb51ba151e13a5761869
 ```
 
-## 1. Purpose
+## 1. Цель
 
-C3.4 must make `repo-guard` itself the smallest honest production example of the architecture accepted after C3.3.
+C3.4 должна сделать сам репозиторий `repo-guard` самым маленьким честным производственным примером архитектуры, принятой после C3.3.
 
-The self-policy must describe only real invariants of this repository. It must not be a catalogue of all product features and must not preserve historical syntax merely to demonstrate support.
+Собственная политика должна описывать только реальные инварианты этого репозитория. Она не должна быть каталогом всех возможностей продукта и не должна сохранять исторические конструкции только ради демонстрации.
 
-Primary design bias:
+Главный принцип:
 
 ```text
-simpler > broader showcase
-universal > repository-specific
-remove > duplicate > macro-hide
-real execution evidence > declarative imitation
+проще > шире
+универсальнее > специфичнее
+удалить > продублировать > спрятать в макрос
+реальное исполнение > декларативная имитация исполнения
 ```
 
-C3.4 is not permission to introduce another runtime, profile, integration DSL, policy language, or repo-specific bypass.
+C3.4 не разрешает вводить новый runtime, профиль, язык интеграции, второй язык политики или специальный обход для собственного репозитория.
 
-## 2. Accepted architecture boundary
+## 2. Принятая архитектурная граница
 
-After C3.3 the canonical semantic runtime is:
+После C3.3 канонический семантический путь имеет вид:
 
 ```text
 Git / GitHub / filesystem
@@ -55,7 +57,7 @@ relation kernel
 AnalysisReport
 ```
 
-Hard invariants for C3.4:
+Жёсткие инварианты C3.4:
 
 ```text
 runtime constraint kinds = 1
@@ -65,18 +67,18 @@ FactRef sources = 4
 relation descriptors = 10
 primitive descriptor registries = 1
 second evaluator = NONE
-new arbitrary expression language = NONE
+arbitrary expression language = NONE
 compatibility aliases = NONE
 repo-specific semantic bypass = NONE
 ```
 
-C3.4 must not grow any of these counts unless an independently demonstrated consumer falsifier proves a generic gap. No such gap is currently known.
+C3.4 не должна увеличивать эти количества. Исключение допустимо только после отдельного потребительского фальсификатора, доказывающего универсальный пробел. Сейчас такого пробела не обнаружено.
 
-## 3. Current self-policy problem
+## 3. Проблема текущей собственной политики
 
-Current `repo-policy.json` is valid, but still resembles a broad feature showcase rather than a minimal executable statement of repo-guard's actual invariants.
+Текущий `repo-policy.json` корректен, но всё ещё похож на широкий показ возможностей продукта, а не на минимальную исполняемую формулировку реальных инвариантов `repo-guard`.
 
-The main duplication is:
+Главное дублирование:
 
 ```text
 surfaces
@@ -84,9 +86,9 @@ new_file_classes
 change_profiles
 ```
 
-`surfaces` and `new_file_classes` mostly repeat the same repository path taxonomy, while five `change_profiles` repeat permissive/forbidden combinations over that taxonomy.
+`surfaces` и `new_file_classes` в основном повторяют одну и ту же классификацию путей, а пять `change_profiles` повторно задают разрешённые комбинации поверх этой классификации.
 
-At the same time every real PR already declares its own executable transition boundary through `ChangeIntent`:
+При этом каждый реальный PR уже объявляет собственную исполняемую границу перехода через `ChangeIntent`:
 
 ```text
 change_type
@@ -97,7 +99,7 @@ must_not_touch
 expected_effects
 ```
 
-and ready PRs are validated through repo-guard's own public Action path:
+Готовый PR проверяется самим публичным действием `repo-guard`:
 
 ```text
 uses: ./
@@ -105,31 +107,31 @@ mode: check-pr
 enforcement: blocking
 ```
 
-Therefore the self-policy does not need a large internal taxonomy merely to classify development method names.
+Следовательно, собственной политике не нужна большая внутренняя таксономия только ради классификации методологии изменения.
 
-## 4. Selected approach — Minimal live exemplar
+## 4. Выбранный вариант — минимальный живой пример
 
-Three approaches were considered:
+Рассмотрены три подхода.
 
-### A. Minimal live exemplar — SELECTED
+### A. Минимальный живой пример — выбран
 
-Keep only real repository invariants in `repo-policy.json`. Product capabilities not genuinely needed by repo-guard itself remain covered by focused tests/examples and are not forced into self-policy.
+В `repo-policy.json` остаются только реальные инварианты репозитория. Возможности продукта, которые самому `repo-guard` не нужны, проверяются специализированными тестами и примерами, но не навязываются собственной политике.
 
-### B. Consolidated taxonomy — REJECTED
+### B. Сжатая таксономия — отклонён
 
-Keep `surfaces + change_profiles`, reduce taxonomy size, delete only some duplication.
+Сохранить `surfaces` и `change_profiles`, сократив только количество категорий.
 
-Rejected because the self-policy would still encode methodology-oriented classification that is already supplied by each PR's `ChangeIntent`.
+Подход отклонён: политика всё равно будет хранить методологическую классификацию, уже задаваемую `ChangeIntent` каждого PR.
 
-### C. Broad showcase — REJECTED
+### C. Широкий показ возможностей — отклонён
 
-Keep the current policy shape and only add more self-host assertions.
+Оставить нынешнюю форму политики и лишь добавить больше проверок самоприменения.
 
-Rejected because it preserves complexity specifically for demonstration, contrary to Architecture Compression 3.0.
+Подход отклонён: он сохраняет сложность специально ради демонстрации и противоречит Architecture Compression 3.0.
 
-## 5. Target self-policy
+## 5. Целевая собственная политика
 
-The canonical repo-guard self-policy should contain only these categories unless RED proves another repository invariant is necessary:
+Каноническая политика самого `repo-guard` должна содержать только следующие категории, если `RED` не докажет необходимость ещё одного реального инварианта:
 
 ```text
 policy identity
@@ -138,13 +140,15 @@ trusted governance paths
 forbidden paths
 operational paths
 global diff budgets
-real compression/size bounds
+real compression / size bounds
 real content rules
 real source -> test cochange
-stable public metadata/document relations
+stable public metadata / document relations
 ```
 
-Expected deletion from repo-guard's own `repo-policy.json`:
+Под идентичностью политики здесь понимаются существующие поля формата и вида репозитория, а не новый механизм идентификации.
+
+Из собственного `repo-policy.json` ожидается удаление:
 
 ```text
 surfaces
@@ -152,15 +156,15 @@ new_file_classes
 change_profiles
 ```
 
-This is a self-policy compression only. It does NOT remove these public product capabilities from schema/runtime merely because the repo-guard repository no longer uses them itself.
+Это только сжатие собственной политики. Публичные возможности продукта не удаляются из схемы или runtime только потому, что сам `repo-guard` больше не использует их.
 
-No new built-in `repo-guard`, `tooling`, `self-host`, or similar profile may be created to hide the same policy complexity inside TypeScript.
+Запрещено создавать встроенный профиль `repo-guard`, `tooling`, `self-host` или аналогичный профиль, который просто перенесёт ту же сложность из JSON в TypeScript.
 
-## 6. Stable structural invariants use existing document relations
+## 6. Устойчивые структурные инварианты выражаются существующими отношениями документов
 
-C3.4 should make the self-policy visibly exercise the canonical document-fact/relation model where the invariant is naturally structural.
+C3.4 должна показать в собственной политике каноническую модель фактов и отношений там, где инвариант действительно структурный.
 
-Initial target relations should use only existing generic descriptors, for example:
+Начальные кандидаты используют только существующие универсальные отношения:
 
 ```text
 package.json:/main
@@ -180,30 +184,30 @@ action.yml:/inputs/enforcement/default
 "blocking"
 ```
 
-The exact final set is bounded by usefulness and stability. Every relation must represent a real public/runtime contract, not a synthetic demonstration.
+Окончательный набор должен оставаться минимальным. Каждое отношение обязано выражать реальную публичную или исполняемую границу, а не искусственный пример возможности.
 
-Allowed existing primitives are sufficient:
+Достаточны уже существующие примитивы:
 
 ```text
 scalar_equal
 scalar_equals_literal
 ```
 
-C3.4 must NOT add an integration-specific relation or workflow-specific FactRef selector.
+Новый примитив интеграции или специальный селектор рабочего процесса запрещён.
 
-## 7. Workflow execution is evidence, not policy text semantics
+## 7. Исполнение рабочего процесса является доказательством, а не текстовой семантикой политики
 
-C3.4 must preserve the C3.3 decision that GitHub workflow topology is not a second policy language.
+C3.4 сохраняет решение C3.3: конфигурация GitHub Actions не становится вторым языком политики.
 
-Do NOT add policy rules that inspect workflow step arrays, command strings, or action text merely to prove CI wiring.
+Не следует добавлять правила, которые разбирают массивы шагов, строки команд или текст рабочего процесса только ради доказательства CI-связности.
 
-Wrong direction:
+Неправильное направление:
 
 ```text
 workflow YAML text -> special policy evaluator
 ```
 
-Correct direction:
+Правильное доказательство:
 
 ```text
 real CI execution
@@ -216,13 +220,13 @@ real CI execution
   -> smoke packaged artifact
 ```
 
-Generated `dist` is similarly proven by `npm run check:dist`; a weak rule such as `src changed -> dist changed` is not equivalent and must not replace the build freshness check.
+Сгенерированный `dist` аналогично доказывается настоящей командой `npm run check:dist`. Слабое правило вида `src changed -> dist changed` не является эквивалентом и не должно заменять проверку свежести сборки.
 
-## 8. Machine-visible self-host topology
+## 8. Машинно наблюдаемая топология самоприменения
 
-C3.4 must make the full self-host path mechanically testable from existing authoritative artifacts, without adding a manually maintained topology manifest.
+C3.4 должна сделать полный путь самоприменения механически проверяемым по уже существующим авторитетным артефактам, не создавая вручную поддерживаемый манифест топологии.
 
-Required observed chain:
+Требуемая цепь:
 
 ```text
 ChangeIntent
@@ -240,7 +244,7 @@ validate + smoke-pack required checks
 accepted main
 ```
 
-The self-host ratchet should derive evidence directly from current repository files and GitHub-facing configuration such as:
+Репозиторный фальсификатор должен выводить доказательства непосредственно из существующих файлов:
 
 ```text
 repo-policy.json
@@ -251,13 +255,13 @@ action.yml
 package.json
 ```
 
-It must not create another static capability/topology registry that duplicates these sources.
+Настройка защиты ветки и набор обязательных проверок не копируются в новый файл политики. Их точное состояние проверяется как внешний GitHub acceptance evidence при приёмке PR, а не превращается в семантику runtime.
 
-## 9. Governance boundary
+## 9. Граница управляющих файлов
 
-The trusted governance set should represent files that define policy, validation, Action, CI/build/release behavior.
+Доверенная управляющая область должна включать файлы, которые действительно определяют политику, валидацию, действие, CI, сборку и выпуск.
 
-The current set should be reviewed for tightening to include real control-plane files such as:
+Текущий набор следует проверить на обоснованное усиление, включая реальные управляющие файлы вроде:
 
 ```text
 package.json
@@ -268,34 +272,36 @@ scripts/check-dist.mjs
 scripts/verify-release-ref.mjs
 ```
 
-Only actual authority-bearing files should be included. Do not classify ordinary source merely because it is important.
+В управляющую область включаются только файлы с реальными полномочиями. Обычный исходный код не становится governance только потому, что он важен.
 
-Any expansion of governance paths is a tightening and must still pass the normal trusted governance path.
+Расширение управляющих путей является усилением политики и всё равно обязано пройти обычную доверенную границу.
 
-## 10. Generic strictness granularity prerequisite
+## 10. Универсальное уточнение strictness перед переписыванием политики
 
-The current policy comparison can collapse unknown top-level vocabulary changes into the root pointer:
+Текущий `compareConstraintPrograms()` отдельно сравнивает известные strictness-ограничения, а затем строит `unknownProjection()` для оставшихся частей политики, не представленных в `Constraint Program` strictness.
+
+Сейчас любое изменение этой остаточной проекции сворачивается в один несопоставимый указатель:
 
 ```text
 /
 ```
 
-That makes an otherwise narrow self-policy compression require an excessively broad GovernanceGrant such as:
+Из-за этого узкое сжатие собственной политики может потребовать недопустимо широкую санкцию:
 
 ```text
 allow_policy_relaxation:
   - /
 ```
 
-C3.4 must not authorize that broad escape hatch.
+C3.4 не должна использовать такой обход.
 
-Before the self-policy deletion slice, implement one generic strictness improvement:
+Перед удалением секций собственной политики нужно сделать одно универсальное улучшение:
 
 ```text
-unknown top-level policy sections are compared independently by key
+unknownProjection сравнивается независимо по top-level ключам
 ```
 
-So deleting current sections can be reported as narrow incomparable/relaxation pointers:
+То есть изменение независимых остаточных секций должно выдавать отдельные указатели, например:
 
 ```text
 /surfaces
@@ -303,35 +309,39 @@ So deleting current sections can be reported as narrow incomparable/relaxation p
 /change_profiles
 ```
 
-The generic comparison algorithm must not contain those field names. It must operate over unknown top-level keys generically.
+Алгоритм не должен содержать имена этих полей. Он должен универсально работать с любыми top-level ключами остаточной проекции.
 
-No new semantic runtime kind or relation descriptor is needed.
+Вложенный объект внутри одного неизвестного top-level ключа остаётся одной единицей сравнения. C3.4 не вводит рекурсивный произвольный язык сравнения JSON и не усложняет strictness больше, чем требуется для узкой доверенной санкции.
 
-## 11. Self-hosting coverage truthfulness
+Новый runtime kind или relation descriptor для этого не нужен.
 
-Current documentation claims that `tests/test-self-hosting.mjs` derives command/rule/profile capabilities and compares them against self-policy/CI/exceptions. The present test primarily exercises `doctor` and runtime environment checks instead.
+## 11. Правдивость self-hosting coverage
 
-C3.4 must remove this factual mismatch.
+Текущая документация утверждает, что `tests/test-self-hosting.mjs` выводит список команд, семейств и профилей и сопоставляет его с собственной политикой, CI и исключениями. Фактический тест сейчас в основном проверяет `doctor` и свойства окружения.
 
-Preferred target:
+C3.4 должна устранить это расхождение между документацией и исполняемой проверкой.
+
+Предпочтительное состояние:
 
 ```text
-derive normal capability inventory from code/registries
+derived capability inventory from code / registries
 +
-derive actual self-host evidence from live repository artifacts
+actual self-host evidence from repository artifacts
 +
-keep docs/self-hosting-coverage.json only for honest exceptions
+self-hosting-coverage.json only for honest exceptions
 ```
 
-Do not replace the current exception-only JSON with a manually maintained full capability matrix.
+Не требуется перегружать существующий doctor-тест другой ответственностью. Допустим отдельный сфокусированный self-exemplar ratchet, если так границы тестов будут проще.
 
-If a product capability is intentionally not used by repo-guard itself, a focused product test may prove it while `self-hosting-coverage.json` records the reason self-application would be artificial.
+`docs/self-hosting-coverage.json` остаётся только списком честных исключений. Полную матрицу возможностей вручную дублировать нельзя.
 
-## 12. Templates and documentation
+Если возможность продукта намеренно не применяется к самому `repo-guard`, её специализированный тест доказывает capability, а файл исключений объясняет, почему dogfooding был бы искусственным.
 
-C3.4 must synchronize consumer-facing examples with the accepted live architecture.
+## 12. Шаблоны и документация
 
-Known drift to remove includes at least:
+C3.4 должна синхронизировать пользовательские примеры с принятой живой архитектурой.
+
+Известный drift, который необходимо удалить:
 
 ```text
 templates/repo-policy.min.json
@@ -341,26 +351,26 @@ templates/example-workflow.yml
   stale Action dependency versions -> current supported example
 
 README.md
-  remove references to already-deleted historical product concepts
+  remove already-deleted historical product concepts
   use canonical self-policy as the primary real example where useful
 ```
 
-Templates remain consumer-oriented minimal examples. They should not blindly copy every self-policy rule.
+Шаблоны остаются минимальными примерами для потребителя. Они не обязаны слепо копировать все ограничения собственного репозитория.
 
-## 13. Execution decomposition
+## 13. Разбиение реализации
 
-C3.4 should be implemented as two separately reviewable acceptance slices.
+C3.4 реализуется двумя отдельно принимаемыми срезами.
 
-### C3.4a — generic strictness granularity
+### C3.4a — универсальная гранулярность strictness
 
-Goal:
+Цель:
 
 ```text
-root-wide incomparable pointer
-  -> independent unknown top-level pointers
+root-wide residual incomparable pointer
+  -> independent top-level residual pointers
 ```
 
-Properties:
+Свойства:
 
 ```text
 generic algorithm only
@@ -368,31 +378,31 @@ no repo-policy rewrite
 no new primitive
 no new FactRef source
 no relation descriptor growth
-no repository-specific field names in canonical comparison logic
+no repository-specific field names in comparison logic
 ```
 
-RED-first proof must show the accepted base currently reports a broad root pointer for independent unknown top-level changes and that the target behavior requires narrow per-key pointers.
+Первый `RED` обязан показать, что принятая база выдаёт широкий корневой указатель при независимых изменениях остаточных top-level секций и что целевое поведение требует узких указателей по ключам.
 
-### C3.4b — canonical self-policy exemplar
+### C3.4b — канонический живой пример
 
-After C3.4a is accepted:
+Только после принятия C3.4a:
 
 ```text
 compress repo-policy.json
 add only real existing document relations
 strengthen governance paths where justified
 repair self-hosting evidence ratchet
-sync templates/docs
+sync templates / docs
 measure final self-policy complexity
 ```
 
-No compatibility layer between old and new self-policy may remain after merge.
+После merge не остаётся compatibility-слоя между старой и новой собственной политикой.
 
-## 14. TDD and acceptance
+## 14. TDD и приёмка
 
-Every implementation slice is RED-first.
+Каждый implementation slice выполняется через test-only `RED` перед production change.
 
-C3.4a acceptance:
+Приёмка C3.4a:
 
 ```text
 test-only RED first
@@ -406,17 +416,17 @@ exact-head merge
 post-merge validate + smoke-pack GREEN
 ```
 
-C3.4b RED probes must establish at minimum:
+`RED` C3.4b должен доказать минимум:
 
 ```text
 current self-policy still contains surfaces/new_file_classes/change_profiles
 current self-policy size/complexity is the accepted starting point
-canonical self-policy does not yet contain the selected real document relations
+canonical self-policy does not yet contain selected real document relations
 self-hosting documentation claim is not yet mechanically proven
-consumer templates contain the known stale values
+consumer templates contain known stale values
 ```
 
-Final C3.4b acceptance:
+Финальная приёмка C3.4b:
 
 ```text
 self-policy uses only real current repository invariants
@@ -429,7 +439,7 @@ FactRef sources = 4
 relation descriptors = 10
 new engine concepts = 0
 public Action self-check exercised in ready PR CI
-trusted governance path still fail-closed
+trusted governance path remains fail-closed
 check:dist is explicit executable evidence
 smoke-pack proves packaged artifact
 self-hosting coverage claims match executable tests
@@ -440,9 +450,9 @@ exact-head merge
 post-merge validate + smoke-pack GREEN
 ```
 
-## 15. Compression measurement
+## 15. Измерение сжатия
 
-At minimum report before/after:
+Минимальный отчёт до и после должен включать:
 
 ```text
 repo-policy bytes
@@ -461,14 +471,14 @@ relation descriptor count
 self-hosting exception count
 ```
 
-Success is not merely fewer bytes. The important result is fewer independent concepts needed to understand how repo-guard governs itself.
+Успех определяется не только количеством байтов. Главный результат — меньше независимых понятий, которые нужно понять для ответа на вопрос «как `repo-guard` управляет самим собой?».
 
-## 16. Explicit non-goals
+## 16. Явно запрещённые направления
 
 ```text
 NO new runtime kind
 NO new FactRef source
-NO new relation descriptor unless independent consumer RED proves necessity
+NO new relation descriptor without independent consumer RED
 NO integration/workflow DSL
 NO repo-guard-specific built-in profile
 NO capability showcase inside self-policy
@@ -478,9 +488,9 @@ NO broad allow_policy_relaxation: /
 NO C3.5/C3.6 work folded into C3.4
 ```
 
-## 17. Final architectural criterion
+## 17. Финальный архитектурный критерий
 
-The desired end state is:
+Желаемое состояние:
 
 ```text
 repo-guard's own repository policy
@@ -494,6 +504,6 @@ trusted governance boundary
 real CI execution evidence
 ```
 
-A new consumer should be able to understand the architecture by reading repo-guard's own policy without first learning a repo-guard-specific meta-policy.
+Новый потребитель должен понимать архитектуру, читая собственную политику `repo-guard`, без предварительного изучения специальной метаполитики `repo-guard`.
 
-That is the C3.4 definition of "canonical exemplar".
+Именно это C3.4 считает каноническим живым примером.
