@@ -1,12 +1,19 @@
+import { readFileSync } from "node:fs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compareConstraintPrograms } from "../constraint-program.mjs";
 import { expandGovernancePatterns } from "./governance-paths.mjs";
 const array = (value) => Array.isArray(value) ? value : [];
+const record = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+const currentPolicySchema = record(JSON.parse(readFileSync(new URL("../../../schemas/repo-policy.schema.json", import.meta.url), "utf-8")));
+const currentPolicyFields = new Set(Object.keys(record(currentPolicySchema.properties)));
+function projectCurrentPolicyVocabulary(policy) {
+    return Object.fromEntries(Object.entries(policy).filter(([field]) => currentPolicyFields.has(field)));
+}
 export const comparePolicyStrictness = compareConstraintPrograms;
 export function computePolicyDelta(basePolicy, headPolicy) {
     if (!basePolicy || !headPolicy)
         return { relaxations: [] };
-    const compared = compareConstraintPrograms(basePolicy, headPolicy);
+    const compared = compareConstraintPrograms(projectCurrentPolicyVocabulary(basePolicy), projectCurrentPolicyVocabulary(headPolicy));
     return { relaxations: [...compared.relaxations, ...compared.incomparable] };
 }
 const DEFAULT_PROTECTED_SURFACES = ["source", "tests", "schemas"];

@@ -1,9 +1,5 @@
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
-import { integrationConstraintEntries } from "../integration-constraints.mjs";
 import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
-const CONSTRAINT_PHASES = {
-    integration: "state",
-};
 function requestedExecutionPhase(context) {
     const phase = context.executionPhase ?? "both";
     if (phase !== "transaction" && phase !== "state" && phase !== "both") {
@@ -12,12 +8,9 @@ function requestedExecutionPhase(context) {
     return phase;
 }
 function constraintPhase(constraint) {
-    if (constraint.kind === "primitive_relation")
-        return constraint.phase ?? relationDescriptor(constraint.primitive || "").phase;
-    const phase = CONSTRAINT_PHASES[constraint.kind];
-    if (!phase)
-        throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
-    return phase;
+    if (constraint.kind !== "primitive_relation")
+        throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);
+    return constraint.phase ?? relationDescriptor(constraint.primitive || "").phase;
 }
 function constraintAppliesToPhase(constraint, requested) {
     const phase = constraintPhase(constraint);
@@ -48,16 +41,9 @@ export function evaluateConstraintIR(facts, context = {}) {
     for (const constraint of constraints) {
         if (!constraintAppliesToPhase(constraint, executionPhase))
             continue;
-        let check;
-        if (constraint.kind === "integration") {
-            results.push(...integrationConstraintEntries(facts.integration));
-            continue;
-        }
-        else if (constraint.kind === "primitive_relation") {
-            check = advisoryCheck(evaluatePrimitiveRelation(facts, primitiveRelation(constraint)), constraint.advisory);
-        }
-        else
+        if (constraint.kind !== "primitive_relation")
             throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);
+        const check = advisoryCheck(evaluatePrimitiveRelation(facts, primitiveRelation(constraint)), constraint.advisory);
         results.push({ name: constraint.name, check });
     }
     return results;

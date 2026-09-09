@@ -1,8 +1,8 @@
-import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { compileAnchorPolicy, compileForbidRegex, compileIntegrationPolicy } from "./policy-compiler.mjs";
+import { compileAnchorPolicy, compileForbidRegex } from "./policy-compiler.mjs";
 import { resolvePolicyProfile } from "./policy-profiles.mjs";
 const PASS = "PASS";
 const WARN = "WARN";
@@ -85,11 +85,7 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
         const valid = ajv.validate(schema, policy);
         if (!valid) {
             const errors = ajv.errors.map(e => `${e.instancePath || "/"} ${e.message}`).join("; ");
-            const integrationErrors = compileIntegrationPolicy(policy);
-            const integrationDetails = integrationErrors.length > 0
-                ? `; Invalid integration policy: ${integrationErrors.map(e => e.message).join("; ")}`
-                : "";
-            return { name: "repo-policy.json", status: FAIL, message: `Schema validation failed: ${errors}${integrationDetails}`, hint: "Fix the policy to match the schema — see schemas/repo-policy.schema.json" };
+            return { name: "repo-policy.json", status: FAIL, message: `Schema validation failed: ${errors}`, hint: "Fix the policy to match the schema — see schemas/repo-policy.schema.json" };
         }
         const profileResult = resolvePolicyProfile(policy);
         if (!profileResult.ok) {
@@ -106,11 +102,6 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
         if (anchorErrors.length > 0) {
             const details = anchorErrors.map(e => e.message).join("; ");
             return { name: "repo-policy.json", status: FAIL, message: `Invalid anchor policy: ${details}`, hint: "Fix anchors and trace_rules references in repo-policy.json" };
-        }
-        const integrationErrors = compileIntegrationPolicy(effectivePolicy);
-        if (integrationErrors.length > 0) {
-            const details = integrationErrors.map(e => e.message).join("; ");
-            return { name: "repo-policy.json", status: FAIL, message: `Invalid integration policy: ${details}`, hint: "Fix integration ids, kinds, roles, required fields, and profile references in repo-policy.json" };
         }
         const profileSuffix = effectivePolicy.profile ? `, profile ${effectivePolicy.profile}` : "";
         return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind}, format ${effectivePolicy.policy_format_version}${profileSuffix})` };
@@ -169,43 +160,6 @@ function checkGhCli() {
         }
     });
 }
-function checkWorkflowConfig(repoRoot) {
-    return check("workflow-config", () => {
-        const workflowDir = resolve(repoRoot, ".github/workflows");
-        if (!existsSync(workflowDir)) {
-            return { name: "workflow-config", status: WARN, message: "No .github/workflows/ directory found", hint: "Run 'repo-guard init' to generate a workflow, or create one manually" };
-        }
-        const files = readdirSync(workflowDir).filter(f => f.endsWith(".yml") || f.endsWith(".yaml"));
-        if (files.length === 0) {
-            return { name: "workflow-config", status: WARN, message: "No YAML workflow files in .github/workflows/", hint: "Run 'repo-guard init' to generate a workflow" };
-        }
-        let repoGuardFound = false;
-        let fetchDepthOk = false;
-        let ghTokenOk = false;
-        for (const file of files) {
-            const content = readFileSync(resolve(workflowDir, file), "utf-8");
-            if (content.includes("repo-guard") || content.includes("check-pr")) {
-                repoGuardFound = true;
-                if (/fetch-depth\s*:\s*0/.test(content))
-                    fetchDepthOk = true;
-                if (/GH_TOKEN|GITHUB_TOKEN/.test(content))
-                    ghTokenOk = true;
-            }
-        }
-        if (!repoGuardFound) {
-            return { name: "workflow-config", status: WARN, message: "No workflow references repo-guard or check-pr", hint: "Add a repo-guard workflow — run 'repo-guard init' or see templates/example-workflow.yml" };
-        }
-        const issues = [];
-        if (!fetchDepthOk)
-            issues.push("missing 'fetch-depth: 0' (required for full diff)");
-        if (!ghTokenOk)
-            issues.push("missing GH_TOKEN/GITHUB_TOKEN env (required for issue fallback)");
-        if (issues.length > 0) {
-            return { name: "workflow-config", status: WARN, message: `Workflow found but: ${issues.join("; ")}`, hint: "Compare your workflow with templates/example-workflow.yml" };
-        }
-        return { name: "workflow-config", status: PASS, message: "Workflow configured with fetch-depth: 0 and token" };
-    });
-}
 export function runDoctor(roots) {
     console.log("repo-guard doctor\n");
     const results = [];
@@ -216,7 +170,6 @@ export function runDoctor(roots) {
     results.push(checkEventContext());
     results.push(checkAuth());
     results.push(checkGhCli());
-    results.push(checkWorkflowConfig(roots.repoRoot));
     let passes = 0;
     let warns = 0;
     let fails = 0;

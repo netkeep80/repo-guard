@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import { compareConstraintPrograms } from "../constraint-program.mjs";
@@ -8,6 +9,7 @@ interface PolicyProjection {
   surfaces?: Record<string, unknown>;
   paths?: { governance_paths?: unknown };
   policy_delta_rules?: { protected_surfaces?: string[] };
+  [key: string]: unknown;
 }
 
 interface PolicyRelaxation {
@@ -59,10 +61,17 @@ interface PolicyRelaxationCheckInput {
 }
 
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const currentPolicySchema = record(JSON.parse(readFileSync(new URL("../../../schemas/repo-policy.schema.json", import.meta.url), "utf-8")));
+const currentPolicyFields = new Set(Object.keys(record(currentPolicySchema.properties)));
+function projectCurrentPolicyVocabulary(policy: PolicyProjection): PolicyProjection {
+  return Object.fromEntries(Object.entries(policy).filter(([field]) => currentPolicyFields.has(field))) as PolicyProjection;
+}
+
 export const comparePolicyStrictness = compareConstraintPrograms;
 export function computePolicyDelta(basePolicy: PolicyProjection | null | undefined, headPolicy: PolicyProjection | null | undefined): { relaxations: PolicyRelaxation[] } {
   if (!basePolicy || !headPolicy) return { relaxations: [] };
-  const compared = compareConstraintPrograms(basePolicy, headPolicy) as ConstraintProgramComparison;
+  const compared = compareConstraintPrograms(projectCurrentPolicyVocabulary(basePolicy), projectCurrentPolicyVocabulary(headPolicy)) as ConstraintProgramComparison;
   return { relaxations: [...compared.relaxations, ...compared.incomparable] };
 }
 

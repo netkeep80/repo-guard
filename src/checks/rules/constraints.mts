@@ -1,7 +1,6 @@
 import type { ParsedDiffFile } from "../../diff/parser.mjs";
 import type { DocumentReader } from "../../document-facts.mjs";
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
-import { integrationConstraintEntries } from "../integration-constraints.mjs";
 import {
   evaluatePrimitiveRelation,
   relationDescriptor,
@@ -10,11 +9,7 @@ import {
 } from "../relation-kernel.mjs";
 import type { ExecutionPhase, RuleFamily } from "../rule-registry.mjs";
 
-type RuntimeConstraintKind =
-  | "integration"
-  | "primitive_relation";
-
-type FixedPhaseConstraintKind = Exclude<RuntimeConstraintKind, "primitive_relation">;
+type RuntimeConstraintKind = "primitive_relation";
 
 interface RuntimeConstraint {
   kind: RuntimeConstraintKind;
@@ -39,17 +34,12 @@ interface ConstraintFacts extends RelationEvaluationFacts {
   changeIntent?: { change_type?: string; [key: string]: unknown } | null;
   diff: { files: { checked: ParsedDiffFile[] } };
   derived?: unknown;
-  integration?: unknown;
 }
 interface ConstraintContext {
   executionPhase?: ExecutionPhase;
 }
 interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
-
-const CONSTRAINT_PHASES: Record<FixedPhaseConstraintKind, ExecutionPhase> = {
-  integration: "state",
-};
 
 function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
   const phase = context.executionPhase ?? "both";
@@ -60,10 +50,8 @@ function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
 }
 
 function constraintPhase(constraint: RuntimeConstraint): ExecutionPhase {
-  if (constraint.kind === "primitive_relation") return constraint.phase ?? relationDescriptor(constraint.primitive || "").phase;
-  const phase = CONSTRAINT_PHASES[constraint.kind];
-  if (!phase) throw new Error(`runtime constraint kind "${constraint.kind}" has no execution phase`);
-  return phase;
+  if (constraint.kind !== "primitive_relation") throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
+  return constraint.phase ?? relationDescriptor(constraint.primitive || "").phase;
 }
 
 function constraintAppliesToPhase(constraint: RuntimeConstraint, requested: ExecutionPhase): boolean {
@@ -97,13 +85,8 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
   const { constraints } = compileConstraintIR(facts), results: RuleResult[] = [];
   for (const constraint of constraints) {
     if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
-    let check: unknown;
-    if (constraint.kind === "integration") {
-      results.push(...integrationConstraintEntries(facts.integration as Parameters<typeof integrationConstraintEntries>[0]));
-      continue;
-    } else if (constraint.kind === "primitive_relation") {
-      check = advisoryCheck(evaluatePrimitiveRelation(facts, primitiveRelation(constraint)), constraint.advisory);
-    } else throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
+    if (constraint.kind !== "primitive_relation") throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
+    const check = advisoryCheck(evaluatePrimitiveRelation(facts, primitiveRelation(constraint)), constraint.advisory);
     results.push({ name: constraint.name, check });
   }
   return results;

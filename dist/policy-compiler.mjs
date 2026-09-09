@@ -76,46 +76,6 @@ export function compileAnchorPolicy(policy = {}) {
     }
     return errors;
 }
-function semanticIntegrationEntries(integration) {
-    return ["workflows", "templates", "docs", "profiles"].flatMap((section) => list(integration?.[section]).map((entry, index) => ({ section, index, entry: object(entry) })));
-}
-export function compileIntegrationPolicy(policy = {}) {
-    const integration = object(policy.integration);
-    if (!policy.integration || !Object.keys(integration).length)
-        return [];
-    const errors = [], seen = new Map(), profileIds = new Set(), references = [];
-    for (const { section, index, entry } of semanticIntegrationEntries(integration)) {
-        const id = entry.id;
-        if (typeof id === "string" && id) {
-            if (seen.has(id)) {
-                const previous = seen.get(id);
-                errors.push({ section, id, index, previous_section: previous.section, previous_index: previous.index, message: `integration.${section}[${index}].id duplicates integration.${previous.section}[${previous.index}].id "${id}"` });
-            }
-            else
-                seen.set(id, { section, index });
-            if (section === "profiles")
-                profileIds.add(id);
-        }
-        if (section === "workflows" && entry.role === "ci_gate") {
-            const expect = object(entry.expect);
-            for (const field of ["action", "mode"])
-                if (expect[field] !== undefined)
-                    errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
-            for (const disallowed of list(expect.disallow))
-                if (disallowed !== "continue_on_error")
-                    errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
-        }
-        for (const profileId of list(entry.profiles))
-            references.push({ section, index, field: "profiles", profileId });
-        if (section === "docs")
-            for (const profileId of list(entry.must_mention_profiles))
-                references.push({ section, index, field: "must_mention_profiles", profileId });
-    }
-    for (const ref of references)
-        if (!profileIds.has(ref.profileId))
-            errors.push({ section: ref.section, index: ref.index, field: ref.field, profile_id: ref.profileId, message: `integration.${ref.section}[${ref.index}].${ref.field} references unknown integration.profiles id "${ref.profileId}"` });
-    return errors;
-}
 export function compileCochangeGroupsPolicy(policy = {}) {
     const errors = [], ids = new Set();
     for (const rawGroup of list(policy.cochange_groups)) {

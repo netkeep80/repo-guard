@@ -8,7 +8,7 @@ const root = resolve(new URL(".", import.meta.url).pathname, "..");
 const read = (path) => readFileSync(resolve(root, path), "utf-8");
 
 assert.deepEqual(COMMANDS, [
-  "validate", "check-diff", "check-pr", "init", "doctor", "validate-integration",
+  "validate", "check-diff", "check-pr", "init", "doctor",
 ]);
 for (const path of [
   "src/agent-lifecycle.mts", "src/status.mts", "src/migrate.mts",
@@ -19,7 +19,7 @@ for (const path of [
 const runtime = read("src/checks/rules/constraints.mts");
 const kindBlock = runtime.match(/type RuntimeConstraintKind =([\s\S]*?);/);
 const kinds = kindBlock ? [...kindBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort() : [];
-assert.deepEqual(kinds, ["integration", "primitive_relation"]);
+assert.deepEqual(kinds, ["primitive_relation"]);
 assert.equal(relationDescriptors().length, 10);
 
 const factSource = read("src/document-facts.mts").match(/export type FactSource = ([^;]+);/);

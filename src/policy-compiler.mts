@@ -3,27 +3,23 @@ import { relationDescriptor } from "./checks/relation-kernel.mjs";
 
 type LooseObject = Record<string, unknown>;
 type SemanticDiagnostic = { message: string } & LooseObject;
-type IntegrationSection = "workflows" | "templates" | "docs" | "profiles";
 
 interface ContentRuleProjection { id?: unknown; forbid_regex?: unknown; }
 interface AnchorSourceProjection { kind?: unknown; pattern: string; }
 interface AnchorTypeProjection { sources?: unknown; }
 interface TraceRuleProjection extends LooseObject { id?: unknown; kind?: unknown; change_intent_field?: unknown; }
-interface IntegrationProjection extends LooseObject { workflows?: unknown; templates?: unknown; docs?: unknown; profiles?: unknown; }
 interface PolicyProjection {
   change_profiles?: unknown;
   surfaces?: unknown;
   new_file_classes?: unknown;
   anchors?: { types?: unknown };
   trace_rules?: unknown;
-  integration?: unknown;
   paths?: { public_api?: unknown };
   content_rules?: unknown;
   cochange_groups?: unknown;
   document_relations?: unknown;
   evidence_bindings?: unknown;
 }
-interface IntegrationReference { section: IntegrationSection; index: number; field: "profiles" | "must_mention_profiles"; profileId: unknown; }
 
 const list = <T = unknown,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
 const object = (value: unknown): LooseObject => value && typeof value === "object" && !Array.isArray(value) ? value as LooseObject : {};
@@ -81,34 +77,6 @@ export function compileAnchorPolicy(policy: PolicyProjection = {}): SemanticDiag
       errors.push({ trace_rule: rule.id, change_intent_field: rule.change_intent_field, message: `trace_rules[${index}].change_intent_field references unsupported ChangeIntent anchor field` });
     }
   }
-  return errors;
-}
-
-function semanticIntegrationEntries(integration: IntegrationProjection | null | undefined) {
-  return (["workflows", "templates", "docs", "profiles"] as const).flatMap((section) => list(integration?.[section]).map((entry, index) => ({ section, index, entry: object(entry) })));
-}
-export function compileIntegrationPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
-  const integration = object(policy.integration);
-  if (!policy.integration || !Object.keys(integration).length) return [];
-  const errors: SemanticDiagnostic[] = [], seen = new Map<string, { section: IntegrationSection; index: number }>(), profileIds = new Set<unknown>(), references: IntegrationReference[] = [];
-  for (const { section, index, entry } of semanticIntegrationEntries(integration as IntegrationProjection)) {
-    const id = entry.id;
-    if (typeof id === "string" && id) {
-      if (seen.has(id)) {
-        const previous = seen.get(id)!;
-        errors.push({ section, id, index, previous_section: previous.section, previous_index: previous.index, message: `integration.${section}[${index}].id duplicates integration.${previous.section}[${previous.index}].id "${id}"` });
-      } else seen.set(id, { section, index });
-      if (section === "profiles") profileIds.add(id);
-    }
-    if (section === "workflows" && entry.role === "ci_gate") {
-      const expect = object(entry.expect);
-      for (const field of ["action", "mode"] as const) if (expect[field] !== undefined) errors.push({ section, id, index, field, message: `integration.workflows[${index}].expect.${field} is not supported for ci_gate` });
-      for (const disallowed of list<string>(expect.disallow)) if (disallowed !== "continue_on_error") errors.push({ section, id, index, field: "disallow", message: `integration.workflows[${index}].expect.disallow value "${disallowed}" is repo-guard-specific and not supported for ci_gate` });
-    }
-    for (const profileId of list(entry.profiles)) references.push({ section, index, field: "profiles", profileId });
-    if (section === "docs") for (const profileId of list(entry.must_mention_profiles)) references.push({ section, index, field: "must_mention_profiles", profileId });
-  }
-  for (const ref of references) if (!profileIds.has(ref.profileId)) errors.push({ section: ref.section, index: ref.index, field: ref.field, profile_id: ref.profileId, message: `integration.${ref.section}[${ref.index}].${ref.field} references unknown integration.profiles id "${ref.profileId}"` });
   return errors;
 }
 

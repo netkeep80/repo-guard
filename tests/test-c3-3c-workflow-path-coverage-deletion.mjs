@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { compileConstraintProgram, runtimeConstraints } from "../dist/checks/constraint-program.mjs";
 import { relationDescriptors } from "../dist/checks/relation-kernel.mjs";
@@ -88,10 +88,14 @@ expect(
   false,
 );
 
-const integrationSource = read("src/checks/integration-constraints.mts");
 expect(
-  "integration constraints contain no workflow path coverage evaluator",
-  integrationSource.includes("checkWorkflowPathCoverage") || integrationSource.includes("WorkflowPathCoverageBinding"),
+  "superseded integration evaluator source is physically absent",
+  existsSync(resolve(root, "src/checks/integration-constraints.mts")),
+  false,
+);
+expect(
+  "superseded integration evaluator dist is physically absent",
+  existsSync(resolve(root, "dist/checks/integration-constraints.mjs")),
   false,
 );
 

@@ -1,14 +1,8 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
 import { buildPolicyFacts } from "../dist/facts/input.mjs";
-import { createIntegrationAnalysisReport } from "../dist/integration-validator.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 let failures = 0;
-const __dirname = new URL(".", import.meta.url).pathname;
-const projectRoot = resolve(__dirname, "..");
 
 function expect(label, actual, expected) {
   try {
@@ -102,20 +96,6 @@ function expectCanonicalEnvelope(label, report, command) {
   ), true);
 }
 
-function makeIntegrationKernelRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-kernel-"));
-  const policy = {
-    policy_format_version: "0.3.0",
-    repository_kind: "tooling",
-    paths: { forbidden: [], canonical_docs: ["README.md"], governance_paths: ["repo-policy.json"] },
-    diff_rules: { max_new_docs: 5, max_new_files: 5, max_net_added_lines: 500 },
-    content_rules: [], cochange_rules: [],
-  };
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2));
-  writeFileSync(join(dir, "README.md"), "# Test\n");
-  return dir;
-}
-
 console.log("\n--- shared policy pipeline normalizes facts and checks ---");
 {
   const facts = buildEquivalentFacts();
@@ -146,7 +126,7 @@ console.log("\n--- pipeline accepts only canonical ChangeIntent input ---");
   expect("legacy contract input is not a supported alias", legacy.violations.some((violation) => violation.rule === "must-not-touch"), false);
 }
 
-console.log("\n--- equivalent command inputs share one result shape ---");
+console.log("\n--- ordinary command inputs share one result shape ---");
 {
   const checkDiffStyle = runEquivalentInput();
   const checkPrStyle = runEquivalentInput({
@@ -154,19 +134,15 @@ console.log("\n--- equivalent command inputs share one result shape ---");
     changeIntentSource: "pr body",
     initialChecks: [{ name: "change-intent", check: { ok: true } }],
   });
-  const integrationRepo = makeIntegrationKernelRepo();
-  const validateIntegrationStyle = createIntegrationAnalysisReport({ packageRoot: projectRoot, repoRoot: integrationRepo, enforcementMode: null }, { format: "json" });
   const checkDiffFacts = buildEquivalentFacts();
   const checkPrFacts = buildEquivalentFacts({ mode: "check-pr", changeIntentSource: "pr body" });
 
   expectCanonicalEnvelope("check-diff report", checkDiffStyle, "check-diff");
   expectCanonicalEnvelope("check-pr report", checkPrStyle, "check-pr");
-  expectCanonicalEnvelope("validate-integration report", validateIntegrationStyle, "validate-integration");
   expect("check-pr initial validation check stays first", checkPrStyle.ruleResults[0]?.rule, "change-intent");
   expect("equivalent facts keep mode-specific provenance", { mode: checkPrFacts.mode, changeIntentSource: checkPrFacts.changeIntentSource }, { mode: "check-pr", changeIntentSource: "pr body" });
   expect("equivalent facts share checked diff paths", checkPrFacts.derived.changedPaths, checkDiffFacts.derived.changedPaths);
   expect("check-pr style input adds ChangeIntent validation without changing policy check result", checkPrStyle.violations.map((violation) => violation.rule), checkDiffStyle.violations.map((violation) => violation.rule));
-  rmSync(integrationRepo, { recursive: true });
 }
 
 console.log("\n--- check-pr style pipeline evaluates size rules ---");

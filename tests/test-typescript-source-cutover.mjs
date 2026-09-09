@@ -1,38 +1,155 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
+import { parseYaml } from "../dist/document-facts.mjs";
+import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = resolve(new URL("..", import.meta.url).pathname);
+const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
+const json = (path) => JSON.parse(read(path));
+const policy = json("repo-policy.json");
+const workflowText = read(".github/workflows/ci.yml");
+const workflow = parseYaml(workflowText);
+const coverage = json("docs/self-hosting-coverage.json");
+const exceptions = coverage.exceptions || {};
+const testFiles = readdirSync(resolve(projectRoot, "tests")).filter((name) => name.endsWith(".mjs")).sort();
 
-function filesUnder(path) {
-  const out = [];
-  for (const entry of readdirSync(path, { withFileTypes: true })) {
-    const full = join(path, entry.name);
-    if (entry.isDirectory()) out.push(...filesUnder(full));
-    else out.push(full);
-  }
-  return out;
+function hasException(id) {
+  return typeof exceptions[id] === "string" && exceptions[id].trim().length > 0;
 }
 
-describe("strict TypeScript source cutover", () => {
-  it("keeps the canonical editable runtime mts-only", () => {
-    const sourceFiles = filesUnder(resolve(root, "src"));
-    assert.ok(sourceFiles.length > 20);
-    assert.deepEqual(sourceFiles.filter((path) => /\.(?:mjs|js)$/.test(path)), []);
-    assert.equal(sourceFiles.every((path) => path.endsWith(".mts")), true);
+function selfFacts() {
+  return {
+    policy,
+    basePolicy: policy,
+    headPolicy: policy,
+    changeIntent: { change_type: "refactor" },
+    trustedGovernancePaths: policy.paths.governance_paths,
+    diff: { files: { checked: [] } },
+  };
+}
+
+describe("repo-guard self-hosting security boundary", () => {
+  it("checks ready PRs through the local Action in blocking mode", () => {
+    const step = workflow.jobs.validate.steps.find((item) => item.name === "Run PR policy check");
+    assert.ok(step);
+    assert.equal(step.uses, "./");
+    assert.equal(step.with.mode, "check-pr");
+    assert.equal(step.with.enforcement, "blocking");
+    assert.match(step.if, /pull_request/);
+    assert.equal(step.env.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
   });
 
-  it("removes the allowJs migration bridge from the compiler", () => {
-    const tsconfig = JSON.parse(readFileSync(resolve(root, "tsconfig.json"), "utf-8"));
-    assert.equal(Object.hasOwn(tsconfig.compilerOptions, "allowJs"), false);
-    assert.equal(Object.hasOwn(tsconfig.compilerOptions, "checkJs"), false);
-    assert.deepEqual(tsconfig.include, ["src/**/*.mts"]);
+  it("keeps governance files inside the checked surface", () => {
+    for (const path of [
+      "repo-policy.json", "schemas/", ".github/workflows/", ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE/", "templates/", "action.yml",
+    ]) assert.ok(policy.paths.governance_paths.includes(path), `missing governance path ${path}`);
+    assert.equal((policy.paths.operational_paths || []).some((path) => path.startsWith(".github/")), false);
   });
 
-  it("keeps the built CLI command inventory explicit", () => {
-    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "init", "doctor", "validate-integration"]);
+  it("exercises both enforcement modes", () => {
+    assert.equal(policy.enforcement.mode, "blocking");
+    const advisory = workflow.jobs.validate.steps.find((item) => item.name === "Exercise advisory policy mode");
+    assert.match(advisory.run, /--enforcement advisory check-diff/);
+    assert.match(advisory.run, /WARN: content-rules/);
+  });
+});
+
+describe("derived test inventory", () => {
+  it("uses one discovery runner instead of a package-maintained file list", () => {
+    const pkg = json("package.json");
+    assert.equal(pkg.scripts.test, "node tests/run.mjs");
+    assert.equal((pkg.scripts.test.match(/node\s+tests\//g) || []).length, 1);
+    assert.match(read("tests/run.mjs"), /\^test-\.\*\\\.mjs\$/);
+  });
+
+  it("runs one canonical suite in CI instead of per-test steps", () => {
+    const steps = workflow.jobs.validate.steps;
+    assert.ok(steps.some((step) => step.name === "Run discovered test suite" && step.run === "npm test"));
+    assert.equal(workflowText.includes("npm run test:"), false);
+  });
+
+  it("discovers every current test-* file without editing package.json", () => {
+    const discovered = testFiles.filter((name) => /^test-.*\.mjs$/.test(name));
+    assert.ok(discovered.length > 20);
+    assert.ok(discovered.includes("test-self-hosting.mjs"));
+    assert.ok(discovered.includes("test-policy-delta-rules.mjs"));
+  });
+});
+
+describe("derived capability inventory", () => {
+  it("derives commands from the CLI registry and finds real evidence or an explicit exception", () => {
+    const corpus = `${workflowText}\n${testFiles.join("\n")}\n${read(".github/PULL_REQUEST_TEMPLATE.md")}`;
+    for (const command of COMMANDS) {
+      if (command === "validate") assert.match(workflowText, /Validate repo-policy\.json/);
+      else if (command === "init") assert.ok(testFiles.includes("test-init.mjs"));
+      else if (!corpus.includes(command)) {
+        assert.ok(hasException(`command:${command}`), `no self-hosting evidence or exception for command ${command}`);
+      }
+    }
+    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("command:"))) {
+      assert.ok(COMMANDS.includes(id.slice(8)), `stale command exception ${id}`);
+    }
+  });
+
+  it("derives rule families from the runtime registry", () => {
+    const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
+    assert.ok(ruleIds.size > 0);
+    for (const family of defaultRuleFamilies) {
+      const capability = `rule:${family.id}`;
+      const applies = family.applies ? family.applies(selfFacts(), {}) : true;
+      if (applies === false) assert.ok(hasException(capability), `${capability} is inactive on self and lacks rationale`);
+    }
+    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("rule:"))) {
+      assert.ok(ruleIds.has(id.slice(5)), `stale rule exception ${id}`);
+    }
+  });
+
+  it("derives built-in profiles and requires rationale for unused ones", () => {
+    for (const profile of listBuiltInProfiles()) {
+      if (policy.profile !== profile) assert.ok(hasException(`profile:${profile}`), `unused profile ${profile} lacks rationale`);
+    }
+  });
+
+  it("stores only explicit exceptions, never a mirror of normal capabilities", () => {
+    assert.equal(coverage.schema_version, "2.0.0");
+    assert.equal(Object.hasOwn(coverage, "capabilities"), false);
+    for (const [id, rationale] of Object.entries(exceptions)) {
+      assert.ok(id.includes(":"));
+      assert.ok(rationale.trim().length > 20, `${id} rationale is too weak`);
+    }
+    assert.ok(hasException("change-intent-format:repo-guard-json"));
+  });
+});
+
+describe("self-hosted policy and documentation", () => {
+  it("has no retired integration policy surface", () => {
+    assert.equal(Object.hasOwn(policy, "integration"), false);
+    assert.equal(workflowText.includes("validate-integration"), false);
+  });
+
+  it("self-applies through build, policy, doctor, tests and PR checks", () => {
+    const steps = workflow.jobs.validate.steps;
+    for (const name of [
+      "Verify generated dist freshness",
+      "Report architecture compression metrics",
+      "Validate repo-policy.json",
+      "Run doctor diagnostics on self",
+      "Run discovered test suite",
+      "Run PR policy check",
+    ]) assert.ok(steps.some((step) => step.name === name), `missing self-hosting step ${name}`);
+    assert.ok(workflow.jobs["smoke-pack"]);
+  });
+
+  it("uses YAML ChangeIntent blocks itself and documents the exception model", () => {
+    assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /```repo-guard-yaml/);
+    assert.match(read(".github/ISSUE_TEMPLATE/change-intent.yml"), /repo-guard-yaml/);
+    const doc = read("docs/self-hosting-coverage.md");
+    assert.match(doc, /вывод/);
+    assert.match(doc, /исключен/);
   });
 });

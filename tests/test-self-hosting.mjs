@@ -1,151 +1,192 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
-import { parseYaml } from "../dist/document-facts.mjs";
-import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
-import { COMMANDS } from "../dist/repo-guard.mjs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, join } from "node:path";
+import { execSync } from "node:child_process";
 
-const projectRoot = resolve(new URL("..", import.meta.url).pathname);
-const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
-const json = (path) => JSON.parse(read(path));
-const policy = json("repo-policy.json");
-const workflowText = read(".github/workflows/ci.yml");
-const workflow = parseYaml(workflowText);
-const coverage = json("docs/self-hosting-coverage.json");
-const exceptions = coverage.exceptions || {};
-const testFiles = readdirSync(resolve(projectRoot, "tests")).filter((name) => name.endsWith(".mjs")).sort();
+const __dirname = new URL(".", import.meta.url).pathname;
+const projectRoot = resolve(__dirname, "..");
 
-function hasException(id) {
-  return typeof exceptions[id] === "string" && exceptions[id].trim().length > 0;
+let failures = 0;
+
+function expect(label, actual, expected) {
+  const passed = actual === expected;
+  console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
+  if (!passed) {
+    failures++;
+    console.error(`  expected: ${JSON.stringify(expected)}, got: ${JSON.stringify(actual)}`);
+  }
 }
 
-function selfFacts() {
-  return {
-    policy,
-    basePolicy: policy,
-    headPolicy: policy,
-    changeIntent: { change_type: "refactor" },
-    trustedGovernancePaths: policy.paths.governance_paths,
-    diff: { files: { checked: [] } },
-  };
+function expectIncludes(label, str, substring) {
+  const passed = str.includes(substring);
+  console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
+  if (!passed) {
+    failures++;
+    console.error(`  expected to include: ${JSON.stringify(substring)}, got: ${JSON.stringify(str.slice(0, 200))}`);
+  }
 }
 
-describe("repo-guard self-hosting security boundary", () => {
-  it("checks ready PRs through the local Action in blocking mode", () => {
-    const step = workflow.jobs.validate.steps.find((item) => item.name === "Run PR policy check");
-    assert.ok(step);
-    assert.equal(step.uses, "./");
-    assert.equal(step.with.mode, "check-pr");
-    assert.equal(step.with.enforcement, "blocking");
-    assert.match(step.if, /pull_request/);
-    assert.equal(step.env.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
-  });
+function expectNotIncludes(label, str, substring) {
+  const passed = !str.includes(substring);
+  console.log(`${passed ? "PASS" : "FAIL"}: ${label}`);
+  if (!passed) {
+    failures++;
+    console.error(`  expected NOT to include: ${JSON.stringify(substring)}`);
+  }
+}
 
-  it("keeps governance files inside the checked surface", () => {
-    for (const path of [
-      "repo-policy.json", "schemas/", ".github/workflows/", ".github/PULL_REQUEST_TEMPLATE.md",
-      ".github/ISSUE_TEMPLATE/", "templates/", "action.yml",
-    ]) assert.ok(policy.paths.governance_paths.includes(path), `missing governance path ${path}`);
-    assert.equal((policy.paths.operational_paths || []).some((path) => path.startsWith(".github/")), false);
-  });
+function makeTmpDir() {
+  return mkdtempSync(join(tmpdir(), "repo-guard-doctor-"));
+}
 
-  it("exercises both enforcement modes", () => {
-    assert.equal(policy.enforcement.mode, "blocking");
-    const advisory = workflow.jobs.validate.steps.find((item) => item.name === "Exercise advisory policy mode");
-    assert.match(advisory.run, /--enforcement advisory check-diff/);
-    assert.match(advisory.run, /WARN: content-rules/);
-  });
-});
+function initGitRepo(dir) {
+  execSync("git init", { cwd: dir, stdio: "pipe" });
+  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+}
 
-describe("derived test inventory", () => {
-  it("uses one discovery runner instead of a package-maintained file list", () => {
-    const pkg = json("package.json");
-    assert.equal(pkg.scripts.test, "node tests/run.mjs");
-    assert.equal((pkg.scripts.test.match(/node\s+tests\//g) || []).length, 1);
-    assert.match(read("tests/run.mjs"), /\^test-\.\*\\\.mjs\$/);
+function validPolicy() {
+  return JSON.stringify({
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: { forbidden: [], canonical_docs: ["README.md"], governance_paths: ["repo-policy.json"] },
+    diff_rules: { max_new_docs: 2, max_new_files: 15 },
+    content_rules: [],
+    cochange_rules: []
   });
+}
 
-  it("runs one canonical suite in CI instead of per-test steps", () => {
-    const steps = workflow.jobs.validate.steps;
-    assert.ok(steps.some((step) => step.name === "Run discovered test suite" && step.run === "npm test"));
-    assert.equal(workflowText.includes("npm run test:"), false);
-  });
+function runRepoGuard(args = "", opts = {}) {
+  const cmd = `node ${resolve(projectRoot, "dist/repo-guard.mjs")} ${args}`;
+  try {
+    const stdout = execSync(cmd, { encoding: "utf-8", cwd: opts.cwd || projectRoot, stdio: ["pipe", "pipe", "pipe"] });
+    return { stdout, stderr: "", code: 0 };
+  } catch (e) {
+    return { stdout: e.stdout || "", stderr: e.stderr || "", code: e.status };
+  }
+}
 
-  it("discovers every current test-* file without editing package.json", () => {
-    const discovered = testFiles.filter((name) => /^test-.*\.mjs$/.test(name));
-    assert.ok(discovered.length > 20);
-    assert.ok(discovered.includes("test-self-hosting.mjs"));
-    assert.ok(discovered.includes("test-policy-delta-rules.mjs"));
-  });
-});
+function runDoctor(args = "", opts = {}) {
+  return runRepoGuard(args, opts);
+}
 
-describe("derived capability inventory", () => {
-  it("derives commands from the CLI registry and finds real evidence or an explicit exception", () => {
-    const corpus = `${workflowText}\n${testFiles.join("\n")}\n${read(".github/PULL_REQUEST_TEMPLATE.md")}`;
-    for (const command of COMMANDS) {
-      if (command === "validate") assert.match(workflowText, /Validate repo-policy\.json/);
-      else if (command === "init") assert.ok(testFiles.includes("test-init.mjs"));
-      else if (!corpus.includes(command)) {
-        assert.ok(hasException(`command:${command}`), `no self-hosting evidence or exception for command ${command}`);
-      }
+console.log("\n--- self-hosting: doctor on repo-guard itself ---");
+{
+  const { stdout, code } = runDoctor("doctor");
+  expect("exit code 0 on healthy repo", code, 0);
+  expectIncludes("shows header", stdout, "repo-guard doctor");
+  expectIncludes("repo root passes", stdout, "PASS: repository-root");
+  expectIncludes("git passes", stdout, "PASS: git-available");
+  expectIncludes("fetch-depth passes", stdout, "PASS: fetch-depth");
+  expectIncludes("policy passes", stdout, "PASS: repo-policy.json");
+  expectNotIncludes("workflow text inspection is absent", stdout, "workflow-config");
+  expectIncludes("summary line", stdout, "Summary:");
+  expectNotIncludes("no failures in summary", stdout, "1 failed");
+}
+
+console.log("\n--- self-hosting: doctor catches broken-policy fixture ---");
+{
+  const dir = makeTmpDir();
+  initGitRepo(dir);
+  const brokenPolicy = resolve(projectRoot, "tests/fixtures/broken-policy.json");
+  writeFileSync(resolve(dir, "repo-policy.json"), readFileSync(brokenPolicy, "utf-8"));
+  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  expect("exit code 1 for broken policy", code, 1);
+  expectIncludes("detects invalid forbid_regex", stdout, "FAIL: repo-policy.json");
+  expectIncludes("mentions bad-regex-rule", stdout, "bad-regex-rule");
+  expectIncludes("summary shows failure", stdout, "1 failed");
+}
+
+console.log("\n--- missing repo-policy.json ---");
+{
+  const dir = makeTmpDir(); initGitRepo(dir);
+  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  expect("exit code 1 for missing policy", code, 1);
+  expectIncludes("policy FAIL", stdout, "FAIL: repo-policy.json");
+  expectIncludes("hint mentions init", stdout, "repo-guard init");
+}
+
+console.log("\n--- malformed JSON in repo-policy.json ---");
+{
+  const dir = makeTmpDir(); initGitRepo(dir);
+  writeFileSync(resolve(dir, "repo-policy.json"), "{ not valid json }}");
+  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  expect("exit code 1 for malformed json", code, 1);
+  expectIncludes("policy FAIL with parse error", stdout, "FAIL: repo-policy.json");
+  expectIncludes("mentions parse error", stdout, "Parse error");
+}
+
+console.log("\n--- schema-invalid repo-policy.json ---");
+{
+  const dir = makeTmpDir(); initGitRepo(dir);
+  writeFileSync(resolve(dir, "repo-policy.json"), JSON.stringify({
+    policy_format_version: "0.3.0", repository_kind: "unknown_kind", paths: {}, diff_rules: {}
+  }));
+  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  expect("exit code 1 for invalid schema", code, 1);
+  expectIncludes("policy FAIL with schema error", stdout, "FAIL: repo-policy.json");
+  expectIncludes("mentions schema validation", stdout, "Schema validation failed");
+}
+
+console.log("\n--- not a git repository ---");
+{
+  const dir = makeTmpDir(); writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
+  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  expect("exit code 0 (warns, no fails)", code, 0);
+  expectIncludes("git WARN for non-repo", stdout, "WARN: git-available");
+  expectIncludes("hint mentions git init", stdout, "git init");
+  expectNotIncludes("workflow text inspection stays absent", stdout, "workflow-config");
+}
+
+console.log("\n--- non-existent repo root ---");
+{
+  const { stdout, code } = runDoctor("--repo-root /nonexistent/path/xyz doctor");
+  expect("exit code 1 for missing root", code, 1);
+  expectIncludes("root FAIL", stdout, "FAIL: repository-root");
+}
+
+console.log("\n--- output distinguishes pass / warn / fail ---");
+{
+  const { stdout } = runDoctor("doctor");
+  expectIncludes("contains PASS", stdout, "PASS:");
+  if (process.env.GITHUB_EVENT_PATH) console.log("PASS: skipping WARN check (CI with full context may have no warnings)");
+  else expectIncludes("contains WARN", stdout, "WARN:");
+  expectIncludes("contains Summary", stdout, "Summary:");
+}
+
+console.log("\n--- event context adapts to environment ---");
+{
+  const { stdout } = runDoctor("doctor");
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    expectIncludes("event-context WARN outside CI", stdout, "WARN: event-context");
+    expectIncludes("mentions not in GitHub Actions", stdout, "not in GitHub Actions");
+  } else {
+    const event = JSON.parse(readFileSync(eventPath, "utf-8"));
+    if (event.pull_request) expectIncludes("event-context PASS for pull_request event", stdout, "PASS: event-context");
+    else {
+      expectIncludes("event-context WARN for non-PR GitHub event", stdout, "WARN: event-context");
+      expectIncludes("non-PR event is explained", stdout, "not a pull_request event");
     }
-    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("command:"))) {
-      assert.ok(COMMANDS.includes(id.slice(8)), `stale command exception ${id}`);
-    }
-  });
+  }
+}
 
-  it("derives rule families from the runtime registry", () => {
-    const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
-    assert.ok(ruleIds.size > 0);
-    for (const family of defaultRuleFamilies) {
-      const capability = `rule:${family.id}`;
-      const applies = family.applies ? family.applies(selfFacts(), {}) : true;
-      if (applies === false) assert.ok(hasException(capability), `${capability} is inactive on self and lacks rationale`);
-    }
-    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("rule:"))) {
-      assert.ok(ruleIds.has(id.slice(5)), `stale rule exception ${id}`);
-    }
-  });
+console.log("\n--- gh/auth are optional unless linked-issue fallback is used ---");
+{
+  const { stdout } = runDoctor("doctor");
+  expectNotIncludes("gh-cli absence is never a hard failure", stdout, "FAIL: gh-cli");
+  expectNotIncludes("auth-token is never FAIL (auth only needed for linked-issue fallback)", stdout, "FAIL: auth-token");
+}
 
-  it("derives built-in profiles and requires rationale for unused ones", () => {
-    for (const profile of listBuiltInProfiles()) {
-      if (policy.profile !== profile) assert.ok(hasException(`profile:${profile}`), `unused profile ${profile} lacks rationale`);
-    }
-  });
+console.log("\n--- --repo-root flag works with doctor ---");
+{
+  const { stdout, code } = runDoctor(`--repo-root ${projectRoot} doctor`);
+  expect("exit code 0 with explicit repo-root", code, 0);
+  expectIncludes("shows repo root path", stdout, projectRoot);
+  expectNotIncludes("no workflow text semantics", stdout, "workflow-config");
+}
 
-  it("stores only explicit exceptions, never a mirror of normal capabilities", () => {
-    assert.equal(coverage.schema_version, "2.0.0");
-    assert.equal(Object.hasOwn(coverage, "capabilities"), false);
-    for (const [id, rationale] of Object.entries(exceptions)) {
-      assert.ok(id.includes(":"));
-      assert.ok(rationale.trim().length > 20, `${id} rationale is too weak`);
-    }
-    assert.ok(hasException("change-intent-format:repo-guard-json"));
-  });
-});
-
-describe("self-hosted integration and documentation", () => {
-  it("declares real workflow/template/doc integration", () => {
-    assert.equal(policy.integration.workflows[0].path, ".github/workflows/ci.yml");
-    assert.ok(policy.integration.templates.some((item) => item.kind === "markdown"));
-    assert.ok(policy.integration.templates.some((item) => item.kind === "github_issue_form"));
-    assert.equal(policy.integration.docs[0].path, "README.md");
-    assert.equal(policy.integration.profiles[0].id, "self-hosting");
-  });
-
-  it("routes integration facts through the Constraint Program", () => {
-    assert.match(read("src/checks/constraint-program.mts"), /kind: "integration"/);
-    assert.doesNotMatch(read("src/integration-validator.mts"), /validateRepoGuardPrGate/);
-  });
-
-  it("uses YAML ChangeIntent blocks itself and documents the exception model", () => {
-    assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /```repo-guard-yaml/);
-    const issueTemplatePath = policy.integration.templates.find((entry) => entry.kind === "github_issue_form").path;
-    assert.match(read(issueTemplatePath), /repo-guard-yaml/);
-    const doc = read("docs/self-hosting-coverage.md");
-    assert.match(doc, /вывод/);
-    assert.match(doc, /исключен/);
-  });
-});
+console.log("\n=========================");
+if (failures > 0) { console.error(`${failures} test(s) FAILED`); process.exit(1); }
+else console.log("All doctor tests passed");

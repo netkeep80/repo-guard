@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -8,6 +8,7 @@ const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const cli = resolve(projectRoot, "dist/repo-guard.mjs");
 const currentSchemaPath = resolve(projectRoot, "schemas/repo-policy.schema.json");
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
+const snapshotOnlyKind = "snapshot_only_kind";
 
 function intent() {
   return `\`\`\`repo-guard-yaml
@@ -15,7 +16,6 @@ change_type: governance
 scope:
   - repo-policy.json
   - schemas/**
-  - .github/workflows/**
 budgets: {}
 anchors:
   affects: []
@@ -30,37 +30,26 @@ expected_effects:
 \`\`\``;
 }
 
-function policy({ withSnapshotOnlyRole }) {
-  const value = {
+function policy({ withSnapshotOnlyKind }) {
+  return {
     policy_format_version: "0.3.0",
-    repository_kind: "tooling",
+    repository_kind: withSnapshotOnlyKind ? snapshotOnlyKind : "tooling",
     enforcement: { mode: "blocking" },
     paths: {
       forbidden: [],
       canonical_docs: [],
-      governance_paths: ["repo-policy.json", "schemas/**", ".github/workflows/**"],
+      governance_paths: ["repo-policy.json", "schemas/**"],
       operational_paths: [],
     },
     diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
     content_rules: [],
     cochange_rules: [],
   };
-  if (withSnapshotOnlyRole) {
-    value.integration = {
-      workflows: [{
-        id: "snapshot-only-gate",
-        kind: "github_actions",
-        path: ".github/workflows/snapshot-only.yml",
-        role: "snapshot_only_gate",
-      }],
-    };
-  }
-  return value;
 }
 
 function baseSchema() {
   const schema = JSON.parse(readFileSync(currentSchemaPath, "utf-8"));
-  schema.definitions.integration_workflow.properties.role.enum.push("snapshot_only_gate");
+  schema.properties.repository_kind.enum.push(snapshotOnlyKind);
   return schema;
 }
 
@@ -88,17 +77,14 @@ try {
   git(root, "config", "user.email", "test@test.com");
   git(root, "config", "user.name", "Test");
   mkdirSync(join(root, "schemas"), { recursive: true });
-  mkdirSync(join(root, ".github/workflows"), { recursive: true });
 
-  writeFileSync(join(root, "repo-policy.json"), JSON.stringify(policy({ withSnapshotOnlyRole: true }), null, 2));
+  writeFileSync(join(root, "repo-policy.json"), JSON.stringify(policy({ withSnapshotOnlyKind: true }), null, 2));
   writeFileSync(join(root, "schemas/repo-policy.schema.json"), JSON.stringify(baseSchema(), null, 2));
-  writeFileSync(join(root, ".github/workflows/snapshot-only.yml"), "name: snapshot-only\non: [pull_request]\njobs: {}\n");
   git(root, "add", "-A");
   git(root, "commit", "-m", "trusted base with snapshot-only schema value");
 
-  writeFileSync(join(root, "repo-policy.json"), JSON.stringify(policy({ withSnapshotOnlyRole: false }), null, 2));
+  writeFileSync(join(root, "repo-policy.json"), JSON.stringify(policy({ withSnapshotOnlyKind: false }), null, 2));
   writeFileSync(join(root, "schemas/repo-policy.schema.json"), readFileSync(currentSchemaPath, "utf-8"));
-  rmSync(join(root, ".github/workflows/snapshot-only.yml"));
   git(root, "add", "-A");
   git(root, "commit", "-m", "remove snapshot-only schema value");
 

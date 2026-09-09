@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
 
@@ -30,7 +30,10 @@ assert.deepEqual(violations, [], `Найдена нерусская Markdown-п�
 const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
 const readme = read("README.md");
 assert.doesNotMatch(readme, /Constraint IR|contract\.overrides/, "README не должен описывать переходную архитектуру");
-for (const marker of ["Constraint Program", "repo-guard-grant", "GovernanceGrant", "schemas/governance-grant.schema.json"]) assert.match(readme, new RegExp(marker.replaceAll(".", "\\.")), `README должен содержать ${marker}`);
+for (const marker of ["Constraint Program", "repo-guard-grant", "GovernanceGrant", "schemas/governance-grant.schema.json", "primitive_relation"]) assert.match(readme, new RegExp(marker.replaceAll(".", "\\.")), `README должен содержать ${marker}`);
+for (const retired of ["validate-integration", "doctor --integration", "repo-policy.integration"]) assert.doesNotMatch(readme, new RegExp(retired.replaceAll(".", "\\.")), `README не должен содержать удалённую поверхность ${retired}`);
+assert.equal(existsSync(resolve(projectRoot, "docs/removing-bespoke-validators.md")), false, "удалённое руководство по integration DSL не должно оставаться публичной документацией");
+assert.doesNotMatch(read("RELEASING.md"), /parallel-migration|v2-migration|v2\.1\.0|параллельного выпуска/, "RELEASING не должен описывать удалённый v2/parallel rollout");
 assert.match(read("templates/issue-change-intent-example.md"), /repo-guard-grant/, "issue example должен показывать отдельный GovernanceGrant");
 assert.doesNotMatch(read("templates/pr-change-intent-example.md"), /```repo-guard-grant/, "PR example не должен выдавать GovernanceGrant");
 assert.match(read(".github/workflows/ci.yml"), /--compare 92432809fcddc290080beb51ba151e13a5761869/, "CI должен измерять Compression 3.0 от канонического C3.0 baseline");

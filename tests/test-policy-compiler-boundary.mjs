@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex, compileIntegrationPolicy } from "../dist/policy-compiler.mjs";
+import { compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex } from "../dist/policy-compiler.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { createDocumentReader } from "../dist/document-facts.mjs";
 import { loadPolicyRuntimeFromObject } from "../dist/runtime/validation.mjs";
@@ -39,20 +39,10 @@ const referencedPaths = {
 const relationPolicy = (overrides = {}) => ({
   document_relations: { documents: structuredClone(documents), rules: [structuredClone(scalarEqual), structuredClone(scalarLiteral)], ...overrides },
 });
-const ciWorkflow = (enforcement = "blocking") => ({
-  id: "project-ci", kind: "github_actions", path: ".github/workflows/ci.yml", role: "ci_gate",
-  expect: { events: ["pull_request"], enforcement, disallow: ["continue_on_error"] },
-});
 
 describe("semantic policy compiler boundary", () => {
   it("keeps non-array nested values inert before semantic compilation", () => {
     assert.deepEqual(compileForbidRegex([{ id: "bad", forbid_regex: "[invalid" }]), []);
-    assert.deepEqual(compileIntegrationPolicy({
-      integration: {
-        workflows: [{ id: "gate", profiles: "missing" }],
-        docs: [{ id: "readme", must_mention_profiles: "missing" }],
-      },
-    }), []);
   });
 
   it("accepts semantically consistent scalar document relations", () => {
@@ -97,11 +87,6 @@ describe("semantic policy compiler boundary", () => {
     assert.ok(messages.some((message) => /path is invalid/.test(message)));
     assert.ok(messages.some((message) => /format "yaml" does not match path/.test(message)));
     assert.ok(messages.some((message) => /literal is incompatible/.test(message)));
-  });
-
-  it("rejects repo-guard-specific expectations on generic ci_gate", () => {
-    assert.ok(compileIntegrationPolicy({ integration: { workflows: [{ ...ciWorkflow(), expect: { ...ciWorkflow().expect, mode: "check-pr" } }] } }).some((error) => /not supported for ci_gate/.test(error.message)));
-    assert.ok(compileIntegrationPolicy({ integration: { workflows: [{ ...ciWorkflow(), expect: { ...ciWorkflow().expect, disallow: ["manual_clone"] } }] } }).some((error) => /repo-guard-specific/.test(error.message)));
   });
 });
 
