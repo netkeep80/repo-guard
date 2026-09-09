@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
+import { computePolicyDelta } from "../dist/checks/rules/policy-delta-rules.mjs";
 
 const currentPolicy = () => ({
   policy_format_version: "0.3.0",
@@ -22,11 +22,8 @@ describe("current policy vocabulary strictness projection", () => {
     base.integration = {
       workflows: [{ id: "retired", path: ".github/workflows/retired.yml" }],
     };
-    const comparison = compareConstraintPrograms(base, currentPolicy());
 
-    assert.equal(comparison.relation, "equal");
-    assert.deepEqual(comparison.relaxations, []);
-    assert.deepEqual(comparison.incomparable, []);
+    assert.deepEqual(computePolicyDelta(base, currentPolicy()).relaxations, []);
   });
 
   it("still fails closed when a current non-Constraint-Program semantic section changes", () => {
@@ -38,9 +35,9 @@ describe("current policy vocabulary strictness projection", () => {
       mode: "added_lines",
       forbid_regex: ["debug"],
     }];
-    const comparison = compareConstraintPrograms(base, head);
 
-    assert.equal(comparison.relation, "incomparable");
-    assert.ok(comparison.incomparable.some((item) => item.pointer === "/"));
+    const relaxations = computePolicyDelta(base, head).relaxations;
+    assert.equal(relaxations.length, 1);
+    assert.equal(relaxations[0]?.pointer, "/");
   });
 });
