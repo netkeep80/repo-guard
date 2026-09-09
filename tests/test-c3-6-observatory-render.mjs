@@ -48,9 +48,18 @@ const snapshot = await collectObservatorySnapshot({
 assert.equal(snapshot.scenarios.length, 5);
 validateObservatorySnapshot(snapshot);
 
-const unsafeSnapshot = structuredClone(snapshot);
-unsafeSnapshot.scenarios[0].title_ru = "Проверка <границы>";
-unsafeSnapshot.scenarios[0].summary_ru = "Текст & данные";
+const unsafeSnapshot = {
+  ...snapshot,
+  scenarios: snapshot.scenarios.map((scenario, index) => (
+    index === 0
+      ? {
+          ...scenario,
+          title_ru: "Проверка <границы>",
+          summary_ru: "Текст & данные",
+        }
+      : scenario
+  )),
+};
 
 const first = renderObservatory(unsafeSnapshot);
 const second = renderObservatory(unsafeSnapshot);
