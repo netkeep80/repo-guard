@@ -690,6 +690,43 @@
       "type": "object",
       "required": ["id", "scope", "metric", "glob", "max"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": ["scope", "count"],
+            "properties": {
+              "scope": { "const": "directory" },
+              "count": { "const": "changed_only" }
+            }
+          }
+        },
+        {
+          "not": {
+            "required": ["scope", "max_growth"],
+            "properties": {
+              "scope": { "const": "file" }
+            }
+          }
+        },
+        {
+          "not": {
+            "required": ["scope", "metric"],
+            "properties": {
+              "scope": { "const": "file" },
+              "metric": { "const": "files" }
+            }
+          }
+        },
+        {
+          "not": {
+            "required": ["scope", "metric", "max_growth"],
+            "properties": {
+              "scope": { "const": "directory" },
+              "metric": { "const": "bytes" }
+            }
+          }
+        }
+      ],
       "properties": {
         "id": { "$ref": "#/definitions/non_empty_string" },
         "scope": {
