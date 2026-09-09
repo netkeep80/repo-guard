@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -7,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -71,6 +73,10 @@ function validateManifest(scenarioId, manifest) {
     assert.match(testCase.title_ru, russianText, `${scenarioId}/${testCase.id}: title_ru должен содержать русский текст`);
     assert.ok([0, 1].includes(testCase.expected_exit_code), `${scenarioId}/${testCase.id}: код завершения должен быть 0 или 1`);
     assert.ok(Array.isArray(testCase.expected_diagnostics), `${scenarioId}/${testCase.id}: expected_diagnostics должен быть массивом`);
+    if (manifest.command === "check-pr") {
+      assert.equal(typeof testCase.pr_body, "string", `${scenarioId}/${testCase.id}: pr_body обязателен для check-pr`);
+      assert.equal(typeof testCase.issue_body, "string", `${scenarioId}/${testCase.id}: issue_body обязателен для check-pr`);
+    }
   }
 }
 
@@ -139,6 +145,75 @@ function runCheckDiff(scenarioId, scenarioRoot, testCase) {
   }
 }
 
+function scenarioText(scenarioId, scenarioRoot, testCase, field) {
+  const relativePath = testCase[field];
+  assert.equal(typeof relativePath, "string", `${scenarioId}/${testCase.id}: ${field} должен указывать на файл`);
+  return readFileSync(resolve(scenarioRoot, relativePath), "utf-8");
+}
+
+function runCheckPr(scenarioId, scenarioRoot, testCase) {
+  const { temp, base, head } = materializeCase(scenarioRoot, testCase);
+  const support = mkdtempSync(join(tmpdir(), "repo-guard-scenario-pr-"));
+  try {
+    const prBody = scenarioText(scenarioId, scenarioRoot, testCase, "pr_body");
+    const issueBody = scenarioText(scenarioId, scenarioRoot, testCase, "issue_body");
+    const eventPath = resolve(support, "event.json");
+    const gh = resolve(support, "gh");
+
+    git(temp, "update-ref", "refs/remotes/origin/main", base);
+    writeFileSync(eventPath, JSON.stringify({
+      pull_request: {
+        number: 42,
+        base: { sha: base, ref: "main" },
+        head: { sha: head },
+        body: prBody,
+      },
+      repository: { full_name: "owner/repo" },
+    }));
+    writeFileSync(gh, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const index = args.indexOf("--jq");
+const query = index >= 0 ? args[index + 1] : "";
+if (args.includes("--version")) console.log("gh 0.0");
+else if (query === ".body") console.log(${JSON.stringify(issueBody)});
+else if (query.includes("author_association")) console.log(JSON.stringify({
+  user: { login: "maintainer", type: "User" },
+  author_association: "OWNER",
+  labels: [],
+}));
+else if (query.includes("permission")) console.log(JSON.stringify({ permission: "write", role_name: "write" }));
+else console.log(JSON.stringify({ labels: [] }));
+`);
+    chmodSync(gh, 0o755);
+
+    const result = spawnSync(process.execPath, [cli, "--repo-root", temp, "check-pr"], {
+      cwd: temp,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        GITHUB_EVENT_PATH: eventPath,
+        PATH: `${support}:${process.env.PATH}`,
+      },
+    });
+    assert.ifError(result.error);
+    const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+    assert.equal(result.status, testCase.expected_exit_code, `${scenarioId}/${testCase.id}: неверный код процесса\n${output}`);
+    const actual = [...output.matchAll(/^\s*FAIL:\s+([^\n]+)/gm)]
+      .map((match) => match[1].trim())
+      .sort();
+    for (const expected of testCase.expected_diagnostics) {
+      assert.ok(actual.includes(expected), `${scenarioId}/${testCase.id}: отсутствует диагностика ${expected}; получено ${actual.join(", ")}`);
+    }
+    if (testCase.expected_exit_code === 0) {
+      assert.deepEqual(actual, [], `${scenarioId}/${testCase.id}: успешный вариант не должен иметь нарушений`);
+    }
+    console.log(`PASS: ${scenarioId}/${testCase.id}`);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+    rmSync(support, { recursive: true, force: true });
+  }
+}
+
 assert.ok(existsSync(scenariosRoot), "C3.5a: каталог examples/scenarios ещё не создан");
 const scenarioIds = discoverScenarios();
 assert.ok(scenarioIds.includes("minimal-diff-policy"), "C3.5a: отсутствует minimal-diff-policy");
@@ -147,8 +222,11 @@ for (const scenarioId of scenarioIds) {
   const scenarioRoot = resolve(scenariosRoot, scenarioId);
   const manifest = JSON.parse(readFileSync(resolve(scenarioRoot, "scenario.json"), "utf-8"));
   validateManifest(scenarioId, manifest);
-  assert.equal(manifest.command, "check-diff", `${scenarioId}: C3.5a исполняет только check-diff`);
-  for (const testCase of manifest.cases) runCheckDiff(scenarioId, scenarioRoot, testCase);
+  for (const testCase of manifest.cases) {
+    if (manifest.command === "check-diff") runCheckDiff(scenarioId, scenarioRoot, testCase);
+    else if (manifest.command === "check-pr") runCheckPr(scenarioId, scenarioRoot, testCase);
+    else assert.fail(`${scenarioId}: неподдерживаемая команда ${manifest.command}`);
+  }
 }
 
 for (const required of ["surgical-change", "version-transition"]) {
@@ -159,5 +237,13 @@ assert.ok(
   scenarioIds.includes("contract-evidence"),
   "C3.5c: отсутствует contract-evidence",
 );
+
+assert.deepEqual(scenarioIds, [
+  "contract-evidence",
+  "governance-cutover",
+  "minimal-diff-policy",
+  "surgical-change",
+  "version-transition",
+], "C3.5d: финальный корпус должен содержать ровно пять принятых сценариев");
 
 console.log(`C3.5 scenario library passed: ${scenarioIds.length} scenario(s)`);
