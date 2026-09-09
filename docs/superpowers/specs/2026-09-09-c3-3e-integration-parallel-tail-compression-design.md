@@ -744,4 +744,4 @@ physical code/schema compression
 self-host exemplar quality
 ```
 
-Только после этого C3.3 считается полностью принятым и можно переходить к следующему этапу Architecture Compression 3.0.
+Только после этого C3.3 считается полностью принятым и можно переходить к следующему этапу программы `Architecture Compression 3.0`.
