@@ -22,8 +22,8 @@ export function validationCheck(ajv, schema, data, label) {
     return ajv.validate(schema, data) ? { ok: true } : { ok: false, message: `${label} failed schema validation`, errors: ajvErrors(ajv.errors) };
 }
 export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
-    const schema = (name) => loadJSON(resolve(roots.packageRoot, `schemas/${name}.schema.json`));
-    const policySchema = schema("repo-policy"), changeIntentSchema = schema("change-intent"), governanceGrantSchema = schema("governance-grant");
+    const schema = (key, name) => options.schemas?.[key] ?? loadJSON(resolve(roots.packageRoot, `schemas/${name}.schema.json`));
+    const policySchema = schema("repoPolicy", "repo-policy"), changeIntentSchema = schema("changeIntent", "change-intent"), governanceGrantSchema = schema("governanceGrant", "governance-grant");
     const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
     let ok = validate(ajv, policySchema, rawPolicy, label, { quiet });
     const profile = resolvePolicyProfile(rawPolicy), policy = profile.policy;
