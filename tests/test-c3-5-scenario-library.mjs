@@ -151,4 +151,8 @@ for (const scenarioId of scenarioIds) {
   for (const testCase of manifest.cases) runCheckDiff(scenarioId, scenarioRoot, testCase);
 }
 
-console.log(`C3.5a scenario library passed: ${scenarioIds.length} scenario(s)`);
+for (const required of ["surgical-change", "version-transition"]) {
+  assert.ok(scenarioIds.includes(required), `C3.5b: отсутствует ${required}`);
+}
+
+console.log(`C3.5 scenario library passed: ${scenarioIds.length} scenario(s)`);
