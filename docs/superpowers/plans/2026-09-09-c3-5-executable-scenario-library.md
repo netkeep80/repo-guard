@@ -4,15 +4,15 @@
 
 **Цель:** создать один маленький корпус `examples/scenarios/**`, который одновременно является исполняемым регрессионным доказательством, человеческим примером и будущим источником данных для C3.6.
 
-**Архитектура:** сценарии являются только данными. Один тестовый исполнитель создаёт реальные временные Git-репозитории с `BASE` и `HEAD` и запускает настоящий `dist/repo-guard.mjs`. Семантика политики остаётся только в production `repo-guard`; тестовая инфраструктура проверяет материализацию, код завершения и ограниченный набор стабильных идентификаторов диагностик.
+**Архитектура:** сценарии являются только данными. Один тестовый исполнитель создаёт реальные временные репозитории `Git` с `BASE` и `HEAD` и запускает настоящий `dist/repo-guard.mjs`. Семантика политики остаётся только в рабочем `repo-guard`; тестовая инфраструктура проверяет материализацию, код завершения и ограниченный набор стабильных идентификаторов диагностик.
 
-**Стек:** Node.js 24, встроенные `node:test`, `node:assert`, `node:fs`, `node:path`, `node:os`, `node:child_process`, Git CLI и существующий `dist/repo-guard.mjs`.
+**Стек:** `Node.js 24`, встроенные `node:test`, `node:assert`, `node:fs`, `node:path`, `node:os`, `node:child_process`, `Git CLI` и существующий `dist/repo-guard.mjs`.
 
 **Спека:** `docs/superpowers/specs/2026-09-09-c3-5-executable-scenario-library-design.md`
 
-**Задачи:** #428 → #429 → #430 → #431; родитель #376; дорожная карта #370.
+**Последовательность:** #428 → #429 → #430 → #431; родитель #376; дорожная карта #370.
 
-## Глобальные ограничения
+## Неподвижные границы
 
 ```text
 runtime kinds = 1
@@ -36,11 +36,33 @@ NO parallel/control-plane revival
 NO C3.6 work inside C3.5
 ```
 
-Если любой срез требует изменения одной из запрещённых production-поверхностей, выполнение этого среза останавливается. Такое требование оформляется как отдельный архитектурный разрыв, а не как разрешение расширить C3.5.
+Если любой срез требует изменения запрещённой рабочей поверхности, выполнение останавливается. Требование оформляется как отдельный архитектурный разрыв, а не как разрешение расширить C3.5.
 
-## Карта файлов
+## Общая форма корпуса
 
-Единственный исполнитель корпуса:
+```text
+examples/scenarios/<scenario>/
+  scenario.json
+  base/
+    repo-policy.json
+    <минимальные файлы>
+  cases/
+    <case>/
+      head/
+        <наложение поверх base>
+```
+
+Разрешённые дополнительные входы:
+
+```text
+change-intent.json
+pr-body.md
+issue-body.md
+```
+
+Они не входят в проверяемый переход и копируются либо читаются после фиксации `HEAD`.
+
+Единственный исполнитель:
 
 ```text
 tests/test-c3-5-scenario-library.mjs
@@ -49,61 +71,40 @@ tests/test-c3-5-scenario-library.mjs
 Он отвечает только за:
 
 ```text
-обнаружение examples/scenarios/*/scenario.json
-техническую проверку manifest
+обнаружение каталогов
+проверку технической формы scenario.json
 копирование base/**
-создание Git BASE
-наложение cases/<case>/head/**
+создание commit BASE
+наложение head/**
 удаление delete_paths
-создание Git HEAD
-подготовку вне diff дополнительных входов
-запуск production CLI
+создание commit HEAD
+подготовку дополнительных входов
+запуск настоящего CLI
 проверку exit code
 проверку обязательных diagnostic ids
 ```
 
-Каноническое описание формы корпуса:
-
-```text
-examples/scenarios/README.md
-```
-
-Данные сценариев:
-
-```text
-examples/scenarios/minimal-diff-policy/**
-examples/scenarios/surgical-change/**
-examples/scenarios/version-transition/**
-examples/scenarios/contract-evidence/**
-examples/scenarios/governance-cutover/**
-```
-
-`README.md` корня изменяется только в C3.5d и только для навигации к корпусу.
+Он не вычисляет правила политики самостоятельно.
 
 ---
 
-### Задача 1: C3.5a — форма корпуса, универсальный исполнитель и `minimal-diff-policy`
+## Задача 1 — C3.5a: форма корпуса и `minimal-diff-policy`
 
-**Issue:** #428
+**GitHub-задача:** #428
 
-**Файлы:**
-- Создать: `tests/test-c3-5-scenario-library.mjs`
-- Создать: `examples/scenarios/README.md`
-- Создать: `examples/scenarios/minimal-diff-policy/scenario.json`
-- Создать: `examples/scenarios/minimal-diff-policy/base/repo-policy.json`
-- Создать: `examples/scenarios/minimal-diff-policy/base/src/app.txt`
-- Создать: `examples/scenarios/minimal-diff-policy/cases/pass/head/src/app.txt`
-- Создать: `examples/scenarios/minimal-diff-policy/cases/fail-forbidden/head/forbidden.txt`
+**Разрешённые файлы:**
 
-**Интерфейсы:**
-- Потребляет: `tests/run.mjs` автоматически обнаруживает `test-*.mjs`; `dist/repo-guard.mjs` принимает `--repo-root`, `check-diff`, `--base`, `--head`, `--change-intent`, `--format json`.
-- Производит: общий исполнитель, который последующие задачи расширяют только данными; функция обнаружения не содержит списка имён сценариев.
+```text
+tests/test-c3-5-scenario-library.mjs
+examples/scenarios/README.md
+examples/scenarios/minimal-diff-policy/**
+```
 
-- [ ] **Шаг 1. Создать только RED-тест**
+### 1.1. Первый commit — только красная проверка
 
-Первый коммит содержит только `tests/test-c3-5-scenario-library.mjs`.
+- [ ] Создать только `tests/test-c3-5-scenario-library.mjs`.
 
-Минимальный RED обязан проверить отсутствие принятого первого сценария, не реализуя исполнитель заранее:
+Начальная проверка:
 
 ```js
 import assert from "node:assert/strict";
@@ -122,42 +123,24 @@ const ids = readdirSync(scenariosRoot, { withFileTypes: true })
 assert.ok(ids.includes("minimal-diff-policy"), "C3.5a: отсутствует minimal-diff-policy");
 ```
 
-- [ ] **Шаг 2. Зафиксировать RED через Draft PR**
+- [ ] Создать черновой PR с `Fixes #428` и доказать ожидаемый красный результат.
+- [ ] До нового теста должны оставаться зелёными `check:dist`, `compression:metrics`, проверка собственной политики, `doctor` и старые тесты.
 
-Создать ветку от принятого `main`, commit только теста и Draft PR `Fixes #428`.
+### 1.2. Общий исполнитель
 
-Запустить полный CI. Ожидаемый результат нового теста:
-
-```text
-FAIL: каталог examples/scenarios ещё не создан
-```
-
-При этом до нового теста должны оставаться зелёными `check:dist`, compression metrics, текущая self-policy, doctor и старые тесты. Если падает что-либо ещё, сначала локализовать причину, не добавляя данные сценария.
-
-- [ ] **Шаг 3. Превратить RED-тест в универсальный исполнитель**
-
-Расширить тот же файл следующими общими функциями:
+- [ ] В том же тестовом файле добавить обнаружение без списка имён сценариев:
 
 ```js
-const git = (cwd, ...args) => execFileSync("git", args, {
-  cwd,
-  encoding: "utf-8",
-  stdio: "pipe",
-}).trim();
-
-function copyTree(source, target) {
-  cpSync(source, target, { recursive: true });
-}
-
 function discoverScenarios() {
   return readdirSync(scenariosRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(resolve(scenariosRoot, entry.name, "scenario.json")))
+    .filter((entry) => entry.isDirectory()
+      && existsSync(resolve(scenariosRoot, entry.name, "scenario.json")))
     .map((entry) => entry.name)
     .sort();
 }
 ```
 
-Техническая проверка `scenario.json` должна быть локальной и маленькой. Разрешить только:
+- [ ] Проверять только технические поля верхнего уровня:
 
 ```text
 id
@@ -167,7 +150,7 @@ command
 cases
 ```
 
-Для каждого case разрешить только:
+- [ ] Для элемента `cases[]` разрешить только:
 
 ```text
 id
@@ -180,21 +163,26 @@ pr_body
 issue_body
 ```
 
-Проверить:
+- [ ] Требовать совпадение `id` с именем каталога, кириллицу в `title_ru` и `summary_ru`, непустой список вариантов и команду из конечного набора `check-diff | check-pr`.
+- [ ] Не создавать отдельную схему продукта для `scenario.json`.
+
+### 1.3. Материализация перехода
+
+- [ ] Добавить общие функции копирования и команд `Git`:
 
 ```js
-assert.equal(manifest.id, directoryName);
-assert.match(manifest.title_ru, /[А-Яа-яЁё]/);
-assert.match(manifest.summary_ru, /[А-Яа-яЁё]/);
-assert.ok(["check-diff", "check-pr"].includes(manifest.command));
-assert.ok(Array.isArray(manifest.cases) && manifest.cases.length > 0);
+const git = (cwd, ...args) => execFileSync("git", args, {
+  cwd,
+  encoding: "utf-8",
+  stdio: "pipe",
+}).trim();
+
+function copyTree(source, target) {
+  cpSync(source, target, { recursive: true });
+}
 ```
 
-Не создавать JSON Schema для manifest и не добавлять его в product schemas.
-
-- [ ] **Шаг 4. Реализовать материализацию реального Git-перехода**
-
-Для каждого case:
+- [ ] Для каждого варианта создавать реальный временный репозиторий:
 
 ```js
 const temp = mkdtempSync(join(tmpdir(), "repo-guard-scenario-"));
@@ -206,25 +194,21 @@ git(temp, "add", "-A");
 git(temp, "commit", "-m", "BASE");
 const base = git(temp, "rev-parse", "HEAD");
 copyTree(resolve(caseRoot, "head"), temp);
-for (const path of testCase.delete_paths || []) rmSync(resolve(temp, path), { recursive: true, force: true });
+for (const path of testCase.delete_paths || []) {
+  rmSync(resolve(temp, path), { recursive: true, force: true });
+}
 git(temp, "add", "-A");
 git(temp, "commit", "-m", "HEAD");
 const head = git(temp, "rev-parse", "HEAD");
 ```
 
-Если `head/` отсутствует, это ошибка целостности case, а не разрешение пустого перехода.
+Каталог `head/` обязателен. Пустой переход не поддерживать.
 
-Дополнительный `change_intent` копировать в temp **после** HEAD commit, чтобы вход команды не попадал в проверяемый diff:
+- [ ] Если указан `change_intent`, копировать его в temp после commit `HEAD`, чтобы служебный вход не попадал в diff.
 
-```js
-if (testCase.change_intent) {
-  copyFileSync(resolve(scenarioRoot, testCase.change_intent), resolve(temp, ".scenario-change-intent.json"));
-}
-```
+### 1.4. Настоящий `check-diff`
 
-- [ ] **Шаг 5. Запускать настоящий `check-diff` процесс**
-
-Общий путь для `command === "check-diff"`:
+- [ ] Запускать процесс:
 
 ```js
 const args = [
@@ -235,8 +219,9 @@ const args = [
   "--head", head,
   "--format", "json",
 ];
-if (testCase.change_intent) args.push("--change-intent", ".scenario-change-intent.json");
-
+if (testCase.change_intent) {
+  args.push("--change-intent", ".scenario-change-intent.json");
+}
 const result = spawnSync(process.execPath, args, {
   cwd: temp,
   encoding: "utf-8",
@@ -244,38 +229,24 @@ const result = spawnSync(process.execPath, args, {
 });
 ```
 
-JSON parse выполняется только над публичным `AnalysisReport`:
+- [ ] Разбирать только публичный `AnalysisReport`:
 
 ```js
 const report = JSON.parse(result.stdout);
 assert.equal(result.status, testCase.expected_exit_code);
 assert.equal(report.exitCode, testCase.expected_exit_code);
-const actualDiagnostics = report.violations.map((item) => item.rule).sort();
+const actual = report.violations.map((item) => item.rule).sort();
 for (const expected of testCase.expected_diagnostics) {
-  assert.ok(actualDiagnostics.includes(expected), `${manifest.id}/${testCase.id}: missing ${expected}`);
+  assert.ok(actual.includes(expected));
 }
 if (testCase.expected_exit_code === 0) assert.deepEqual(report.violations, []);
 ```
 
-`expected_diagnostics` является обязательным подмножеством для отрицательного case, а не снимком всего отчёта.
+Для отрицательного варианта `expected_diagnostics` — обязательное подмножество, а не снимок всего отчёта.
 
-- [ ] **Шаг 6. Добавить каноническую документацию формы корпуса**
+### 1.5. Первый сценарий
 
-`examples/scenarios/README.md` кратко фиксирует на русском:
-
-```text
-сценарий = base + cases + scenario.json
-base/head материализуются как реальные Git commits
-manifest не содержит семантику policy
-каждый case запускается production CLI
-Pages C3.6 читает тот же corpus
-```
-
-Не дублировать содержимое конкретных policy-файлов.
-
-- [ ] **Шаг 7. Добавить `minimal-diff-policy`**
-
-`scenario.json`:
+- [ ] Создать `scenario.json`:
 
 ```json
 {
@@ -300,7 +271,7 @@ Pages C3.6 читает тот же corpus
 }
 ```
 
-`base/repo-policy.json`:
+- [ ] Базовая `repo-policy.json`:
 
 ```json
 {
@@ -322,17 +293,19 @@ Pages C3.6 читает тот же corpus
 }
 ```
 
-Файлы:
+- [ ] Создать файлы:
 
 ```text
-base/src/app.txt                 -> base
-cases/pass/head/src/app.txt      -> changed
-cases/fail-forbidden/head/forbidden.txt -> forbidden
+base/src/app.txt
+cases/pass/head/src/app.txt
+cases/fail-forbidden/head/forbidden.txt
 ```
 
-- [ ] **Шаг 8. Проверить focused GREEN и полный suite**
+- [ ] `examples/scenarios/README.md` описывает только общую форму корпуса и правило «данные → реальный Git → рабочий CLI»; содержимое конкретных политик не копируется.
 
-Запуски:
+### 1.6. Приёмка #428
+
+- [ ] Выполнить:
 
 ```bash
 node tests/test-c3-5-scenario-library.mjs
@@ -342,50 +315,36 @@ npm run compression:metrics
 node dist/repo-guard.mjs
 ```
 
-Ожидание: все GREEN; новый runner сообщает два case первого сценария как принятые.
-
-- [ ] **Шаг 9. Принять #428**
-
-Перевести PR в Ready только после Draft GREEN. На неизменном exact head получить:
-
-```text
-validate = GREEN
-smoke-pack = GREEN
-Run PR policy check = GREEN
-```
-
-Merge exact head. Затем дождаться post-merge `validate + smoke-pack = GREEN`. #428 должна закрыться `completed` через `Fixes #428`.
+- [ ] После зелёного чернового PR перевести его в `Ready`.
+- [ ] На неизменном SHA получить `validate`, `smoke-pack` и `Run PR policy check` = GREEN.
+- [ ] Слить именно проверенный SHA и дождаться зелёных post-merge `validate + smoke-pack`.
+- [ ] Убедиться, что #428 закрылась `completed`.
 
 ---
 
-### Задача 2: C3.5b — `surgical-change` и `version-transition`
+## Задача 2 — C3.5b: `surgical-change` и `version-transition`
 
-**Issue:** #429
+**GitHub-задача:** #429. Начинать только после принятия #428.
 
-**Файлы:**
-- Изменить: `tests/test-c3-5-scenario-library.mjs`
-- Создать: `examples/scenarios/surgical-change/**`
-- Создать: `examples/scenarios/version-transition/**`
+### 2.1. Красная проверка
 
-**Интерфейсы:**
-- Потребляет: принятый в C3.5a `discoverScenarios()`, материализацию BASE/HEAD и `check-diff` adapter.
-- Производит: два новых чистых сценария; общий исполнитель не получает ветвления по `manifest.id`.
-
-- [ ] **Шаг 1. RED: потребовать два новых идентификатора**
-
-Первый commit меняет только тест. После обнаружения корпуса добавить:
+- [ ] Первый commit меняет только общий тест:
 
 ```js
-for (const required of ["minimal-diff-policy", "surgical-change", "version-transition"]) {
+for (const required of [
+  "minimal-diff-policy",
+  "surgical-change",
+  "version-transition",
+]) {
   assert.ok(discovered.includes(required), `C3.5b: отсутствует ${required}`);
 }
 ```
 
-Запустить только новый тест. Ожидание: `minimal-diff-policy` проходит, RED возникает на первом отсутствующем новом сценарии.
+Принятый `minimal-diff-policy` должен пройти до ошибки об отсутствующем новом сценарии.
 
-- [ ] **Шаг 2. Добавить `surgical-change` без изменения исполнителя**
+### 2.2. `surgical-change`
 
-Manifest:
+- [ ] Добавить manifest:
 
 ```json
 {
@@ -412,7 +371,7 @@ Manifest:
 }
 ```
 
-Общий `change-intent.json`:
+- [ ] Общий вход `change-intent.json`:
 
 ```json
 {
@@ -426,36 +385,14 @@ Manifest:
 }
 ```
 
-Base policy — минимальная валидная policy без дополнительных ограничений; `base/src/app.txt` существует. PASS меняет только `src/app.txt`. FAIL меняет `src/app.txt` и добавляет `docs/oops.md`, поэтому scope и must-touch остаются допустимыми, а отрицательное доказательство локализуется в `must-not-touch`.
+- [ ] PASS меняет только `src/app.txt`.
+- [ ] Отрицательный вариант меняет `src/app.txt` и добавляет `docs/oops.md`; область и обязательный путь остаются допустимыми, а нарушение локализуется в `must-not-touch`.
 
-- [ ] **Шаг 3. Добавить `version-transition` без изменения исполнителя**
+### 2.3. `version-transition`
 
-Manifest:
+- [ ] Добавить manifest с PASS `1.2.3 → 1.2.4` и отрицательным `1.2.3 → 1.2.2`; ожидаемый идентификатор — `document-relation:release-revision`.
 
-```json
-{
-  "id": "version-transition",
-  "title_ru": "Переход версии между снимками",
-  "summary_ru": "Проверяет рост SemVer между BASE и HEAD обычным document relation.",
-  "command": "check-diff",
-  "cases": [
-    {
-      "id": "pass",
-      "title_ru": "Версия увеличена",
-      "expected_exit_code": 0,
-      "expected_diagnostics": []
-    },
-    {
-      "id": "fail-downgrade",
-      "title_ru": "Версия уменьшена",
-      "expected_exit_code": 1,
-      "expected_diagnostics": ["document-relation:release-revision"]
-    }
-  ]
-}
-```
-
-В base policy использовать уже принятый generic relation:
+- [ ] В базовой policy использовать уже принятую связь:
 
 ```json
 "document_relations": {
@@ -475,63 +412,43 @@ Manifest:
 }
 ```
 
-Файлы:
+- [ ] Файлы версии:
 
 ```text
-base/meta/REVISION                         = 1.2.3
-cases/pass/head/meta/REVISION              = 1.2.4
-cases/fail-downgrade/head/meta/REVISION    = 1.2.2
+base/meta/REVISION                      = 1.2.3
+cases/pass/head/meta/REVISION           = 1.2.4
+cases/fail-downgrade/head/meta/REVISION = 1.2.2
 ```
 
-- [ ] **Шаг 4. Запустить focused и полный GREEN**
+### 2.4. Приёмка #429
 
-```bash
-node tests/test-c3-5-scenario-library.mjs
-npm test
-npm run check:dist
-npm run compression:metrics
-```
-
-Никаких изменений runner, кроме доказанного общего дефекта. Любое желание добавить `if (manifest.id === ...)` является нарушением плана.
-
-- [ ] **Шаг 5. Принять #429**
-
-Draft GREEN → Ready exact-head GREEN → exact-head merge → post-merge `validate + smoke-pack` GREEN. Только затем переходить к #430.
+- [ ] Общий исполнитель не получает ветвления по `manifest.id`.
+- [ ] Любое изменение исполнителя допускается только после доказанного общего дефекта.
+- [ ] Выполнить новый тест, `npm test`, `check:dist`, метрики и обычный self-check.
+- [ ] Черновой GREEN → `Ready` exact-head GREEN → merge exact head → post-merge GREEN.
 
 ---
 
-### Задача 3: C3.5c — `contract-evidence`
+## Задача 3 — C3.5c: `contract-evidence`
 
-**Issue:** #430
+**GitHub-задача:** #430. Начинать только после принятия #429.
 
-**Файлы:**
-- Изменить: `tests/test-c3-5-scenario-library.mjs`
-- Создать: `examples/scenarios/contract-evidence/scenario.json`
-- Создать: `examples/scenarios/contract-evidence/base/repo-policy.json`
-- Создать: `examples/scenarios/contract-evidence/base/contracts/spec.json`
-- Создать: `examples/scenarios/contract-evidence/base/contracts/checks.yaml`
-- Создать: `examples/scenarios/contract-evidence/base/docs/spec.md`
-- Создать: `examples/scenarios/contract-evidence/base/tests/gate.mjs`
-- Создать: `examples/scenarios/contract-evidence/cases/pass/head/contracts/spec.json`
-- Создать: `examples/scenarios/contract-evidence/cases/pass/head/contracts/checks.yaml`
+### 3.1. Красная проверка
 
-**Интерфейсы:**
-- Потребляет: только принятый `check-diff` runner и существующий `contract_conformance` macro.
-- Производит: обычные corpus data; не добавляет знание `anum_docs`.
-
-- [ ] **Шаг 1. RED: потребовать `contract-evidence`**
-
-Первый commit меняет только corpus falsifier:
+- [ ] Первый commit меняет только общий тест:
 
 ```js
-assert.ok(discovered.includes("contract-evidence"), "C3.5c: отсутствует contract-evidence");
+assert.ok(
+  discovered.includes("contract-evidence"),
+  "C3.5c: отсутствует contract-evidence",
+);
 ```
 
-Все C3.5a–b сценарии должны пройти до этой проверки.
+Все ранее принятые сценарии должны оставаться зелёными.
 
-- [ ] **Шаг 2. Создать policy через уже принятый macro**
+### 3.2. Базовая политика
 
-Использовать минимальную policy с:
+- [ ] Использовать существующий `contract_conformance` без нового механизма:
 
 ```json
 "contract_conformance": {
@@ -558,11 +475,11 @@ assert.ok(discovered.includes("contract-evidence"), "C3.5c: отсутствуе
 }
 ```
 
-`paths.governance_paths` должен включать `repo-policy.json` и `contracts/**`, как требует macro control boundary.
+`paths.governance_paths` включает `repo-policy.json` и `contracts/**`.
 
-- [ ] **Шаг 3. Создать валидную base topology**
+### 3.3. Базовые документы
 
-`contracts/spec.json`:
+- [ ] `contracts/spec.json`:
 
 ```json
 {
@@ -574,7 +491,7 @@ assert.ok(discovered.includes("contract-evidence"), "C3.5c: отсутствуе
 }
 ```
 
-`contracts/checks.yaml`:
+- [ ] `contracts/checks.yaml`:
 
 ```yaml
 contract: spec-v1
@@ -584,66 +501,44 @@ requiredGates:
   - tests/gate.mjs
 ```
 
-Также создать `docs/spec.md` и `tests/gate.mjs`.
+- [ ] Создать `docs/spec.md` и `tests/gate.mjs`.
 
-- [ ] **Шаг 4. PASS меняет contract и conformance вместе**
+### 3.4. Положительный и отрицательный варианты
 
-PASS HEAD сохраняет те же связи и меняет нейтральное содержимое обоих документов, например добавляет поле `revision: 2` в contract и `revision: 2` в conformance. Это создаёт реальный diff и соблюдает semantic cochange group.
-
-Manifest PASS ожидает `0` и пустые diagnostics.
-
-- [ ] **Шаг 5. FAIL удаляет требуемое evidence без нового semantic switch**
-
-В manifest отрицательного case использовать:
+- [ ] Положительный `HEAD` меняет оба документа вместе и сохраняет все связи; можно добавить нейтральное поле `revision: 2` в оба документа.
+- [ ] Положительный вариант ожидает код `0` и отсутствие нарушений.
+- [ ] Отрицательный вариант меняет оба документа так же, но имеет:
 
 ```json
-{
-  "id": "fail-missing-gate",
-  "title_ru": "Обязательное исполняемое свидетельство отсутствует",
-  "expected_exit_code": 1,
-  "expected_diagnostics": ["document-relation:contract-conformance:required-path:1"],
-  "delete_paths": ["tests/gate.mjs"]
-}
+"delete_paths": ["tests/gate.mjs"]
 ```
 
-Для этого case `head/` всё равно должен существовать; положить в него изменённый `contracts/spec.json` и `contracts/checks.yaml`, чтобы HEAD commit одновременно содержит contract/conformance переход и удаление gate.
+- [ ] Ожидаемый идентификатор нарушения:
 
-Если реальный diagnostic id отличается от уже принятого `document-relation:contract-conformance:required-path:1`, сначала проверить текущее production evidence. Не переименовывать engine ради сценария.
-
-- [ ] **Шаг 6. Проверить отсутствие engine gap**
-
-```bash
-node tests/test-c3-5-scenario-library.mjs
-npm test
-npm run check:dist
-npm run compression:metrics
+```text
+document-relation:contract-conformance:required-path:1
 ```
 
-`src/**`, `dist/**`, schemas, Action и workflows должны иметь нулевой diff. Если нет — остановить #430 как обнаруженный архитектурный разрыв.
+Если живой рабочий код выдаёт иной идентификатор, сначала проверить текущее доказательство в production-тестах. Ядро ради сценария не переименовывать.
 
-- [ ] **Шаг 7. Принять #430**
+### 3.5. Приёмка #430
 
-Draft GREEN → Ready exact-head GREEN → exact-head merge → post-merge GREEN. Только затем #431.
+- [ ] Diff по `src/**`, `dist/**`, `schemas/**`, `action.yml`, `.github/workflows/**` равен нулю.
+- [ ] Выполнить новый тест и полный набор проверок.
+- [ ] Черновой GREEN → `Ready` exact-head GREEN → merge exact head → post-merge GREEN.
+- [ ] Если появляется необходимость менять ядро, остановить #430 и оформить отдельный архитектурный разрыв.
 
 ---
 
-### Задача 4: C3.5d — `governance-cutover`, навигация и финальный аудит
+## Задача 4 — C3.5d: `governance-cutover` и сведение корпуса
 
-**Issue:** #431
+**GitHub-задача:** #431. Начинать только после принятия #430.
 
-**Файлы:**
-- Изменить: `tests/test-c3-5-scenario-library.mjs`
-- Создать: `examples/scenarios/governance-cutover/**`
-- Изменить: `README.md`
+**Дополнительно разрешён:** `README.md`.
 
-**Интерфейсы:**
-- Потребляет: тот же corpus manifest и materializer.
-- Расширяет только транспортный adapter исполнителя для `command === "check-pr"`.
-- Производит: окончательный корпус из ровно пяти архитектурных сценариев и ссылку из корневого README.
+### 4.1. Красная проверка финального набора
 
-- [ ] **Шаг 1. RED: потребовать пятый сценарий и точный финальный набор**
-
-Первый commit меняет только тест:
+- [ ] Первый commit меняет только общий тест:
 
 ```js
 assert.deepEqual(discovered, [
@@ -655,11 +550,11 @@ assert.deepEqual(discovered, [
 ]);
 ```
 
-Ожидание: четыре принятых сценария проходят, RED только из-за отсутствия `governance-cutover`.
+Ожидаемый RED возникает только из-за отсутствующего `governance-cutover`.
 
-- [ ] **Шаг 2. Добавить общий `check-pr` transport adapter**
+### 4.2. Общий адаптер `check-pr`
 
-Не создавать ветвление по имени сценария. Ветвление допустимо только по публичной команде manifest:
+- [ ] Ветвление исполнителя допускается только по публичной команде:
 
 ```js
 if (manifest.command === "check-diff") return runCheckDiffCase(...);
@@ -667,7 +562,9 @@ if (manifest.command === "check-pr") return runCheckPrCase(...);
 throw new Error(`unsupported command: ${manifest.command}`);
 ```
 
-`runCheckPrCase` после BASE/HEAD commits создаёт вне diff `event.json`:
+Ветвление по идентификатору сценария запрещено.
+
+- [ ] После фиксации `BASE` и `HEAD` создать вне diff `event.json`:
 
 ```js
 writeFileSync(eventPath, JSON.stringify({
@@ -681,7 +578,7 @@ writeFileSync(eventPath, JSON.stringify({
 }));
 ```
 
-Минимальный fake `gh` генерируется исполнителем из `issue_body` case и отвечает только на уже существующие production-запросы:
+- [ ] Минимальную подмену `gh` генерировать только как транспорт существующих входов:
 
 ```js
 if (args.includes("--version")) console.log("gh 0.0");
@@ -691,11 +588,12 @@ else if (query.includes("author_association")) console.log(JSON.stringify({
   author_association: "OWNER",
   labels: [],
 }));
-else if (query.includes("permission")) console.log(JSON.stringify({ permission: "write", role_name: "write" }));
-else console.log(JSON.stringify({ labels: [] }));
+else if (query.includes("permission")) {
+  console.log(JSON.stringify({ permission: "write", role_name: "write" }));
+} else console.log(JSON.stringify({ labels: [] }));
 ```
 
-Запуск:
+- [ ] Запускать настоящий процесс:
 
 ```js
 spawnSync(process.execPath, [cli, "--repo-root", temp, "check-pr"], {
@@ -709,7 +607,7 @@ spawnSync(process.execPath, [cli, "--repo-root", temp, "check-pr"], {
 });
 ```
 
-Так как `check-pr` сейчас выдаёт text, стабильные диагностические идентификаторы извлекаются только из строк публичного renderer:
+- [ ] Поскольку `check-pr` выдаёт текст, извлекать только публичные строки отказа:
 
 ```js
 const output = `${result.stdout || ""}\n${result.stderr || ""}`;
@@ -717,15 +615,11 @@ const diagnostics = [...output.matchAll(/^FAIL:\s+([^\n]+)/gm)]
   .map((match) => match[1].trim());
 ```
 
-Не импортировать `runCheckPR` напрямую: нужен именно процессный boundary.
+### 4.3. Сценарий `governance-cutover`
 
-- [ ] **Шаг 3. Создать `governance-cutover`**
-
-Base policy содержит `repo-policy.json` в `paths.governance_paths` и обычные минимальные diff/content/cochange поля.
-
-Оба case предлагают одинаковую HEAD policy: добавить в `paths.forbidden` новый шаблон `secrets/**`. Это tightening, поэтому сценарий проверяет доверенную governance authorization без отдельного policy relaxation grant.
-
-Оба `pr-body.md` содержат один и тот же `ChangeIntent` и `Fixes #77`:
+- [ ] Базовая policy содержит `repo-policy.json` в `paths.governance_paths`.
+- [ ] Оба варианта предлагают одинаковую более строгую `HEAD` policy: добавить `secrets/**` в `paths.forbidden`.
+- [ ] Оба тела PR содержат один `ChangeIntent` и `Fixes #77`:
 
 ```repo-guard-yaml
 change_type: governance
@@ -745,7 +639,7 @@ expected_effects:
   - Управляющая политика стала строже
 ```
 
-PASS issue body содержит:
+- [ ] Связанная issue положительного варианта содержит:
 
 ```repo-guard-grant
 authorized_governance_paths:
@@ -753,64 +647,33 @@ authorized_governance_paths:
 allow_policy_relaxation: []
 ```
 
-FAIL issue body не содержит `repo-guard-grant`.
+- [ ] Связанная issue отрицательного варианта не содержит блока `repo-guard-grant`.
+- [ ] Положительный вариант ожидает `0`; отрицательный — `1` и `governance-change-authorization`.
 
-Manifest:
+### 4.4. Финальные инварианты корпуса
 
-```json
-{
-  "id": "governance-cutover",
-  "title_ru": "Доверенное изменение управляющей политики",
-  "summary_ru": "Показывает, что изменение governance-пути требует отдельного разрешения из связанной issue.",
-  "command": "check-pr",
-  "cases": [
-    {
-      "id": "pass",
-      "title_ru": "Доверенное разрешение присутствует",
-      "expected_exit_code": 0,
-      "expected_diagnostics": [],
-      "pr_body": "cases/pass/pr-body.md",
-      "issue_body": "cases/pass/issue-body.md"
-    },
-    {
-      "id": "fail-no-grant",
-      "title_ru": "Разрешение отсутствует",
-      "expected_exit_code": 1,
-      "expected_diagnostics": ["governance-change-authorization"],
-      "pr_body": "cases/fail-no-grant/pr-body.md",
-      "issue_body": "cases/fail-no-grant/issue-body.md"
-    }
-  ]
-}
-```
-
-- [ ] **Шаг 4. Добавить финальные corpus invariants**
-
-Тест должен механически проверить для каждого manifest:
+- [ ] Для каждого `scenario.json` механически проверить:
 
 ```text
 title_ru содержит кириллицу
 summary_ru содержит кириллицу
 каждый case имеет title_ru
-каждый scenario имеет минимум один expected_exit_code = 0
-каждый scenario имеет минимум один expected_exit_code != 0
-нет scenario ids workflow-evidence и parallel-readiness
-нет неизвестных manifest/case полей
+есть минимум один положительный case
+есть минимум один отрицательный case
+нет неизвестных полей
 ```
 
-Не фиксировать число файлов внутри сценария и не создавать ручную матрицу capability → scenario.
+- [ ] Явно запретить идентификаторы `workflow-evidence` и `parallel-readiness`.
+- [ ] Не фиксировать число внутренних файлов сценария и не создавать ручную матрицу возможностей.
 
-- [ ] **Шаг 5. Синхронизировать корневой README**
+### 4.5. Навигация
 
-Добавить короткий раздел или абзац со ссылкой:
+- [ ] В корневой `README.md` добавить короткую ссылку на `examples/scenarios/` и объяснить, что это единственный исполняемый каталог примеров и будущий источник C3.6.
+- [ ] Не копировать туда policy, `ChangeIntent` или содержимое `scenario.json`.
 
-```text
-examples/scenarios/
-```
+### 4.6. Финальная приёмка #431
 
-Объяснить, что этот каталог является единственным исполняемым каталогом примеров и будущим источником C3.6. Не копировать policy JSON, ChangeIntent или scenario manifests в README.
-
-- [ ] **Шаг 6. Финальный focused и full GREEN**
+- [ ] Выполнить:
 
 ```bash
 node tests/test-c3-5-scenario-library.mjs
@@ -821,25 +684,13 @@ node dist/repo-guard.mjs
 npm pack --dry-run
 ```
 
-Проверить, что `examples/scenarios/**` попадает в package через уже существующее `files: ["examples/"]`; `package.json` не менять.
+- [ ] Проверить, что пакет уже включает `examples/scenarios/**` через существующее `files: ["examples/"]`; `package.json` не менять.
+- [ ] Проверить нулевой diff запрещённых рабочих поверхностей.
+- [ ] Черновой GREEN → `Ready` exact-head GREEN с `Run PR policy check` → merge exact head → post-merge GREEN.
 
-Diff по запрещённым production-поверхностям должен быть пуст.
+### 4.7. Закрытие #376
 
-- [ ] **Шаг 7. Принять #431**
-
-Draft GREEN → Ready exact-head:
-
-```text
-validate = GREEN
-smoke-pack = GREEN
-Run PR policy check = GREEN
-```
-
-Merge exact head. Дождаться post-merge `validate + smoke-pack = GREEN`.
-
-- [ ] **Шаг 8. Финальный аудит #376**
-
-После post-merge проверить live `main` и записать в #376:
+- [ ] После post-merge проверить живой `main` и записать в #376:
 
 ```text
 accepted main SHA
@@ -858,25 +709,22 @@ post-merge validate GREEN
 post-merge smoke-pack GREEN
 ```
 
-Только после этого закрыть #376 с `state_reason = completed`.
-
-Не создавать C3.6 ветку, issue-дочернюю работу или Pages-файлы внутри C3.5.
+- [ ] Только после этого закрыть #376 как `completed`.
+- [ ] Не создавать работу C3.6 внутри C3.5.
 
 ## Самопроверка плана
 
-Покрытие спеки:
-
 ```text
-один corpus source                  -> задачи 1-4
-реальные Git BASE/HEAD              -> задача 1
-production check-diff               -> задачи 1-3
-production check-pr                 -> задача 4
-русские human metadata              -> задачи 1-4
-5 архитектурных сценариев           -> задачи 1-4
-без workflow/parallel revival       -> глобальные границы + задача 4
-будущий Pages читает тот же corpus  -> README корпуса + задача 4
-RED-first каждого среза             -> первый шаг каждой задачи
-exact-head acceptance               -> финальный шаг каждой задачи
+один источник сценариев              -> задачи 1-4
+реальные Git BASE/HEAD               -> задача 1
+рабочий check-diff                   -> задачи 1-3
+рабочий check-pr                     -> задача 4
+русские пояснения                    -> задачи 1-4
+ровно пять архитектурных сценариев   -> задачи 1-4
+нет workflow/parallel resurrection   -> границы + задача 4
+будущий Pages читает тот же корпус   -> задача 4
+RED-first каждого среза              -> первый шаг каждой задачи
+exact-head acceptance                -> финал каждой задачи
 ```
 
-Плейсхолдеров, отложенных архитектурных решений и специальных ветвей по scenario id в плане нет. Имена интерфейсов между задачами неизменны: `discoverScenarios`, общий materializer, `runCheckDiffCase`, а в C3.5d добавляется только общий `runCheckPrCase` по значению публичного поля `command`.
+Плейсхолдеров и отложенных архитектурных решений нет. Общие интерфейсы между срезами заранее фиксированы: `discoverScenarios`, материализация репозитория и `runCheckDiffCase`; в C3.5d добавляется только общий `runCheckPrCase` по публичному полю `command`.
