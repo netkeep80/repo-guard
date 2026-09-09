@@ -114,6 +114,21 @@ function collectCiWiring(repoRoot) {
   };
 }
 
+function validateReleasePayload(release, tag) {
+  if (
+    !release
+    || typeof release !== "object"
+    || release.tag_name !== tag
+    || typeof release.draft !== "boolean"
+    || (
+      release.draft === false
+      && (typeof release.html_url !== "string" || !release.html_url)
+    )
+  ) {
+    throw new Error("malformed GitHub release observation");
+  }
+}
+
 async function observeMatchingRelease({ repository, tag, token, fetchImpl }) {
   const headers = {
     Accept: "application/vnd.github+json",
@@ -140,13 +155,12 @@ async function observeMatchingRelease({ repository, tag, token, fetchImpl }) {
   }
 
   const release = await response.json();
-  const published = release?.draft !== true;
+  validateReleasePayload(release, tag);
+  const published = !release.draft;
   return {
     tag,
     matching_published_release: published,
-    release_url: published && typeof release?.html_url === "string"
-      ? release.html_url
-      : null,
+    release_url: published ? release.html_url : null,
   };
 }
 
