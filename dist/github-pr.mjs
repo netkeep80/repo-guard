@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
-import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
+import { getDiff, readBasePolicy, readFileAtRef, resolveRemoteBaseRef } from "./git.mjs";
 import { parseDiff } from "./diff/parser.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
@@ -14,6 +14,23 @@ const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"];
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const array = (value) => Array.isArray(value) ? value : [];
 const asPipelinePolicy = (policy) => policy;
+function readOptionalBaseSchema(base, repoRoot, path) {
+    let raw;
+    try {
+        raw = readFileAtRef(base, path, repoRoot);
+    }
+    catch {
+        return undefined;
+    }
+    return raw == null ? undefined : JSON.parse(raw);
+}
+function readBaseSchemaSnapshot(base, repoRoot) {
+    return {
+        repoPolicy: readOptionalBaseSchema(base, repoRoot, "schemas/repo-policy.schema.json"),
+        changeIntent: readOptionalBaseSchema(base, repoRoot, "schemas/change-intent.schema.json"),
+        governanceGrant: readOptionalBaseSchema(base, repoRoot, "schemas/governance-grant.schema.json"),
+    };
+}
 function resolveAtomicIntegrationTransition(basePolicy, headPolicy, diffText) {
     const patched = structuredClone(basePolicy);
     const baseIntegration = object(object(patched).integration), headIntegration = object(object(headPolicy).integration);
@@ -184,7 +201,10 @@ export function runCheckPR(roots, args = []) {
     if (baseRead.error)
         initialChecks.push({ name: "governance-trusted-boundary", check: { ok: false, message: `cannot establish trusted governance boundary: ${baseRead.error}`, details: [`base_ref: ${base}`] } });
     else {
-        runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, { label: "repo-policy.json (base)" }), "repo-policy.json (base)", "Base policy compilation failed");
+        runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, {
+            label: "repo-policy.json (base)",
+            schemas: readBaseSchemaSnapshot(base, roots.repoRoot),
+        }), "repo-policy.json (base)", "Base policy compilation failed");
         if (!runtime)
             return 1;
         basePolicy = runtime.policy;
