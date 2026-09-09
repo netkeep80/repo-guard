@@ -19,7 +19,7 @@ const validPolicy = json("tests/fixtures/valid-policy.json");
 expect("valid policy fixture", policy(validPolicy));
 expect("invalid policy fixture", policy(json("tests/fixtures/invalid-policy.json")), false);
 expect("repo-policy self", policy(json("repo-policy.json")));
-expect("downstream integration example", policy(json("examples/downstream-integration-policy.json")));
+expect("old top-level integration rejected", policy({ ...validPolicy, integration: {} }), false);
 expect("size rules example", policy(json("examples/size-rules-policy.json")));
 expect("requirements-strict profile", policy({ ...validPolicy, profile: "requirements-strict", profile_overrides: { evidence_surfaces: ["src/**"] } }));
 expect("profile overrides require profile", policy({ ...validPolicy, profile_overrides: { evidence_surfaces: ["src/**"] } }), false);
@@ -44,30 +44,10 @@ expect("removed workflow_path_coverage rejected", policy({
     covers: ["tests/**"],
   }],
 }), false);
-
-const integration = {
-  workflows: [{ id: "gate", kind: "github_actions", path: ".github/workflows/ci.yml", role: "repo_guard_pr_gate", expect: { events: ["pull_request"], action: { uses: "netkeep80/repo-guard", ref_pinning: "semver" }, mode: "check-pr", enforcement: "blocking", permissions: { contents: "read" }, token_env: ["GH_TOKEN"], summary: true, disallow: ["continue_on_error"] } }],
-  templates: [{ id: "pr", kind: "markdown", path: ".github/PULL_REQUEST_TEMPLATE.md", requires_change_intent_block: true, required_block_kind: "repo-guard-yaml", required_change_intent_fields: ["change_type"] }],
-  docs: [{ id: "readme", kind: "markdown", path: "README.md", must_mention: ["repo-guard"] }],
-  profiles: [{ id: "self", doc_path: "README.md" }],
-};
-expect("integration shape", policy({ ...validPolicy, integration }));
-for (const field of ["requires_contract_block", "required_contract_fields"]) {
-  expect(`legacy integration template field ${field} rejected`, policy({
-    ...validPolicy,
-    integration: { ...integration, templates: [{ ...integration.templates[0], [field]: field === "requires_contract_block" ? true : ["change_type"] }] },
-  }), false);
-}
-expect("legacy integration doc field must_mention_contract_fields rejected", policy({
-  ...validPolicy,
-  integration: { ...integration, docs: [{ ...integration.docs[0], must_mention_contract_fields: ["change_type"] }] },
-}), false);
 expect("legacy trace field contract_field rejected", policy({
   ...validPolicy,
   trace_rules: [{ id: "legacy", kind: "declared_anchors_require_evidence", contract_field: "anchors.affects", must_touch_any: ["tests/**"] }],
 }), false);
-expect("invalid integration role", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "custom" }] } }), false);
-expect("invalid integration expectation", policy({ ...validPolicy, integration: { workflows: [{ id: "x", kind: "github_actions", path: "x.yml", role: "repo_guard_pr_gate", expect: { mode: "deploy" } }] } }), false);
 expect("valid size rule", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }));
 expect("invalid size metric", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "tokens", glob: "src/**", max: 1 }] }), false);
 expect("directory changed_only size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, count: "changed_only" }] }), false);
