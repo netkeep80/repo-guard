@@ -1,0 +1,20 @@
+{
+  "id": "version-transition",
+  "title_ru": "Переход версии вперёд",
+  "summary_ru": "Показывает проверку увеличения семантической версии между BASE и HEAD.",
+  "command": "check-diff",
+  "cases": [
+    {
+      "id": "pass",
+      "title_ru": "Версия увеличивается",
+      "expected_exit_code": 0,
+      "expected_diagnostics": []
+    },
+    {
+      "id": "fail-downgrade",
+      "title_ru": "Понижение версии блокируется",
+      "expected_exit_code": 1,
+      "expected_diagnostics": ["document-relation:release-revision"]
+    }
+  ]
+}
