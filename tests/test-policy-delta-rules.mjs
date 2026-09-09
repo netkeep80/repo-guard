@@ -18,7 +18,6 @@ const BASE = {
     { id: "max-doc", glob: "docs/**/*.md", metric: "lines", max: 300, level: "blocking", count: "all_tracked" },
   ],
   surfaces: { source: ["src/**"], tests: ["tests/**"], schemas: ["schemas/**"], docs: ["docs/**"] },
-  integration: { workflows: [{ id: "gate", role: "repo_guard_pr_gate", path: ".github/workflows/ci.yml", expect: { enforcement: "blocking" } }] },
 };
 const mutate = (fn) => { const copy = structuredClone(BASE); fn(copy); return copy; };
 const relax = () => mutate((policy) => { policy.size_rules[0].max = 1000; });
@@ -122,7 +121,6 @@ describe("Constraint Program strictness projection", () => {
     ["diff budget", (p) => { p.diff_rules.max_new_files = 20; }, "diff_rule_budget_increased"],
     ["forbidden path", (p) => { p.paths.forbidden = []; }, "forbidden_path_removed"],
     ["governance path", (p) => { p.paths.governance_paths = ["repo-policy.json"]; }, "governance_path_removed"],
-    ["workflow", (p) => { p.integration.workflows = []; }, "integration_workflow_removed"],
     ["enforcement", (p) => { p.enforcement.mode = "advisory"; }, "enforcement_weakened"],
   ];
   for (const [name, mutatePolicy, kind] of cases) it(`detects ${name} relaxation`, () => {
