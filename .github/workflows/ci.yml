@@ -89,11 +89,9 @@ jobs:
         with:
           node-version: "24"
 
-      - run: npm ci
-
       - name: Smoke-test packaged artifact
         run: |
-          npm pack 2>/dev/null
+          npm pack --ignore-scripts 2>/dev/null
           TARBALL=$(ls repo-guard-*.tgz)
           REPODIR="$PWD"
           TMPDIR=$(mktemp -d)
