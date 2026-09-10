@@ -90,30 +90,52 @@ assert.equal(published.version.release_commit, acceptedSha);
 assert.equal(published.version.release_url, publishedReleaseUrl);
 assert.equal(published.version.release_truth_status, "published");
 
-const prereleaseFetch = async (url) => {
-  if (url.includes("/git/ref/tags/")) {
-    return response(200, {
-      object: { type: "commit", sha: acceptedSha },
-    });
-  }
-  if (url.includes("/releases/tags/")) {
-    return response(200, {
-      tag_name: "v3.0.0",
+function nonOfficialReleaseFetch({ draft, prerelease, url }) {
+  return async (requestUrl) => {
+    if (requestUrl.includes("/git/ref/tags/")) {
+      return response(200, {
+        object: { type: "commit", sha: acceptedSha },
+      });
+    }
+    if (requestUrl.includes("/releases/tags/")) {
+      return response(200, {
+        tag_name: "v3.0.0",
+        draft,
+        prerelease,
+        html_url: url,
+      });
+    }
+    throw new Error(`unexpected URL: ${requestUrl}`);
+  };
+}
+
+for (const [name, fetchImpl] of [
+  [
+    "prerelease",
+    nonOfficialReleaseFetch({
       draft: false,
       prerelease: true,
-      html_url: "https://example.invalid/releases/v3.0.0-rc",
-    });
-  }
-  throw new Error(`unexpected URL: ${url}`);
-};
-const prerelease = await collectObservatorySnapshot({
-  ...input,
-  fetchImpl: prereleaseFetch,
-});
-assert.equal(prerelease.version.matching_published_release, false);
-assert.equal(prerelease.version.release_commit, null);
-assert.equal(prerelease.version.release_url, null);
-assert.equal(prerelease.version.release_truth_status, "package_only");
+      url: "https://example.invalid/releases/v3.0.0-rc",
+    }),
+  ],
+  [
+    "draft",
+    nonOfficialReleaseFetch({
+      draft: true,
+      prerelease: false,
+      url: "https://example.invalid/releases/v3.0.0-draft",
+    }),
+  ],
+]) {
+  const nonOfficial = await collectObservatorySnapshot({
+    ...input,
+    fetchImpl,
+  });
+  assert.equal(nonOfficial.version.matching_published_release, false, name);
+  assert.equal(nonOfficial.version.release_commit, null, name);
+  assert.equal(nonOfficial.version.release_url, null, name);
+  assert.equal(nonOfficial.version.release_truth_status, "package_only", name);
+}
 
 assert.deepEqual(
   first.architecture.current.architecture.canonical_fact_sources,
