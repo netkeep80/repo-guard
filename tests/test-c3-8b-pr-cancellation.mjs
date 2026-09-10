@@ -15,6 +15,7 @@ const workflow = workflowDocument.toJS();
 
 assert.deepEqual(Object.keys(workflow.jobs ?? {}).sort(), ["smoke-pack", "validate"]);
 assert.deepEqual(Object.keys(workflow.on ?? {}).sort(), ["pull_request", "push"]);
+assert.deepEqual(Object.keys(workflow.concurrency ?? {}).sort(), ["cancel-in-progress", "group"]);
 assert.equal(
   workflow.concurrency?.group,
   "ci-${{ github.event.pull_request.number || github.run_id }}",
