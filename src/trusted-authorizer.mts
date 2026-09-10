@@ -6,6 +6,7 @@ interface UserProjection {
 }
 
 interface IssueContextProjection {
+  body?: unknown;
   user?: UserProjection | null;
   author_association?: unknown;
   labels?: unknown;
@@ -39,6 +40,7 @@ interface ResolveTrustedAuthorizerInput {
   repoFullName: unknown;
   issueNumber?: unknown;
   prNumber?: unknown;
+  issueContext?: unknown;
   options?: TrustedAuthorizerOptions;
 }
 
@@ -83,7 +85,7 @@ export function fetchIssueAuthorContext(repoFullName: unknown, issueNumber: unkn
     "api",
     `repos/${repoFullName}/issues/${issueNumber as string | number | bigint}`,
     "--jq",
-    "{user: {login: .user.login, type: .user.type}, author_association: .author_association, labels: [.labels[].name]}",
+    "{body: .body, user: {login: .user.login, type: .user.type}, author_association: .author_association, labels: [.labels[].name]}",
   ]);
 }
 
@@ -184,13 +186,16 @@ export function resolveTrustedAuthorizer({
   repoFullName,
   issueNumber,
   prNumber,
+  issueContext,
   options = {},
 }: ResolveTrustedAuthorizerInput): TrustedAuthorizerSummary {
   const governanceApprovedLabel = options.governanceApprovedLabel || DEFAULT_GOVERNANCE_LABEL;
-  const issueContext = issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null;
+  const observedIssueContext = issueContext === undefined
+    ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null)
+    : issueContext;
   const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
-  const username = (issueContext as IssueContextProjection | null)?.user?.login;
-  const permission = username && !isBotUser((issueContext as IssueContextProjection).user)
+  const username = (observedIssueContext as IssueContextProjection | null)?.user?.login;
+  const permission = username && !isBotUser((observedIssueContext as IssueContextProjection).user)
     ? fetchUserRepoPermission(repoFullName, username)
     : null;
 
@@ -198,7 +203,7 @@ export function resolveTrustedAuthorizer({
   // the rule engine but are not yet auto-resolved from the GitHub API here.
   // They flow in only through caller-provided options for tests / future work.
   return detectTrustedAuthorizerLocally({
-    issueContext,
+    issueContext: observedIssueContext,
     prContext,
     permission,
     governanceApprovedLabel,
