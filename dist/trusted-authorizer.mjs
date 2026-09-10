@@ -26,7 +26,7 @@ export function fetchIssueAuthorContext(repoFullName, issueNumber) {
         "api",
         `repos/${repoFullName}/issues/${issueNumber}`,
         "--jq",
-        "{user: {login: .user.login, type: .user.type}, author_association: .author_association, labels: [.labels[].name]}",
+        "{body: .body, user: {login: .user.login, type: .user.type}, author_association: .author_association, labels: [.labels[].name]}",
     ]);
 }
 export function fetchPullRequestContext(repoFullName, prNumber) {
@@ -115,19 +115,19 @@ export function detectTrustedAuthorizerLocally({ issueContext, prContext, permis
     }
     return summary;
 }
-export function resolveTrustedAuthorizer({ repoFullName, issueNumber, prNumber, options = {}, }) {
+export function resolveTrustedAuthorizer({ repoFullName, issueNumber, prNumber, issueContext, options = {} }) {
     const governanceApprovedLabel = options.governanceApprovedLabel || DEFAULT_GOVERNANCE_LABEL;
-    const issueContext = issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null;
+    const observedIssueContext = issueContext === undefined ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null) : issueContext;
     const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
-    const username = issueContext?.user?.login;
-    const permission = username && !isBotUser(issueContext.user)
+    const username = observedIssueContext?.user?.login;
+    const permission = username && !isBotUser(observedIssueContext.user)
         ? fetchUserRepoPermission(repoFullName, username)
         : null;
     // codeowner_approved / trusted_team_approval are accepted as trust sources by
     // the rule engine but are not yet auto-resolved from the GitHub API here.
     // They flow in only through caller-provided options for tests / future work.
     return detectTrustedAuthorizerLocally({
-        issueContext,
+        issueContext: observedIssueContext,
         prContext,
         permission,
         governanceApprovedLabel,

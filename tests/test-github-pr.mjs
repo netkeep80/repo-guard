@@ -102,7 +102,7 @@ describe("check-pr process boundary", () => {
 const a=process.argv.slice(2), i=a.indexOf('--jq'), q=i>=0?a[i+1]:'';
 if(a.includes('--version')) console.log('gh 0.0');
 else if(q==='.body') console.log(${JSON.stringify(issueBody)});
-else if(q.includes('author_association')) console.log(JSON.stringify({user:{login:'maintainer',type:'User'},author_association:'OWNER',labels:[]}));
+else if(q.includes('author_association')) console.log(JSON.stringify({body:${JSON.stringify(issueBody)},user:{login:'maintainer',type:'User'},author_association:'OWNER',labels:[]}));
 else if(q.includes('permission')) console.log(JSON.stringify({permission:'write',role_name:'write'}));
 else console.log(JSON.stringify({labels:[]}));
 `); chmodSync(gh, 0o755);
