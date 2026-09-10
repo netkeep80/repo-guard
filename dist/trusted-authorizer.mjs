@@ -115,7 +115,7 @@ export function detectTrustedAuthorizerLocally({ issueContext, prContext, permis
     }
     return summary;
 }
-export function resolveTrustedAuthorizer({ repoFullName, issueNumber, prNumber, issueContext, options = {}, }) {
+export function resolveTrustedAuthorizer({ repoFullName, issueNumber, prNumber, issueContext, options = {} }) {
     const governanceApprovedLabel = options.governanceApprovedLabel || DEFAULT_GOVERNANCE_LABEL;
     const observedIssueContext = issueContext === undefined ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null) : issueContext;
     const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
