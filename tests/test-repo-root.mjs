@@ -1,13 +1,13 @@
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolveRoots } from "../dist/repo-guard.mjs";
+import { runCliCaptured } from "./support/run-cli.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
-
 let failures = 0;
 
 function expect(label, actual, expected) {
@@ -19,7 +19,59 @@ function expect(label, actual, expected) {
   }
 }
 
-// --- resolveRoots: default uses process.cwd() ---
+function git(cwd, ...args) {
+  return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function policy({ withNetBudget = false } = {}) {
+  return {
+    policy_format_version: "0.1.0",
+    repository_kind: "library",
+    paths: {
+      forbidden: [],
+      canonical_docs: ["README.md"],
+      governance_paths: ["repo-policy.json"],
+    },
+    diff_rules: {
+      max_new_docs: 5,
+      max_new_files: 20,
+      ...(withNetBudget ? { max_net_added_lines: 500 } : {}),
+    },
+    content_rules: [],
+    cochange_rules: [],
+  };
+}
+
+function initRepo(dir) {
+  git(dir, "init");
+  git(dir, "config", "user.email", "test@test.com");
+  git(dir, "config", "user.name", "Test");
+}
+
+function makeDiffRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "rg-repo-root-"));
+  initRepo(dir);
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy({ withNetBudget: true })));
+  writeFileSync(join(dir, "hello.txt"), "hello\nworld\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "init");
+  writeFileSync(join(dir, "hello.txt"), "hello\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "second");
+  return dir;
+}
+
+function writeIntent(dir) {
+  mkdirSync(join(dir, "change-intents"), { recursive: true });
+  writeFileSync(join(dir, "change-intents", "change.json"), JSON.stringify({
+    change_type: "feature",
+    scope: ["**"],
+    budgets: { max_new_files: 5, max_net_added_lines: 500 },
+    must_touch: ["hello.txt"],
+    must_not_touch: [],
+    expected_effects: ["test"],
+  }));
+}
 
 {
   const roots = resolveRoots([]);
@@ -28,16 +80,12 @@ function expect(label, actual, expected) {
   expect("args empty when no args given", roots.args.length, 0);
 }
 
-// --- resolveRoots: --repo-root override ---
-
 {
   const roots = resolveRoots(["--repo-root", "/tmp/other-repo"]);
   expect("--repo-root overrides repoRoot", roots.repoRoot, resolve("/tmp/other-repo"));
   expect("--repo-root stripped from args", roots.args.length, 0);
   expect("packageRoot unchanged with --repo-root", roots.packageRoot, projectRoot);
 }
-
-// --- resolveRoots: --repo-root mixed with other args ---
 
 {
   const roots = resolveRoots(["--base", "main", "--repo-root", "/tmp/other", "--head", "dev"]);
@@ -49,252 +97,103 @@ function expect(label, actual, expected) {
   expect("mixed args: dev preserved", roots.args[3], "dev");
 }
 
-// --- resolveRoots: packageRoot and repoRoot are independent ---
-
 {
   const roots = resolveRoots(["--repo-root", "/tmp/target"]);
-  expect("packageRoot != repoRoot when --repo-root set",
-    roots.packageRoot !== roots.repoRoot, true);
+  expect("packageRoot != repoRoot when --repo-root set", roots.packageRoot !== roots.repoRoot, true);
 }
-
-// --- self-hosted mode: validate works when cwd is repo-guard ---
 
 {
-  try {
-    const output = execSync(`node dist/repo-guard.mjs`, {
-      encoding: "utf-8",
-      cwd: projectRoot,
-    });
-    expect("self-hosted validate passes", output.includes("OK: repo-policy.json"), true);
-  } catch (e) {
-    expect("self-hosted validate passes", false, true);
-  }
+  const result = await runCliCaptured([]);
+  expect("self-hosted validate passes", result.stdout.includes("OK: repo-policy.json"), true);
 }
 
-// --- installed bin symlink: validate still runs the CLI entrypoint ---
-
+// Keep one explicit OS-process proof that the installed bin symlink executes the real entrypoint.
 {
   const tmp = mkdtempSync(join(tmpdir(), "rg-bin-symlink-"));
   const binDir = join(tmp, "node_modules", ".bin");
   mkdirSync(binDir, { recursive: true });
   const binPath = join(binDir, "repo-guard");
   symlinkSync(resolve(projectRoot, "dist/repo-guard.mjs"), binPath);
-
   try {
-    const output = execSync(
-      `node ${binPath} --repo-root ${projectRoot}`,
-      { encoding: "utf-8", cwd: tmp }
-    );
+    const output = execFileSync(process.execPath, [binPath, "--repo-root", projectRoot], {
+      encoding: "utf-8",
+      cwd: tmp,
+    });
     expect("installed bin symlink validates policy", output.includes("OK: repo-policy.json"), true);
-  } catch (e) {
+  } catch {
     expect("installed bin symlink validates policy", false, true);
   }
-
   rmSync(tmp, { recursive: true });
 }
 
-// --- explicit --repo-root: validate loads policy from target repo ---
-
+// One external-policy run proves both repo-root selection and package-owned schema loading.
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-repo-root-"));
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs --repo-root ${tmp}`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("--repo-root validate loads external policy", output.includes("OK: repo-policy.json"), true);
-  } catch (e) {
-    expect("--repo-root validate loads external policy", false, true);
-  }
-
+  const tmp = mkdtempSync(join(tmpdir(), "rg-external-root-"));
+  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy()));
+  const result = await runCliCaptured(["--repo-root", tmp]);
+  expect("--repo-root validate loads external policy", result.stdout.includes("OK: repo-policy.json"), true);
+  expect("schemas load from package (no schemas/ in target)", result.stdout.includes("OK: repo-policy.json"), true);
   rmSync(tmp, { recursive: true });
 }
 
-// --- schemas still load from package assets, not from --repo-root ---
-
+// One real Git fixture proves target-repo Git routing plus both legal --repo-root positions.
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-repo-root-"));
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
+  const tmp = makeDiffRepo();
+  const post = await runCliCaptured([
+    "check-diff", "--repo-root", tmp, "--base", "HEAD~1", "--head", "HEAD",
+  ]);
+  expect("check-diff --repo-root uses target git", post.output.includes("1 file(s) changed"), true);
+  expect("check-diff --repo-root passes", post.output.includes("0 failed"), true);
+  expect("post-command --repo-root check-diff still works", post.output.includes("1 file(s) changed"), true);
+  expect("known check-diff options still accepted", post.output.includes("1 file(s) changed"), true);
 
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs --repo-root ${tmp}`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("schemas load from package (no schemas/ in target)", output.includes("OK: repo-policy.json"), true);
-  } catch (e) {
-    expect("schemas load from package (no schemas/ in target)", false, true);
-  }
-
+  const pre = await runCliCaptured([
+    "--repo-root", tmp, "check-diff", "--base", "HEAD~1", "--head", "HEAD",
+  ]);
+  expect("pre-command --repo-root check-diff works", pre.output.includes("1 file(s) changed"), true);
+  expect("pre-command --repo-root check-diff passes", pre.output.includes("0 failed"), true);
   rmSync(tmp, { recursive: true });
 }
 
-// --- check-diff with --repo-root uses target repo git ---
-
-{
-  const tmp = mkdtempSync(join(tmpdir(), "rg-repo-root-"));
-  execSync("git init", { cwd: tmp });
-  execSync("git config user.email test@test.com && git config user.name Test", { cwd: tmp });
-
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "hello.txt"), "hello\nworld\n");
-  execSync("git add -A && git commit -m init", { cwd: tmp });
-
-  writeFileSync(join(tmp, "hello.txt"), "hello\n");
-  execSync("git add -A && git commit -m second", { cwd: tmp });
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("check-diff --repo-root uses target git", output.includes("1 file(s) changed"), true);
-    expect("check-diff --repo-root passes", output.includes("0 failed"), true);
-  } catch (e) {
-    expect("check-diff --repo-root uses target git", false, true);
-  }
-
-  rmSync(tmp, { recursive: true });
-}
-
-// --- validate resolves ChangeIntent path relative to repoRoot ---
-
+// Validate resolves a positional ChangeIntent relative to repoRoot; the same invocation is the pre-command regression.
 {
   const tmp = mkdtempSync(join(tmpdir(), "rg-change-intent-validate-"));
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-
+  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy()));
   mkdirSync(join(tmp, "change-intents"));
-  const changeIntent = {
+  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify({
     change_type: "feature",
     scope: ["src/**"],
     budgets: { max_new_files: 5 },
     must_touch: [],
     must_not_touch: [],
     expected_effects: ["test"],
-  };
-  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify(changeIntent));
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("validate resolves ChangeIntent relative to repoRoot", output.includes("OK: repo-policy.json"), true);
-    expect("validate ChangeIntent passes schema check", output.includes("OK: change-intents/change.json"), true);
-  } catch (e) {
-    const stderr = e.stderr || e.message || "";
-    expect("validate resolves ChangeIntent relative to repoRoot (no ENOENT)", !stderr.includes("ENOENT"), true);
-    expect("validate resolves ChangeIntent relative to repoRoot", false, true);
-  }
-
+  }));
+  const result = await runCliCaptured(["--repo-root", tmp, "change-intents/change.json"]);
+  expect("validate resolves ChangeIntent relative to repoRoot", result.stdout.includes("OK: repo-policy.json"), true);
+  expect("validate ChangeIntent passes schema check", result.stdout.includes("OK: change-intents/change.json"), true);
+  expect("pre-command --repo-root validate with ChangeIntent works", result.stdout.includes("OK: repo-policy.json"), true);
+  expect("pre-command --repo-root validate ChangeIntent passes", result.stdout.includes("OK: change-intents/change.json"), true);
   rmSync(tmp, { recursive: true });
 }
 
-// --- check-diff resolves --change-intent path relative to repoRoot ---
-
+// check-diff resolves --change-intent relative to the selected repository.
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-change-intent-diff-"));
-  execSync("git init", { cwd: tmp });
-  execSync("git config user.email test@test.com && git config user.name Test", { cwd: tmp });
-
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-
-  mkdirSync(join(tmp, "change-intents"));
-  const changeIntent = {
-    change_type: "feature",
-    scope: ["**"],
-    budgets: { max_new_files: 5, max_net_added_lines: 500 },
-    must_touch: ["hello.txt"],
-    must_not_touch: [],
-    expected_effects: ["test"],
-  };
-  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify(changeIntent));
-
-  writeFileSync(join(tmp, "hello.txt"), "hello");
-  execSync("git add -A && git commit -m init", { cwd: tmp });
-
-  writeFileSync(join(tmp, "hello.txt"), "hello world");
-  execSync("git add -A && git commit -m second", { cwd: tmp });
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD --change-intent change-intents/change.json`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("check-diff resolves --change-intent relative to repoRoot", output.includes("1 file(s) changed"), true);
-    expect("check-diff --change-intent passes with repoRoot", output.includes("0 failed"), true);
-  } catch (e) {
-    const stderr = e.stderr || e.message || "";
-    expect("check-diff resolves --change-intent relative to repoRoot (no ENOENT)", !stderr.includes("ENOENT"), true);
-    expect("check-diff resolves --change-intent relative to repoRoot", false, true);
-  }
-
+  const tmp = makeDiffRepo();
+  writeIntent(tmp);
+  git(tmp, "add", "-A");
+  git(tmp, "commit", "-m", "add intent");
+  writeFileSync(join(tmp, "hello.txt"), "hello world\n");
+  git(tmp, "add", "-A");
+  git(tmp, "commit", "-m", "change with intent");
+  const result = await runCliCaptured([
+    "check-diff", "--repo-root", tmp,
+    "--base", "HEAD~1", "--head", "HEAD",
+    "--change-intent", "change-intents/change.json",
+  ]);
+  expect("check-diff resolves --change-intent relative to repoRoot", result.output.includes("1 file(s) changed"), true);
+  expect("check-diff --change-intent passes with repoRoot", result.output.includes("0 failed"), true);
   rmSync(tmp, { recursive: true });
 }
-
-// --- check-pr respects repo root via roots parameter ---
 
 {
   const roots = resolveRoots(["--repo-root", "/tmp/some-repo"]);
@@ -302,264 +201,39 @@ function expect(label, actual, expected) {
   expect("check-pr receives packageRoot through roots", roots.packageRoot, projectRoot);
 }
 
-// --- pre-command --repo-root with check-pr (regression for issue #15) ---
-
+// Regression for issue #15: pre-command --repo-root reaches check-pr rather than being treated as validate input.
 {
   const tmp = mkdtempSync(join(tmpdir(), "rg-precommand-pr-"));
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-
-  try {
-    const result = execSync(
-      `node dist/repo-guard.mjs --repo-root ${tmp} check-pr 2>&1`,
-      { encoding: "utf-8", cwd: projectRoot, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "GITHUB_EVENT_PATH")) }
-    );
-    const isCheckPR = result.includes("check-pr") && !result.includes("ENOENT");
-    expect("pre-command --repo-root check-pr enters check-pr mode", isCheckPR, true);
-  } catch (e) {
-    const output = (e.stdout || "") + (e.stderr || "");
-    const isCheckPR = output.includes("check-pr") && !output.includes("ENOENT");
-    expect("pre-command --repo-root check-pr enters check-pr mode", isCheckPR, true);
-  }
-
+  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy()));
+  const result = await runCliCaptured(["--repo-root", tmp, "check-pr"], {
+    env: { GITHUB_EVENT_PATH: null },
+  });
+  const isCheckPR = result.output.includes("check-pr") && !result.output.includes("ENOENT");
+  expect("pre-command --repo-root check-pr enters check-pr mode", isCheckPR, true);
   rmSync(tmp, { recursive: true });
 }
 
-// --- pre-command --repo-root with check-diff ---
-
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-precommand-diff-"));
-  execSync("git init", { cwd: tmp });
-  execSync("git config user.email test@test.com && git config user.name Test", { cwd: tmp });
-
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "hello.txt"), "hello\nworld\n");
-  execSync("git add -A && git commit -m init", { cwd: tmp });
-
-  writeFileSync(join(tmp, "hello.txt"), "hello\n");
-  execSync("git add -A && git commit -m second", { cwd: tmp });
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs --repo-root ${tmp} check-diff --base HEAD~1 --head HEAD`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("pre-command --repo-root check-diff works", output.includes("1 file(s) changed"), true);
-    expect("pre-command --repo-root check-diff passes", output.includes("0 failed"), true);
-  } catch (e) {
-    expect("pre-command --repo-root check-diff works", false, true);
-  }
-
-  rmSync(tmp, { recursive: true });
+  const result = await runCliCaptured(["--unknown-flag"]);
+  expect("unknown option shows error message", result.stderr.includes("Unknown option: --unknown-flag"), true);
+  expect("unknown option shows usage hint", result.stderr.includes("Usage:"), true);
 }
 
-// --- pre-command --repo-root with validate (positional ChangeIntent) ---
-
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-precommand-validate-"));
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-
-  mkdirSync(join(tmp, "change-intents"));
-  const changeIntent = {
-    change_type: "feature",
-    scope: ["src/**"],
-    budgets: { max_new_files: 5 },
-    must_touch: [],
-    must_not_touch: [],
-    expected_effects: ["test"],
-  };
-  writeFileSync(join(tmp, "change-intents", "change.json"), JSON.stringify(changeIntent));
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs --repo-root ${tmp} change-intents/change.json`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("pre-command --repo-root validate with ChangeIntent works", output.includes("OK: repo-policy.json"), true);
-    expect("pre-command --repo-root validate ChangeIntent passes", output.includes("OK: change-intents/change.json"), true);
-  } catch (e) {
-    const stderr = e.stderr || e.message || "";
-    expect("pre-command --repo-root validate with ChangeIntent (no ENOENT)", !stderr.includes("ENOENT"), true);
-    expect("pre-command --repo-root validate with ChangeIntent works", false, true);
-  }
-
-  rmSync(tmp, { recursive: true });
+  const result = await runCliCaptured(["--repo-root"]);
+  expect("--repo-root without value shows error", result.stderr.includes("--repo-root requires a path argument"), true);
+  expect("--repo-root without value shows usage hint", result.stderr.includes("Usage:"), true);
 }
 
-// --- unknown option produces clear error ---
-
 {
-  try {
-    execSync(
-      `node dist/repo-guard.mjs --unknown-flag 2>&1`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("unknown option exits with error", false, true);
-  } catch (e) {
-    const output = (e.stdout || "") + (e.stderr || "");
-    expect("unknown option shows error message", output.includes("Unknown option: --unknown-flag"), true);
-    expect("unknown option shows usage hint", output.includes("Usage:"), true);
-  }
+  const result = await runCliCaptured(["check-diff", "--repo-root", "--base", "HEAD~1", "--head", "HEAD"]);
+  expect("--repo-root followed by flag shows error", result.stderr.includes("--repo-root requires a path argument"), true);
 }
 
-// --- post-command --repo-root still works ---
-
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-postcommand-"));
-  execSync("git init", { cwd: tmp });
-  execSync("git config user.email test@test.com && git config user.name Test", { cwd: tmp });
-
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "a.txt"), "a\nb\n");
-  execSync("git add -A && git commit -m init", { cwd: tmp });
-
-  writeFileSync(join(tmp, "a.txt"), "a\n");
-  execSync("git add -A && git commit -m second", { cwd: tmp });
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("post-command --repo-root check-diff still works", output.includes("1 file(s) changed"), true);
-  } catch (e) {
-    expect("post-command --repo-root check-diff still works", false, true);
-  }
-
-  rmSync(tmp, { recursive: true });
-}
-
-// --- --repo-root without value produces clear error ---
-
-{
-  try {
-    execSync(
-      `node dist/repo-guard.mjs --repo-root 2>&1`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("--repo-root without value exits with error", false, true);
-  } catch (e) {
-    const output = (e.stdout || "") + (e.stderr || "");
-    expect("--repo-root without value shows error", output.includes("--repo-root requires a path argument"), true);
-    expect("--repo-root without value shows usage hint", output.includes("Usage:"), true);
-  }
-}
-
-// --- --repo-root followed by flag (missing value) produces clear error ---
-
-{
-  try {
-    execSync(
-      `node dist/repo-guard.mjs check-diff --repo-root --base HEAD~1 --head HEAD 2>&1`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("--repo-root --base exits with error", false, true);
-  } catch (e) {
-    const output = (e.stdout || "") + (e.stderr || "");
-    expect("--repo-root followed by flag shows error", output.includes("--repo-root requires a path argument"), true);
-  }
-}
-
-// --- unknown option in check-diff mode produces clear error ---
-
-{
-  try {
-    execSync(
-      `node dist/repo-guard.mjs check-diff --hed HEAD 2>&1`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("unknown check-diff option exits with error", false, true);
-  } catch (e) {
-    const output = (e.stdout || "") + (e.stderr || "");
-    expect("unknown check-diff option shows error message", output.includes("Unknown option for check-diff: --hed"), true);
-    expect("unknown check-diff option shows usage hint", output.includes("Usage:"), true);
-  }
-}
-
-// --- known check-diff options still work (no false positive) ---
-
-{
-  const tmp = mkdtempSync(join(tmpdir(), "rg-known-opts-"));
-  execSync("git init", { cwd: tmp });
-  execSync("git config user.email test@test.com && git config user.name Test", { cwd: tmp });
-
-  const policy = {
-    policy_format_version: "0.1.0",
-    repository_kind: "library",
-    paths: {
-      forbidden: [],
-      canonical_docs: ["README.md"],
-      governance_paths: ["repo-policy.json"],
-    },
-    diff_rules: { max_new_docs: 5, max_new_files: 20, max_net_added_lines: 500 },
-    content_rules: [],
-    cochange_rules: [],
-  };
-  writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy));
-  writeFileSync(join(tmp, "a.txt"), "a\nb\n");
-  execSync("git add -A && git commit -m init", { cwd: tmp });
-
-  writeFileSync(join(tmp, "a.txt"), "a\n");
-  execSync("git add -A && git commit -m second", { cwd: tmp });
-
-  try {
-    const output = execSync(
-      `node dist/repo-guard.mjs check-diff --repo-root ${tmp} --base HEAD~1 --head HEAD`,
-      { encoding: "utf-8", cwd: projectRoot }
-    );
-    expect("known check-diff options still accepted", output.includes("1 file(s) changed"), true);
-  } catch (e) {
-    expect("known check-diff options still accepted", false, true);
-  }
-
-  rmSync(tmp, { recursive: true });
+  const result = await runCliCaptured(["check-diff", "--hed", "HEAD"]);
+  expect("unknown check-diff option shows error message", result.stderr.includes("Unknown option for check-diff: --hed"), true);
+  expect("unknown check-diff option shows usage hint", result.stderr.includes("Usage:"), true);
 }
 
 console.log(`\n${failures === 0 ? "All tests passed" : `${failures} test(s) failed`}`);

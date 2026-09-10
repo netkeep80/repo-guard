@@ -1,11 +1,8 @@
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { execSync, spawnSync } from "node:child_process";
-
-const __dirname = new URL(".", import.meta.url).pathname;
-const projectRoot = resolve(__dirname, "..");
-const repoGuard = resolve(projectRoot, "dist/repo-guard.mjs");
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { runCliCaptured } from "./support/run-cli.mjs";
 
 let failures = 0;
 
@@ -28,16 +25,8 @@ function expectIncludes(label, str, substring) {
   }
 }
 
-function runGuard(args, opts = {}) {
-  const result = spawnSync(process.execPath, [repoGuard, ...args], {
-    cwd: opts.cwd || projectRoot,
-    env: { ...process.env, ...(opts.env || {}) },
-    encoding: "utf-8",
-  });
-  return {
-    code: result.status,
-    output: `${result.stdout || ""}${result.stderr || ""}`,
-  };
+function git(cwd, ...args) {
+  return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
 function makePolicy(enforcementMode) {
@@ -57,119 +46,88 @@ function makePolicy(enforcementMode) {
     content_rules: [],
     cochange_rules: [],
   };
-
-  if (enforcementMode) {
-    policy.enforcement = { mode: enforcementMode };
-  }
-
+  if (enforcementMode) policy.enforcement = { mode: enforcementMode };
   return policy;
 }
 
 function makeRepo(enforcementMode) {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-enforcement-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-
+  git(dir, "init");
+  git(dir, "config", "user.email", "test@test.com");
+  git(dir, "config", "user.name", "Test");
   writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(makePolicy(enforcementMode), null, 2));
   writeFileSync(join(dir, "README.md"), "# Test\n");
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
-
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "init");
   writeFileSync(join(dir, "new-file.txt"), "new\n");
-  execSync("git add -A && git commit -m add-file", { cwd: dir, stdio: "pipe" });
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "add-file");
+  return { dir, base: git(dir, "rev-parse", "HEAD~1"), head: git(dir, "rev-parse", "HEAD") };
+}
 
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
+async function runDiff(repo, extra = []) {
+  return runCliCaptured([
+    "--repo-root", repo.dir,
+    "check-diff",
+    "--base", repo.base,
+    "--head", repo.head,
+    ...extra,
+  ]);
 }
 
 console.log("\n--- blocking check-diff fails on policy violation ---");
 {
   const repo = makeRepo();
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
+  const result = await runDiff(repo);
   expect("blocking exit code", result.code, 1);
   expectIncludes("blocking reports FAIL", result.output, "FAIL: max-new-files");
   expectIncludes("blocking summary names mode", result.output, "mode: blocking");
   expectIncludes("blocking result failed", result.output, "Result: failed");
-
   rmSync(repo.dir, { recursive: true });
 }
 
 console.log("\n--- advisory check-diff reports but does not fail ---");
 {
   const repo = makeRepo();
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "--enforcement", "advisory",
-    "check-diff",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
+  const result = await runDiff(repo, ["--enforcement", "advisory"]);
   expect("advisory exit code", result.code, 0);
   expectIncludes("advisory reports WARN", result.output, "WARN: max-new-files");
   expectIncludes("advisory summary has zero enforced failures", result.output, "0 failed");
   expectIncludes("advisory summary names advisory violations", result.output, "advisory violation");
   expectIncludes("advisory result still records failed checks", result.output, "Result: failed");
-
   rmSync(repo.dir, { recursive: true });
 }
 
 console.log("\n--- warn alias can be supplied after the command ---");
 {
   const repo = makeRepo();
-  const result = runGuard([
+  const result = await runCliCaptured([
     "check-diff",
     "--repo-root", repo.dir,
     "--base", repo.base,
     "--head", repo.head,
     "--enforcement", "warn",
   ]);
-
   expect("warn alias exit code", result.code, 0);
   expectIncludes("warn alias resolves to advisory", result.output, "mode: advisory");
-
   rmSync(repo.dir, { recursive: true });
 }
 
 console.log("\n--- policy config can opt into advisory mode ---");
 {
   const repo = makeRepo("advisory");
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "check-diff",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
+  const result = await runDiff(repo);
   expect("policy advisory exit code", result.code, 0);
   expectIncludes("policy advisory mode", result.output, "mode: advisory");
-
   rmSync(repo.dir, { recursive: true });
 }
 
 console.log("\n--- CLI enforcement overrides policy config ---");
 {
   const repo = makeRepo("advisory");
-  const result = runGuard([
-    "--repo-root", repo.dir,
-    "--enforcement", "blocking",
-    "check-diff",
-    "--base", repo.base,
-    "--head", repo.head,
-  ]);
-
+  const result = await runDiff(repo, ["--enforcement", "blocking"]);
   expect("CLI blocking override exit code", result.code, 1);
   expectIncludes("CLI blocking override mode", result.output, "mode: blocking");
-
   rmSync(repo.dir, { recursive: true });
 }
 
@@ -186,19 +144,14 @@ console.log("\n--- check-pr missing ChangeIntent is advisory when requested ---"
     },
     repository: { full_name: "owner/repo" },
   }));
-
-  const result = runGuard([
+  const result = await runCliCaptured([
     "--repo-root", repo.dir,
     "--enforcement", "advisory",
     "check-pr",
-  ], {
-    env: { GITHUB_EVENT_PATH: eventPath },
-  });
-
+  ], { env: { GITHUB_EVENT_PATH: eventPath } });
   expect("check-pr advisory missing ChangeIntent exit code", result.code, 0);
   expectIncludes("check-pr missing ChangeIntent warning", result.output, "WARN: change-intent");
   expectIncludes("check-pr advisory summary", result.output, "advisory violation");
-
   rmSync(repo.dir, { recursive: true });
 }
 

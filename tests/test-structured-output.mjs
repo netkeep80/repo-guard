@@ -1,11 +1,9 @@
-import { dirname, join, resolve } from "node:path";
-import { execSync, spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { runCliCaptured } from "./support/run-cli.mjs";
 
-const __dirname = new URL(".", import.meta.url).pathname;
-const projectRoot = resolve(__dirname, "..");
-const repoGuard = resolve(projectRoot, "dist/repo-guard.mjs");
 let failures = 0;
 
 function expect(label, actual, expected) {
@@ -21,17 +19,8 @@ function expectIncludes(label, value, substring) {
   expect(label, value.includes(substring), true);
 }
 
-function runGuard(args) {
-  const result = spawnSync(process.execPath, [repoGuard, ...args], {
-    cwd: projectRoot,
-    encoding: "utf-8",
-  });
-  return {
-    code: result.status,
-    stdout: result.stdout || "",
-    stderr: result.stderr || "",
-    output: `${result.stdout || ""}${result.stderr || ""}`,
-  };
+function git(cwd, ...args) {
+  return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
 function writeTree(root, files) {
@@ -43,22 +32,20 @@ function writeTree(root, files) {
 
 function makeRepo({ policy, baseFiles = {}, headFiles = {} }) {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-output-"));
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+  git(dir, "init");
+  git(dir, "config", "user.email", "test@test.com");
+  git(dir, "config", "user.name", "Test");
   writeTree(dir, {
     "repo-policy.json": JSON.stringify(policy, null, 2),
     "README.md": "# Test\n",
     ...baseFiles,
   });
-  execSync("git add -A && git commit -m init", { cwd: dir, stdio: "pipe" });
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "init");
   writeTree(dir, headFiles);
-  execSync("git add -A && git commit -m change", { cwd: dir, stdio: "pipe" });
-  return {
-    dir,
-    base: execSync("git rev-parse HEAD~1", { cwd: dir, encoding: "utf-8" }).trim(),
-    head: execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf-8" }).trim(),
-  };
+  git(dir, "add", "-A");
+  git(dir, "commit", "-m", "change");
+  return { dir, base: git(dir, "rev-parse", "HEAD~1"), head: git(dir, "rev-parse", "HEAD") };
 }
 
 function basePolicy(extra = {}) {
@@ -81,8 +68,8 @@ function basePolicy(extra = {}) {
   };
 }
 
-function runJson(repo, extraArgs = []) {
-  const result = runGuard([
+async function runJson(repo, extraArgs = []) {
+  const result = await runCliCaptured([
     "--repo-root", repo.dir,
     "check-diff",
     "--format", "json",
@@ -116,7 +103,7 @@ console.log("\n--- stable JSON envelope and violation details ---");
       "secrets/token.txt": "token\n",
     },
   });
-  const { result, parsed } = runJson(repo);
+  const { result, parsed } = await runJson(repo);
   expect("blocking violations set exit code", result.code, 1);
   expect("JSON mode keeps stderr empty", result.stderr, "");
   expect("command is stable", parsed?.command, "check-diff");
@@ -175,7 +162,7 @@ console.log("\n--- ChangeIntent anchors are exposed in JSON and summary output -
       "docs/feature.md": "Covers [FR-002] and [FR-404].\n",
     },
   });
-  const { result, parsed } = runJson(repo, ["--change-intent", "change-intent.json"]);
+  const { result, parsed } = await runJson(repo, ["--change-intent", "change-intent.json"]);
   expect("unresolved anchors block", result.code, 1);
   expect("detected anchor count is exposed", parsed?.anchors?.stats?.detected, 6);
   expect("changed anchor count is exposed", parsed?.anchors?.stats?.changed, 4);
@@ -183,15 +170,13 @@ console.log("\n--- ChangeIntent anchors are exposed in JSON and summary output -
   expect("anchor stats do not duplicate semantic unresolved state", parsed?.anchors?.stats?.unresolved, undefined);
   expect("declared affects value is exposed", parsed?.anchors?.declaredByChangeIntent?.affects?.[0], "FR-001");
   expect("legacy trace result side channel is absent", parsed?.traceRuleResults, undefined);
-
   const codeTrace = parsed?.ruleResults.find((item) => item.rule === "trace-rule: code-refs-must-resolve");
   const docTrace = parsed?.ruleResults.find((item) => item.rule === "trace-rule: doc-refs-must-resolve");
   expect("code trace remains a canonical relation result", codeTrace?.data?.kind, "set_subset");
   expect("code trace exposes unresolved value through relation data", codeTrace?.data?.missing_values?.[0], "FR-999");
   expect("doc trace remains a canonical relation result", docTrace?.data?.kind, "set_subset");
   expect("doc trace exposes unresolved value through relation data", docTrace?.data?.missing_values?.[0], "FR-404");
-
-  const summary = runGuard([
+  const summary = await runCliCaptured([
     "--repo-root", repo.dir,
     "check-diff",
     "--format", "summary",
@@ -221,7 +206,7 @@ console.log("\n--- malformed ChangeIntent uses canonical validation diagnostic -
     baseFiles: { "change-intent.json": JSON.stringify(changeIntent, null, 2) },
     headFiles: { "src/feature.mjs": "export const value = 1;\n" },
   });
-  const { result, parsed } = runJson(repo, ["--change-intent", "change-intent.json"]);
+  const { result, parsed } = await runJson(repo, ["--change-intent", "change-intent.json"]);
   expect("malformed ChangeIntent blocks", result.code, 1);
   const violation = parsed?.violations.find((item) => item.rule === "change-intent");
   expect("canonical ChangeIntent violation is present", Boolean(violation), true);
@@ -238,7 +223,7 @@ console.log("\n--- size violations retain machine-readable measurements ---");
     }),
     headFiles: { "src/big.mjs": "one\ntwo\nthree\n" },
   });
-  const { result, parsed } = runJson(repo);
+  const { result, parsed } = await runJson(repo);
   expect("size violation blocks", result.code, 1);
   const measurement = parsed?.violations.find((item) => item.rule === "size:max-src-lines:max");
   expect("size rule identity is carried by canonical relation name", measurement?.rule, "size:max-src-lines:max");
@@ -270,7 +255,7 @@ console.log("\n--- advisory warnings remain non-blocking and structured ---");
       "docs/copy.md": "# Release Policy\n\nPolicy prose belongs in the canonical document so maintainers update one source.\n",
     },
   });
-  const { result, parsed } = runJson(repo);
+  const { result, parsed } = await runJson(repo);
   expect("advisory warning does not block", result.code, 0);
   expect("result records warnings", parsed?.result, "passed_with_warnings");
   expect("warning count is stable", parsed?.warnings, 1);
@@ -290,7 +275,7 @@ console.log("\n--- summary output stays concise and GitHub-friendly ---");
     },
   });
   const repo = makeRepo({ policy, headFiles: { "secrets/token.txt": "token\n" } });
-  const result = runGuard([
+  const result = await runCliCaptured([
     "--repo-root", repo.dir,
     "--enforcement", "advisory",
     "check-diff",
