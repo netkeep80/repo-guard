@@ -6,7 +6,7 @@ import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers,
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
-import { resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
+import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 
 type PolicyRuntime = ReturnType<typeof loadPolicyRuntime>;
 type RuntimePolicy = PolicyRuntime["policy"];
@@ -40,6 +40,7 @@ type PRChangeIntentFacts =
   | ({ ok: true; changeIntent: unknown; changeIntentSource: "pr body" | "linked issue" } & PRFactsCommon)
   | ({ ok: false; error: string; message: string; changeIntentSource: "pr body" | "none" } & PRFactsCommon);
 interface InitialCheck { name: string; check: unknown; }
+interface LinkedIssueObservation { body?: unknown; }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
@@ -102,16 +103,19 @@ function printMissing(title: string, missing: readonly string[]) { console.error
 function fetchLinkedIssue({ prBody, repoFullName }: { prBody: unknown; repoFullName: unknown }) {
   const linkedIssues = extractLinkedIssueNumbers(prBody), pr = extractChangeIntent(prBody);
   const hasChangeIntent = pr.ok, needsFallback = !hasChangeIntent && pr.error === "change_intent_not_found" && linkedIssues.length === 1;
-  if (linkedIssues.length !== 1 || (!needsFallback && !hasChangeIntent)) return { linkedIssues, issueBody: null, fatal: false };
+  if (linkedIssues.length !== 1 || (!needsFallback && !hasChangeIntent)) return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
   console.log(needsFallback ? `No ChangeIntent in PR body; trying linked issue #${linkedIssues[0]}...` : `Fetching linked issue #${linkedIssues[0]} for GovernanceGrant...`);
   const missing = checkIssueFallbackPrerequisites();
   if (missing.length) {
-    if (needsFallback) { printMissing("ERROR: linked issue fallback prerequisites not met:", missing); return { linkedIssues, issueBody: null, fatal: true }; }
-    console.warn("WARN: linked issue lookup unavailable; GovernanceGrant cannot be established"); return { linkedIssues, issueBody: null, fatal: false };
+    if (needsFallback) { printMissing("ERROR: linked issue fallback prerequisites not met:", missing); return { linkedIssues, issueBody: null, issueContext: null, fatal: true }; }
+    console.warn("WARN: linked issue lookup unavailable; GovernanceGrant cannot be established"); return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
   }
-  const issueBody = fetchIssueBody(repoFullName, linkedIssues[0]);
+  const issueContext = fetchIssueAuthorContext(repoFullName, linkedIssues[0]);
+  const issueBody = issueContext && typeof issueContext === "object" && typeof (issueContext as LinkedIssueObservation).body === "string"
+    ? (issueContext as LinkedIssueObservation).body as string
+    : null;
   if (issueBody === null && hasChangeIntent) console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
-  return { linkedIssues, issueBody, fatal: false };
+  return { linkedIssues, issueBody, issueContext, fatal: false };
 }
 
 export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
@@ -150,7 +154,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   if (!enforcement.ok) { console.error(`ERROR: ${enforcement.message}`); return 1; }
   const linked = fetchLinkedIssue({ prBody, repoFullName });
   if (linked.fatal) return 1;
-  const { linkedIssues, issueBody } = linked;
+  const { linkedIssues, issueBody, issueContext } = linked;
   let resolved = resolvePRChangeIntentFacts({ prBody, issueBody });
   if (!resolved.ok && resolved.linkedIssues.length === 1 && issueBody === null && resolved.error !== "issue_link_ambiguous") resolved = { ...resolved, error: "issue_fetch_failed", message: `Could not fetch issue #${resolved.linkedIssues[0]} body` };
 
@@ -174,7 +178,9 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   try { diffText = getDiff(base, head as string, roots.repoRoot); }
   catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
-  if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber }); } catch {}
+  if (basePolicy && repoFullName) try {
+    trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber, issueContext });
+  } catch {}
 
   const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
