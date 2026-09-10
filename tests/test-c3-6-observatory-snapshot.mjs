@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
+  C3_BASELINE_SHA,
   collectObservatorySnapshot,
   stableJson,
 } from "../scripts/observatory/collect.mjs";
@@ -26,6 +27,26 @@ function response(status, body = {}) {
   };
 }
 
+const runCache = new Map();
+const runExecutions = new Map();
+function runKey(command, args, options = {}) {
+  return JSON.stringify([command, args, options.cwd ?? null]);
+}
+function memoizedRun(command, args, options = {}) {
+  const key = runKey(command, args, options);
+  if (!runCache.has(key)) {
+    runExecutions.set(key, (runExecutions.get(key) ?? 0) + 1);
+    runCache.set(key, execFileSync(command, args, {
+      encoding: "utf8",
+      ...options,
+    }).trim());
+  }
+  return runCache.get(key);
+}
+function executionCount(command, args, options = {}) {
+  return runExecutions.get(runKey(command, args, options)) ?? 0;
+}
+
 const release404 = async () => response(404);
 
 const input = {
@@ -40,6 +61,7 @@ const input = {
   repository: "netkeep80/repo-guard",
   token: "test-token",
   fetchImpl: release404,
+  run: memoizedRun,
 };
 
 const first = await collectObservatorySnapshot(input);
@@ -136,6 +158,19 @@ for (const [name, fetchImpl] of [
   assert.equal(nonOfficial.version.release_url, null, name);
   assert.equal(nonOfficial.version.release_truth_status, "package_only", name);
 }
+
+assert.equal(
+  executionCount(
+    process.execPath,
+    [resolve(repoRoot, "scripts/compression-metrics.mjs"), "--compare", C3_BASELINE_SHA],
+    { cwd: repoRoot },
+  ),
+  1,
+);
+assert.equal(
+  executionCount("git", ["rev-parse", "HEAD"], { cwd: repoRoot }),
+  1,
+);
 
 assert.deepEqual(
   first.architecture.current.architecture.canonical_fact_sources,
