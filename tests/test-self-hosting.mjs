@@ -1,11 +1,11 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { runCliCaptured } from "./support/run-cli.mjs";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const projectRoot = resolve(__dirname, "..");
-
 let failures = 0;
 
 function expect(label, actual, expected) {
@@ -39,11 +39,15 @@ function makeTmpDir() {
   return mkdtempSync(join(tmpdir(), "repo-guard-doctor-"));
 }
 
+function git(cwd, ...args) {
+  return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
 function initGitRepo(dir) {
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
-  execSync("git commit --allow-empty -m init", { cwd: dir, stdio: "pipe" });
+  git(dir, "init");
+  git(dir, "config", "user.email", "test@test.com");
+  git(dir, "config", "user.name", "Test");
+  git(dir, "commit", "--allow-empty", "-m", "init");
 }
 
 function validPolicy() {
@@ -57,23 +61,11 @@ function validPolicy() {
   });
 }
 
-function runRepoGuard(args = "", opts = {}) {
-  const cmd = `node ${resolve(projectRoot, "dist/repo-guard.mjs")} ${args}`;
-  try {
-    const stdout = execSync(cmd, { encoding: "utf-8", cwd: opts.cwd || projectRoot, stdio: ["pipe", "pipe", "pipe"] });
-    return { stdout, stderr: "", code: 0 };
-  } catch (e) {
-    return { stdout: e.stdout || "", stderr: e.stderr || "", code: e.status };
-  }
-}
-
-function runDoctor(args = "", opts = {}) {
-  return runRepoGuard(args, opts);
-}
+const runDoctor = (args = []) => runCliCaptured(args);
 
 console.log("\n--- self-hosting: doctor on repo-guard itself ---");
 {
-  const { stdout, code } = runDoctor("doctor");
+  const { stdout, code } = await runDoctor(["doctor"]);
   expect("exit code 0 on healthy repo", code, 0);
   expectIncludes("shows header", stdout, "repo-guard doctor");
   expectIncludes("repo root passes", stdout, "PASS: repository-root");
@@ -91,64 +83,73 @@ console.log("\n--- self-hosting: doctor catches broken-policy fixture ---");
   initGitRepo(dir);
   const brokenPolicy = resolve(projectRoot, "tests/fixtures/broken-policy.json");
   writeFileSync(resolve(dir, "repo-policy.json"), readFileSync(brokenPolicy, "utf-8"));
-  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  const { stdout, code } = await runDoctor(["--repo-root", dir, "doctor"]);
   expect("exit code 1 for broken policy", code, 1);
   expectIncludes("detects invalid forbid_regex", stdout, "FAIL: repo-policy.json");
   expectIncludes("mentions bad-regex-rule", stdout, "bad-regex-rule");
   expectIncludes("summary shows failure", stdout, "1 failed");
+  rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- missing repo-policy.json ---");
 {
-  const dir = makeTmpDir(); initGitRepo(dir);
-  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  const dir = makeTmpDir();
+  initGitRepo(dir);
+  const { stdout, code } = await runDoctor(["--repo-root", dir, "doctor"]);
   expect("exit code 1 for missing policy", code, 1);
   expectIncludes("policy FAIL", stdout, "FAIL: repo-policy.json");
   expectIncludes("hint mentions init", stdout, "repo-guard init");
+  rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- malformed JSON in repo-policy.json ---");
 {
-  const dir = makeTmpDir(); initGitRepo(dir);
+  const dir = makeTmpDir();
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), "{ not valid json }}");
-  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  const { stdout, code } = await runDoctor(["--repo-root", dir, "doctor"]);
   expect("exit code 1 for malformed json", code, 1);
   expectIncludes("policy FAIL with parse error", stdout, "FAIL: repo-policy.json");
   expectIncludes("mentions parse error", stdout, "Parse error");
+  rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- schema-invalid repo-policy.json ---");
 {
-  const dir = makeTmpDir(); initGitRepo(dir);
+  const dir = makeTmpDir();
+  initGitRepo(dir);
   writeFileSync(resolve(dir, "repo-policy.json"), JSON.stringify({
     policy_format_version: "0.3.0", repository_kind: "unknown_kind", paths: {}, diff_rules: {}
   }));
-  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  const { stdout, code } = await runDoctor(["--repo-root", dir, "doctor"]);
   expect("exit code 1 for invalid schema", code, 1);
   expectIncludes("policy FAIL with schema error", stdout, "FAIL: repo-policy.json");
   expectIncludes("mentions schema validation", stdout, "Schema validation failed");
+  rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- not a git repository ---");
 {
-  const dir = makeTmpDir(); writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
-  const { stdout, code } = runDoctor(`--repo-root ${dir} doctor`);
+  const dir = makeTmpDir();
+  writeFileSync(resolve(dir, "repo-policy.json"), validPolicy());
+  const { stdout, code } = await runDoctor(["--repo-root", dir, "doctor"]);
   expect("exit code 0 (warns, no fails)", code, 0);
   expectIncludes("git WARN for non-repo", stdout, "WARN: git-available");
   expectIncludes("hint mentions git init", stdout, "git init");
   expectNotIncludes("workflow text inspection stays absent", stdout, "workflow-config");
+  rmSync(dir, { recursive: true });
 }
 
 console.log("\n--- non-existent repo root ---");
 {
-  const { stdout, code } = runDoctor("--repo-root /nonexistent/path/xyz doctor");
+  const { stdout, code } = await runDoctor(["--repo-root", "/nonexistent/path/xyz", "doctor"]);
   expect("exit code 1 for missing root", code, 1);
   expectIncludes("root FAIL", stdout, "FAIL: repository-root");
 }
 
 console.log("\n--- output distinguishes pass / warn / fail ---");
 {
-  const { stdout } = runDoctor("doctor");
+  const { stdout } = await runDoctor(["doctor"]);
   expectIncludes("contains PASS", stdout, "PASS:");
   if (process.env.GITHUB_EVENT_PATH) console.log("PASS: skipping WARN check (CI with full context may have no warnings)");
   else expectIncludes("contains WARN", stdout, "WARN:");
@@ -157,7 +158,7 @@ console.log("\n--- output distinguishes pass / warn / fail ---");
 
 console.log("\n--- event context adapts to environment ---");
 {
-  const { stdout } = runDoctor("doctor");
+  const { stdout } = await runDoctor(["doctor"]);
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventPath) {
     expectIncludes("event-context WARN outside CI", stdout, "WARN: event-context");
@@ -174,19 +175,22 @@ console.log("\n--- event context adapts to environment ---");
 
 console.log("\n--- gh/auth are optional unless linked-issue fallback is used ---");
 {
-  const { stdout } = runDoctor("doctor");
+  const { stdout } = await runDoctor(["doctor"]);
   expectNotIncludes("gh-cli absence is never a hard failure", stdout, "FAIL: gh-cli");
   expectNotIncludes("auth-token is never FAIL (auth only needed for linked-issue fallback)", stdout, "FAIL: auth-token");
 }
 
 console.log("\n--- --repo-root flag works with doctor ---");
 {
-  const { stdout, code } = runDoctor(`--repo-root ${projectRoot} doctor`);
+  const { stdout, code } = await runDoctor(["--repo-root", projectRoot, "doctor"]);
   expect("exit code 0 with explicit repo-root", code, 0);
   expectIncludes("shows repo root path", stdout, projectRoot);
   expectNotIncludes("no workflow text semantics", stdout, "workflow-config");
 }
 
 console.log("\n=========================");
-if (failures > 0) { console.error(`${failures} test(s) FAILED`); process.exit(1); }
-else console.log("All doctor tests passed");
+if (failures > 0) {
+  console.error(`${failures} test(s) FAILED`);
+  process.exit(1);
+}
+console.log("All doctor tests passed");
