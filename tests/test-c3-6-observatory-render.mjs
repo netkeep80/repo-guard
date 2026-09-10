@@ -19,13 +19,10 @@ import {
   renderObservatory,
   validateObservatorySnapshot,
 } from "../scripts/observatory/render.mjs";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
 const repoRoot = resolve(".");
-const acceptedSha = execFileSync(
-  "git",
-  ["rev-parse", "HEAD"],
-  { cwd: repoRoot, encoding: "utf8" },
-).trim();
+const acceptedSha = observeImmutable("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
 
 const snapshot = await collectObservatorySnapshot({
   repoRoot,
@@ -43,6 +40,7 @@ const snapshot = await collectObservatorySnapshot({
     ok: false,
     async json() { return {}; },
   }),
+  run: observeImmutable,
 });
 
 assert.equal(snapshot.scenarios.length, 5);

@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { readFact } from "../dist/document-facts.mjs";
@@ -6,6 +5,7 @@ import {
   relationDescriptor,
   relationDescriptors,
 } from "../dist/checks/relation-kernel.mjs";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
 let failures = 0;
 
@@ -155,10 +155,9 @@ for (const file of [
 expect("old selector type is deleted", source("src/document-facts.mts").includes("DocumentFactSelector"), false);
 expect("old selector reader is deleted", source("src/document-facts.mts").includes("readDocumentFact"), false);
 
-const compressionMetrics = JSON.parse(execFileSync(
+const compressionMetrics = JSON.parse(observeImmutable(
   process.execPath,
   ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
-  { encoding: "utf8" },
 ));
 const c31 = compressionMetrics.architecture;
 expect("compression metrics see one canonical FactRef model", c31.canonical_factref_model_count, 1);

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDocument } from "yaml";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
 const root = resolve(".");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
@@ -33,10 +33,10 @@ assert.equal(distStep.run, "npm run check:dist");
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 assert.equal(packageJson.scripts.prepack, "npm run build");
 
-const metrics = JSON.parse(execFileSync(
+const metrics = JSON.parse(observeImmutable(
   process.execPath,
   ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
-  { cwd: root, encoding: "utf8" },
+  { cwd: root },
 ));
 assert.equal(metrics.ci.npm_ci_runs, 1);
 assert.equal(metrics.ci.effective_check_dist_runs, 1);

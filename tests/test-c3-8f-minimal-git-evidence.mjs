@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDocument } from "yaml";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
 const root = resolve(".");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
@@ -38,10 +38,10 @@ for (const name of ["Report architecture compression metrics", "Run doctor diagn
   assert.ok(index > evidenceIndex, `${name} must run after minimal Git evidence acquisition`);
 }
 
-const metrics = JSON.parse(execFileSync(
+const metrics = JSON.parse(observeImmutable(
   process.execPath,
   ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
-  { cwd: root, encoding: "utf8" },
+  { cwd: root },
 ));
 assert.equal(metrics.ci.full_history_checkouts, 0);
 assert.equal(metrics.ci.effective_check_dist_runs, 1);

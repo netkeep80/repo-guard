@@ -1,8 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
-const metrics = () => JSON.parse(execFileSync(process.execPath, ["scripts/compression-metrics.mjs", "--ref", "HEAD"], { encoding: "utf-8" }));
+const metrics = () => JSON.parse(observeImmutable(
+  process.execPath,
+  ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
+));
 
 describe("C3.2 architecture compression metrics", () => {
   it("proves pure macro lowering and removal of positional generated-edge knowledge", () => {

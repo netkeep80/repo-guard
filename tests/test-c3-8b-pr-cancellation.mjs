@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDocument } from "yaml";
 
 import { collectObservatorySnapshot } from "../scripts/observatory/collect.mjs";
 import { renderObservatory } from "../scripts/observatory/render.mjs";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
 const repoRoot = resolve(".");
 const workflowSource = readFileSync(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8");
@@ -28,11 +28,7 @@ assert.equal(
 );
 assert.equal(workflow.concurrency?.["cancel-in-progress"], true);
 
-const acceptedSha = execFileSync(
-  "git",
-  ["rev-parse", "HEAD"],
-  { cwd: repoRoot, encoding: "utf8" },
-).trim();
+const acceptedSha = observeImmutable("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
 const snapshot = await collectObservatorySnapshot({
   repoRoot,
   acceptedSha,
@@ -49,6 +45,7 @@ const snapshot = await collectObservatorySnapshot({
     ok: false,
     async json() { return {}; },
   }),
+  run: observeImmutable,
 });
 
 assert.deepEqual(snapshot.ci.concurrency, workflow.concurrency);

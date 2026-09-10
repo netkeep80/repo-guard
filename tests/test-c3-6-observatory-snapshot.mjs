@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -8,13 +7,10 @@ import {
   collectObservatorySnapshot,
   stableJson,
 } from "../scripts/observatory/collect.mjs";
+import { observeImmutable } from "./support/immutable-observation.mjs";
 
 const repoRoot = resolve(".");
-const acceptedSha = execFileSync(
-  "git",
-  ["rev-parse", "HEAD"],
-  { cwd: repoRoot, encoding: "utf8" },
-).trim();
+const acceptedSha = observeImmutable("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
 const packageJson = JSON.parse(
   readFileSync(resolve(repoRoot, "package.json"), "utf8"),
 );
@@ -36,10 +32,7 @@ function memoizedRun(command, args, options = {}) {
   const key = runKey(command, args, options);
   if (!runCache.has(key)) {
     runExecutions.set(key, (runExecutions.get(key) ?? 0) + 1);
-    runCache.set(key, execFileSync(command, args, {
-      encoding: "utf8",
-      ...options,
-    }).trim());
+    runCache.set(key, observeImmutable(command, args, options));
   }
   return runCache.get(key);
 }
