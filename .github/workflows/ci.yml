@@ -41,7 +41,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run discovered test suite
-        run: npm test
+        run: node tests/run.mjs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
