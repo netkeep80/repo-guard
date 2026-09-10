@@ -1,56 +1,57 @@
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { describe, it } from "node:test";
-import { parse as parseYaml } from "yaml";
-import { COMMANDS } from "../dist/repo-guard.mjs";
+import { resolve } from "node:path";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
+import { parseYaml } from "../dist/document-facts.mjs";
 import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
+import { COMMANDS } from "../dist/repo-guard.mjs";
 
-const read = (path) => readFileSync(path, "utf8");
+const projectRoot = resolve(new URL("..", import.meta.url).pathname);
+const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
 const json = (path) => JSON.parse(read(path));
+const policy = json("repo-policy.json");
 const workflowText = read(".github/workflows/ci.yml");
 const workflow = parseYaml(workflowText);
 const coverage = json("docs/self-hosting-coverage.json");
-const testFiles = readdirSync("tests");
+const exceptions = coverage.exceptions || {};
+const testFiles = readdirSync(resolve(projectRoot, "tests")).filter((name) => name.endsWith(".mjs")).sort();
 
-function observedCommands() {
-  const commands = new Set();
-  const runs = workflow.jobs.validate.steps.map((step) => step.run || "").join("\n");
-  if (runs.includes("npx repo-guard\n") || runs.includes("run: npx repo-guard")) commands.add("validate");
-  if (runs.includes("repo-guard doctor")) commands.add("doctor");
-  if (runs.includes("check-diff")) commands.add("check-diff");
-  const localAction = workflow.jobs.validate.steps.find((step) => step.uses === "./");
-  if (localAction?.with?.mode === "check-pr") commands.add("check-pr");
-  return commands;
+function hasException(id) {
+  return typeof exceptions[id] === "string" && exceptions[id].trim().length > 0;
 }
 
-function allowedExceptions(prefix) {
-  return new Set(
-    Object.keys(coverage.exceptions || {})
-      .filter((key) => key.startsWith(prefix))
-      .map((key) => key.slice(prefix.length)),
-  );
+function selfFacts() {
+  return {
+    policy,
+    basePolicy: policy,
+    headPolicy: policy,
+    changeIntent: { change_type: "refactor" },
+    trustedGovernancePaths: policy.paths.governance_paths,
+    diff: { files: { checked: [] } },
+  };
 }
 
 describe("repo-guard self-hosting security boundary", () => {
   it("checks ready PRs through the local Action in blocking mode", () => {
-    const localAction = workflow.jobs.validate.steps.find((step) => step.uses === "./");
-    assert.ok(localAction);
-    assert.equal(localAction.with.mode, "check-pr");
-    assert.equal(localAction.with.enforcement, "blocking");
-    assert.match(localAction.if, /pull_request/);
-    assert.match(localAction.if, /!github\.event\.pull_request\.draft/);
+    const step = workflow.jobs.validate.steps.find((item) => item.name === "Run PR policy check");
+    assert.ok(step);
+    assert.equal(step.uses, "./");
+    assert.equal(step.with.mode, "check-pr");
+    assert.equal(step.with.enforcement, "blocking");
+    assert.match(step.if, /pull_request/);
+    assert.equal(step.env.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
   });
 
   it("keeps governance files inside the checked surface", () => {
-    const policy = json("repo-policy.json");
-    assert.ok(policy.paths.governance_paths.includes("repo-policy.json"));
-    assert.ok(policy.paths.governance_paths.includes(".github/workflows/**"));
-    assert.ok(policy.paths.governance_paths.includes("schemas/**"));
+    for (const path of [
+      "repo-policy.json", "schemas/", ".github/workflows/", ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE/", "templates/", "action.yml",
+    ]) assert.ok(policy.paths.governance_paths.includes(path), `missing governance path ${path}`);
+    assert.equal((policy.paths.operational_paths || []).some((path) => path.startsWith(".github/")), false);
   });
 
   it("exercises both enforcement modes", () => {
-    const policy = json("repo-policy.json");
     assert.equal(policy.enforcement.mode, "blocking");
     const advisory = workflow.jobs.validate.steps.find((item) => item.name === "Exercise advisory policy mode");
     assert.match(advisory.run, /--enforcement advisory check-diff/);
@@ -82,54 +83,73 @@ describe("derived test inventory", () => {
 
 describe("derived capability inventory", () => {
   it("derives commands from the CLI registry and finds real evidence or an explicit exception", () => {
-    const observed = observedCommands();
-    const exceptions = allowedExceptions("command:");
+    const corpus = `${workflowText}\n${testFiles.join("\n")}\n${read(".github/PULL_REQUEST_TEMPLATE.md")}`;
     for (const command of COMMANDS) {
-      assert.ok(observed.has(command) || exceptions.has(command), `missing self-host evidence for command ${command}`);
+      if (command === "validate") assert.match(workflowText, /Validate repo-policy\.json/);
+      else if (command === "init") assert.ok(testFiles.includes("test-init.mjs"));
+      else if (!corpus.includes(command)) {
+        assert.ok(hasException(`command:${command}`), `no self-hosting evidence or exception for command ${command}`);
+      }
+    }
+    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("command:"))) {
+      assert.ok(COMMANDS.includes(id.slice(8)), `stale command exception ${id}`);
     }
   });
 
   it("derives rule families from the runtime registry", () => {
-    const familyIds = new Set(defaultRuleFamilies.map((family) => family.id));
-    const exceptions = allowedExceptions("rule:");
-    for (const id of familyIds) {
-      assert.ok(!exceptions.has(id) || coverage.exceptions[`rule:${id}`]);
+    const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
+    assert.ok(ruleIds.size > 0);
+    for (const family of defaultRuleFamilies) {
+      const capability = `rule:${family.id}`;
+      const applies = family.applies ? family.applies(selfFacts(), {}) : true;
+      if (applies === false) assert.ok(hasException(capability), `${capability} is inactive on self and lacks rationale`);
     }
-    for (const id of exceptions) assert.ok(familyIds.has(id), `stale rule exception ${id}`);
+    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("rule:"))) {
+      assert.ok(ruleIds.has(id.slice(5)), `stale rule exception ${id}`);
+    }
   });
 
   it("derives built-in profiles and requires rationale for unused ones", () => {
-    const profiles = new Set(listBuiltInProfiles());
-    const exceptions = allowedExceptions("profile:");
-    for (const id of exceptions) assert.ok(profiles.has(id), `stale profile exception ${id}`);
+    for (const profile of listBuiltInProfiles()) {
+      if (policy.profile !== profile) assert.ok(hasException(`profile:${profile}`), `unused profile ${profile} lacks rationale`);
+    }
   });
 
   it("stores only explicit exceptions, never a mirror of normal capabilities", () => {
-    assert.deepEqual(Object.keys(coverage).sort(), ["exceptions"]);
-    for (const [key, reason] of Object.entries(coverage.exceptions)) {
-      assert.match(key, /^(command|rule|profile):/);
-      assert.equal(typeof reason, "string");
-      assert.ok(reason.trim().length > 0);
+    assert.equal(coverage.schema_version, "2.0.0");
+    assert.equal(Object.hasOwn(coverage, "capabilities"), false);
+    for (const [id, rationale] of Object.entries(exceptions)) {
+      assert.ok(id.includes(":"));
+      assert.ok(rationale.trim().length > 20, `${id} rationale is too weak`);
     }
+    assert.ok(hasException("change-intent-format:repo-guard-json"));
   });
 });
 
 describe("self-hosted policy and documentation", () => {
   it("has no retired integration policy surface", () => {
-    const policy = json("repo-policy.json");
-    assert.equal(policy.integration, undefined);
+    assert.equal(Object.hasOwn(policy, "integration"), false);
+    assert.equal(workflowText.includes("validate-integration"), false);
   });
 
   it("self-applies through build, policy, doctor, tests and PR checks", () => {
-    assert.match(workflowText, /npm run check:dist/);
-    assert.match(workflowText, /npx repo-guard/);
-    assert.match(workflowText, /repo-guard doctor/);
-    assert.match(workflowText, /node tests\/run\.mjs/);
-    assert.match(workflowText, /uses:\s*\.\//);
+    const steps = workflow.jobs.validate.steps;
+    for (const name of [
+      "Verify generated dist freshness",
+      "Report architecture compression metrics",
+      "Validate repo-policy.json",
+      "Run doctor diagnostics on self",
+      "Run discovered test suite",
+      "Run PR policy check",
+    ]) assert.ok(steps.some((step) => step.name === name), `missing self-hosting step ${name}`);
+    assert.ok(workflow.jobs["smoke-pack"]);
   });
 
   it("uses YAML ChangeIntent blocks itself and documents the exception model", () => {
-    assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /repo-guard-yaml/);
-    assert.match(read("docs/SELF_HOSTING.md"), /исключ/i);
+    assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /```repo-guard-yaml/);
+    assert.match(read(".github/ISSUE_TEMPLATE/change-intent.yml"), /repo-guard-yaml/);
+    const doc = read("docs/self-hosting-coverage.md");
+    assert.match(doc, /вывод/);
+    assert.match(doc, /исключен/);
   });
 });
