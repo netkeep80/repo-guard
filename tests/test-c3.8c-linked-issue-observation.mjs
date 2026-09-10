@@ -59,6 +59,7 @@ const a = process.argv.slice(2), i = a.indexOf('--jq'), q = i >= 0 ? a[i + 1] : 
 if (a.includes('--version')) { console.log('gh 0.0'); process.exit(0); }
 if (a[0] === 'api') appendFileSync(${JSON.stringify(callLog)}, JSON.stringify(a) + '\\n');
 if (route.endsWith('/issues/77')) {
+  if (process.env.FAIL_ISSUE === '1') process.exit(1);
   if (q === '.body') console.log(${JSON.stringify(issueBody)});
   else console.log(JSON.stringify({body:${JSON.stringify(issueBody)},user:{login:'maintainer',type:'User'},author_association:'OWNER',labels:[]}));
 } else if (route.includes('/collaborators/')) {
@@ -80,24 +81,41 @@ if (route.endsWith('/issues/77')) {
       repository: { full_name: "owner/repo" },
     }));
 
-    const result = spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr"], {
+    const run = (extraEnv = {}) => spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr"], {
       cwd: root,
-      env: { ...process.env, GITHUB_EVENT_PATH: eventPath, PATH: `${fakeDir}:${process.env.PATH}` },
+      env: { ...process.env, GITHUB_EVENT_PATH: eventPath, PATH: `${fakeDir}:${process.env.PATH}`, ...extraEnv },
       encoding: "utf-8",
     });
+    const readCalls = () => readFileSync(callLog, "utf-8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const summarizeCalls = (calls) => ({
+      totalRestReads: calls.length,
+      linkedIssueReads: calls.filter((args) => String(args[1] || "").endsWith("/issues/77")).length,
+      prReads: calls.filter((args) => String(args[1] || "").endsWith("/pulls/42")).length,
+      permissionReads: calls.filter((args) => String(args[1] || "").includes("/collaborators/maintainer/permission")).length,
+    });
+
+    const result = run();
     const output = `${result.stdout || ""}${result.stderr || ""}`;
     assert.equal(result.status, 0, output);
     assert.match(output, /PASS: governance-change-authorization/);
+    assert.deepEqual(summarizeCalls(readCalls()), {
+      totalRestReads: 3,
+      linkedIssueReads: 1,
+      prReads: 1,
+      permissionReads: 1,
+    });
 
-    const calls = readFileSync(callLog, "utf-8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    const issueReads = calls.filter((args) => String(args[1] || "").endsWith("/issues/77"));
-    const prReads = calls.filter((args) => String(args[1] || "").endsWith("/pulls/42"));
-    const permissionReads = calls.filter((args) => String(args[1] || "").includes("/collaborators/maintainer/permission"));
-
-    assert.deepEqual(
-      { totalRestReads: calls.length, linkedIssueReads: issueReads.length, prReads: prReads.length, permissionReads: permissionReads.length },
-      { totalRestReads: 3, linkedIssueReads: 1, prReads: 1, permissionReads: 1 },
-    );
+    writeFileSync(callLog, "");
+    const failed = run({ FAIL_ISSUE: "1" });
+    const failedOutput = `${failed.stdout || ""}${failed.stderr || ""}`;
+    assert.equal(failed.status, 1, failedOutput);
+    assert.doesNotMatch(failedOutput, /PASS: governance-change-authorization/);
+    assert.deepEqual(summarizeCalls(readCalls()), {
+      totalRestReads: 2,
+      linkedIssueReads: 1,
+      prReads: 1,
+      permissionReads: 0,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(fakeDir, { recursive: true, force: true });
