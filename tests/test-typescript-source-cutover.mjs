@@ -69,7 +69,7 @@ describe("derived test inventory", () => {
 
   it("runs one canonical suite in CI instead of per-test steps", () => {
     const steps = workflow.jobs.validate.steps;
-    assert.ok(steps.some((step) => step.name === "Run discovered test suite" && step.run === "npm test"));
+    assert.ok(steps.some((step) => step.name === "Run discovered test suite" && step.run === "node tests/run.mjs"));
     assert.equal(workflowText.includes("npm run test:"), false);
   });
 

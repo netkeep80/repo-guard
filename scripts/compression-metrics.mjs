@@ -79,13 +79,20 @@ function ciMetrics(target, pkg) {
   const jobs = count(jobsBlock, /^  [A-Za-z0-9_-]+:\s*$/gm);
   const npmCiRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm ci\s*$/gm);
   const explicitCheckDistRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm run check:dist\s*$/gm);
-  const testRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm test\s*$/gm);
+  const runCommands = [...workflow.matchAll(/^\s*(?:-\s*)?run:\s*([^\n]+?)\s*$/gm)]
+    .map((match) => match[1].trim());
+  const npmLifecycleTestRuns = runCommands.filter((command) => command === "npm test").length;
+  const packageTestCommand = (pkg.scripts?.test || "").trim();
+  const directTestRuns = packageTestCommand && packageTestCommand !== "npm test"
+    ? runCommands.filter((command) => command === packageTestCommand).length
+    : 0;
+  const testRuns = npmLifecycleTestRuns + directTestRuns;
   const pretestCallsCheckDist = /check:dist/.test(pkg.scripts?.pretest || "") ? 1 : 0;
   return {
     jobs,
     npm_ci_runs: npmCiRuns,
     explicit_check_dist_runs: explicitCheckDistRuns,
-    effective_check_dist_runs: explicitCheckDistRuns + (testRuns * pretestCallsCheckDist),
+    effective_check_dist_runs: explicitCheckDistRuns + (npmLifecycleTestRuns * pretestCallsCheckDist),
     test_runs: testRuns,
     full_history_checkouts: count(workflow, /fetch-depth:\s*0/g),
     self_action_runtime_installs: count(action, /npm install --omit=dev/g),
