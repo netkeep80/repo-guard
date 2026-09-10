@@ -106,10 +106,8 @@ function fetchLinkedIssue({ prBody, repoFullName }) {
         console.warn("WARN: linked issue lookup unavailable; GovernanceGrant cannot be established");
         return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
     }
-    const issueContext = fetchIssueAuthorContext(repoFullName, linkedIssues[0]);
-    const issueBody = issueContext && typeof issueContext === "object" && typeof issueContext.body === "string"
-        ? issueContext.body
-        : null;
+    const issueContext = fetchIssueAuthorContext(repoFullName, linkedIssues[0]), observedBody = issueContext?.body;
+    const issueBody = typeof observedBody === "string" ? observedBody : null;
     if (issueBody === null && hasChangeIntent)
         console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
     return { linkedIssues, issueBody, issueContext, fatal: false };
