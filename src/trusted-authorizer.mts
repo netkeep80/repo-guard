@@ -6,7 +6,6 @@ interface UserProjection {
 }
 
 interface IssueContextProjection {
-  body?: unknown;
   user?: UserProjection | null;
   author_association?: unknown;
   labels?: unknown;
@@ -182,17 +181,9 @@ export function detectTrustedAuthorizerLocally({
   return summary;
 }
 
-export function resolveTrustedAuthorizer({
-  repoFullName,
-  issueNumber,
-  prNumber,
-  issueContext,
-  options = {},
-}: ResolveTrustedAuthorizerInput): TrustedAuthorizerSummary {
+export function resolveTrustedAuthorizer({ repoFullName, issueNumber, prNumber, issueContext, options = {} }: ResolveTrustedAuthorizerInput): TrustedAuthorizerSummary {
   const governanceApprovedLabel = options.governanceApprovedLabel || DEFAULT_GOVERNANCE_LABEL;
-  const observedIssueContext = issueContext === undefined
-    ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null)
-    : issueContext;
+  const observedIssueContext = issueContext === undefined ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null) : issueContext;
   const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
   const username = (observedIssueContext as IssueContextProjection | null)?.user?.login;
   const permission = username && !isBotUser((observedIssueContext as IssueContextProjection).user)
