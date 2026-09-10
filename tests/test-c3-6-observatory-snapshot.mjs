@@ -18,11 +18,15 @@ const packageJson = JSON.parse(
   readFileSync(resolve(repoRoot, "package.json"), "utf8"),
 );
 
-const release404 = async () => ({
-  status: 404,
-  ok: false,
-  async json() { return {}; },
-});
+function response(status, body = {}) {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    async json() { return body; },
+  };
+}
+
+const release404 = async () => response(404);
 
 const input = {
   repoRoot,
@@ -50,12 +54,66 @@ assert.equal(first.accepted.sha, acceptedSha);
 assert.equal(first.accepted.ci.conclusion, "success");
 assert.equal(first.accepted.provenance.origin, "accepted_ci");
 assert.equal(first.accepted.provenance.sha, acceptedSha);
-assert.equal(first.version.package_version, packageJson.version);
-assert.equal(first.version.matching_release_tag, `v${packageJson.version}`);
+assert.equal(packageJson.version, "3.0.0");
+assert.equal(first.version.package_version, "3.0.0");
+assert.equal(first.version.matching_release_tag, "v3.0.0");
 assert.equal(first.version.matching_published_release, false);
+assert.equal(first.version.release_commit, null);
+assert.equal(first.version.release_url, null);
 assert.equal(first.version.release_truth_status, "package_only");
 assert.equal(first.version.provenance.origin, "github_observation");
 assert.equal(first.version.provenance.sha, acceptedSha);
+
+const publishedReleaseUrl = "https://example.invalid/releases/v3.0.0";
+const exactPublishedFetch = async (url) => {
+  if (url.includes("/git/ref/tags/")) {
+    return response(200, {
+      object: { type: "commit", sha: acceptedSha },
+    });
+  }
+  if (url.includes("/releases/tags/")) {
+    return response(200, {
+      tag_name: "v3.0.0",
+      draft: false,
+      prerelease: false,
+      html_url: publishedReleaseUrl,
+    });
+  }
+  throw new Error(`unexpected URL: ${url}`);
+};
+const published = await collectObservatorySnapshot({
+  ...input,
+  fetchImpl: exactPublishedFetch,
+});
+assert.equal(published.version.matching_published_release, true);
+assert.equal(published.version.release_commit, acceptedSha);
+assert.equal(published.version.release_url, publishedReleaseUrl);
+assert.equal(published.version.release_truth_status, "published");
+
+const prereleaseFetch = async (url) => {
+  if (url.includes("/git/ref/tags/")) {
+    return response(200, {
+      object: { type: "commit", sha: acceptedSha },
+    });
+  }
+  if (url.includes("/releases/tags/")) {
+    return response(200, {
+      tag_name: "v3.0.0",
+      draft: false,
+      prerelease: true,
+      html_url: "https://example.invalid/releases/v3.0.0-rc",
+    });
+  }
+  throw new Error(`unexpected URL: ${url}`);
+};
+const prerelease = await collectObservatorySnapshot({
+  ...input,
+  fetchImpl: prereleaseFetch,
+});
+assert.equal(prerelease.version.matching_published_release, false);
+assert.equal(prerelease.version.release_commit, null);
+assert.equal(prerelease.version.release_url, null);
+assert.equal(prerelease.version.release_truth_status, "package_only");
 
 assert.deepEqual(
   first.architecture.current.architecture.canonical_fact_sources,
@@ -115,25 +173,17 @@ assert.deepEqual(first.policy.accepted, policy);
 await assert.rejects(
   () => collectObservatorySnapshot({
     ...input,
-    fetchImpl: async () => ({
-      status: 500,
-      ok: false,
-      async json() { return {}; },
-    }),
+    fetchImpl: async () => response(500),
   }),
-  /release observation failed/,
+  /failed/,
 );
 
 await assert.rejects(
   () => collectObservatorySnapshot({
     ...input,
-    fetchImpl: async () => ({
-      status: 200,
-      ok: true,
-      async json() { return {}; },
-    }),
+    fetchImpl: async () => response(200),
   }),
-  /malformed GitHub release observation/,
+  /malformed/i,
 );
 
 await assert.rejects(
@@ -144,4 +194,4 @@ await assert.rejects(
   /accepted SHA mismatch/,
 );
 
-console.log("C3.6 Observatory snapshot contract passed");
+console.log("C3.7 Observatory release truth contract passed");
