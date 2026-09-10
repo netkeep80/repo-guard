@@ -26,6 +26,17 @@ function response(status, body = {}) {
   };
 }
 
+let compressionMetricsExecutions = 0;
+function countedRun(command, args, options = {}) {
+  if (args.some((arg) => String(arg).endsWith("scripts/compression-metrics.mjs"))) {
+    compressionMetricsExecutions += 1;
+  }
+  return execFileSync(command, args, {
+    encoding: "utf8",
+    ...options,
+  }).trim();
+}
+
 const release404 = async () => response(404);
 
 const input = {
@@ -40,6 +51,7 @@ const input = {
   repository: "netkeep80/repo-guard",
   token: "test-token",
   fetchImpl: release404,
+  run: countedRun,
 };
 
 const first = await collectObservatorySnapshot(input);
@@ -136,6 +148,8 @@ for (const [name, fetchImpl] of [
   assert.equal(nonOfficial.version.release_url, null, name);
   assert.equal(nonOfficial.version.release_truth_status, "package_only", name);
 }
+
+assert.equal(compressionMetricsExecutions, 1);
 
 assert.deepEqual(
   first.architecture.current.architecture.canonical_fact_sources,
