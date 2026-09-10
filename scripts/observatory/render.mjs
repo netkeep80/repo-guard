@@ -329,6 +329,8 @@ AnalysisReport</code></pre>
       <p>Объявленная схема процесса взята из ${sourceLink(snapshot, snapshot.ci.source)}. Успешный запуск принятого коммита показан отдельно выше как evidence.</p>
       <p>Триггеры:</p>
       ${list(snapshot.ci.triggers)}
+      <h3>Управление параллельностью</h3>
+      ${jsonBlock(snapshot.ci.concurrency)}
       <div class="cards">${renderCiJobs(snapshot)}</div>
     </section>
 
