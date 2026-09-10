@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyReleaseRef } from "../scripts/verify-release-ref.mjs";
 
+const exactHead = "a".repeat(40);
+const otherHead = "b".repeat(40);
+
+function runAt(sha) {
+  return () => sha;
+}
+
 function makePackageRoot(version) {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-release-ref-"));
   writeFileSync(join(dir, "package.json"), JSON.stringify({ version }), "utf-8");
@@ -51,6 +58,38 @@ describe("release ref verification", () => {
       "https://api.github.com/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4",
       "https://api.github.com/repos/netkeep80/repo-guard/releases/tags/v2.3.4",
     ]);
+  });
+
+  it("rejects a matching tag name that resolves to another commit", async () => {
+    const packageRoot = makePackageRoot("2.3.4");
+    const result = await verifyReleaseRef({
+      packageRoot,
+      repo: "netkeep80/repo-guard",
+      run: runAt(exactHead),
+      fetchImpl: fakeFetch([
+        [
+          "/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4",
+          200,
+          { object: { type: "commit", sha: otherHead } },
+        ],
+        [
+          "/repos/netkeep80/repo-guard/releases/tags/v2.3.4",
+          200,
+          {
+            tag_name: "v2.3.4",
+            draft: false,
+            prerelease: false,
+            html_url: "https://example.invalid/release",
+          },
+        ],
+      ], []),
+    });
+
+    assert.equal(result.ok, false);
+    assert.ok(result.checks.some((check) => (
+      check.name === "release-tag-resolves-to-checkout"
+      && check.status === "FAIL"
+    )));
   });
 
   it("fails before network checks when a supplied release tag differs from package.json", async () => {
