@@ -119,6 +119,7 @@ function collectCiWiring(repoRoot, acceptedSha) {
     source,
     name: String(workflow.name ?? ""),
     triggers: Object.keys(triggerObject).sort(),
+    concurrency: workflow.concurrency ?? null,
     jobs: Object.keys(jobs).sort().map((id) => ({
       id,
       steps: Array.isArray(jobs[id]?.steps)
