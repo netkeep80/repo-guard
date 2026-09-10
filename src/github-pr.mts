@@ -40,7 +40,6 @@ type PRChangeIntentFacts =
   | ({ ok: true; changeIntent: unknown; changeIntentSource: "pr body" | "linked issue" } & PRFactsCommon)
   | ({ ok: false; error: string; message: string; changeIntentSource: "pr body" | "none" } & PRFactsCommon);
 interface InitialCheck { name: string; check: unknown; }
-interface LinkedIssueObservation { body?: unknown; }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
@@ -110,10 +109,8 @@ function fetchLinkedIssue({ prBody, repoFullName }: { prBody: unknown; repoFullN
     if (needsFallback) { printMissing("ERROR: linked issue fallback prerequisites not met:", missing); return { linkedIssues, issueBody: null, issueContext: null, fatal: true }; }
     console.warn("WARN: linked issue lookup unavailable; GovernanceGrant cannot be established"); return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
   }
-  const issueContext = fetchIssueAuthorContext(repoFullName, linkedIssues[0]);
-  const issueBody = issueContext && typeof issueContext === "object" && typeof (issueContext as LinkedIssueObservation).body === "string"
-    ? (issueContext as LinkedIssueObservation).body as string
-    : null;
+  const issueContext = fetchIssueAuthorContext(repoFullName, linkedIssues[0]), observedBody = (issueContext as { body?: unknown } | null)?.body;
+  const issueBody = typeof observedBody === "string" ? observedBody : null;
   if (issueBody === null && hasChangeIntent) console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
   return { linkedIssues, issueBody, issueContext, fatal: false };
 }
@@ -178,9 +175,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   try { diffText = getDiff(base, head as string, roots.repoRoot); }
   catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
-  if (basePolicy && repoFullName) try {
-    trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber, issueContext });
-  } catch {}
+  if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber, issueContext }); } catch {}
 
   const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
