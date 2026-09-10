@@ -56,5 +56,6 @@ const html = renderObservatory(snapshot);
 assert.match(html, /Управление параллельностью/);
 assert.ok(html.includes("ci-${{ github.head_ref || github.run_id }}"));
 assert.ok(html.includes('&quot;cancel-in-progress&quot;: true'));
+assert.ok(!html.includes("github.event.pull_request.number"));
 
 console.log("C3.8b PR supersession concurrency contract passed");
