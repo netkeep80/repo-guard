@@ -88,6 +88,28 @@ assert.equal((first.match(/data-scenario-id=/g) ?? []).length, 5);
 assert.equal((first.match(/data-case-result="PASS"/g) ?? []).length, 5);
 assert.equal((first.match(/data-case-result="FAIL"/g) ?? []).length, 5);
 
+assert.match(first, /Пакет: <code>3\.0\.0<\/code>/);
+assert.match(first, /Совпадающий тег: <code>v3\.0\.0<\/code>/);
+assert.match(first, /Выпуск: не опубликован для совпадающего тега/);
+assert.match(first, /Коммит выпуска: отсутствует/);
+
+const releaseCommit = "d".repeat(40);
+const releaseUrl = "https://example.invalid/releases/v3.0.0";
+const publishedSnapshot = {
+  ...snapshot,
+  version: {
+    ...snapshot.version,
+    matching_published_release: true,
+    release_commit: releaseCommit,
+    release_url: releaseUrl,
+    release_truth_status: "published",
+  },
+};
+const publishedHtml = renderObservatory(publishedSnapshot);
+assert.match(publishedHtml, new RegExp(releaseCommit));
+assert.match(publishedHtml, /Коммит выпуска:/);
+assert.ok(publishedHtml.includes(releaseUrl));
+
 assert.doesNotMatch(first, /Проверка <границы>/);
 assert.match(first, /Проверка &lt;границы&gt;/);
 assert.match(first, /Текст &amp; данные/);
@@ -157,5 +179,25 @@ assert.throws(
   }),
   /successful CI/,
 );
+assert.throws(
+  () => validateObservatorySnapshot({
+    ...publishedSnapshot,
+    version: {
+      ...publishedSnapshot.version,
+      release_commit: null,
+    },
+  }),
+  /release commit/i,
+);
+assert.throws(
+  () => validateObservatorySnapshot({
+    ...snapshot,
+    version: {
+      ...snapshot.version,
+      release_commit: releaseCommit,
+    },
+  }),
+  /release commit/i,
+);
 
-console.log("C3.6 Observatory renderer contract passed");
+console.log("C3.7 Observatory renderer release projection contract passed");

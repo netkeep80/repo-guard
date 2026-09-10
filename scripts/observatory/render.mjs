@@ -51,6 +51,28 @@ export function validateObservatorySnapshot(snapshot) {
   requireString(snapshot.version.package_version, "version.package_version");
   requireString(snapshot.version.matching_release_tag, "version.matching_release_tag");
   requireString(snapshot.version.release_truth_status, "version.release_truth_status");
+  if (typeof snapshot.version.matching_published_release !== "boolean") {
+    throw new Error("invalid published release truth");
+  }
+  if (snapshot.version.matching_published_release) {
+    if (!/^[0-9a-f]{40}$/.test(snapshot.version.release_commit ?? "")) {
+      throw new Error("invalid release commit for published release");
+    }
+    requireString(snapshot.version.release_url, "version.release_url");
+    if (snapshot.version.release_truth_status !== "published") {
+      throw new Error("published release requires published truth status");
+    }
+  } else {
+    if (snapshot.version.release_commit !== null) {
+      throw new Error("unpublished release requires absent release commit");
+    }
+    if (snapshot.version.release_url !== null) {
+      throw new Error("unpublished release requires absent release URL");
+    }
+    if (snapshot.version.release_truth_status !== "package_only") {
+      throw new Error("unpublished release requires package_only truth status");
+    }
+  }
 
   requireObject(snapshot.policy, "policy");
   requireObject(snapshot.policy.accepted, "policy.accepted");
@@ -208,10 +230,13 @@ export function renderObservatory(snapshot) {
     .map((path) => `<li>${sourceLink(snapshot, path)}</li>`)
     .join("");
 
+  const repositoryUrl = `https://github.com/${snapshot.repository.full_name}`;
   const releaseTruth = snapshot.version.matching_published_release
     ? `<a href="${escapeHtml(snapshot.version.release_url)}">опубликован</a>`
     : "не опубликован для совпадающего тега";
-  const repositoryUrl = `https://github.com/${snapshot.repository.full_name}`;
+  const releaseCommit = snapshot.version.release_commit
+    ? `<a href="${escapeHtml(`${repositoryUrl}/commit/${snapshot.version.release_commit}`)}"><code>${escapeHtml(snapshot.version.release_commit)}</code></a>`
+    : "отсутствует";
   const roadmapUrl = `${repositoryUrl}/issues/370`;
 
   return `<!doctype html>
@@ -248,6 +273,7 @@ export function renderObservatory(snapshot) {
           <p>Пакет: <code>${escapeHtml(snapshot.version.package_version)}</code></p>
           <p>Совпадающий тег: <code>${escapeHtml(snapshot.version.matching_release_tag)}</code></p>
           <p>Выпуск: ${releaseTruth}</p>
+          <p>Коммит выпуска: ${releaseCommit}</p>
           <p>Статус истины: <code>${escapeHtml(snapshot.version.release_truth_status)}</code></p>
         </article>
       </div>

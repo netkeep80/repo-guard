@@ -11,6 +11,10 @@ import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 
 import { compileConstraintProgram } from "../../dist/checks/constraint-program.mjs";
+import {
+  expectedTagForVersion,
+  observeReleaseTruth,
+} from "../verify-release-ref.mjs";
 
 export const C3_BASELINE_SHA =
   "92432809fcddc290080beb51ba151e13a5761869";
@@ -129,56 +133,6 @@ function collectCiWiring(repoRoot, acceptedSha) {
   };
 }
 
-function validateReleasePayload(release, tag) {
-  if (
-    !release
-    || typeof release !== "object"
-    || release.tag_name !== tag
-    || typeof release.draft !== "boolean"
-    || (
-      release.draft === false
-      && (typeof release.html_url !== "string" || !release.html_url)
-    )
-  ) {
-    throw new Error("malformed GitHub release observation");
-  }
-}
-
-async function observeMatchingRelease({ repository, tag, token, fetchImpl }) {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const response = await fetchImpl(
-    `https://api.github.com/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`,
-    { headers },
-  );
-
-  if (response.status === 404) {
-    return {
-      tag,
-      matching_published_release: false,
-      release_url: null,
-    };
-  }
-  if (!response.ok) {
-    throw new Error(
-      `GitHub release observation failed with status ${response.status}`,
-    );
-  }
-
-  const release = await response.json();
-  validateReleasePayload(release, tag);
-  const published = !release.draft;
-  return {
-    tag,
-    matching_published_release: published,
-    release_url: published ? release.html_url : null,
-  };
-}
-
 function requireAcceptedCi(ci) {
   if (!ci || ci.workflow !== "CI" || ci.conclusion !== "success") {
     throw new Error("accepted CI metadata requires successful CI workflow");
@@ -214,9 +168,9 @@ export async function collectObservatorySnapshot({
 
   const packageJson = readJson(resolve(repoRoot, "package.json"));
   const policy = readJson(resolve(repoRoot, "repo-policy.json"));
-  const matchingReleaseTag = `v${packageJson.version}`;
-  const release = await observeMatchingRelease({
-    repository,
+  const matchingReleaseTag = expectedTagForVersion(String(packageJson.version));
+  const release = await observeReleaseTruth({
+    repo: repository,
     tag: matchingReleaseTag,
     token,
     fetchImpl,
@@ -251,14 +205,15 @@ export async function collectObservatorySnapshot({
     version: {
       package_version: String(packageJson.version),
       matching_release_tag: matchingReleaseTag,
-      matching_published_release: release.matching_published_release,
-      release_url: release.release_url,
-      release_truth_status: release.matching_published_release
+      matching_published_release: release.published,
+      release_commit: release.published ? release.tag_commit : null,
+      release_url: release.published ? release.release_url : null,
+      release_truth_status: release.published
         ? "published"
         : "package_only",
       provenance: {
         origin: "github_observation",
-        source: `releases/tags/${matchingReleaseTag}`,
+        source: "scripts/verify-release-ref.mjs",
         sha: acceptedSha,
       },
     },
@@ -282,6 +237,7 @@ export async function collectObservatorySnapshot({
       "package.json",
       "repo-policy.json",
       "scripts/compression-metrics.mjs",
+      "scripts/verify-release-ref.mjs",
     ].sort(),
   };
 }
