@@ -177,6 +177,7 @@ const query = index >= 0 ? args[index + 1] : "";
 if (args.includes("--version")) console.log("gh 0.0");
 else if (query === ".body") console.log(${JSON.stringify(issueBody)});
 else if (query.includes("author_association")) console.log(JSON.stringify({
+  body: ${JSON.stringify(issueBody)},
   user: { login: "maintainer", type: "User" },
   author_association: "OWNER",
   labels: [],
