@@ -100,7 +100,7 @@ describe("C3.4b canonical self-host exemplar", () => {
     assert.match(validateRuns, /npm run compression:metrics/);
     assert.match(validateRuns, /npx repo-guard(?:\n|$)/);
     assert.match(validateRuns, /npx repo-guard doctor/);
-    assert.match(validateRuns, /npm test/);
+    assert.match(validateRuns, /node tests\/run\.mjs/);
     assert.ok(localActionStep);
     assert.equal(localActionStep.with?.mode, "check-pr");
     assert.equal(localActionStep.with?.enforcement, "blocking");

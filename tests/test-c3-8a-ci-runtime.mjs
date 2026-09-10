@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDocument } from "yaml";
@@ -39,6 +40,15 @@ const packageJson = JSON.parse(
 );
 assert.equal(packageJson.scripts.pretest, "npm run check:dist");
 assert.equal(packageJson.scripts.test, "node tests/run.mjs");
+
+const metrics = JSON.parse(execFileSync(
+  process.execPath,
+  ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
+  { cwd: root, encoding: "utf8" },
+));
+assert.equal(metrics.ci.test_runs, 1);
+assert.equal(metrics.ci.explicit_check_dist_runs, 1);
+assert.equal(metrics.ci.effective_check_dist_runs, 1);
 
 const prPolicyStep = validate.steps.find(
   (step) => step.name === "Run PR policy check",
