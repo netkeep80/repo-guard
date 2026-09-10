@@ -22,7 +22,6 @@ assert.equal(setupNodeSteps(validate)[0].with?.["node-version"], "24");
 assert.equal(setupNodeSteps(smokePack).length, 0);
 
 assert.equal(packageJson.engines?.node, ">=20.0.0");
-assert.equal(smokePack.env?.npm_config_engine_strict, true);
 
 const checkout = (smokePack.steps ?? []).find(
   (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
@@ -33,6 +32,7 @@ const smokeStep = (smokePack.steps ?? []).find(
   (step) => step.name === "Smoke-test packaged artifact",
 );
 assert.ok(smokeStep);
+assert.equal(smokeStep.env?.npm_config_engine_strict, "true");
 assert.match(smokeStep.run, /npm pack --ignore-scripts/);
 assert.match(smokeStep.run, /npm install --prefix/);
 assert.match(smokeStep.run, /node_modules\/\.bin\/repo-guard/);
