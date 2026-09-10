@@ -24,12 +24,9 @@ assert.deepEqual(
 assert.deepEqual(Object.keys(workflow.concurrency ?? {}).sort(), ["cancel-in-progress", "group"]);
 assert.equal(
   workflow.concurrency?.group,
-  "ci-${{ github.event.pull_request.number || github.run_id }}",
+  "ci-${{ github.head_ref || github.run_id }}",
 );
-assert.equal(
-  workflow.concurrency?.["cancel-in-progress"],
-  "${{ github.event_name == 'pull_request' }}",
-);
+assert.equal(workflow.concurrency?.["cancel-in-progress"], true);
 
 const acceptedSha = execFileSync(
   "git",
@@ -57,7 +54,7 @@ const snapshot = await collectObservatorySnapshot({
 assert.deepEqual(snapshot.ci.concurrency, workflow.concurrency);
 const html = renderObservatory(snapshot);
 assert.match(html, /Управление параллельностью/);
-assert.ok(html.includes("ci-${{ github.event.pull_request.number || github.run_id }}"));
-assert.ok(html.includes("${{ github.event_name == &#39;pull_request&#39; }}"));
+assert.ok(html.includes("ci-${{ github.head_ref || github.run_id }}"));
+assert.ok(html.includes('&quot;cancel-in-progress&quot;: true'));
 
 console.log("C3.8b PR supersession concurrency contract passed");
