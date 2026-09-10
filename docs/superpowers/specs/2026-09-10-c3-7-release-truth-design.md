@@ -4,158 +4,127 @@
 Дорожная карта: #370  
 Родительская фаза: #378  
 Принятая база: `3cf78ea0472f84438967f55ad7ed9212972ffc28`  
-Зависимость #377: закрыта как завершённая
+Зависимость #377: завершена
 
 ## 1. Решение
 
-C3.7 вводит минимальную универсальную модель версии и выпуска для `repo-guard`.
-
-Хранимая версия существует ровно в одном месте:
+C3.7 использует одну каноническую версию продукта:
 
 ```text
 package.json.version
 ```
 
-C3.7 не создаёт второй файл версии, отдельный статус выпуска или специальную модель жизненного цикла.
-
-Все остальные факты выводятся:
+Отдельного состояния выпуска нет. Оно вычисляется из фактов `Git` и `GitHub`:
 
 ```text
 package.json.version = X.Y.Z
         ↓
 expected tag = vX.Y.Z
         ↓
-Git tag exists?
-        ↓
 tag resolves to exact commit
         ↓
-published GitHub Release for vX.Y.Z exists?
+published GitHub Release for the same tag
         ↓
 released | unreleased
 ```
 
-Слова `released` и `unreleased` являются результатом проверки, а не сохраняемым состоянием.
+`released` и `unreleased` — результат проверки, а не сохраняемое поле.
 
-Архитектурный ответ C3.7:
+Главный инвариант:
 
 ```text
-Can release truth be derived from one persisted version
-and immutable Git/GitHub facts without a release-state subsystem?
-YES.
+если для ответа «эта версия выпущена?»
+нужно читать ещё один собственный файл repo-guard,
+дизайн нарушен
 ```
 
-## 2. Главный принцип
+## 2. Единственный источник версии
 
-Система не хранит то, что можно однозначно вывести.
-
-Хранимая истина:
+Каноническая версия читается только из:
 
 ```text
 package.json.version
 ```
 
-Наблюдаемые факты:
+Не создаются:
 
 ```text
-Git tag refs
-Git tag objects when annotated
-Git commit objects
-GitHub Releases
-current exact checkout SHA
+VERSION
+release-state.json
+target-version.json
+persisted RELEASED / UNRELEASED
+version field in repo-policy.json
 ```
 
-Вычисляемая истина:
+`package-lock.json` может содержать то же значение как обязательное зеркало `npm`. Это не второй источник истины.
+
+Правило:
 
 ```text
-expected tag
-resolved tag commit
-matching published release
-released/unreleased
+package.json.version = authority
+package-lock.json version fields = derived mirror
 ```
 
-Запрещены параллельные источники:
-
-```text
-NO VERSION file
-NO release-state.json
-NO target-version.json
-NO persisted RELEASED / UNRELEASED flag
-NO duplicated version in repo-policy.json
-NO mutable main/latest as release identity
-```
+При изменении версии lock-файл обязан синхронно обновиться и совпасть с `package.json`, но версия никогда не определяется из lock-файла.
 
 ## 3. Переход на `3.0.0`
 
-Архитектурное сжатие 3.0 является несовместимым публичным переходом. Поэтому в C3.7 каноническая версия меняется:
+Compression 3.0 — несовместимая публичная граница, поэтому C3.7 меняет:
 
 ```text
-2.0.0
-  ↓
-3.0.0
+2.0.0 -> 3.0.0
 ```
 
-Это изменение означает целевую публичную идентичность принятой архитектуры, но не означает, что выпуск уже опубликован.
+Это ещё не выпуск.
 
-После принятия C3.7 и до финального выпуска ожидаемое состояние:
+После принятия C3.7 ожидается:
 
 ```text
 package.json.version = 3.0.0
 expected tag = v3.0.0
-matching tag = absent
-matching published release = absent
-release truth = unreleased
+tag = absent
+published release = absent
+state = unreleased
 ```
 
-Это честное состояние. Версия пакета уже определяет продуктовую границу, а существование выпуска выводится независимо.
-
-Не вводятся промежуточные значения только ради обозначения процесса:
+Не вводятся промежуточные сущности только ради внутреннего процесса:
 
 ```text
 NO 3.0.0-dev
-NO 3.0.0-alpha solely for internal phase naming
-NO 3.0.0-rc solely as stored project state
+NO 3.0.0-rc
+NO separate target version
 ```
-
-Предварительный выпуск допустим только если в будущем возникнет реальная отдельная потребность. C3.7 её не предполагает.
 
 ## 4. Граница C3.7 и C3.10
 
-C3.7 строит и принимает контракт выпуска.
-
-C3.7 не создаёт официальный тег и выпуск `v3.0.0`.
+C3.7 создаёт строгую проверяемую release boundary, но не публикует `v3.0.0`.
 
 ```text
 C3.7
-  package.json.version = 3.0.0
-  + exact release verifier
+  version = 3.0.0
+  + strict verifier
   + tests
   + docs
   + Pages projection
         ↓
 C3.8
-  CI optimization
         ↓
 C3.9
-  documentation convergence
         ↓
-C3.10
-  external falsification
-  + final self-host acceptance
+C3.10 final acceptance
         ↓
-exact accepted candidate SHA
+exact accepted SHA S
         ↓
-tag v3.0.0
+tag v3.0.0 -> S
         ↓
 published GitHub Release v3.0.0
         ↓
-final release verification
+release verification
         ↓
-optional package publication
+optional npm publish
 ```
 
-До C3.10 потребители-кандидаты используют полный неизменяемый `SHA`.
-
-Официальный `v3.0.0` не создаётся до завершения финальной приёмки C3.10.
+До C3.10 потребители используют полный неизменяемый `SHA`.
 
 ## 5. Формальная истина выпуска
 
@@ -163,216 +132,202 @@ optional package publication
 
 ```text
 released(X.Y.Z, S) :=
-    package.json.version == X.Y.Z
-    AND expected_tag == "v" + X.Y.Z
-    AND tag(expected_tag) exists
-    AND resolve_tag_to_commit(expected_tag) == S
-    AND github_release(expected_tag) exists
-    AND github_release(expected_tag).draft == false
-    AND github_release(expected_tag).prerelease == false
+  package.json.version == X.Y.Z
+  AND expected_tag == "v" + X.Y.Z
+  AND tag(expected_tag) exists
+  AND resolve_tag_to_commit(expected_tag) == S
+  AND matching GitHub Release exists
+  AND release.draft == false
+  AND release.prerelease == false
 ```
 
-`S` — точный проверяемый коммит текущего release candidate или checkout выпуска.
+Отдельный `release_commit` не хранится.
 
-Отдельный `release_commit` в файле не хранится.
-
-Связь выпуска с коммитом задаёт сам неизменяемый тег:
+Точный commit выпуска определяется неизменяемым тегом:
 
 ```text
-tag vX.Y.Z
-  -> exact commit S
+vX.Y.Z -> exact commit S
 ```
 
-`GitHub Release` подтверждает публикацию этого тега, но не создаёт отдельную идентичность коммита.
+`GitHub Release` подтверждает публикацию этого же тега.
 
-## 6. Разрешение тега
+## 6. Лёгкие и аннотированные теги
 
-Проверка должна корректно работать для лёгкого и аннотированного тега.
+Проверка обязана разрешать оба вида тегов.
 
-Лёгкий тег:
+Лёгкий:
 
 ```text
-refs/tags/vX.Y.Z
-  -> commit S
+refs/tags/vX.Y.Z -> commit S
 ```
 
-Аннотированный тег:
+Аннотированный:
 
 ```text
-refs/tags/vX.Y.Z
-  -> tag object
-  -> ...
-  -> commit S
+refs/tags/vX.Y.Z -> tag object -> ... -> commit S
 ```
 
-Проверяющий код обязан разрешать цепочку до объекта `commit` и сравнивать конечный `SHA` с ожидаемым `S`.
+Конечный объект обязан иметь тип `commit`.
 
-Он не должен считать `SHA` объекта аннотированного тега коммитом выпуска.
+Неизвестная, циклическая или неразрешимая цепочка завершается ошибкой.
 
-Циклическая, неизвестная или неразрешимая цепочка завершается ошибкой.
+## 7. Источник ожидаемого `SHA`
 
-## 7. Источник ожидаемого точного `SHA`
+Новый файл с `SHA` не нужен.
 
-Новый постоянный файл для `SHA` не вводится.
-
-В обычной проверке выпуска ожидаемым является точный текущий checkout:
+При строгой проверке ожидаемый commit — текущий checkout:
 
 ```text
 git rev-parse HEAD
 ```
 
-Для процесса `GitHub Actions` выпуск проверяется после checkout официального тега. Поэтому:
+В `GitHub Actions` процесс выпуска сначала делает checkout официального тега, затем существующий verifier доказывает:
 
 ```text
-checkout(tag)
-  ↓
-HEAD = expected release commit S
-  ↓
-remote tag resolves to S
+remote tag -> exact current HEAD
 ```
 
-Это связывает локально исполняемый пакет, удалённый тег и опубликованный выпуск без дублируемой метаинформации.
+Если точный `HEAD` недоступен там, где требуется доказательство официального выпуска, проверка завершается ошибкой.
 
-Если `.git` или точный `HEAD` недоступен в контексте, где требуется доказательство официального выпуска, проверка завершается ошибкой.
+## 8. Один verifier
 
-## 8. Проверяющий механизм
-
-Существующий `scripts/verify-release-ref.mjs` сохраняется как одна граница проверки выпуска.
-
-Он уже проверяет:
+Существующий:
 
 ```text
-package version
-  ↔ expected tag name
-  ↔ tag existence
-  ↔ GitHub Release existence
+scripts/verify-release-ref.mjs
 ```
 
-C3.7 усиливает этот же механизм, а не создаёт второй проверяющий модуль.
+остаётся единственной строгой границей release verification.
 
-Финальная ответственность:
+Он уже проверяет имя версии, существование тега и выпуска. C3.7 усиливает именно его:
 
 ```text
-1. прочитать package.json.version
-2. вычислить v<version>
-3. проверить точное имя ожидаемого тега
-4. получить refs/tags/<tag>
-5. разрешить ref/tag objects до commit SHA
-6. получить current exact checkout SHA
-7. доказать tag commit == checkout SHA
-8. получить GitHub Release по тому же tag
-9. потребовать draft == false
-10. потребовать prerelease == false
-11. вернуть один структурированный результат
+1. read package.json.version
+2. compute v<version>
+3. require supplied tag == expected tag
+4. read tag ref
+5. resolve tag objects to commit SHA
+6. read exact checkout HEAD
+7. require resolved tag SHA == HEAD
+8. read GitHub Release for the same tag
+9. require exact matching tag_name
+10. require draft == false
+11. require prerelease == false
+12. return structured PASS / FAIL evidence
 ```
 
-Любая ошибка наблюдения `GitHub API` является ошибкой проверки, а не состоянием `unreleased`.
+Новый параллельный verifier не создаётся.
 
-Отсутствие тега или выпуска при обычном наблюдении может быть честно представлено как `unreleased`; при команде строгой release verification это является `FAIL`.
+## 9. Ошибки и fail-closed
 
-## 9. Один вычислитель, два режима использования
+Строгая проверка даёт `FAIL`, если:
 
-Новая подсистема статусов не нужна.
+```text
+package version invalid
+supplied tag mismatches package version
+tag absent
+GitHub API unavailable
+tag object malformed
+tag chain cannot resolve to commit
+resolved commit != current HEAD
+release absent
+release malformed
+release draft
+release prerelease
+release tag_name mismatches expected tag
+```
 
-Одна функция проверки должна позволять двум потребителям использовать одну семантику:
+Ответ `200 OK` с неполными данными не считается успехом.
+
+Ошибка `GitHub API` не превращается в «релиз отсутствует».
+
+## 10. Наблюдение и строгая проверка
+
+Сохраняем две разные операции, но не две истины.
 
 ```text
 strict verification
-  -> release workflow
+  -> verify-release-ref
+  -> release-integrity
   -> prepublishOnly
   -> PASS / FAIL
 
 read-only observation
   -> Policy Observatory
-  -> published / package-only representation
+  -> package-only | published representation
 ```
 
-Предпочтительно вынести только чистую общую функцию получения нормализованных release facts, если это реально уменьшит дублирование между существующим verifier и C3.6 collector.
+Общая внутренняя функция допустима только если действительно уменьшает дублирование. Создавать новую библиотеку ради симметрии запрещено.
 
-Но C3.7 не требует такой абстракции заранее. Если существующий collector и verifier можно согласовать меньшим изменением, новая библиотека не создаётся.
+## 11. `Policy Observatory`
 
-YAGNI приоритетнее симметрии.
+Обсерватория остаётся read-only проекцией.
 
-## 10. Поведение `Policy Observatory`
-
-Обсерватория не становится источником истины выпуска.
-
-Она показывает результат наблюдения относительно `package.json.version`.
-
-После принятия C3.7 и до C3.10 ожидаемое представление:
+До C3.10 она должна честно показывать:
 
 ```text
 Версия пакета: 3.0.0
 Ожидаемый тег: v3.0.0
 Опубликованный выпуск: отсутствует
-Состояние: версия определена, официальный выпуск ещё не опубликован
 ```
 
-После финального выпуска:
+После реального выпуска:
 
 ```text
 Версия пакета: 3.0.0
 Тег: v3.0.0
 Опубликованный выпуск: присутствует
-Точный commit: <accepted release SHA>
+Точный commit: S
 ```
 
-Страница не хранит состояние между сборками и не получает кнопку публикации.
+Она не хранит release state и не получает write-функций.
 
-## 11. `repo-guard init` и потребители
+## 12. `init` и потребители
 
-`repo-guard init --action-ref` сохраняет существующую строгую модель:
+Модель refs остаётся простой:
 
 ```text
-candidate / unreleased
-  -> full 40-char SHA
-
-published release
-  -> exact vX.Y.Z tag matching package version
+candidate / unreleased -> full 40-char SHA
+published release      -> exact vX.Y.Z
 ```
 
-Не вводятся:
+Не рекомендуются и не создаются aliases:
 
 ```text
 main
 latest
 v3
 v3.0
-floating aliases
 ```
 
-как рекомендуемый production ref.
+C3.7 не добавляет legacy compatibility.
 
-C3.7 не добавляет поддержку legacy alias.
+`init` не обязан заново выполнять полный release verifier. Его задача — принять только синтаксически допустимый immutable `SHA` или строгий version tag, совпадающий с текущей package version.
 
-Если текущая проверка `init` допускает тег только по совпадению строки с `package.json.version`, C3.7 должна сохранить эту простую границу. Доказательство существования и точного release commit принадлежит release verifier, а не каждому запуску `init`.
+## 13. Официальный выпуск
 
-## 12. Процесс официального выпуска
-
-После финальной приёмки C3.10 последовательность минимальна:
+После C3.10 последовательность минимальна:
 
 ```text
 A. main = exact accepted candidate S
 B. required checks for S = GREEN
-C. package.json.version = 3.0.0 уже принято ранее
-D. создать tag v3.0.0 -> S
-E. создать published non-prerelease GitHub Release v3.0.0
-F. release-integrity workflow checkout v3.0.0
+C. package.json.version already = 3.0.0
+D. create tag v3.0.0 -> S
+E. publish non-prerelease GitHub Release v3.0.0
+F. release-integrity checks out v3.0.0
 G. verify-release-ref proves tag -> S and release published
-H. только после этого допустим npm publish
+H. only then npm publish is allowed
 ```
 
-Никакой semantic/code edit между `S` и созданием тега не допускается.
+Между `S` и созданием тега не допускается semantic/code edit.
 
-Если после финальной приёмки требуется исправление кода, прежний `S` перестаёт быть release candidate, исправление проходит обычный PR цикл, и C3.10 acceptance повторяется для нового `SHA`.
+Если требуется исправление, создаётся новый PR, появляется новый accepted `SHA`, и финальная приёмка повторяется.
 
-## 13. `npm publish`
+## 14. `npm publish`
 
 Существующий `prepublishOnly` остаётся fail-closed границей.
 
-Публикация пакета до существования корректного официального тега и `GitHub Release` должна завершаться ошибкой.
-
-После C3.7 требование становится сильнее:
+После C3.7 пакет нельзя опубликовать, если не доказано:
 
 ```text
 package version matches tag
@@ -380,23 +335,17 @@ AND tag resolves to current exact checkout
 AND matching published non-prerelease release exists
 ```
 
-Это предотвращает публикацию:
+Это блокирует публикацию с неправильного или устаревшего commit.
+
+## 15. `release-integrity`
+
+Существующий workflow:
 
 ```text
-wrong commit under correct version
-wrong tag under correct package
-package before GitHub Release
-package from stale checkout
-package from unrelated commit
+.github/workflows/release-integrity.yml
 ```
 
-## 14. `release-integrity` процесс
-
-Существующий `.github/workflows/release-integrity.yml` остаётся единственным специализированным процессом проверки опубликованного выпуска.
-
-Он не создаёт тег, выпуск или пакет.
-
-Он только читает и проверяет.
+остаётся read-only проверкой.
 
 ```text
 release published
@@ -408,89 +357,57 @@ verify-release-ref
 PASS | FAIL
 ```
 
-C3.7 может обновить этот процесс только настолько, насколько нужно для точного доказательства `tag -> checkout SHA`.
+Он не создаёт tags, releases или packages.
 
-Никаких write permissions для выпуска в этом процессе не требуется.
+Write permissions для него не нужны.
 
-## 15. Ошибки и запрет по умолчанию
-
-Строгая проверка завершается `FAIL`, если:
-
-```text
-package version отсутствует или некорректна
-supplied tag != v<package version>
-tag отсутствует
-GitHub API недоступен
-tag ref имеет неизвестный object type
-tag chain не разрешается до commit
-resolved tag commit != exact checkout SHA
-GitHub Release отсутствует
-release draft == true
-release prerelease == true
-release tag_name != expected tag
-```
-
-Ответ `200 OK` с неполной или противоречивой структурой не трактуется как успех.
-
-Наблюдение не должно превращать ошибку API в `release absent`.
+Если C3.7 меняет этот workflow, изменение требует отдельного доверенного `GovernanceGrant` только на нужный governance path.
 
 ## 16. Семантическое версионирование
 
-Остаётся простое правило:
+Правило остаётся обычным:
 
 ```text
 breaking public contract -> major
-additive compatible capability -> minor
+compatible additive capability -> minor
 compatible correctness fix -> patch
 ```
 
-Compression 3.0 является major cutover, поэтому:
+Compression 3.0 — major cutover, поэтому текущая целевая версия:
 
 ```text
 3.0.0
 ```
 
-Не сохраняются устаревшие команды, поля, режимы или alias только ради искусственной совместимости.
+Legacy aliases не сохраняются ради уменьшения номера версии.
 
 ## 17. Документация
 
-C3.7 синхронизирует только документы, где меняется публичная version/release граница.
-
-Минимальные кандидаты:
+C3.7 синхронизирует только публичные места, связанные с version/release truth:
 
 ```text
+package.json
+package-lock.json as derived npm mirror
 README.md
 RELEASING.md
-Policy Observatory generated view
-relevant tests/examples if they encode release assumptions
+release verifier tests
+release workflow contract tests where needed
+Policy Observatory projection/tests where needed
 ```
 
-Документация должна прямо различать:
+Документация до C3.10 не должна утверждать, что `v3.0.0` уже выпущен.
 
-```text
-package version
-expected tag
-published release
-exact release commit
-```
+## 18. Публичная CLI не растёт
 
-Но только `package version` является сохраняемой версией продукта.
-
-До C3.10 документация не утверждает, что `v3.0.0` выпущен.
-
-## 18. Отсутствие новой публичной команды
-
-C3.7 не добавляет публичную CLI-команду вроде:
+C3.7 не добавляет команды:
 
 ```text
 repo-guard release
-repo-guard version-state
 repo-guard publish
+repo-guard version-state
 ```
 
-Внутренний `npm run verify:release-ref` достаточен для release tooling.
-
-Пользовательская CLI-поверхность остаётся:
+Публичный набор остаётся:
 
 ```text
 validate
@@ -500,109 +417,99 @@ init
 doctor
 ```
 
-## 19. Отсутствие новой семантики политики
+`npm run verify:release-ref` остаётся внутренним release tooling.
 
-Release truth не становится новым `FactRef` source, relation kind или runtime constraint kind только ради C3.7.
+## 19. Policy core не растёт
 
-C3.7 относится к product/release boundary, а не к расширению языка policy.
-
-Жёстко:
+C3.7 не добавляет:
 
 ```text
-NO new FactRef source
-NO new relation descriptor
-NO new runtime constraint kind
-NO second evaluator
-NO release-specific policy DSL
-NO legacy compatibility layer
+FactRef source
+relation descriptor
+runtime constraint kind
+release-specific policy DSL
+second evaluator
 ```
 
-Если будущий реальный consumer потребует version policy как обычное ограничение репозитория, это рассматривается отдельно и должно по возможности выражаться существующими фактами и отношениями.
+Release truth — продуктовая граница, а не новый язык политики.
 
-## 20. TDD границы реализации
+## 20. TDD-направление реализации
 
-Реализация начинается только после принятия отдельного implementation plan.
+Implementation plan должен начинать каждый поведенческий срез с falsifier.
 
-Ожидаемые независимые RED-срезы:
+Минимальные доказательства:
 
 ```text
-A. package version cutover 2.0.0 -> 3.0.0
-   + docs/observable package-only truth
+A. version cutover
+   package.json/package-lock -> 3.0.0
+   Pages/docs still say unreleased
 
-B. exact tag resolution
-   RED: correct tag name points to wrong commit and old verifier passes
-   GREEN: verifier rejects mismatch
+B. wrong exact commit
+   RED: correct tag name points to another commit and old verifier passes
+   GREEN: verifier rejects it
 
-C. annotated tag resolution
-   RED: annotated tag object is confused with commit
-   GREEN: recursive resolution reaches exact commit
+C. annotated tag
+   RED: tag object SHA is mistaken for commit SHA
+   GREEN: resolution reaches exact commit
 
-D. release object strictness
-   RED: prerelease or malformed successful response passes
+D. malformed/prerelease release
+   RED: insufficient successful response passes
    GREEN: fail-closed
 
-E. release workflow integration
-   RED: workflow does not prove exact tag checkout relation
-   GREEN: one existing verifier path proves it
+E. release workflow
+   same verifier proves checked-out tag == remote tag commit
 ```
 
-Точный разрез может быть ещё сжат implementation plan, если несколько falsifier безопасно входят в одну маленькую транзакцию.
+Implementation plan может объединить falsifiers, если это уменьшает число транзакций без потери наблюдаемого RED→GREEN.
 
-## 21. Governance boundary
-
-Изменение `.github/workflows/release-integrity.yml` является governance path и требует отдельного доверенного `GovernanceGrant`.
-
-Design и plan PR не получают такое разрешение, потому что они не меняют workflow.
-
-Implementation issue, которая действительно меняет процесс выпуска, должна разрешить только нужный путь и не должна разрешать ослабление policy без отдельной причины.
-
-## 22. Что C3.7 сознательно не делает
+## 21. Не входит в C3.7
 
 ```text
-NO actual v3.0.0 tag creation
-NO GitHub Release v3.0.0 creation
+NO actual v3.0.0 tag
+NO actual GitHub Release v3.0.0
 NO npm publication
-NO release automation that writes tags/releases
+NO tag/release write automation
 NO changelog subsystem
-NO release notes generator
 NO floating major tag
-NO signing subsystem added speculatively
-NO provenance/SBOM subsystem added speculatively
-NO C3.8 CI optimization
-NO C3.9 final documentation sweep
-NO C3.10 external consumer acceptance
+NO speculative signing subsystem
+NO speculative SBOM/provenance subsystem
+NO C3.8 CI redesign
+NO C3.9 final docs sweep
+NO C3.10 external acceptance
 ```
 
-C3.7 создаёт строгую истину выпуска, а не платформу выпуска.
+C3.7 создаёт release truth, а не release platform.
 
-## 23. Критерии приёмки C3.7
+## 22. Критерии приёмки
 
-Фаза принята, когда доказано всё ниже:
+C3.7 завершена, когда доказано:
 
 ```text
-1. package.json.version является единственным persisted version source
-2. accepted version = 3.0.0
-3. отсутствие v3.0.0 tag/release честно означает unreleased
-4. verifier вычисляет expected tag из package version
-5. verifier разрешает lightweight и annotated tag до exact commit
-6. verifier сравнивает resolved tag commit с exact checkout SHA
-7. verifier требует matching published non-draft non-prerelease GitHub Release
-8. malformed/API-error state fail-closed
-9. prepublishOnly использует ту же строгую verification boundary
-10. release-integrity использует тот же verifier
-11. Pages показывает package/release truth без нового authority
-12. README/RELEASING не называют v3.0.0 выпущенным до C3.10
-13. candidate consumers используют immutable SHA
-14. public CLI surface не вырос
-15. policy semantic core не вырос
-16. никакого второго version/release state файла нет
+1. package.json.version = only canonical version authority
+2. package-lock version = derived matching mirror
+3. accepted package version = 3.0.0
+4. no v3.0.0 tag/release still means unreleased
+5. expected tag derives from package version
+6. lightweight tag resolves to exact current commit
+7. annotated tag resolves to exact current commit
+8. wrong commit is rejected
+9. matching GitHub Release must be published, non-draft, non-prerelease
+10. malformed/API errors fail closed
+11. prepublishOnly uses the same strict verifier
+12. release-integrity uses the same strict verifier
+13. Pages shows release truth without authority
+14. README/RELEASING do not claim v3.0.0 is released before C3.10
+15. candidate consumers use immutable SHA
+16. public CLI does not grow
+17. policy semantic core does not grow
+18. no second stored release-state/version authority exists
 ```
 
-После выполнения этих критериев #378 закрывается как завершённая архитектура выпуска, но официальный `v3.0.0` остаётся не выпущенным до C3.10.
+После этого #378 может быть закрыта как завершённая. Официальный выпуск `v3.0.0` остаётся задачей C3.10.
 
-## 24. Инвариант простоты
+## 23. Инвариант простоты
 
-Итоговая модель должна объясняться одной цепочкой:
+Итоговую модель должно быть возможно объяснить одной цепочкой:
 
 ```text
 package.json.version
@@ -614,10 +521,4 @@ exact immutable tag commit
 published GitHub Release
 ```
 
-Если для определения того, выпущена ли версия, нужно читать ещё один собственный файл `repo-guard`, дизайн нарушен.
-
-Если два компонента независимо решают, какой `SHA` является release commit, дизайн нарушен.
-
-Если имя версии приходится синхронизировать более чем в одном сохраняемом источнике, дизайн нарушен.
-
-Цель C3.7 — не добавить release machinery, а убрать неоднозначность минимальным числом сущностей.
+Никакой дополнительной сущности между этими четырьмя фактами C3.7 не вводит.
