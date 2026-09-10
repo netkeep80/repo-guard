@@ -1,12 +1,12 @@
 # C3.7 — План реализации единой версии и истины выпуска
 
-> **Для агентных исполнителей:** обязательно использовать `superpowers:subagent-driven-development` либо `superpowers:executing-plans` и выполнять задачи строго последовательно. Каждый поведенческий срез начинается с наблюдаемого отрицательного теста и заканчивается собственной приёмкой.
+> **Для агентных исполнителей:** обязательно использовать `superpowers:subagent-driven-development` либо `superpowers:executing-plans`. Задачи выполнять строго последовательно; каждый новый поведенческий контракт сначала доказать красным тестом.
 
-**Цель:** сделать `3.0.0` единственной канонической версией продукта и доказуемо выводить состояние выпуска из неизменяемого тега, точного коммита и опубликованного выпуска `GitHub`, не создавая отдельную подсистему состояния выпуска.
+**Цель:** сделать `3.0.0` единственной канонической версией продукта и выводить официальный выпуск из неизменяемого тега, точного коммита и опубликованного выпуска `GitHub`, не создавая отдельного состояния выпуска.
 
-**Архитектура:** существующий `scripts/verify-release-ref.mjs` остаётся единственной строгой границей проверки выпуска и получает точное разрешение лёгких и аннотированных тегов до коммита. `package.json.version` остаётся единственным хранимым источником версии, `package-lock.json` — только производным зеркалом. Обсерватория повторно использует ту же функцию наблюдения и ничего не публикует сама.
+**Архитектура:** существующий `scripts/verify-release-ref.mjs` остаётся единственной строгой границей проверки и предоставляет одну read-only функцию наблюдения, которую затем переиспользует Observatory. `package.json.version` — authority; `package-lock.json` — только производное зеркало.
 
-**Стек:** `Node.js` 24 в `CI`, встроенный `node:test`, `Git`, `GitHub REST API`, существующий `yaml`, статический `GitHub Pages`.
+**Стек:** `Node.js` 24, `node:test`, `Git`, `GitHub REST API`, существующий `yaml`, статический `GitHub Pages`.
 
 **Спецификация:** `docs/superpowers/specs/2026-09-10-c3-7-release-truth-design.md`
 
@@ -14,79 +14,62 @@
 
 - Принятая база плана: `aee40dac928bf6ce20b7296a21d3525933f7ad4d`.
 - Родитель: #378; дорожная карта: #370.
-- Порядок исполнения: #452 → #453 → #454.
-- `package.json.version` — единственный канонический источник версии.
-- `package-lock.json` не становится источником версии и обязан только совпадать как производное зеркало.
-- В C3.7 каноническая версия становится `3.0.0`.
-- C3.7 не создаёт реальный тег `v3.0.0`, выпуск `GitHub` или публикацию `npm`.
-- Реальный выпуск остаётся после финальной приёмки C3.10.
-- До реального выпуска потребитель использует полный 40-символьный `SHA`.
-- Не создавать `VERSION`, `release-state.json`, `target-version.json` и другие параллельные источники.
-- Не создавать новый публичный `CLI` для выпуска.
-- Не добавлять новый `FactRef`, дескриптор отношения, вид исполняемого ограничения или язык политики.
-- Не менять C3.8, C3.9 и C3.10 в рамках этой работы.
-- Не менять `.github/workflows/release-integrity.yml`, если отдельный структурный тест не докажет расхождение с принятой спецификацией.
-- Любая ошибка чтения или неполный успешный ответ `GitHub API` в строгой проверке завершается запретом по умолчанию.
-- Каждый `PR` проходит `DRAFT` → наблюдаемый отрицательный тест → минимальное исправление → полный зелёный набор → `Ready` → точный `check-pr` → слияние с `expected_head_sha` → послемержевый `CI`.
-- Для управляющих путей использовать только узкие санкции из #452 и #453; ослабление политики не разрешено.
-- Не запускать #453 до принятия #452 и не запускать #454 до принятия #453.
+- Порядок: #452 → #453 → #454.
+- `package.json.version` — единственный источник версии.
+- `package-lock.json` только совпадает с ним как зеркало `npm`.
+- C3.7 меняет версию на `3.0.0`, но не создаёт `v3.0.0`.
+- Реальный тег, выпуск `GitHub` и публикация `npm` остаются после C3.10.
+- До выпуска потребители используют полный 40-символьный `SHA`.
+- Не создавать `VERSION`, `release-state.json`, `target-version.json` и аналоги.
+- Не добавлять новый публичный `CLI`, `FactRef`, отношение, вид runtime-ограничения или release-specific DSL.
+- Не менять C3.8, C3.9 и C3.10.
+- Не менять `.github/workflows/release-integrity.yml`, если отдельный структурный тест не докажет реальное расхождение.
+- Ошибка API или неполный успешный ответ запрещаются по умолчанию.
+- Для #452 и #453 использовать только уже записанные узкие `GovernanceGrant`; ослабление политики не разрешено.
+- Каждая задача проходит отдельный `DRAFT PR` → отрицательный тест → минимальное исправление → полный зелёный набор → `Ready` → exact-head `check-pr` → merge → post-merge `CI`.
 
 ---
 
-### Задача 1: #452 — точная истина `tag -> commit` в существующем проверяющем механизме
+## Задача 1 — #452: точный `tag -> commit` через существующий verifier
 
 **Файлы:**
-- Изменить: `scripts/verify-release-ref.mjs`
-- Изменить: `tests/test-release-ref.mjs`
 
-**Интерфейсы:**
-- Потребляет: `package.json.version`, текущий `HEAD`, `GitHub REST API`.
-- Сохраняет: `expectedTagForVersion(version)` и `verifyReleaseRef(options)`.
-- Добавляет в тот же файл один переиспользуемый read-only интерфейс:
+```text
+scripts/verify-release-ref.mjs
+tests/test-release-ref.mjs
+```
+
+**Итоговые интерфейсы:**
 
 ```js
-export async function observeReleaseTruth({
+expectedTagForVersion(version)
+
+observeReleaseTruth({
   repo,
   tag,
-  token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "",
-  fetchImpl = globalThis.fetch,
-} = {})
-```
+  token,
+  fetchImpl,
+})
 
-- `observeReleaseTruth` возвращает нормализованные факты:
-
-```js
-{
+verifyReleaseRef({
+  packageRoot,
+  repo,
   tag,
-  tag_exists,
-  tag_commit,
-  release_exists,
-  published,
-  draft,
-  prerelease,
-  release_url
-}
+  token,
+  fetchImpl,
+  run,
+})
 ```
 
-- Отсутствующий начальный тег даёт `tag_exists: false`, `tag_commit: null`, `published: false`.
-- Существующий тег без выпуска даёт точный `tag_commit`, но `published: false`.
-- Черновой или предварительный выпуск существует, но не считается официально опубликованным.
-- Неполный ответ `200`, неизвестный тип объекта, цикл тега и ошибка API являются ошибкой наблюдения, а не обычным отсутствием.
-- `verifyReleaseRef` использует тот же `observeReleaseTruth` и дополнительно требует совпадения `tag_commit` с текущим `HEAD`.
+`observeReleaseTruth` живёт в том же `scripts/verify-release-ref.mjs`; нового release-модуля нет.
 
-- [ ] **Шаг 1: создать ветку только от свежего принятого `main`**
+### 1.1 Красный контракт
 
-```bash
-git fetch origin main
-git switch --detach <fresh-main-sha>
-git switch -c c3/452-exact-release-truth
-```
+- [ ] Создать ветку `c3/452-exact-release-truth` от свежего принятого `main`.
+- [ ] Проверить, что #452 открыта и её санкция разрешает только `scripts/verify-release-ref.mjs` с атомарным смешанным срезом.
+- [ ] Сначала изменить только `tests/test-release-ref.mjs`.
 
-Перед записью проверить, что `<fresh-main-sha>` совпадает с текущим `origin/main` и что #452 остаётся открытой с узким `GovernanceGrant` на `scripts/verify-release-ref.mjs`.
-
-- [ ] **Шаг 2: переписать успешный тест так, чтобы он требовал точный лёгкий тег и точный `HEAD`**
-
-В `tests/test-release-ref.mjs` добавить стабильные тестовые идентификаторы:
+Добавить стабильные идентификаторы:
 
 ```js
 const exactHead = "a".repeat(40);
@@ -95,7 +78,7 @@ const annotatedTagObject = "c".repeat(40);
 const runAt = (sha) => () => sha;
 ```
 
-Успешный случай должен передавать полный ответ ссылки тега и полный ответ выпуска:
+Обновить успешный случай до полного лёгкого тега:
 
 ```js
 const result = await verifyReleaseRef({
@@ -124,9 +107,7 @@ const result = await verifyReleaseRef({
 assert.equal(result.ok, true);
 ```
 
-Старый код должен перестать удовлетворять этому контракту после добавления следующих отрицательных случаев.
-
-- [ ] **Шаг 3: добавить главный отрицательный тест неправильного коммита**
+Главный falsifier:
 
 ```js
 it("rejects a matching tag name that resolves to another commit", async () => {
@@ -148,7 +129,7 @@ it("rejects a matching tag name that resolves to another commit", async () => {
           tag_name: "v2.3.4",
           draft: false,
           prerelease: false,
-          html_url: "https://github.com/netkeep80/repo-guard/releases/tag/v2.3.4",
+          html_url: "https://example.invalid/release",
         },
       ],
     ], []),
@@ -162,12 +143,11 @@ it("rejects a matching tag name that resolves to another commit", async () => {
 });
 ```
 
-- [ ] **Шаг 4: добавить отрицательный/положительный контракт аннотированного тега**
+Добавить положительный случай аннотированного тега:
 
 ```js
 it("resolves an annotated tag object to the exact checkout commit", async () => {
   const packageRoot = makePackageRoot("2.3.4");
-  const calls = [];
   const result = await verifyReleaseRef({
     packageRoot,
     repo: "netkeep80/repo-guard",
@@ -190,72 +170,45 @@ it("resolves an annotated tag object to the exact checkout commit", async () => 
           tag_name: "v2.3.4",
           draft: false,
           prerelease: false,
-          html_url: "https://github.com/netkeep80/repo-guard/releases/tag/v2.3.4",
+          html_url: "https://example.invalid/release",
         },
       ],
-    ], calls),
+    ], []),
   });
 
   assert.equal(result.ok, true);
-  assert.ok(calls.some((url) => url.endsWith(`/git/tags/${annotatedTagObject}`)));
 });
 ```
 
-Также добавить отдельный случай неизвестного типа или циклического `tag`-объекта и потребовать `FAIL`/ошибку наблюдения.
+Добавить отрицательные случаи:
 
-- [ ] **Шаг 5: добавить случаи строгой проверки выпуска**
-
-Минимальный набор:
-
-```js
-for (const release of [
-  {},
-  {
-    tag_name: "v9.9.9",
-    draft: false,
-    prerelease: false,
-    html_url: "https://example.invalid/release",
-  },
-  {
-    tag_name: "v2.3.4",
-    draft: true,
-    prerelease: false,
-    html_url: "https://example.invalid/release",
-  },
-  {
-    tag_name: "v2.3.4",
-    draft: false,
-    prerelease: true,
-    html_url: "https://example.invalid/release",
-  },
-]) {
-  // При точном теге и HEAD verifyReleaseRef обязан вернуть ok=false.
-}
+```text
+unknown tag object type
+tag-object cycle
+malformed 200 release
+mismatching release tag_name
+draft release
+prerelease release
+GitHub API 500
 ```
 
-Добавить отдельный ответ `500` и доказать, что ошибка API не превращается в обычное отсутствие выпуска.
-
-- [ ] **Шаг 6: зафиксировать наблюдаемый отрицательный результат до изменения production-кода**
+- [ ] Запустить только тест:
 
 ```bash
 node --test tests/test-release-ref.mjs
 ```
 
-Ожидаемый результат: новый тест неправильного коммита не получает требуемый `FAIL` либо новый контракт ответа тега не поддерживается существующим кодом.
+Ожидается красный результат на новом exact-commit контракте.
 
-В GitHub-only исполнении: сначала закоммитить только изменения теста, открыть `DRAFT PR` с `Fixes #452` и получить тот же красный результат в `CI` на точной голове.
+В GitHub-only исполнении сначала закоммитить только тест и открыть `DRAFT PR` с `Fixes #452`, чтобы красный результат был наблюдаем в `CI`.
 
-- [ ] **Шаг 7: добавить единственный общий механизм разрешения тега в существующий файл**
+### 1.2 Минимальная реализация
 
-В `scripts/verify-release-ref.mjs` добавить импорт:
+- [ ] В `scripts/verify-release-ref.mjs` добавить один локальный исполнитель `Git`:
 
 ```js
 import { execFileSync } from "node:child_process";
-```
 
-И локальный исполнитель:
-
-```js
 function runProcess(command, args, options = {}) {
   return execFileSync(command, args, {
     encoding: "utf-8",
@@ -264,27 +217,25 @@ function runProcess(command, args, options = {}) {
 }
 ```
 
-Проверка формы `SHA`:
+- [ ] Использовать один валидатор идентификаторов объектов:
 
 ```js
-function requireCommitSha(value, context) {
+function requireObjectSha(value, context) {
   if (typeof value !== "string" || !/^[0-9a-f]{40}$/.test(value)) {
-    throw new Error(`${context} does not contain an exact commit SHA`);
+    throw new Error(`${context} does not contain an exact object SHA`);
   }
   return value;
 }
 ```
 
-Разрешение тега должно оставаться в этом же файле:
+- [ ] Разрешать лёгкий и аннотированный тег одной функцией:
 
 ```js
 async function resolveTagCommit({ repo, tag, token, fetchImpl }) {
-  const encodedTag = encodeURIComponent(tag);
-  const ref = await githubGet(`/git/ref/tags/${encodedTag}`, {
-    repo,
-    token,
-    fetchImpl,
-  });
+  const ref = await githubGet(
+    `/git/ref/tags/${encodeURIComponent(tag)}`,
+    { repo, token, fetchImpl },
+  );
 
   if (!ref.ok && ref.status === 404) {
     return { exists: false, commit: null };
@@ -298,24 +249,19 @@ async function resolveTagCommit({ repo, tag, token, fetchImpl }) {
 
   for (let depth = 0; depth < 16; depth += 1) {
     const type = object?.type;
-    const sha = requireCommitSha(object?.sha, `Git object for ${tag}`);
+    const sha = requireObjectSha(object?.sha, `Git object for ${tag}`);
 
-    if (type === "commit") {
-      return { exists: true, commit: sha };
-    }
+    if (type === "commit") return { exists: true, commit: sha };
     if (type !== "tag") {
       throw new Error(`Git tag ${tag} resolved to unsupported object type ${type}`);
     }
-    if (seen.has(sha)) {
-      throw new Error(`Git tag ${tag} contains a cycle`);
-    }
+    if (seen.has(sha)) throw new Error(`Git tag ${tag} contains a cycle`);
     seen.add(sha);
 
-    const tagObject = await githubGet(`/git/tags/${sha}`, {
-      repo,
-      token,
-      fetchImpl,
-    });
+    const tagObject = await githubGet(
+      `/git/tags/${sha}`,
+      { repo, token, fetchImpl },
+    );
     if (!tagObject.ok) {
       throw new Error(`Git tag object ${sha} lookup failed: ${tagObject.message}`);
     }
@@ -326,9 +272,7 @@ async function resolveTagCommit({ repo, tag, token, fetchImpl }) {
 }
 ```
 
-Если при реализации проверка `sha` нужна также для объекта `tag`, не вводить второй валидатор: использовать тот же `requireCommitSha`, потому что оба идентификатора имеют ту же 40-символьную форму.
-
-- [ ] **Шаг 8: добавить общую read-only функцию наблюдения**
+- [ ] Добавить общую read-only функцию:
 
 ```js
 export async function observeReleaseTruth({
@@ -339,12 +283,6 @@ export async function observeReleaseTruth({
 } = {}) {
   if (typeof fetchImpl !== "function") {
     throw new Error("No fetch implementation is available");
-  }
-  if (typeof repo !== "string" || !repo.includes("/")) {
-    throw new Error("Repository must use owner/name form");
-  }
-  if (typeof tag !== "string" || !/^v\d+\.\d+\.\d+$/.test(tag)) {
-    throw new Error("Release tag must use vX.Y.Z form");
   }
 
   const resolved = await resolveTagCommit({ repo, tag, token, fetchImpl });
@@ -361,11 +299,10 @@ export async function observeReleaseTruth({
     };
   }
 
-  const release = await githubGet(`/releases/tags/${encodeURIComponent(tag)}`, {
-    repo,
-    token,
-    fetchImpl,
-  });
+  const release = await githubGet(
+    `/releases/tags/${encodeURIComponent(tag)}`,
+    { repo, token, fetchImpl },
+  );
   if (!release.ok && release.status === 404) {
     return {
       tag,
@@ -406,56 +343,51 @@ export async function observeReleaseTruth({
 }
 ```
 
-Не создавать `scripts/release-truth.mjs`: этот интерфейс живёт рядом с единственным строгим verifier и позже переиспользуется обсерваторией.
+Не создавать второй API-клиент или `scripts/release-truth.mjs`.
 
-- [ ] **Шаг 9: усилить `verifyReleaseRef` через общую функцию, не создавая вторую семантику**
-
-Расширить параметры:
+- [ ] Расширить `verifyReleaseRef` только параметром `run = runProcess` и получить текущий checkout:
 
 ```js
-export async function verifyReleaseRef({
-  packageRoot = defaultPackageRoot,
-  repo = DEFAULT_REPO,
-  tag = null,
-  token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "",
-  fetchImpl = globalThis.fetch,
-  run = runProcess,
-} = {})
+const checkoutSha = requireObjectSha(
+  run("git", ["rev-parse", "HEAD"], { cwd: packageRoot }),
+  "Current checkout",
+);
 ```
 
-После проверки `suppliedTag === expectedTag` получить точный `HEAD`:
+- [ ] В строгом verifier обернуть общее наблюдение в `try/catch` и превратить operational/malformed error в структурированный `FAIL`:
 
 ```js
-let checkoutSha;
+let truth;
 try {
-  checkoutSha = requireCommitSha(
-    run("git", ["rev-parse", "HEAD"], { cwd: packageRoot }),
-    "Current checkout",
-  );
-  checks.push(pass("checkout-sha", `Current checkout is ${checkoutSha}`));
+  truth = await observeReleaseTruth({
+    repo,
+    tag: expectedTag,
+    token,
+    fetchImpl,
+  });
 } catch (error) {
-  checks.push(fail("checkout-sha", error.message));
-  return { ok: false, packageVersion, expectedTag, repo, checks };
+  checks.push(fail("release-observation", error.message));
+  return {
+    ok: false,
+    packageVersion,
+    expectedTag,
+    repo,
+    checks,
+  };
 }
 ```
 
-Затем вызвать `observeReleaseTruth`. Если тег отсутствует, сохранить существующую диагностическую идентичность `published-git-tag = FAIL`. Если тег существует, добавить:
+Это различие намеренное: строгий verifier возвращает доказательство `FAIL`, а Observatory позже вызывает `observeReleaseTruth` напрямую и при ошибке не публикует снимок.
+
+- [ ] При существующем теге потребовать:
 
 ```js
-if (truth.tag_commit !== checkoutSha) {
-  checks.push(fail(
-    "release-tag-resolves-to-checkout",
-    `Git tag ${expectedTag} resolves to ${truth.tag_commit}, not ${checkoutSha}`,
-  ));
-} else {
-  checks.push(pass(
-    "release-tag-resolves-to-checkout",
-    `${expectedTag} resolves to the current checkout`,
-  ));
-}
+truth.tag_commit === checkoutSha
 ```
 
-Для выпуска требовать одновременно:
+с отдельной проверкой `release-tag-resolves-to-checkout`.
+
+- [ ] Для официального выпуска потребовать:
 
 ```js
 truth.release_exists === true
@@ -464,9 +396,9 @@ truth.prerelease === false
 truth.published === true
 ```
 
-Результат `ok` вычислять только из `checks`, как и сейчас.
+### 1.3 Приёмка #452
 
-- [ ] **Шаг 10: прогнать узкий тест и полный набор**
+- [ ] Выполнить:
 
 ```bash
 node --test tests/test-release-ref.mjs
@@ -474,78 +406,27 @@ npm test
 npm run check:dist
 ```
 
-Ожидаемо: всё зелёное; `src/**` и `dist/**` не изменены.
-
-- [ ] **Шаг 11: провести self-dogfooding приёмку #452**
-
-`DRAFT PR` должен содержать `Fixes #452` и только:
-
-```text
-scripts/verify-release-ref.mjs
-tests/test-release-ref.mjs
-```
-
-`ChangeIntent`:
-
-```repo-guard-yaml
-change_type: governance
-scope:
-  - scripts/verify-release-ref.mjs
-  - tests/test-release-ref.mjs
-budgets:
-  max_new_files: 0
-  max_new_docs: 0
-  max_net_added_lines: 350
-anchors:
-  affects: []
-  implements: []
-  verifies: []
-must_touch:
-  - scripts/verify-release-ref.mjs
-  - tests/test-release-ref.mjs
-must_not_touch:
-  - package.json
-  - package-lock.json
-  - repo-policy.json
-  - src/**
-  - dist/**
-  - schemas/**
-  - .github/**
-expected_effects:
-  - существующий verifier доказывает точный commit тега
-  - аннотированные теги разрешаются до commit
-  - ошибочные ответы выпуска запрещаются по умолчанию
-```
-
-После зелёного draft-run перевести PR в `Ready`, получить на той же голове зелёные `validate`, `smoke-pack`, `Run PR policy check`, затем слить только с точным `expected_head_sha` и дождаться зелёного послемержевого `CI`.
+- [ ] Финальный PR должен менять ровно два файла и использовать `Fixes #452`.
+- [ ] `ChangeIntent` должен иметь `change_type: governance`, `scope` только на script+test и не касаться `package*.json`, `src/**`, `dist/**`, схем и workflow.
+- [ ] После draft GREEN перевести PR в `Ready`, получить зелёный `Run PR policy check` на exact head, слить с `expected_head_sha` и дождаться зелёного post-merge `CI`.
 
 ---
 
-### Задача 2: #453 — каноническая версия `3.0.0` без публикации выпуска
+## Задача 2 — #453: версия `3.0.0` без реального выпуска
 
 **Файлы:**
-- Создать: `tests/test-c3-7-version-truth.mjs`
-- Изменить: `package.json`
-- Изменить: `package-lock.json`
 
-**Интерфейсы:**
-- Потребляет: усиленный `expectedTagForVersion` из принятой #452.
-- Производит: единственную каноническую версию `3.0.0`.
-- Не производит: `Git tag`, `GitHub Release`, отдельный файл состояния.
-
-- [ ] **Шаг 1: начать только от послемержевого зелёного состояния #452**
-
-```bash
-git fetch origin main
-git switch --detach <accepted-c3-7a-main-sha>
-git switch -c c3/453-version-3-cutover
+```text
+package.json
+package-lock.json
+tests/test-c3-7-version-truth.mjs
 ```
 
-Перед записью проверить, что #452 закрыта как завершённая и #453 открыта с санкцией ровно на `package.json` и `package-lock.json`.
+### 2.1 Красный контракт
 
-- [ ] **Шаг 2: сначала добавить отрицательный тест версии**
-
-Создать `tests/test-c3-7-version-truth.mjs`:
+- [ ] Начать ветку `c3/453-version-3-cutover` только после принятия #452.
+- [ ] Проверить санкцию #453: только `package.json`, `package-lock.json`, атомарный смешанный срез, без ослабления policy.
+- [ ] Сначала создать `tests/test-c3-7-version-truth.mjs`:
 
 ```js
 import assert from "node:assert/strict";
@@ -578,47 +459,34 @@ for (const path of [
 console.log("C3.7 canonical version truth passed");
 ```
 
-- [ ] **Шаг 3: доказать отрицательное состояние до изменения версии**
+- [ ] Запустить:
 
 ```bash
 node tests/test-c3-7-version-truth.mjs
 ```
 
-Ожидаемо: падение на `packageJson.version`, потому что принятая база ещё содержит `2.0.0`.
+Ожидается красный результат, потому что принятая версия ещё `2.0.0`.
 
-В GitHub-only исполнении закоммитить только тест, открыть `DRAFT PR` с `Fixes #453` и получить тот же красный результат в `CI`.
+В GitHub-only исполнении сначала открыть test-only `DRAFT PR` с `Fixes #453` и зафиксировать этот failure.
 
-- [ ] **Шаг 4: изменить только каноническую версию и её производное зеркало**
+### 2.2 Минимальный version cutover
 
-`package.json`:
-
-```json
-{
-  "name": "repo-guard",
-  "version": "3.0.0"
-}
-```
-
-Сохранить все остальные поля файла неизменными.
-
-В `package-lock.json` изменить только корневые зеркала:
+- [ ] В `package.json` изменить только:
 
 ```json
-{
-  "name": "repo-guard",
-  "version": "3.0.0",
-  "packages": {
-    "": {
-      "name": "repo-guard",
-      "version": "3.0.0"
-    }
-  }
-}
+"version": "3.0.0"
 ```
 
-Не менять версии зависимостей и не создавать тег.
+- [ ] В `package-lock.json` изменить только два корневых зеркала:
 
-- [ ] **Шаг 5: проверить локальный контракт и существующий `init`**
+```text
+/version = 3.0.0
+/packages/""/version = 3.0.0
+```
+
+Не менять зависимости и не создавать новый файл версии.
+
+- [ ] Выполнить:
 
 ```bash
 node tests/test-c3-7-version-truth.mjs
@@ -627,145 +495,56 @@ npm test
 npm run check:dist
 ```
 
-`tests/test-init.mjs` уже читает `package.json.version` динамически, поэтому отдельная реализация `init` не ожидается. Если он падает после честного version cutover, остановить задачу и локализовать расхождение; не добавлять совместимый alias.
+`tests/test-init.mjs` уже читает package version динамически. Если он падает, не добавлять alias: локализовать реальное расхождение.
 
-- [ ] **Шаг 6: проверить внешнее отсутствие официального выпуска**
-
-До и после слияния проверить через GitHub:
+- [ ] До Ready и после merge проверить внешние факты:
 
 ```text
 GET /repos/netkeep80/repo-guard/git/ref/tags/v3.0.0 -> 404
 GET /repos/netkeep80/repo-guard/releases/tags/v3.0.0 -> 404
 ```
 
-Если любой объект уже существует, не продолжать C3.7 как обычный cutover: зафиксировать неожиданную внешнюю историю в #453 и пересмотреть release candidate boundary.
+Если любой объект уже существует, остановить C3.7 и зафиксировать неожиданную историю в #453.
 
-- [ ] **Шаг 7: провести self-dogfooding приёмку #453**
+### 2.3 Приёмка #453
 
-Финальный PR содержит только:
-
-```text
-package.json
-package-lock.json
-tests/test-c3-7-version-truth.mjs
-```
-
-`ChangeIntent`:
-
-```repo-guard-yaml
-change_type: governance
-scope:
-  - package.json
-  - package-lock.json
-  - tests/test-c3-7-version-truth.mjs
-budgets:
-  max_new_files: 1
-  max_new_docs: 0
-  max_net_added_lines: 80
-anchors:
-  affects: []
-  implements: []
-  verifies: []
-must_touch:
-  - package.json
-  - package-lock.json
-  - tests/test-c3-7-version-truth.mjs
-must_not_touch:
-  - repo-policy.json
-  - src/**
-  - dist/**
-  - schemas/**
-  - scripts/**
-  - .github/**
-  - README.md
-  - RELEASING.md
-expected_effects:
-  - каноническая версия становится 3.0.0
-  - package-lock остаётся производным совпадающим зеркалом
-  - официальный v3.0.0 всё ещё отсутствует
-```
-
-После draft GREEN перевести в `Ready`, получить реальный `check-pr` на той же голове, слить с `expected_head_sha`, дождаться послемержевого `CI`.
-
-- [ ] **Шаг 8: проверить автоматическую промежуточную публикацию Observatory**
-
-После зелёного послемержевого `CI` дождаться автоматического `Policy Observatory Pages` для того же `SHA` и проверить:
+- [ ] Финальный PR меняет только три заявленных файла и использует `Fixes #453`.
+- [ ] `ChangeIntent`: `change_type: governance`, точный `scope`, `max_new_files: 1`, `max_new_docs: 0`, запрет на scripts, docs, workflow, policy, src и dist.
+- [ ] Получить draft GREEN, exact-head Ready GREEN, merge с `expected_head_sha`, post-merge GREEN.
+- [ ] Дождаться автоматического Observatory deploy на том же SHA и проверить промежуточную правду:
 
 ```text
-Версия пакета: 3.0.0
-Совпадающий тег: v3.0.0
-Выпуск: не опубликован
-Статус истины: package_only
+package_version = 3.0.0
+matching_release_tag = v3.0.0
+matching_published_release = false
+release_truth_status = package_only
 ```
-
-Это промежуточное доказательство version cutover. Оно не заменяет финальный C3.7 Pages-срез #454.
 
 ---
 
-### Задача 3: #454 — единое наблюдение выпуска, документация и финальная приёмка C3.7
+## Задача 3 — #454: единое наблюдение, документация и финальная приёмка
 
-**Файлы:**
-- Изменить: `scripts/observatory/collect.mjs`
-- Изменить: `scripts/observatory/render.mjs`
-- Изменить: `tests/test-c3-6-observatory-snapshot.mjs`
-- Изменить: `tests/test-c3-6-observatory-render.mjs`
-- Создать: `tests/test-c3-7-release-workflow.mjs`
-- Изменить: `README.md` только если нужна одна краткая публичная формулировка
-- Изменить: `RELEASING.md`
-- Только читать: `.github/workflows/release-integrity.yml`
-
-**Интерфейсы:**
-- Потребляет: принятый `observeReleaseTruth` из #452 и `package.json.version = 3.0.0` из #453.
-- Сохраняет текущие поля внутреннего снимка:
+**Файлы, которые могут измениться:**
 
 ```text
-package_version
-matching_release_tag
-matching_published_release
-release_url
-release_truth_status
+scripts/observatory/collect.mjs
+scripts/observatory/render.mjs
+tests/test-c3-6-observatory-snapshot.mjs
+tests/test-c3-6-observatory-render.mjs
+tests/test-c3-7-release-workflow.mjs
+README.md
+RELEASING.md
 ```
 
-- Добавляет ровно одно производное поле для опубликованного состояния:
+`.github/workflows/release-integrity.yml` только читается.
 
-```text
-release_commit
-```
+### 3.1 Красный контракт Observatory
 
-- `release_commit` равен `null`, пока официального опубликованного выпуска нет.
-- При официальном опубликованном выпуске `release_commit` равен точному коммиту, до которого разрешился тот же тег.
-- Не добавлять `matching_tag_commit`, отдельный status-файл или вторую модель состояния, если это не требуется для отображения официального выпуска.
+- [ ] Начать `c3/454-release-truth-convergence` только после принятия #453.
+- [ ] Снова проверить отсутствие реального `v3.0.0` tag/release.
+- [ ] Сначала изменить snapshot-тест.
 
-- [ ] **Шаг 1: начать только от послемержевого зелёного состояния #453**
-
-```bash
-git fetch origin main
-git switch --detach <accepted-c3-7b-main-sha>
-git switch -c c3/454-release-truth-convergence
-```
-
-До записи снова проверить отсутствие реального `v3.0.0` tag/release.
-
-- [ ] **Шаг 2: сначала изменить snapshot-тест так, чтобы он требовал общий tag-aware observation**
-
-В `tests/test-c3-6-observatory-snapshot.mjs` заменить одноответный `release404` на маршрутизатор, который способен различить тег и выпуск:
-
-```js
-const absentReleaseTruth = async (url) => {
-  if (
-    url.endsWith("/git/ref/tags/v3.0.0")
-    || url.endsWith("/releases/tags/v3.0.0")
-  ) {
-    return {
-      status: 404,
-      async json() { return { message: "not found" }; },
-    };
-  }
-  throw new Error(`unexpected URL: ${url}`);
-};
-```
-
-Для текущего состояния потребовать:
+Для текущего состояния требовать:
 
 ```js
 assert.equal(first.version.package_version, "3.0.0");
@@ -775,10 +554,11 @@ assert.equal(first.version.release_commit, null);
 assert.equal(first.version.release_truth_status, "package_only");
 ```
 
-Добавить синтетический опубликованный случай с точным лёгким тегом:
+Добавить синтетическое опубликованное состояние:
 
 ```js
 const releaseCommit = "d".repeat(40);
+
 const published = await collectObservatorySnapshot({
   ...input,
   fetchImpl: async (url) => {
@@ -798,7 +578,7 @@ const published = await collectObservatorySnapshot({
             tag_name: "v3.0.0",
             draft: false,
             prerelease: false,
-            html_url: "https://github.com/netkeep80/repo-guard/releases/tag/v3.0.0",
+            html_url: "https://example.invalid/release",
           };
         },
       };
@@ -812,34 +592,20 @@ assert.equal(published.version.release_commit, releaseCommit);
 assert.equal(published.version.release_truth_status, "published");
 ```
 
-Добавить preliminary-release вариант и потребовать `matching_published_release === false` и `release_commit === null`.
+Добавить предварительный выпуск и потребовать `matching_published_release === false` и `release_commit === null`.
 
-- [ ] **Шаг 3: получить отрицательный результат до изменения collector**
+- [ ] Запустить snapshot-тест до изменения collector. Ожидается красный результат на отсутствии `release_commit` и tag-aware observation.
 
-```bash
-node tests/test-c3-6-observatory-snapshot.mjs
-```
+### 3.2 Удалить дублирование наблюдения
 
-Ожидаемо: текущий collector не вызывает tag-resolution helper и не предоставляет `release_commit`.
-
-В GitHub-only исполнении зафиксировать только тестовый commit в `DRAFT PR`, связанный с #454 через `Refs #454`, но пока не закрывать задачу.
-
-- [ ] **Шаг 4: удалить локальную release-семантику collector и переиспользовать #452**
-
-В `scripts/observatory/collect.mjs` импортировать:
+- [ ] В `scripts/observatory/collect.mjs` импортировать:
 
 ```js
 import { observeReleaseTruth } from "../verify-release-ref.mjs";
 ```
 
-Удалить локальные функции:
-
-```text
-validateReleasePayload
-observeMatchingRelease
-```
-
-Заменить вызов на:
+- [ ] Удалить локальные `validateReleasePayload` и `observeMatchingRelease`.
+- [ ] Использовать только:
 
 ```js
 const release = await observeReleaseTruth({
@@ -850,7 +616,7 @@ const release = await observeReleaseTruth({
 });
 ```
 
-Секция `version` становится:
+- [ ] Секцию снимка оставить минимальной:
 
 ```js
 version: {
@@ -868,79 +634,33 @@ version: {
 },
 ```
 
-В `sources` добавить существующий общий механизм:
+В `sources` добавить `scripts/verify-release-ref.mjs`.
+
+Ошибка `observeReleaseTruth` здесь не ловится как `package_only`: Pages build обязан завершиться ошибкой вместо ложной публикации.
+
+### 3.3 Показать exact release commit без новой страницы
+
+- [ ] В `validateObservatorySnapshot` разрешить `release_commit` только как `null` либо точный 40-символьный `SHA`; для `published` требовать ненулевое значение.
+- [ ] В карточку «Версия и выпуск» добавить одну строку «Коммит выпуска».
+- [ ] Для ненулевого значения строить неизменяемую ссылку:
 
 ```text
-scripts/verify-release-ref.mjs
+https://github.com/<owner>/<repo>/commit/<release_commit>
 ```
 
-Не создавать новую библиотеку или второй HTTP-клиент.
+- [ ] В `tests/test-c3-6-observatory-render.mjs` доказать:
 
-- [ ] **Шаг 5: обновить renderer-контракт до одного необязательного exact commit**
-
-В `validateObservatorySnapshot` добавить:
-
-```js
-const releaseCommit = snapshot.version.release_commit;
-if (
-  releaseCommit !== null
-  && !/^[0-9a-f]{40}$/.test(releaseCommit ?? "")
-) {
-  throw new Error("invalid release commit SHA");
-}
-if (
-  snapshot.version.release_truth_status === "published"
-  && releaseCommit === null
-) {
-  throw new Error("published release requires exact release commit");
-}
+```text
+package_only -> release_commit отсутствует
+published -> exact release_commit виден и является immutable link
+published + null release_commit -> validation failure
 ```
 
-В карточке версии добавить только одну строку:
+Нового клиентского запроса и новой страницы нет.
 
-```js
-const releaseCommitTruth = snapshot.version.release_commit
-  ? `<a href="https://github.com/${escapeHtml(snapshot.repository.full_name)}/commit/${escapeHtml(snapshot.version.release_commit)}"><code>${escapeHtml(snapshot.version.release_commit)}</code></a>`
-  : "отсутствует до официального выпуска";
-```
+### 3.4 Доказать, что текущий release-workflow уже достаточен
 
-И вывести:
-
-```html
-<p>Коммит выпуска: ${releaseCommitTruth}</p>
-```
-
-Не создавать отдельную страницу выпуска и не добавлять клиентский запрос `GitHub API`.
-
-- [ ] **Шаг 6: обновить renderer-тест**
-
-В `tests/test-c3-6-observatory-render.mjs` для `package_only` проверить текст отсутствия exact release commit.
-
-Для синтетического опубликованного снимка:
-
-```js
-const releaseCommit = "d".repeat(40);
-const publishedSnapshot = {
-  ...snapshot,
-  version: {
-    ...snapshot.version,
-    matching_published_release: true,
-    release_truth_status: "published",
-    release_commit: releaseCommit,
-    release_url: "https://github.com/netkeep80/repo-guard/releases/tag/v3.0.0",
-  },
-};
-
-const publishedHtml = renderObservatory(publishedSnapshot);
-assert.ok(publishedHtml.includes(releaseCommit));
-assert.ok(publishedHtml.includes(`/commit/${releaseCommit}`));
-```
-
-Также проверить, что `published` с `release_commit: null` отвергается валидатором снимка.
-
-- [ ] **Шаг 7: добавить структурный тест уже существующего release-workflow**
-
-Создать `tests/test-c3-7-release-workflow.mjs`:
+- [ ] Создать `tests/test-c3-7-release-workflow.mjs`:
 
 ```js
 import assert from "node:assert/strict";
@@ -948,8 +668,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseDocument } from "yaml";
 
-const path = resolve(".github/workflows/release-integrity.yml");
-const document = parseDocument(readFileSync(path, "utf8"));
+const document = parseDocument(
+  readFileSync(resolve(".github/workflows/release-integrity.yml"), "utf8"),
+);
 assert.equal(document.errors.length, 0);
 const workflow = document.toJS();
 
@@ -958,16 +679,16 @@ assert.equal(Object.keys(workflow.permissions ?? {}).length, 1);
 
 const job = workflow.jobs?.["verify-release-ref"];
 assert.ok(job);
-const steps = job.steps ?? [];
+assert.equal(job.permissions, undefined);
 
-const checkout = steps.find((step) => step.uses === "actions/checkout@v6");
+const checkout = job.steps.find((step) => step.uses === "actions/checkout@v6");
 assert.equal(
   checkout?.with?.ref,
   "${{ github.event.release.tag_name || inputs.tag }}",
 );
 assert.equal(checkout?.with?.["fetch-depth"], 0);
 
-const verify = steps.find((step) => (
+const verify = job.steps.find((step) => (
   typeof step.run === "string"
   && step.run.includes("scripts/verify-release-ref.mjs")
 ));
@@ -975,166 +696,101 @@ assert.ok(verify);
 assert.match(verify.run, /--tag/);
 
 const serialized = JSON.stringify(workflow);
-assert.doesNotMatch(serialized, /contents\s*:\s*write/i);
-assert.doesNotMatch(serialized, /npm publish/);
+assert.doesNotMatch(serialized, /npm publish|gh release create|git push/i);
 ```
 
-Этот тест должен сразу проходить на принятом workflow. Если он падает, не менять workflow автоматически: остановить #454 и зафиксировать точное расхождение, потому что это уже новая governance-транзакция.
+Этот тест ожидается зелёным без изменения workflow. Если он красный, остановить #454 и зафиксировать точное governance-расхождение; не расширять scope молча.
 
-- [ ] **Шаг 8: синхронизировать `RELEASING.md` с принятой моделью**
+### 3.5 Синхронизировать документацию без дублирования
 
-Удалить старую часть последовательности, где официальный выпуск сам выбирает уровень и выполняет:
-
-```bash
-npm version patch
-npm version minor
-npm version major
-```
-
-Новая минимальная последовательность должна говорить по-русски:
+- [ ] В `RELEASING.md` удалить старую последовательность, где финальный выпуск выполняет `npm version`.
+- [ ] Описать один процесс:
 
 ```text
-1. Версия продукта уже принята обычным PR и хранится в package.json.
-2. Финальная C3.10-приёмка фиксирует точный SHA S.
-3. После приёмки между S и тегом не меняются код, версия или документы.
-4. Создаётся неизменяемый тег v3.0.0, указывающий ровно на S.
-5. Публикуется обычный, не предварительный GitHub Release для того же тега.
-6. release-integrity проверяет tag -> S и выпуск.
-7. Только затем допустим npm publish.
+package.json.version уже принят обычным PR
+        ↓
+C3.10 принимает exact SHA S
+        ↓
+никаких code/version/docs edits
+        ↓
+tag v3.0.0 -> S
+        ↓
+published non-prerelease GitHub Release v3.0.0
+        ↓
+release-integrity + verify-release-ref
+        ↓
+только затем npm publish
 ```
 
-Сохранить общую таблицу SemVer, но не утверждать, что `v3.0.0` уже существует.
-
-- [ ] **Шаг 9: сделать README только навигационно достаточным**
-
-Текущий README уже требует точный `SHA`, не подставляет `main`/`latest` и ссылается на `RELEASING.md`. Поэтому не переписывать разделы целиком.
-
-Если после version cutover нужна явная фраза, добавить рядом с быстрым стартом только один смысл:
+- [ ] Сохранить обычное правило SemVer для будущих version boundaries, но не утверждать, что `v3.0.0` уже выпущен.
+- [ ] README менять только если нужна одна короткая фраза рядом с быстрым стартом:
 
 ```text
 Номер в `package.json` сам по себе не означает опубликованный выпуск; до появления совпадающего официального тега и выпуска используйте полный `SHA`.
 ```
 
-Не добавлять копию процедуры из `RELEASING.md`.
+Если текущий README уже выражает это однозначно, не менять его ради формальной галочки.
 
-- [ ] **Шаг 10: прогнать узкие и полные проверки**
+### 3.6 Проверки и закрытие C3.7
+
+- [ ] Выполнить:
 
 ```bash
+node tests/test-release-ref.mjs
+node tests/test-c3-7-version-truth.mjs
 node tests/test-c3-6-observatory-snapshot.mjs
 node tests/test-c3-6-observatory-render.mjs
 node tests/test-c3-7-release-workflow.mjs
-node tests/test-release-ref.mjs
-node tests/test-c3-7-version-truth.mjs
 npm test
 npm run check:dist
 npm run compression:metrics
 ```
 
-Ожидаемые архитектурные инварианты остаются:
+- [ ] Подтвердить, что архитектурные метрики не выросли:
 
 ```text
-canonical FactRef model count = 1
-canonical FactRef sources = 4
+FactRef models = 1
+FactRef sources = 4
 runtime constraint kinds = 1
-relation descriptor count = 10
-primitive descriptor registry count = 1
+relation descriptors = 10
+primitive descriptor registries = 1
 public CLI = validate, check-diff, check-pr, init, doctor
 ```
 
-- [ ] **Шаг 11: провести финальный PR #454 без governance-раздувания**
-
-Финальный PR закрывает #454 и содержит только реально потребовавшиеся файлы из заявленного списка. `.github/workflows/release-integrity.yml` должен отсутствовать в diff при зелёном структурном тесте.
-
-Пример `ChangeIntent`:
-
-```repo-guard-yaml
-change_type: docs
-scope:
-  - scripts/observatory/collect.mjs
-  - scripts/observatory/render.mjs
-  - tests/test-c3-6-observatory-snapshot.mjs
-  - tests/test-c3-6-observatory-render.mjs
-  - tests/test-c3-7-release-workflow.mjs
-  - README.md
-  - RELEASING.md
-budgets:
-  max_new_files: 1
-  max_new_docs: 0
-  max_net_added_lines: 350
-anchors:
-  affects: []
-  implements: []
-  verifies: []
-must_touch:
-  - scripts/observatory/collect.mjs
-  - tests/test-c3-6-observatory-snapshot.mjs
-  - RELEASING.md
-must_not_touch:
-  - package.json
-  - package-lock.json
-  - repo-policy.json
-  - src/**
-  - dist/**
-  - schemas/**
-  - action.yml
-  - .github/workflows/**
-expected_effects:
-  - Observatory использует ту же вычисляемую истину выпуска
-  - опубликованное состояние содержит точный commit тега
-  - документация не выдаёт package version за опубликованный выпуск
-```
-
-Если README после проверки не требует изменения, убрать его из `scope` и diff вместо добавления искусственной правки.
-
-- [ ] **Шаг 12: выполнить точную финальную приёмку C3.7**
-
-После `DRAFT` GREEN перевести PR в `Ready`, получить реальный `Run PR policy check` на той же голове, слить с `expected_head_sha` и дождаться послемержевого `CI`.
-
-Затем дождаться автоматического `Policy Observatory Pages` на том же merge SHA и проверить живой артефакт:
+- [ ] Финальный PR использует `Fixes #454`; `.github/workflows/release-integrity.yml` отсутствует в diff, если структурный тест зелёный.
+- [ ] После draft GREEN получить exact-head Ready GREEN, merge и post-merge GREEN.
+- [ ] Дождаться автоматического `Policy Observatory Pages` на том же merge SHA.
+- [ ] Проверить живой артефакт:
 
 ```text
-package version = 3.0.0
-matching release tag = v3.0.0
-matching published release = false
-release commit = absent
-release truth status = package_only
+package_version = 3.0.0
+matching_release_tag = v3.0.0
+matching_published_release = false
+release_commit = null
+release_truth_status = package_only
 accepted SHA = exact final C3.7 main SHA
 ```
 
-После этого свежепроверить внешние объекты:
+- [ ] Последний раз проверить GitHub:
 
 ```text
 GET /git/ref/tags/v3.0.0 -> 404
 GET /releases/tags/v3.0.0 -> 404
 ```
 
-И только при одновременном выполнении всех условий:
-
-```text
-#452 = completed
-#453 = completed
-#454 = completed
-post-merge CI = GREEN
-Pages deploy = GREEN on exact same SHA
-v3.0.0 tag = absent
-v3.0.0 GitHub Release = absent
-```
-
-добавить сводный комментарий в #378 и закрыть #378 как `completed`.
-
-Не создавать тег `v3.0.0` при закрытии #378. Следующий этап после этого — C3.8, а реальный выпуск остаётся за C3.10.
+- [ ] Только после этого добавить сводный audit в #378 и закрыть #378 как `completed`.
+- [ ] Не создавать `v3.0.0` при закрытии #378. Следующий этап — C3.8; официальный выпуск остаётся после C3.10.
 
 ---
 
-## Проверка полноты плана
-
-Спецификация покрывается тремя последовательными задачами:
+## Проверка полноты
 
 ```text
 #452
-exact tag resolution
-+ strict current HEAD equality
-+ published non-draft non-prerelease release
+one verifier
++ exact lightweight/annotated tag -> commit
++ exact current HEAD equality
++ fail-closed official release
         ↓
 #453
 package.json = 3.0.0
@@ -1142,25 +798,13 @@ package.json = 3.0.0
 + no actual release
         ↓
 #454
-same observation in Pages
-+ exact release commit projection
-+ release workflow structural proof
-+ README/RELEASING convergence
-+ live acceptance
+same observation in Observatory
++ exact published release commit
++ existing read-only workflow proven
++ release docs converged
++ live Pages acceptance
         ↓
 #378 completed
 ```
 
-В плане нет отдельного файла версии, отдельного состояния выпуска, второй release-библиотеки, команды публикации, плавающего тега или автоматизации записи в `GitHub Releases`.
-
-Типы и имена интерфейсов согласованы между задачами:
-
-```text
-expectedTagForVersion(version)
-observeReleaseTruth({ repo, tag, token, fetchImpl })
-verifyReleaseRef({ packageRoot, repo, tag, token, fetchImpl, run })
-```
-
-`observeReleaseTruth` появляется в #452 и повторно используется collector в #454. #453 не создаёт новой семантики и меняет только данные версии.
-
-План не содержит необязательных ветвей реализации: единственная условная точка — структурная проверка существующего `release-integrity.yml`. Если она неожиданно красная, выполнение останавливается вместо молчаливого расширения governance scope.
+Новые постоянные сущности отсутствуют. Единственное новое переиспользуемое поведение — `observeReleaseTruth` внутри уже существующего verifier-файла; строгая проверка и read-only проекция используют его по-разному, но не создают две истины.
