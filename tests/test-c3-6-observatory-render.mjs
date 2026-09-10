@@ -92,6 +92,11 @@ assert.doesNotMatch(first, /Проверка <границы>/);
 assert.match(first, /Проверка &lt;границы&gt;/);
 assert.match(first, /Текст &amp; данные/);
 
+const repositoryUrl = `https://github.com/${snapshot.repository.full_name}`;
+const roadmapUrl = `${repositoryUrl}/issues/370`;
+assert.ok(first.includes(repositoryUrl));
+assert.ok(first.includes(roadmapUrl));
+
 const policyUrl = `https://github.com/${snapshot.repository.full_name}/blob/${acceptedSha}/repo-policy.json`;
 assert.ok(first.includes(policyUrl));
 for (const scenario of snapshot.scenarios) {

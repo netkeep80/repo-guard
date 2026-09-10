@@ -211,6 +211,8 @@ export function renderObservatory(snapshot) {
   const releaseTruth = snapshot.version.matching_published_release
     ? `<a href="${escapeHtml(snapshot.version.release_url)}">опубликован</a>`
     : "не опубликован для совпадающего тега";
+  const repositoryUrl = `https://github.com/${snapshot.repository.full_name}`;
+  const roadmapUrl = `${repositoryUrl}/issues/370`;
 
   return `<!doctype html>
 <html lang="ru">
@@ -328,7 +330,7 @@ AnalysisReport</code></pre>
   </main>
 
   <footer>
-    <p>Статическая проекция только для чтения · <code>${escapeHtml(snapshot.repository.full_name)}</code></p>
+    <p>Статическая проекция только для чтения · <a href="${escapeHtml(repositoryUrl)}">Репозиторий</a> · <a href="${escapeHtml(roadmapUrl)}">Дорожная карта #370</a></p>
   </footer>
 </body>
 </html>
