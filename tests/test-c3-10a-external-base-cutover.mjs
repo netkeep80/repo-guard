@@ -29,7 +29,7 @@ function policy(maxNewFiles = 20) {
   };
 }
 
-function retiredBasePolicy(maxNewFiles = 20) {
+function retiredBasePolicy(maxNewFiles = 20, { invalidCurrentRegex = false } = {}) {
   const base = policy(maxNewFiles);
   base.integration = {
     workflows: [{
@@ -51,6 +51,14 @@ function retiredBasePolicy(maxNewFiles = 20) {
     workflow: "project-ci",
     covers: ["tests/**"],
   }];
+  if (invalidCurrentRegex) {
+    base.content_rules = [{
+      id: "malformed-current-rule",
+      glob: "**",
+      mode: "added_lines",
+      forbid_regex: ["["],
+    }];
+  }
   return base;
 }
 
@@ -92,13 +100,16 @@ else console.log(JSON.stringify({labels:[]}));
   return root;
 }
 
-function externalCutoverRepo({ baseMaxNewFiles = 20, headMaxNewFiles = 20 } = {}) {
+function externalCutoverRepo({ baseMaxNewFiles = 20, headMaxNewFiles = 20, invalidCurrentRegex = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "rg-c3-10a-external-"));
   git(root, "init", "-b", "main");
   git(root, "config", "user.email", "test@test.com");
   git(root, "config", "user.name", "Test");
 
-  writeFileSync(join(root, "repo-policy.json"), JSON.stringify(retiredBasePolicy(baseMaxNewFiles), null, 2));
+  writeFileSync(
+    join(root, "repo-policy.json"),
+    JSON.stringify(retiredBasePolicy(baseMaxNewFiles, { invalidCurrentRegex }), null, 2),
+  );
   writeFileSync(join(root, "README.md"), "consumer\n");
   git(root, "add", "-A");
   git(root, "commit", "-m", "historical external consumer policy");
@@ -157,6 +168,20 @@ function run(root, issueBody) {
     assert.doesNotMatch(output, /Base policy compilation failed/);
     assert.match(output, /FAIL: policy-relaxation/);
     assert.match(output, /\/diff_rules/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+{
+  const root = externalCutoverRepo({ invalidCurrentRegex: true });
+  try {
+    const result = run(root, `${intent()}\n${grant()}`);
+    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 1, output);
+    assert.match(output, /FAIL: forbid_regex compilation/);
+    assert.match(output, /malformed-current-rule/);
+    assert.match(output, /Base policy compilation failed/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
