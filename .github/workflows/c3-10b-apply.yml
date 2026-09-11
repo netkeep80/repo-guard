@@ -51,8 +51,13 @@ jobs:
               raise SystemExit('expected exactly one nalue transport transcription')
           if text.count('REPE_GUARD_WORKFLOW_') != 3:
               raise SystemExit('expected exactly three REPE_GUARD_WORKFLOW_ transport transcriptions')
+          wrong_yaml_check = r'/\\.ya?ml$/i.test(path)'
+          right_yaml_check = '(path.toLowerCase().endsWith(".yml") || path.toLowerCase().endsWith(".yaml"))'
+          if text.count(wrong_yaml_check) != 1:
+              raise SystemExit('expected exactly one double-escaped YAML transport check')
           text = text.replace('nalue', 'value')
           text = text.replace('REPE_GUARD_WORKFLOW_', 'REPO_GUARD_WORKFLOW_')
+          text = text.replace(wrong_yaml_check, right_yaml_check)
           path.write_text(text)
           PY
 
