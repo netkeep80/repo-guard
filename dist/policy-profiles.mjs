@@ -121,24 +121,51 @@ function generatedRuleIds(macro) {
         ...((Array.isArray(macro.required_paths) ? macro.required_paths : []).map((_, index) => `contract-conformance:required-path:${index}`)),
     ];
 }
-export const listBuiltInProfiles = () => Object.keys(PACKS).sort();
+export const listBuiltInPacks = () => Object.keys(PACKS).sort();
+export const listBuiltInProfiles = () => listBuiltInPacks();
+function validateRequirementsConfig(fieldPrefix, value, errors) {
+    if (!isObject(value)) {
+        errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+        return;
+    }
+    for (const [field, fieldValue] of Object.entries(value)) {
+        const qualified = `${fieldPrefix}.${field}`;
+        if (!OVERRIDE_FIELDS.has(field))
+            errors.push({ field: qualified, message: `${qualified} is not supported` });
+        else if (!Array.isArray(fieldValue) || !fieldValue.length || fieldValue.some((item) => typeof item !== "string" || !item.trim())) {
+            errors.push({ field: qualified, message: `${qualified} must be a non-empty array of non-empty strings` });
+        }
+    }
+}
 export function compileProfilePolicy(policy) {
-    const errors = [], profile = policy?.profile, overrides = policy?.profile_overrides;
+    const source = policy;
+    const errors = [], profile = source?.profile, overrides = source?.profile_overrides, packs = source?.packs;
     if (overrides !== undefined && !profile)
         errors.push({ field: "profile_overrides", message: "profile_overrides requires top-level profile" });
     if (profile !== undefined && !PACKS[profile])
         errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
-    if (overrides !== undefined) {
-        if (!isObject(overrides))
-            errors.push({ field: "profile_overrides", message: "profile_overrides must be an object" });
-        else
-            for (const [field, value] of Object.entries(overrides)) {
-                if (!OVERRIDE_FIELDS.has(field))
-                    errors.push({ field: `profile_overrides.${field}`, message: `profile_overrides.${field} is not supported` });
-                else if (!Array.isArray(value) || !value.length || value.some((item) => typeof item !== "string" || !item.trim())) {
-                    errors.push({ field: `profile_overrides.${field}`, message: `profile_overrides.${field} must be a non-empty array of non-empty strings` });
-                }
+    if (overrides !== undefined)
+        validateRequirementsConfig("profile_overrides", overrides, errors);
+    if (packs !== undefined) {
+        if (profile !== undefined || overrides !== undefined)
+            errors.push({ field: "packs", message: "packs cannot be combined with profile or profile_overrides" });
+        if (!isObject(packs))
+            errors.push({ field: "packs", message: "packs must be an object" });
+        else {
+            const entries = Object.entries(packs);
+            if (!entries.length)
+                errors.push({ field: "packs", message: "packs must contain at least one built-in pack" });
+            for (const [name, config] of entries) {
+                const spec = PACKS[name];
+                if (!spec)
+                    errors.push({ field: `packs.${name}`, message: `pack "${name}" is not supported; use ${listBuiltInPacks().join(", ")}` });
+                else
+                    validateRequirementsConfig(`packs.${name}`, config, errors);
             }
+            if (Object.hasOwn(packs, "requirements-strict") && (source?.anchors !== undefined || source?.trace_rules !== undefined)) {
+                errors.push({ field: "packs.requirements-strict", message: "requirements-strict cannot be combined with explicit anchors or trace_rules" });
+            }
+        }
     }
     return errors;
 }
@@ -229,7 +256,23 @@ export function compileContractConformancePolicy(policy) {
     return errors;
 }
 export function expandPolicyProfile(policy) {
-    const base = clone(policy), spec = PACKS[base.profile];
+    const base = clone(policy);
+    if (isObject(base.packs)) {
+        const configuredPacks = clone(base.packs);
+        delete base.packs;
+        for (const [name, config] of Object.entries(configuredPacks)) {
+            const spec = PACKS[name];
+            if (!spec || !isObject(config))
+                continue;
+            const patch = materializePack(spec, config);
+            if (name === "requirements-strict") {
+                base.anchors = patch.anchors;
+                base.trace_rules = patch.trace_rules;
+            }
+        }
+        return base;
+    }
+    const spec = PACKS[base.profile];
     if (!spec)
         return base;
     const patch = materializePack(spec, base.profile_overrides || {});

@@ -55,6 +55,7 @@ type ContractRole = PairRole | "acceptance";
 interface PolicyProjection extends Record<string, unknown> {
   profile?: string;
   profile_overrides?: unknown;
+  packs?: unknown;
   anchors?: unknown;
   trace_rules?: unknown;
   contract_conformance?: unknown;
@@ -155,18 +156,43 @@ function generatedRuleIds(macro: Record<string, unknown>): string[] {
   ];
 }
 
-export const listBuiltInProfiles = (): string[] => Object.keys(PACKS).sort();
+export const listBuiltInPacks = (): string[] => Object.keys(PACKS).sort();
+export const listBuiltInProfiles = (): string[] => listBuiltInPacks();
+
+function validateRequirementsConfig(fieldPrefix: string, value: unknown, errors: ProfileValidationError[]) {
+  if (!isObject(value)) {
+    errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+    return;
+  }
+  for (const [field, fieldValue] of Object.entries(value)) {
+    const qualified = `${fieldPrefix}.${field}`;
+    if (!OVERRIDE_FIELDS.has(field)) errors.push({ field: qualified, message: `${qualified} is not supported` });
+    else if (!Array.isArray(fieldValue) || !fieldValue.length || fieldValue.some((item) => typeof item !== "string" || !item.trim())) {
+      errors.push({ field: qualified, message: `${qualified} must be a non-empty array of non-empty strings` });
+    }
+  }
+}
 
 export function compileProfilePolicy(policy: unknown): ProfileValidationError[] {
-  const errors: ProfileValidationError[] = [], profile = (policy as PolicyProjection | null | undefined)?.profile, overrides = (policy as PolicyProjection | null | undefined)?.profile_overrides;
+  const source = policy as PolicyProjection | null | undefined;
+  const errors: ProfileValidationError[] = [], profile = source?.profile, overrides = source?.profile_overrides, packs = source?.packs;
   if (overrides !== undefined && !profile) errors.push({ field: "profile_overrides", message: "profile_overrides requires top-level profile" });
   if (profile !== undefined && !(PACKS as unknown as Record<string, ProfileSpec>)[profile]) errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
-  if (overrides !== undefined) {
-    if (!isObject(overrides)) errors.push({ field: "profile_overrides", message: "profile_overrides must be an object" });
-    else for (const [field, value] of Object.entries(overrides)) {
-      if (!OVERRIDE_FIELDS.has(field)) errors.push({ field: `profile_overrides.${field}`, message: `profile_overrides.${field} is not supported` });
-      else if (!Array.isArray(value) || !value.length || value.some((item) => typeof item !== "string" || !item.trim())) {
-        errors.push({ field: `profile_overrides.${field}`, message: `profile_overrides.${field} must be a non-empty array of non-empty strings` });
+  if (overrides !== undefined) validateRequirementsConfig("profile_overrides", overrides, errors);
+
+  if (packs !== undefined) {
+    if (profile !== undefined || overrides !== undefined) errors.push({ field: "packs", message: "packs cannot be combined with profile or profile_overrides" });
+    if (!isObject(packs)) errors.push({ field: "packs", message: "packs must be an object" });
+    else {
+      const entries = Object.entries(packs);
+      if (!entries.length) errors.push({ field: "packs", message: "packs must contain at least one built-in pack" });
+      for (const [name, config] of entries) {
+        const spec = (PACKS as unknown as Record<string, ProfileSpec>)[name];
+        if (!spec) errors.push({ field: `packs.${name}`, message: `pack "${name}" is not supported; use ${listBuiltInPacks().join(", ")}` });
+        else validateRequirementsConfig(`packs.${name}`, config, errors);
+      }
+      if (Object.hasOwn(packs, "requirements-strict") && (source?.anchors !== undefined || source?.trace_rules !== undefined)) {
+        errors.push({ field: "packs.requirements-strict", message: "requirements-strict cannot be combined with explicit anchors or trace_rules" });
       }
     }
   }
@@ -247,7 +273,22 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
 }
 
 export function expandPolicyProfile(policy: unknown) {
-  const base: PolicyProjection = clone(policy as PolicyProjection), spec = (PACKS as unknown as Record<string, ProfileSpec>)[base.profile as string];
+  const base: PolicyProjection = clone(policy as PolicyProjection);
+  if (isObject(base.packs)) {
+    const configuredPacks = clone(base.packs);
+    delete base.packs;
+    for (const [name, config] of Object.entries(configuredPacks)) {
+      const spec = (PACKS as unknown as Record<string, ProfileSpec>)[name];
+      if (!spec || !isObject(config)) continue;
+      const patch = materializePack(spec, config);
+      if (name === "requirements-strict") {
+        base.anchors = patch.anchors;
+        base.trace_rules = patch.trace_rules;
+      }
+    }
+    return base;
+  }
+  const spec = (PACKS as unknown as Record<string, ProfileSpec>)[base.profile as string];
   if (!spec) return base;
   const patch = materializePack(spec, (base.profile_overrides as Record<string, unknown>) || {});
   return { ...base, anchors: base.anchors || patch.anchors, trace_rules: base.trace_rules || patch.trace_rules };

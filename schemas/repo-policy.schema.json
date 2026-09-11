@@ -25,6 +25,10 @@
       "type": "string",
       "enum": ["library", "application", "tooling", "documentation"]
     },
+    "packs": {
+      "$ref": "#/definitions/packs",
+      "description": "Closed built-in policy packs expanded before runtime checks."
+    },
     "profile": {
       "type": "string",
       "enum": ["requirements-strict"],
@@ -342,6 +346,14 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "minItems": 1
+    },
+    "packs": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "requirements-strict": { "$ref": "#/definitions/profile_overrides" }
+      }
     },
     "contract_conformance": {
       "type": "object",
