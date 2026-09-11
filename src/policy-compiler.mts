@@ -14,6 +14,7 @@ interface PolicyProjection {
   new_file_classes?: unknown;
   anchors?: { types?: unknown };
   trace_rules?: unknown;
+  paths?: LooseObject;
   content_rules?: unknown;
   cochange_groups?: unknown;
   document_relations?: unknown;
