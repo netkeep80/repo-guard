@@ -41,6 +41,21 @@ jobs:
       - name: Apply reviewed repo-guard-workflow patch
         run: node tests/c3-10b-apply.mjs
 
+      - name: Normalize bounded transport transcription
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/policy-profiles.mts')
+          text = path.read_text()
+          if text.count('nalue') != 1:
+              raise SystemExit('expected exactly one nalue transport transcription')
+          if text.count('REPE_GUARD_WORKFLOW_') != 3:
+              raise SystemExit('expected exactly three REPE_GUARD_WORKFLOW_ transport transcriptions')
+          text = text.replace('nalue', 'value')
+          text = text.replace('REPE_GUARD_WORKFLOW_', 'REPO_GUARD_WORKFLOW_')
+          path.write_text(text)
+          PY
+
       - name: Install dependencies
         run: npm ci
 
