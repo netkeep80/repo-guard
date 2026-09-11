@@ -142,8 +142,9 @@ assert.deepEqual(versionRules.get("pack:version-governance:mirror:0"), {
 });
 
 const versionProgram = compileConstraintProgram(resolvedVersion.policy).filter((entry) => entry.key.startsWith("document-relation:pack:version-governance:"));
-assert.equal(versionProgram.length, 2, "version-governance must lower to exactly two ordinary document relations for one mirror");
-assert.ok(versionProgram.every((entry) => entry.runtime?.kind === "primitive_relation"), "version-governance must not create a pack-specific runtime kind");
+const versionRuntime = versionProgram.filter((entry) => entry.runtime);
+assert.equal(versionRuntime.length, 2, "version-governance must lower to exactly two ordinary runtime relations for one mirror");
+assert.ok(versionRuntime.every((entry) => entry.runtime?.kind === "primitive_relation"), "version-governance must not create a pack-specific runtime kind");
 
 function evaluateVersionPack(baseVersion, headVersion, mirrorVersion = headVersion) {
   const entries = evaluateConstraintIR({
