@@ -186,9 +186,6 @@
     "document_relations": {
       "$ref": "#/definitions/document_relations"
     },
-    "contract_conformance": {
-      "$ref": "#/definitions/contract_conformance"
-    },
     "evidence_bindings": {
       "$ref": "#/definitions/evidence_bindings"
     },
@@ -344,7 +341,8 @@
       "properties": {
         "requirements-strict": { "$ref": "#/definitions/requirements_strict_pack" },
         "version-governance": { "$ref": "#/definitions/version_governance_pack" },
-        "repo-guard-workflow": { "$ref": "#/definitions/repo_guard_workflow_pack" }
+        "repo-guard-workflow": { "$ref": "#/definitions/repo_guard_workflow_pack" },
+        "contract-conformance": { "$ref": "#/definitions/contract_conformance_pack" }
       }
     },
     "repo_guard_workflow_pack": {
@@ -381,7 +379,7 @@
         }
       }
     },
-    "contract_conformance": {
+    "contract_conformance_pack": {
       "type": "object",
       "required": ["current", "pair_fields", "accepted_state", "required_paths", "cochange", "control_paths"],
       "additionalProperties": false,

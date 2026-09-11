@@ -4,12 +4,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import Ajv from "ajv";
-import { compileContractConformancePolicy, compileProfilePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { compileProfilePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 import { loadJSON, loadPolicyRuntime } from "../dist/runtime/validation.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
+const contractErrors = (policy) => resolvePolicyProfile(policy).errors;
 
 let failures = 0;
 
@@ -119,7 +120,7 @@ function contractPolicy(overrides = {}) {
   return {
     ...foundationPolicy(),
     paths: { ...foundationPolicy().paths, governance_paths: ["repo-policy.json", "schemas/**"] },
-    contract_conformance: contractConformanceMacro(),
+    packs: { "contract-conformance": contractConformanceMacro() },
     ...overrides,
   };
 }
@@ -213,19 +214,19 @@ console.log("\n--- requirements-strict pack enforces changed requirement evidenc
 
 console.log("\n--- current contract/conformance macro semantic boundary ---");
 {
-  expect("valid current macro compiles without semantic errors", compileContractConformancePolicy(contractPolicy()), []);
+  expect("valid current macro compiles without semantic errors", contractErrors(contractPolicy()), []);
 
   const samePath = contractPolicy();
-  samePath.contract_conformance.current.conformance.path = samePath.contract_conformance.current.contract.path;
-  expect("macro rejects identical current pair paths", compileContractConformancePolicy(samePath).some((item) => /duplicates current\.contract/.test(item.message)), true);
+  samePath.packs["contract-conformance"].current.conformance.path = samePath.packs["contract-conformance"].current.contract.path;
+  expect("macro rejects identical current pair paths", contractErrors(samePath).some((item) => /duplicates current\.contract/.test(item.message)), true);
 
   const uncovered = contractPolicy();
-  uncovered.contract_conformance.control_paths = ["other/**"];
-  expect("macro rejects control paths that do not cover pair", compileContractConformancePolicy(uncovered).some((item) => /do not cover/.test(item.message)), true);
+  uncovered.packs["contract-conformance"].control_paths = ["other/**"];
+  expect("macro rejects control paths that do not cover pair", contractErrors(uncovered).some((item) => /do not cover/.test(item.message)), true);
 
   const duplicateSelector = contractPolicy();
-  duplicateSelector.contract_conformance.required_paths.push(structuredClone(duplicateSelector.contract_conformance.required_paths[0]));
-  expect("macro rejects duplicate required path selectors", compileContractConformancePolicy(duplicateSelector).some((item) => /duplicates selector/.test(item.message)), true);
+  duplicateSelector.packs["contract-conformance"].required_paths.push(structuredClone(duplicateSelector.packs["contract-conformance"].required_paths[0]));
+  expect("macro rejects duplicate required path selectors", contractErrors(duplicateSelector).some((item) => /duplicates selector/.test(item.message)), true);
 
   const collision = contractPolicy({
     document_relations: {
@@ -233,7 +234,7 @@ console.log("\n--- current contract/conformance macro semantic boundary ---");
       rules: [],
     },
   });
-  expect("macro rejects generated namespace collisions", compileContractConformancePolicy(collision).some((item) => /collides/.test(item.message)), true);
+  expect("macro rejects generated namespace collisions", contractErrors(collision).some((item) => /collides/.test(item.message)), true);
 }
 
 console.log("\n--- current macro expands to ordinary policy only ---");
@@ -247,7 +248,7 @@ console.log("\n--- current macro expands to ordinary policy only ---");
   });
   const resolved = resolvePolicyProfile(source);
   expect("macro resolves", resolved.ok, true);
-  expect("macro source field disappears after expansion", resolved.policy.contract_conformance, undefined);
+  expect("pack source field disappears after expansion", resolved.policy.packs, undefined);
   expect("explicit document relation composes", resolved.policy.document_relations.documents.explicit.path, "contracts/extra.json");
   expect("current contract generated document path", resolved.policy.document_relations.documents["contract-conformance.current.contract"].path, "contracts/spec-v2.json");
   expect("current conformance generated document path", resolved.policy.document_relations.documents["contract-conformance.current.conformance"].path, "contracts/checks-v2.yaml");
@@ -316,7 +317,7 @@ console.log("\n--- synthetic current macro executes through ordinary R2 constrai
 console.log("\n--- synthetic previous pair and acceptance execute through ordinary R2 constraints ---");
 {
   const source = contractPolicy({
-    contract_conformance: historyContractConformanceMacro(),
+    packs: { "contract-conformance": historyContractConformanceMacro() },
     document_relations: {
       documents: { "consumer-context": { path: "cutover/acceptance.json", format: "json" } },
       rules: [{
@@ -395,7 +396,7 @@ console.log("\n--- synthetic previous pair and acceptance execute through ordina
 console.log("\n--- anum_docs-shaped current topology is data only ---");
 {
   const source = contractPolicy({
-    contract_conformance: contractConformanceMacro({
+    packs: { "contract-conformance": contractConformanceMacro({
       current: {
         contract: { path: "contracts/mts-contract-v0.7.json", format: "json" },
         conformance: { path: "contracts/mts-conformance-v0.7.json", format: "json" },
@@ -404,7 +405,7 @@ console.log("\n--- anum_docs-shaped current topology is data only ---");
         { document: "current.contract", pointer: "/owners", projection: "object_values" },
         { document: "current.conformance", pointer: "/requiredExecutableGates", projection: "array_items" },
       ],
-    }),
+    }) },
   });
   const resolved = resolvePolicyProfile(source);
   expect("anum_docs-shaped macro resolves without domain-specific implementation", resolved.ok, true);

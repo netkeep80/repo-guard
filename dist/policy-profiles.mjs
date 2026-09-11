@@ -85,9 +85,6 @@ function materializePack(spec, overrides) {
     const trace_rules = spec.trace_rules.map((rule) => Object.fromEntries(Object.entries(rule).map(([key, value]) => [key, ref(value, config)])));
     return { anchors: { types }, trace_rules };
 }
-function contractMacro(policy) {
-    return isObject(policy.contract_conformance) ? policy.contract_conformance : null;
-}
 function pairDocuments(value, prefix) {
     const pair = isObject(value) ? value : {};
     return {
@@ -123,7 +120,8 @@ function generatedRuleIds(macro) {
 }
 const VERSION_GOVERNANCE_PACK = "version-governance";
 const REPO_GUARD_WORKFLOW_PACK = "repo-guard-workflow";
-export const listBuiltInPacks = () => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK].sort();
+const CONTRACT_CONFORMANCE_PACK = "contract-conformance";
+export const listBuiltInPacks = () => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK, CONTRACT_CONFORMANCE_PACK].sort();
 function validateRequirementsConfig(fieldPrefix, value, errors) {
     if (!isObject(value)) {
         errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
@@ -311,7 +309,9 @@ export function compileProfilePolicy(policy) {
             if (!entries.length)
                 errors.push({ field: "packs", message: "packs must contain at least one built-in pack" });
             for (const [name, config] of entries) {
-                if (name === VERSION_GOVERNANCE_PACK)
+                if (name === CONTRACT_CONFORMANCE_PACK)
+                    errors.push(...validateContractConformanceConfig(`packs.${name}`, config, source || {}));
+                else if (name === VERSION_GOVERNANCE_PACK)
                     validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
                 else if (name === REPO_GUARD_WORKFLOW_PACK)
                     validateRepoGuardWorkflowConfig(`packs.${name}`, config, source || {}, errors);
@@ -330,35 +330,32 @@ export function compileProfilePolicy(policy) {
     }
     return errors;
 }
-export function compileContractConformancePolicy(policy) {
-    const source = policy;
-    if (source?.contract_conformance === undefined)
-        return [];
-    if (!isObject(source.contract_conformance))
-        return [{ field: "contract_conformance", message: "contract_conformance must be an object" }];
-    const macro = source.contract_conformance, errors = [];
+function validateContractConformanceConfig(fieldPrefix, value, source) {
+    if (!isObject(value))
+        return [{ field: fieldPrefix, message: `${fieldPrefix} must be an object` }];
+    const macro = value, errors = [];
     const roles = configuredRoleDocuments(macro), paths = new Map();
     for (const [role, definition] of Object.entries(roles)) {
         const path = normalizeDocumentPath(definition.path), format = definition.format;
         if (!path)
-            errors.push({ field: `contract_conformance.${role}.path`, message: `${role} path must be a canonical repository path` });
+            errors.push({ field: `${fieldPrefix}.${role}.path`, message: `${role} path must be a canonical repository path` });
         else
             paths.set(role, path);
         if (format !== "json" && format !== "yaml")
-            errors.push({ field: `contract_conformance.${role}.format`, message: `${role} format must be json or yaml` });
+            errors.push({ field: `${fieldPrefix}.${role}.format`, message: `${role} format must be json or yaml` });
     }
     const pathOwners = new Map();
     for (const [role, path] of paths) {
         const previousOwner = pathOwners.get(path);
         if (previousOwner)
-            errors.push({ field: "contract_conformance", message: `${role} path duplicates ${previousOwner} path "${path}"` });
+            errors.push({ field: fieldPrefix, message: `${role} path duplicates ${previousOwner} path "${path}"` });
         else
             pathOwners.set(path, role);
     }
     const pairFields = isObject(macro.pair_fields) ? macro.pair_fields : {};
     for (const field of ["contract_id", "conformance_contract_id", "contract_conformance_path", "contract_status", "conformance_status", "contract_accepted", "conformance_accepted"]) {
         if (typeof pairFields[field] !== "string")
-            errors.push({ field: `contract_conformance.pair_fields.${field}`, message: `${field} must be a JSON Pointer string` });
+            errors.push({ field: `${fieldPrefix}.pair_fields.${field}`, message: `${field} must be a JSON Pointer string` });
     }
     const acceptedState = isObject(macro.accepted_state) ? macro.accepted_state : {};
     if (typeof acceptedState.status !== "string")
@@ -376,18 +373,18 @@ export function compileContractConformancePolicy(policy) {
     for (const [index, rawSelector] of selectors.entries()) {
         const selector = isObject(rawSelector) ? rawSelector : {}, role = selector.document;
         if (!availableRoles.has(role))
-            errors.push({ field: `contract_conformance.required_paths[${index}].document`, message: `required_paths[${index}] references unavailable role "${selector.document}"` });
+            errors.push({ field: `${fieldPrefix}.required_paths[${index}].document`, message: `required_paths[${index}] references unavailable role "${selector.document}"` });
         const key = `${selector.document}|${selector.pointer}|${selector.projection}`;
         if (selectorKeys.has(key))
-            errors.push({ field: `contract_conformance.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
+            errors.push({ field: `${fieldPrefix}.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
         selectorKeys.add(key);
     }
     const cochange = stringList(macro.cochange), seenRoles = new Set();
     for (const [index, role] of cochange.entries()) {
         if (!availableRoles.has(role))
-            errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange references unavailable role "${role}"` });
+            errors.push({ field: `${fieldPrefix}.cochange[${index}]`, message: `cochange references unavailable role "${role}"` });
         if (seenRoles.has(role))
-            errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
+            errors.push({ field: `${fieldPrefix}.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
         seenRoles.add(role);
     }
     if (cochange.length < 2)
@@ -403,16 +400,16 @@ export function compileContractConformancePolicy(policy) {
     for (const role of availableRoles) {
         const name = GENERATED_DOCUMENTS[role];
         if (Object.hasOwn(explicitDocuments, name))
-            errors.push({ field: "document_relations.documents", message: `contract_conformance generated document "${name}" collides with explicit document_relations` });
+            errors.push({ field: "document_relations.documents", message: `contract-conformance generated document "${name}" collides with explicit document_relations` });
     }
     const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
     for (const id of generatedRuleIds(macro))
         if (explicitRuleIds.has(id)) {
-            errors.push({ field: "document_relations.rules", message: `contract_conformance generated rule "${id}" collides with explicit document_relations` });
+            errors.push({ field: "document_relations.rules", message: `contract-conformance generated rule "${id}" collides with explicit document_relations` });
         }
     const explicitCochangeGroups = Array.isArray(source.cochange_groups) ? source.cochange_groups : [];
     if (explicitCochangeGroups.some((group) => isObject(group) && group.id === "contract-conformance")) {
-        errors.push({ field: "cochange_groups", message: "contract_conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
+        errors.push({ field: "cochange_groups", message: "contract-conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
     }
     return errors;
 }
@@ -424,6 +421,10 @@ export function expandPolicyProfile(policy) {
         for (const [name, config] of Object.entries(configuredPacks)) {
             if (!isObject(config))
                 continue;
+            if (name === CONTRACT_CONFORMANCE_PACK) {
+                materializeContractConformance(base, config);
+                continue;
+            }
             if (name === VERSION_GOVERNANCE_PACK) {
                 materializeVersionGovernance(base, config);
                 continue;
@@ -445,11 +446,7 @@ export function expandPolicyProfile(policy) {
     }
     return base;
 }
-export function expandContractConformancePolicy(policy) {
-    const base = clone(policy), macro = contractMacro(base);
-    if (!macro)
-        return base;
-    delete base.contract_conformance;
+function materializeContractConformance(base, macro) {
     const roleDefinitions = configuredRoleDocuments(macro);
     const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition.path)]));
     const relations = isObject(base.document_relations) ? clone(base.document_relations) : {}, documents = isObject(relations.documents) ? clone(relations.documents) : {};
@@ -483,8 +480,8 @@ export function expandContractConformancePolicy(policy) {
     return base;
 }
 export function resolvePolicyProfile(policy) {
-    const errors = [...compileProfilePolicy(policy), ...compileContractConformancePolicy(policy)];
+    const errors = compileProfilePolicy(policy);
     if (errors.length)
         return { ok: false, policy: clone(policy), errors };
-    return { ok: true, policy: expandContractConformancePolicy(expandPolicyProfile(policy)), errors };
+    return { ok: true, policy: expandPolicyProfile(policy), errors };
 }

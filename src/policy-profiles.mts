@@ -56,7 +56,6 @@ interface PolicyProjection extends Record<string, unknown> {
   packs?: unknown;
   anchors?: unknown;
   trace_rules?: unknown;
-  contract_conformance?: unknown;
   document_relations?: unknown;
   cochange_rules?: unknown;
   cochange_groups?: unknown;
@@ -117,9 +116,6 @@ function materializePack(spec: ProfileSpec, overrides: Record<string, unknown>) 
   return { anchors: { types }, trace_rules };
 }
 
-function contractMacro(policy: PolicyProjection) {
-  return isObject(policy.contract_conformance) ? policy.contract_conformance : null;
-}
 
 function pairDocuments(value: unknown, prefix: "current" | "previous") {
   const pair = isObject(value) ? value : {};
@@ -155,8 +151,9 @@ function generatedRuleIds(macro: Record<string, unknown>): string[] {
 
 const VERSION_GOVERNANCE_PACK = "version-governance";
 const REPO_GUARD_WORKFLOW_PACK = "repo-guard-workflow";
+const CONTRACT_CONFORMANCE_PACK = "contract-conformance";
 
-export const listBuiltInPacks = (): string[] => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK].sort();
+export const listBuiltInPacks = (): string[] => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK, CONTRACT_CONFORMANCE_PACK].sort();
 
 function validateRequirementsConfig(fieldPrefix: string, value: unknown, errors: ProfileValidationError[]) {
   if (!isObject(value)) {
@@ -339,7 +336,8 @@ export function compileProfilePolicy(policy: unknown): ProfileValidationError[] 
       const entries = Object.entries(packs);
       if (!entries.length) errors.push({ field: "packs", message: "packs must contain at least one built-in pack" });
       for (const [name, config] of entries) {
-        if (name === VERSION_GOVERNANCE_PACK) validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
+        if (name === CONTRACT_CONFORMANCE_PACK) errors.push(...validateContractConformanceConfig(`packs.${name}`, config, source || {}));
+        else if (name === VERSION_GOVERNANCE_PACK) validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
         else if (name === REPO_GUARD_WORKFLOW_PACK) validateRepoGuardWorkflowConfig(`packs.${name}`, config, source || {}, errors);
         else {
           const spec = (PACKS as unknown as Record<string, ProfileSpec>)[name];
@@ -355,29 +353,27 @@ export function compileProfilePolicy(policy: unknown): ProfileValidationError[] 
   return errors;
 }
 
-export function compileContractConformancePolicy(policy: unknown): ProfileValidationError[] {
-  const source = policy as PolicyProjection | null | undefined;
-  if (source?.contract_conformance === undefined) return [];
-  if (!isObject(source.contract_conformance)) return [{ field: "contract_conformance", message: "contract_conformance must be an object" }];
+function validateContractConformanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection): ProfileValidationError[] {
+  if (!isObject(value)) return [{ field: fieldPrefix, message: `${fieldPrefix} must be an object` }];
 
-  const macro = source.contract_conformance, errors: ProfileValidationError[] = [];
+  const macro = value, errors: ProfileValidationError[] = [];
   const roles = configuredRoleDocuments(macro), paths = new Map<ContractRole, string>();
   for (const [role, definition] of Object.entries(roles) as Array<[ContractRole, Record<string, unknown>]>) {
     const path = normalizeDocumentPath(definition.path), format = definition.format;
-    if (!path) errors.push({ field: `contract_conformance.${role}.path`, message: `${role} path must be a canonical repository path` });
+    if (!path) errors.push({ field: `${fieldPrefix}.${role}.path`, message: `${role} path must be a canonical repository path` });
     else paths.set(role, path);
-    if (format !== "json" && format !== "yaml") errors.push({ field: `contract_conformance.${role}.format`, message: `${role} format must be json or yaml` });
+    if (format !== "json" && format !== "yaml") errors.push({ field: `${fieldPrefix}.${role}.format`, message: `${role} format must be json or yaml` });
   }
   const pathOwners = new Map<string, ContractRole>();
   for (const [role, path] of paths) {
     const previousOwner = pathOwners.get(path);
-    if (previousOwner) errors.push({ field: "contract_conformance", message: `${role} path duplicates ${previousOwner} path "${path}"` });
+    if (previousOwner) errors.push({ field: fieldPrefix, message: `${role} path duplicates ${previousOwner} path "${path}"` });
     else pathOwners.set(path, role);
   }
 
   const pairFields = isObject(macro.pair_fields) ? macro.pair_fields : {};
   for (const field of ["contract_id", "conformance_contract_id", "contract_conformance_path", "contract_status", "conformance_status", "contract_accepted", "conformance_accepted"]) {
-    if (typeof pairFields[field] !== "string") errors.push({ field: `contract_conformance.pair_fields.${field}`, message: `${field} must be a JSON Pointer string` });
+    if (typeof pairFields[field] !== "string") errors.push({ field: `${fieldPrefix}.pair_fields.${field}`, message: `${field} must be a JSON Pointer string` });
   }
   const acceptedState = isObject(macro.accepted_state) ? macro.accepted_state : {};
   if (typeof acceptedState.status !== "string") errors.push({ field: "contract_conformance.accepted_state.status", message: "accepted_state.status must be a string" });
@@ -392,16 +388,16 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
   const selectors = Array.isArray(macro.required_paths) ? macro.required_paths : [], selectorKeys = new Set<string>();
   for (const [index, rawSelector] of selectors.entries()) {
     const selector = isObject(rawSelector) ? rawSelector : {}, role = selector.document as ContractRole;
-    if (!availableRoles.has(role)) errors.push({ field: `contract_conformance.required_paths[${index}].document`, message: `required_paths[${index}] references unavailable role "${selector.document}"` });
+    if (!availableRoles.has(role)) errors.push({ field: `${fieldPrefix}.required_paths[${index}].document`, message: `required_paths[${index}] references unavailable role "${selector.document}"` });
     const key = `${selector.document}|${selector.pointer}|${selector.projection}`;
-    if (selectorKeys.has(key)) errors.push({ field: `contract_conformance.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
+    if (selectorKeys.has(key)) errors.push({ field: `${fieldPrefix}.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
     selectorKeys.add(key);
   }
 
   const cochange = stringList(macro.cochange), seenRoles = new Set<string>();
   for (const [index, role] of cochange.entries()) {
-    if (!availableRoles.has(role as ContractRole)) errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange references unavailable role "${role}"` });
-    if (seenRoles.has(role)) errors.push({ field: `contract_conformance.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
+    if (!availableRoles.has(role as ContractRole)) errors.push({ field: `${fieldPrefix}.cochange[${index}]`, message: `cochange references unavailable role "${role}"` });
+    if (seenRoles.has(role)) errors.push({ field: `${fieldPrefix}.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
     seenRoles.add(role);
   }
   if (cochange.length < 2) errors.push({ field: "contract_conformance.cochange", message: "cochange must contain at least two distinct roles" });
@@ -415,15 +411,15 @@ export function compileContractConformancePolicy(policy: unknown): ProfileValida
   const explicitRelations = isObject(source.document_relations) ? source.document_relations : {}, explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
   for (const role of availableRoles) {
     const name = GENERATED_DOCUMENTS[role];
-    if (Object.hasOwn(explicitDocuments, name)) errors.push({ field: "document_relations.documents", message: `contract_conformance generated document "${name}" collides with explicit document_relations` });
+    if (Object.hasOwn(explicitDocuments, name)) errors.push({ field: "document_relations.documents", message: `contract-conformance generated document "${name}" collides with explicit document_relations` });
   }
   const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
   for (const id of generatedRuleIds(macro)) if (explicitRuleIds.has(id)) {
-    errors.push({ field: "document_relations.rules", message: `contract_conformance generated rule "${id}" collides with explicit document_relations` });
+    errors.push({ field: "document_relations.rules", message: `contract-conformance generated rule "${id}" collides with explicit document_relations` });
   }
   const explicitCochangeGroups = Array.isArray(source.cochange_groups) ? source.cochange_groups : [];
   if (explicitCochangeGroups.some((group) => isObject(group) && group.id === "contract-conformance")) {
-    errors.push({ field: "cochange_groups", message: "contract_conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
+    errors.push({ field: "cochange_groups", message: "contract-conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
   }
   return errors;
 }
@@ -435,6 +431,10 @@ export function expandPolicyProfile(policy: unknown) {
     delete base.packs;
     for (const [name, config] of Object.entries(configuredPacks)) {
       if (!isObject(config)) continue;
+      if (name === CONTRACT_CONFORMANCE_PACK) {
+        materializeContractConformance(base, config);
+        continue;
+      }
       if (name === VERSION_GOVERNANCE_PACK) {
         materializeVersionGovernance(base, config);
         continue;
@@ -456,10 +456,7 @@ export function expandPolicyProfile(policy: unknown) {
   return base;
 }
 
-export function expandContractConformancePolicy(policy: unknown) {
-  const base = clone(policy as PolicyProjection), macro = contractMacro(base);
-  if (!macro) return base;
-  delete base.contract_conformance;
+function materializeContractConformance(base: PolicyProjection, macro: Record<string, unknown>) {
 
   const roleDefinitions = configuredRoleDocuments(macro);
   const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition!.path)!])) as Record<ContractRole, string>;
@@ -506,7 +503,7 @@ export function expandContractConformancePolicy(policy: unknown) {
 }
 
 export function resolvePolicyProfile(policy: unknown) {
-  const errors = [...compileProfilePolicy(policy), ...compileContractConformancePolicy(policy)];
+  const errors = compileProfilePolicy(policy);
   if (errors.length) return { ok: false, policy: clone(policy), errors };
-  return { ok: true, policy: expandContractConformancePolicy(expandPolicyProfile(policy)), errors };
+  return { ok: true, policy: expandPolicyProfile(policy), errors };
 }
