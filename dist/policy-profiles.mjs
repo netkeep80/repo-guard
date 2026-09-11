@@ -121,8 +121,9 @@ function generatedRuleIds(macro) {
         ...((Array.isArray(macro.required_paths) ? macro.required_paths : []).map((_, index) => `contract-conformance:required-path:${index}`)),
     ];
 }
-export const listBuiltInPacks = () => Object.keys(PACKS).sort();
-export const listBuiltInProfiles = () => listBuiltInPacks();
+const VERSION_GOVERNANCE_PACK = "version-governance";
+export const listBuiltInPacks = () => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK].sort();
+export const listBuiltInProfiles = () => Object.keys(PACKS).sort();
 function validateRequirementsConfig(fieldPrefix, value, errors) {
     if (!isObject(value)) {
         errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
@@ -136,6 +137,106 @@ function validateRequirementsConfig(fieldPrefix, value, errors) {
             errors.push({ field: qualified, message: `${qualified} must be a non-empty array of non-empty strings` });
         }
     }
+}
+function inferVersionDocumentFormat(path, explicit) {
+    if (explicit === "json" || explicit === "yaml" || explicit === "plain_text")
+        return explicit;
+    if (explicit !== undefined)
+        return null;
+    const lower = path.toLowerCase();
+    if (lower.endsWith(".json"))
+        return "json";
+    if (lower.endsWith(".yaml") || lower.endsWith(".yml"))
+        return "yaml";
+    return null;
+}
+function versionDocument(value) {
+    if (!isObject(value))
+        return null;
+    const path = normalizeDocumentPath(value.path);
+    if (!path || typeof value.pointer !== "string")
+        return null;
+    const format = inferVersionDocumentFormat(path, value.format);
+    return format ? { path, pointer: value.pointer, format } : null;
+}
+function validateVersionDocument(fieldPrefix, value, errors) {
+    if (!isObject(value)) {
+        errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+        return null;
+    }
+    const path = normalizeDocumentPath(value.path);
+    if (!path)
+        errors.push({ field: `${fieldPrefix}.path`, message: `${fieldPrefix}.path must be a canonical repository path` });
+    if (typeof value.pointer !== "string")
+        errors.push({ field: `${fieldPrefix}.pointer`, message: `${fieldPrefix}.pointer must be a JSON Pointer string` });
+    const format = path ? inferVersionDocumentFormat(path, value.format) : null;
+    if (!format)
+        errors.push({ field: `${fieldPrefix}.format`, message: `${fieldPrefix}.format must be json, yaml, or plain_text when it cannot be inferred from the path` });
+    return path && typeof value.pointer === "string" && format ? { path, pointer: value.pointer, format } : null;
+}
+function validateVersionGovernanceConfig(fieldPrefix, value, source, errors) {
+    if (!isObject(value)) {
+        errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+        return;
+    }
+    const authority = validateVersionDocument(`${fieldPrefix}.authority`, value.authority, errors);
+    if (value.advance !== "semver")
+        errors.push({ field: `${fieldPrefix}.advance`, message: `${fieldPrefix}.advance must be semver` });
+    const mirrors = value.mirrors;
+    if (mirrors !== undefined && (!Array.isArray(mirrors) || !mirrors.length)) {
+        errors.push({ field: `${fieldPrefix}.mirrors`, message: `${fieldPrefix}.mirrors must be a non-empty array when present` });
+    }
+    const seen = new Set();
+    if (authority)
+        seen.add(`${authority.path}|${authority.pointer}`);
+    for (const [index, mirror] of (Array.isArray(mirrors) ? mirrors : []).entries()) {
+        const normalized = validateVersionDocument(`${fieldPrefix}.mirrors[${index}]`, mirror, errors);
+        if (!normalized)
+            continue;
+        const key = `${normalized.path}|${normalized.pointer}`;
+        if (seen.has(key))
+            errors.push({ field: `${fieldPrefix}.mirrors[${index}]`, message: `${fieldPrefix}.mirrors[${index}] duplicates the authority or another mirror` });
+        seen.add(key);
+    }
+    const explicitRelations = isObject(source.document_relations) ? source.document_relations : {};
+    const explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
+    const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
+    const generatedDocuments = ["pack:version-governance:authority", ...(Array.isArray(mirrors) ? mirrors.map((_, index) => `pack:version-governance:mirror:${index}`) : [])];
+    const generatedRules = ["pack:version-governance:advance", ...(Array.isArray(mirrors) ? mirrors.map((_, index) => `pack:version-governance:mirror:${index}`) : [])];
+    for (const id of generatedDocuments)
+        if (Object.hasOwn(explicitDocuments, id))
+            errors.push({ field: "document_relations.documents", message: `version-governance generated document "${id}" collides with explicit document_relations` });
+    for (const id of generatedRules)
+        if (explicitRuleIds.has(id))
+            errors.push({ field: "document_relations.rules", message: `version-governance generated rule "${id}" collides with explicit document_relations` });
+}
+function materializeVersionGovernance(base, value) {
+    const authority = versionDocument(value.authority);
+    const mirrors = (Array.isArray(value.mirrors) ? value.mirrors : []).map((item) => versionDocument(item));
+    const relations = isObject(base.document_relations) ? clone(base.document_relations) : {};
+    const documents = isObject(relations.documents) ? clone(relations.documents) : {};
+    const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [];
+    const authorityId = "pack:version-governance:authority";
+    documents[authorityId] = { path: authority.path, format: authority.format };
+    const selector = (document, snapshot, pointer) => ({ document, snapshot, pointer, type: "string" });
+    rules.push({
+        id: "pack:version-governance:advance",
+        kind: "scalar_strictly_greater",
+        comparator: "semver",
+        left: selector(authorityId, "head", authority.pointer),
+        right: selector(authorityId, "base", authority.pointer),
+    });
+    for (const [index, mirror] of mirrors.entries()) {
+        const mirrorId = `pack:version-governance:mirror:${index}`;
+        documents[mirrorId] = { path: mirror.path, format: mirror.format };
+        rules.push({
+            id: mirrorId,
+            kind: "scalar_equal",
+            left: selector(authorityId, "head", authority.pointer),
+            right: selector(mirrorId, "head", mirror.pointer),
+        });
+    }
+    base.document_relations = { ...relations, documents, rules };
 }
 export function compileProfilePolicy(policy) {
     const source = policy;
@@ -156,11 +257,15 @@ export function compileProfilePolicy(policy) {
             if (!entries.length)
                 errors.push({ field: "packs", message: "packs must contain at least one built-in pack" });
             for (const [name, config] of entries) {
-                const spec = PACKS[name];
-                if (!spec)
-                    errors.push({ field: `packs.${name}`, message: `pack "${name}" is not supported; use ${listBuiltInPacks().join(", ")}` });
-                else
-                    validateRequirementsConfig(`packs.${name}`, config, errors);
+                if (name === VERSION_GOVERNANCE_PACK)
+                    validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
+                else {
+                    const spec = PACKS[name];
+                    if (!spec)
+                        errors.push({ field: `packs.${name}`, message: `pack "${name}" is not supported; use ${listBuiltInPacks().join(", ")}` });
+                    else
+                        validateRequirementsConfig(`packs.${name}`, config, errors);
+                }
             }
             if (Object.hasOwn(packs, "requirements-strict") && (source?.anchors !== undefined || source?.trace_rules !== undefined)) {
                 errors.push({ field: "packs.requirements-strict", message: "requirements-strict cannot be combined with explicit anchors or trace_rules" });
@@ -261,8 +366,14 @@ export function expandPolicyProfile(policy) {
         const configuredPacks = clone(base.packs);
         delete base.packs;
         for (const [name, config] of Object.entries(configuredPacks)) {
+            if (!isObject(config))
+                continue;
+            if (name === VERSION_GOVERNANCE_PACK) {
+                materializeVersionGovernance(base, config);
+                continue;
+            }
             const spec = PACKS[name];
-            if (!spec || !isObject(config))
+            if (!spec)
                 continue;
             const patch = materializePack(spec, config);
             if (name === "requirements-strict") {

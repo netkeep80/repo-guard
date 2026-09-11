@@ -352,7 +352,33 @@
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "requirements-strict": { "$ref": "#/definitions/profile_overrides" }
+        "requirements-strict": { "$ref": "#/definitions/profile_overrides" },
+        "version-governance": { "$ref": "#/definitions/version_governance_pack" }
+      }
+    },
+    "version_governance_document": {
+      "type": "object",
+      "required": ["path", "pointer"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "pointer": { "type": "string" },
+        "format": { "type": "string", "enum": ["json", "yaml", "plain_text"] }
+      }
+    },
+    "version_governance_pack": {
+      "type": "object",
+      "required": ["authority", "advance"],
+      "additionalProperties": false,
+      "properties": {
+        "authority": { "$ref": "#/definitions/version_governance_document" },
+        "advance": { "const": "semver" },
+        "mirrors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/version_governance_document" }
+        }
       }
     },
     "contract_conformance": {
