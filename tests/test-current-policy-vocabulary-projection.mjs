@@ -10,7 +10,6 @@ const currentPolicy = () => ({
     forbidden: [],
     canonical_docs: [],
     governance_paths: ["repo-policy.json"],
-    public_api: ["src/**"],
   },
   diff_rules: { max_new_docs: 5, max_new_files: 5 },
   content_rules: [],
