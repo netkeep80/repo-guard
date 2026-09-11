@@ -49,8 +49,10 @@ function gitCommit(ref, repoRoot) {
 }
 function checkGitEvidence(repoRoot) {
     return check("git-evidence", () => {
-        const head = gitCommit("HEAD", repoRoot), eventPath = process.env.GITHUB_EVENT_PATH;
-        if (!eventPath)
+        if (!existsSync(resolve(repoRoot, ".git")))
+            return { name: "git-evidence", status: WARN, message: "Git evidence unavailable outside a Git repository" };
+        const head = gitCommit("HEAD", repoRoot), eventPath = process.env.GITHUB_EVENT_PATH, workspace = process.env.GITHUB_WORKSPACE;
+        if (!eventPath || (workspace && resolve(workspace) !== resolve(repoRoot)))
             return { name: "git-evidence", status: PASS, message: `HEAD ${head.slice(0, 7)} available` };
         const pr = JSON.parse(readFileSync(eventPath, "utf-8")).pull_request;
         if (!pr)
