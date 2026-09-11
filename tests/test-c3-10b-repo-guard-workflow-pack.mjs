@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import Ajv from "ajv";
 import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
+import { createDocumentReader } from "../dist/document-facts.mjs";
 import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
@@ -70,12 +71,13 @@ function workflowYaml({ sha = expectedSha, mode = "check-pr", enforcement = "blo
 }
 
 function evaluateWorkflow(content) {
+  const readFile = (path) => {
+    if (path === workflowPath) return content;
+    throw new Error(`unexpected workflow path: ${path}`);
+  };
   const entries = evaluateConstraintIR({
     repositoryRoot: process.cwd(),
-    readFile: (path) => {
-      if (path === workflowPath) return content;
-      throw new Error(`unexpected workflow path: ${path}`);
-    },
+    documents: createDocumentReader({ readFile }),
     policy: resolved.policy,
     changeIntent: null,
     diff: { files: { checked: [{ path: "src/change.mjs", status: "modified", addedLines: ["x"], deletedLines: [] }] } },
