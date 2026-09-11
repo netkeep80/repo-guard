@@ -70,7 +70,7 @@ console.log("\n--- self-hosting: doctor on repo-guard itself ---");
   expectIncludes("shows header", stdout, "repo-guard doctor");
   expectIncludes("repo root passes", stdout, "PASS: repository-root");
   expectIncludes("git passes", stdout, "PASS: git-available");
-  expectIncludes("fetch-depth passes", stdout, "PASS: fetch-depth");
+  expectIncludes("git evidence passes", stdout, "PASS: git-evidence");
   expectIncludes("policy passes", stdout, "PASS: repo-policy.json");
   expectNotIncludes("workflow text inspection is absent", stdout, "workflow-config");
   expectIncludes("summary line", stdout, "Summary:");
