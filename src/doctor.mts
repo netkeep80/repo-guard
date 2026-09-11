@@ -14,7 +14,7 @@ interface DoctorCheck { name: string; status: DoctorStatus; message: string; hin
 interface DoctorRoots { repoRoot: string; packageRoot: string; }
 interface PullRequestProjection {
   number?: unknown;
-  base?: { sha?: unknown } | null;
+  base?: { sha?: unknown; ref?: unknown } | null;
   head?: { sha?: unknown } | null;
 }
 interface GitHubEventProjection { pull_request?: PullRequestProjection | null; }
@@ -63,23 +63,22 @@ function checkGit(repoRoot: string) {
   });
 }
 
-function checkFetchDepth(repoRoot: string) {
-  return check("fetch-depth", () => {
-    try {
-      const isShallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], { encoding: "utf-8", cwd: repoRoot, stdio: "pipe" }).trim();
-      if (isShallow === "true") {
-        let count: string;
-        try {
-          count = execFileSync("git", ["rev-list", "--count", "HEAD"], { encoding: "utf-8", cwd: repoRoot, stdio: "pipe" }).trim();
-        } catch {
-          count = "unknown";
-        }
-        return { name: "fetch-depth", status: WARN, message: `Shallow clone detected (${count} commit(s) available)`, hint: "Use 'fetch-depth: 0' in actions/checkout to enable full diff analysis" };
-      }
-      return { name: "fetch-depth", status: PASS, message: "Full history available" };
-    } catch {
-      return { name: "fetch-depth", status: WARN, message: "Unable to determine fetch depth (not a git repository?)", hint: "Ensure this is a git repository with at least one commit" };
-    }
+function gitCommit(ref: unknown, repoRoot: string) {
+  if (typeof ref !== "string" || !ref) throw new Error("missing Git commit evidence");
+  return execFileSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], { encoding: "utf-8", cwd: repoRoot, stdio: "pipe" }).trim();
+}
+
+function checkGitEvidence(repoRoot: string) {
+  return check("git-evidence", () => {
+    const head = gitCommit("HEAD", repoRoot), eventPath = process.env.GITHUB_EVENT_PATH;
+    if (!eventPath) return { name: "git-evidence", status: PASS, message: `HEAD ${head.slice(0, 7)} available` };
+    const pr = (JSON.parse(readFileSync(eventPath, "utf-8")) as GitHubEventProjection).pull_request;
+    if (!pr) return { name: "git-evidence", status: PASS, message: `HEAD ${head.slice(0, 7)} available; no PR evidence required` };
+    const base = gitCommit(typeof pr.base?.ref === "string" ? `refs/remotes/origin/${pr.base.ref}` : pr.base?.sha, repoRoot);
+    const prHead = gitCommit(pr.head?.sha, repoRoot);
+    const mergeBase = execFileSync("git", ["merge-base", base, prHead], { encoding: "utf-8", cwd: repoRoot, stdio: "pipe" }).trim();
+    if (!mergeBase) throw new Error("missing merge-base for PR evidence");
+    return { name: "git-evidence", status: PASS, message: `PR evidence available: BASE ${base.slice(0, 7)}, HEAD ${prHead.slice(0, 7)}, merge-base ${mergeBase.slice(0, 7)}` };
   });
 }
 
@@ -200,7 +199,7 @@ export function runDoctor(roots: DoctorRoots) {
 
   results.push(checkRepoRoot(roots.repoRoot));
   results.push(checkGit(roots.repoRoot));
-  results.push(checkFetchDepth(roots.repoRoot));
+  results.push(checkGitEvidence(roots.repoRoot));
   results.push(checkPolicyDiscovery(roots.repoRoot, roots.packageRoot));
   results.push(checkEventContext());
   results.push(checkAuth());
