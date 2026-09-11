@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import Ajv from "ajv";
 import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
+import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -64,3 +65,38 @@ const invalidSnapshotPolicy = {
 assert.equal(validate(invalidSnapshotPolicy), false, "unknown document snapshots must fail schema validation");
 
 console.log("C3.10b snapshot parity contract passed");
+
+const requirementsPackPolicy = {
+  ...basePolicy,
+  packs: {
+    "requirements-strict": {
+      strict_heading_docs: ["docs/architecture.md"],
+      evidence_surfaces: ["src/**", "tests/**", "docs/**"],
+    },
+  },
+};
+
+assert.equal(
+  validate(requirementsPackPolicy),
+  true,
+  `known built-in packs must be a public closed policy surface; schema errors: ${JSON.stringify(validate.errors)}`,
+);
+
+const resolvedPack = resolvePolicyProfile(requirementsPackPolicy);
+assert.equal(resolvedPack.ok, true, "known built-in pack must lower successfully");
+assert.equal(Object.hasOwn(resolvedPack.policy, "packs"), false, "packs must disappear after frontend lowering");
+assert.ok(resolvedPack.policy.anchors?.types?.requirement_id, "requirements-strict must lower to its existing canonical anchor policy");
+assert.ok(
+  resolvedPack.policy.trace_rules?.some((rule) => rule.id === "changed-requirements-need-evidence"),
+  "requirements-strict must lower to its existing canonical trace policy",
+);
+
+const unknownPackPolicy = {
+  ...basePolicy,
+  packs: {
+    "consumer-custom-macro": {},
+  },
+};
+assert.equal(validate(unknownPackPolicy), false, "unknown or user-defined packs must fail closed at the public schema");
+
+console.log("C3.10b closed built-in packs surface contract passed");
