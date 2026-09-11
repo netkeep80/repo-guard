@@ -145,11 +145,9 @@ describe("self-hosted policy and documentation", () => {
     assert.ok(workflow.jobs["smoke-pack"]);
   });
 
-  it("uses YAML ChangeIntent blocks itself and documents the exception model", () => {
+  it("uses YAML ChangeIntent blocks itself and keeps the alternative format as an explicit exception", () => {
     assert.match(read(".github/PULL_REQUEST_TEMPLATE.md"), /```repo-guard-yaml/);
     assert.match(read(".github/ISSUE_TEMPLATE/change-intent.yml"), /repo-guard-yaml/);
-    const doc = read("docs/self-hosting-coverage.md");
-    assert.match(doc, /вывод/);
-    assert.match(doc, /исключен/);
+    assert.ok(hasException("change-intent-format:repo-guard-json"));
   });
 });
