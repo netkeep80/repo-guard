@@ -131,7 +131,7 @@ function writeIfAbsent(path, content, created, skipped) {
 }
 const usage = `Usage: repo-guard init --action-ref <40-char-sha|vX.Y.Z> [--preset <preset>] [--mode <mode>]\nPresets: application, library, tooling, documentation`;
 export function runInit(roots, args = []) {
-    let preset = "application", mode = roots.enforcementMode || "enforce", actionRef = null;
+    let preset = "application", mode = roots.enforcementMode || "blocking", actionRef = null;
     for (let i = 0; i < args.length; i++) {
         if (["--preset", "--mode", "--enforcement", "--action-ref"].includes(args[i]) && args[i + 1]) {
             const option = args[i], value = args[++i];
