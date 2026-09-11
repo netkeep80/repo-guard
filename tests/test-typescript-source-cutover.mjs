@@ -109,13 +109,13 @@ describe("derived capability inventory", () => {
     }
   });
 
-  it("derives built-in packs and requires rationale for unused ones", () => {
-    const configuredPacks = new Set(Object.keys(policy.packs || {}));
-    for (const pack of listBuiltInPacks()) {
-      if (!configuredPacks.has(pack)) assert.ok(hasException(`pack:${pack}`), `unused pack ${pack} lacks rationale`);
+  it("derives built-in pack authority without mirroring unused packs", () => {
+    const packs = new Set(listBuiltInPacks());
+    for (const configured of Object.keys(policy.packs || {})) {
+      assert.ok(packs.has(configured), `unknown configured pack ${configured}`);
     }
     for (const id of Object.keys(exceptions).filter((id) => id.startsWith("pack:"))) {
-      assert.ok(listBuiltInPacks().includes(id.slice(5)), `stale pack exception ${id}`);
+      assert.ok(packs.has(id.slice(5)), `stale pack exception ${id}`);
     }
   });
 
