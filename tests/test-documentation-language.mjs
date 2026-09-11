@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { checkContentRules } from "../dist/checks/rules/content-rules.mjs";
+import { renderInitScaffold } from "../dist/init.mjs";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const projectRoot = resolve(__dirname, "..");
@@ -34,8 +35,9 @@ for (const marker of ["Constraint Program", "repo-guard-grant", "GovernanceGrant
 for (const retired of ["validate-integration", "doctor --integration", "repo-policy.integration"]) assert.doesNotMatch(readme, new RegExp(retired.replaceAll(".", "\\.")), `README не должен содержать удалённую поверхность ${retired}`);
 assert.equal(existsSync(resolve(projectRoot, "docs/removing-bespoke-validators.md")), false, "удалённое руководство по integration DSL не должно оставаться публичной документацией");
 assert.doesNotMatch(read("RELEASING.md"), /parallel-migration|v2-migration|v2\.1\.0|параллельного выпуска/, "RELEASING не должен описывать удалённый v2/parallel rollout");
-assert.match(read("templates/issue-change-intent-example.md"), /repo-guard-grant/, "issue example должен показывать отдельный GovernanceGrant");
-assert.doesNotMatch(read("templates/pr-change-intent-example.md"), /```repo-guard-grant/, "PR example не должен выдавать GovernanceGrant");
+const scaffold = renderInitScaffold({ preset: "application", mode: "blocking", actionRef: "0123456789abcdef0123456789abcdef01234567" });
+assert.match(scaffold[".github/ISSUE_TEMPLATE/change-intent.yml"], /repo-guard-grant/, "generated issue template должен показывать отдельный GovernanceGrant");
+assert.doesNotMatch(scaffold[".github/PULL_REQUEST_TEMPLATE.md"], /```repo-guard-grant/, "generated PR template не должен выдавать GovernanceGrant");
 assert.match(read(".github/workflows/ci.yml"), /--compare 92432809fcddc290080beb51ba151e13a5761869/, "CI должен измерять Compression 3.0 от канонического C3.0 baseline");
 
 console.log(`Проверено Markdown-файлов: ${markdownFiles.length}. Язык и архитектурные инварианты актуальны.`);
