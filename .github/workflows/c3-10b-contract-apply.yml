@@ -21,21 +21,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent="d5aaec7e0a2d263a99c177c8e8a194de0a2ce47d"
+          expected_parent="fc90b6e1d5952f334e62e25191f23fa33e61e5ac"
           test "$(git rev-parse HEAD^)" = "$expected_parent"
           test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/c3-10b-contract-apply.yml"
 
-      - name: Normalize transport diagnostic vocabulary
+      - name: Normalize transport ratchet
         shell: python
         run: |
           from pathlib import Path
           p = Path("tests/c3-10b-contract-apply.py")
           s = p.read_text()
-          needle = "s = s.replace('field: `contract_conformance.', 'field: `${fieldPrefix}.')\n"
-          replacement = needle + 's = s.replace("contract_conformance generated", "contract-conformance generated")\n'
-          if s.count(needle) != 1:
-              raise SystemExit(f"expected one transport insertion point, got {s.count(needle)}")
-          p.write_text(s.replace(needle, replacement, 1))
+          diagnostic = "s = s.replace('field: `contract_conformance.', 'field: `${fieldPrefix}.')\n"
+          diagnostic_replacement = diagnostic + 's = s.replace("contract_conformance generated", "contract-conformance generated")\n'
+          if s.count(diagnostic) != 1:
+              raise SystemExit(f"expected one diagnostic insertion point, got {s.count(diagnostic)}")
+          s = s.replace(diagnostic, diagnostic_replacement, 1)
+          old = 'if "contract_conformance" in s:\n    raise SystemExit("production source still contains legacy snake-case authoring field")\n'
+          new = '''for forbidden in [
+              "contract_conformance?: unknown",
+              "contractMacro(",
+              "compileContractConformancePolicy",
+              "expandContractConformancePolicy",
+              "source.contract_conformance",
+              "base.contract_conformance",
+          ]:
+              if forbidden in s:
+                  raise SystemExit(f"production source still contains legacy public alias: {forbidden}")
+          '''
+          if s.count(old) != 1:
+              raise SystemExit(f"expected one legacy ratchet block, got {s.count(old)}")
+          p.write_text(s.replace(old, new, 1))
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -64,8 +79,8 @@ jobs:
           node tests/validate-schemas.mjs
           node tests/test-c3-10b-policy-packs.mjs
           node tests/test-c3-10b-repo-guard-workflow-pack.mjs
-          ! grep -n 'contract_conformance' src/policy-profiles.mts
-          ! grep -n '"contract_conformance"' schemas/repo-policy.schema.json
+          ! grep -nE 'contract_conformance\?:|contractMacro\(|compileContractConformancePolicy|expandContractConformancePolicy|source\.contract_conformance|base\.contract_conformance' src/policy-profiles.mts
+          ! grep -n '"contract_conformance":' schemas/repo-policy.schema.json
           git diff --check
 
       - name: Verify bounded production diff
