@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent="b9fac68c1fcbb9e50fc4f6a4eae6f095bf006996"
+          expected_parent="e83d0e60b12eedc6ea0b982a405fcf6fb40373db"
           actual_parent="$(git rev-parse HEAD^)"
           test "$actual_parent" = "$expected_parent"
           changed="$(git diff --name-only HEAD^ HEAD)"
@@ -51,7 +51,6 @@ jobs:
           node tests/test-policy-profiles.mjs
           node tests/test-c3-10b-policy-packs.mjs
           node tests/test-c3-10b-repo-guard-workflow-pack.mjs
-          npm run check:dist
           git diff --check
 
       - name: Verify bounded production diff
@@ -78,7 +77,7 @@ jobs:
             test "$found" -eq 1 || { echo "Unexpected changed path: $path"; exit 1; }
           done
 
-      - name: Publish production commit
+      - name: Commit, verify dist freshness, and publish
         shell: bash
         run: |
           set -euo pipefail
@@ -87,4 +86,6 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m "C3.10b: remove legacy profile frontend"
+          npm run check:dist
+          test -z "$(git status --porcelain)"
           git push origin HEAD:c3.10b/507-policy-packs-design
