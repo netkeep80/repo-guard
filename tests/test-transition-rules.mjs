@@ -9,8 +9,8 @@ const transitionRule = {
   id: "release-revision",
   kind: "scalar_strictly_greater",
   comparator: "semver",
-  left: { document: "head-revision", pointer: "", type: "string" },
-  right: { document: "base-revision", pointer: "", type: "string" },
+  left: { document: "revision", snapshot: "head", pointer: "", type: "string" },
+  right: { document: "revision", snapshot: "base", pointer: "", type: "string" },
 };
 
 const basePolicy = () => ({
@@ -18,8 +18,7 @@ const basePolicy = () => ({
   diff_rules: { max_new_docs: 2, max_new_files: 5 },
   document_relations: {
     documents: {
-      "base-revision": { path: "meta/REVISION", format: "plain_text", snapshot: "base" },
-      "head-revision": { path: "meta/REVISION", format: "plain_text", snapshot: "head" },
+      revision: { path: "meta/REVISION", format: "plain_text" },
     },
     rules: [structuredClone(transitionRule)],
   },
@@ -147,9 +146,9 @@ describe("ordered document relation policy-delta semantics", () => {
   for (const field of ["path", "format", "snapshot", "comparator"]) {
     it(`changing ${field} is incomparable through existing relation identity`, () => {
       const after = basePolicy();
-      if (field === "path") after.document_relations.documents["head-revision"].path = "meta/OTHER";
-      if (field === "format") after.document_relations.documents["head-revision"].format = "json";
-      if (field === "snapshot") after.document_relations.documents["head-revision"].snapshot = "base";
+      if (field === "path") after.document_relations.documents.revision.path = "meta/OTHER";
+      if (field === "format") after.document_relations.documents.revision.format = "json";
+      if (field === "snapshot") after.document_relations.rules[0].left.snapshot = "base";
       if (field === "comparator") after.document_relations.rules[0].comparator = "numeric_tuple";
       const result = compareConstraintPrograms(basePolicy(), after);
       assert.equal(result.relation, "incomparable");
@@ -169,7 +168,7 @@ describe("ordered document relation schema", () => {
     cochange_rules: [],
   });
 
-  it("accepts snapshot plain-text documents with semver ordering", () => {
+  it("accepts selector snapshots with semver ordering", () => {
     assert.equal(validate(schemaPolicy()), true, JSON.stringify(validate.errors));
   });
 
