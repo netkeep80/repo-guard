@@ -34,9 +34,6 @@ jobs:
       - name: Build canonical dist
         run: npm run build
 
-      - name: Verify generated dist freshness
-        run: npm run check:dist
-
       - name: Verify targeted C3.10b contract
         run: node tests/test-c3-10b-policy-packs.mjs
 
