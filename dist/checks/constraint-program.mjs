@@ -24,7 +24,7 @@ function canonicalDocumentPath(value) {
 }
 function compileFactRef(selectorValue, documents) {
     const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
-    const snapshot = definition.snapshot === "base" || definition.snapshot === "head" ? definition.snapshot : "state";
+    const snapshot = selector.snapshot === "base" || selector.snapshot === "head" ? selector.snapshot : "state";
     const documentSelector = {
         path: canonicalDocumentPath(definition.path),
         format: definition.format,
