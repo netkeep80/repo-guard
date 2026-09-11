@@ -26,7 +26,7 @@ AnalysisReport
 
 `FactRef` имеет четыре источника: `change_intent`, `diff`, `document`, `repository`. Высокоуровневые возможности компилируются в конечный набор обычных отношений и не получают собственной исполняемой семантики в ядре.
 
-Доверие отделено от намерения изменения. `ChangeIntent` сообщает, что PR намерен изменить. `GovernanceGrant` сообщает, что доверенный внешний субъект разрешил изменить. Проверка PR исполняется политикой trusted BASE — доверенной базовой ветки; PR не может сам выдать себе управляющую санкцию.
+Доверие отделено от намерения изменения. `ChangeIntent` сообщает, что PR намерен изменить. `GovernanceGrant` сообщает, что доверенный внешний субъект разрешил изменить. Проверка PR исполняется политикой доверенной базовой ветки; PR не может сам выдать себе управляющую санкцию.
 
 ## Установка
 
@@ -54,7 +54,7 @@ repo-guard doctor
 - `.github/PULL_REQUEST_TEMPLATE.md`;
 - `.github/ISSUE_TEMPLATE/change-intent.yml`.
 
-Сгенерированный workflow закрепляет Action за явно переданным SHA или тегом. Проверка соответствия официального release ref версии пакета доступна через `npm run verify:release-ref`.
+Сгенерированный рабочий процесс закрепляет действие за явно переданным коммитом или тегом. Проверка соответствия официальной ссылки выпуска версии пакета доступна через `npm run verify:release-ref`.
 
 ## Команды
 
@@ -63,7 +63,7 @@ repo-guard doctor
 | `repo-guard` | проверить и скомпилировать политику |
 | `repo-guard validate [change-intent.json]` | проверить состояние, при необходимости с `ChangeIntent` из файла |
 | `repo-guard check-diff` | проверить локальное изменение |
-| `repo-guard check-diff --base main --head feature` | проверить диапазон Git refs |
+| `repo-guard check-diff --base main --head feature` | проверить диапазон ссылок |
 | `repo-guard check-pr` | проверить PR в CI |
 | `repo-guard init --action-ref <ref>` | создать начальную конфигурацию |
 | `repo-guard doctor` | проверить операционные предпосылки окружения |
@@ -94,9 +94,9 @@ repo-guard doctor
 }
 ```
 
-JSON Schema — источник истины для структуры, типов и перечислений языка политики: [`schemas/repo-policy.schema.json`](schemas/repo-policy.schema.json). Исполняемые примеры находятся в [`examples/scenarios/`](examples/scenarios/), поэтому README не дублирует полный справочник правил.
+Машинная схема — источник истины для структуры, типов и перечислений языка политики: [`schemas/repo-policy.schema.json`](schemas/repo-policy.schema.json). Исполняемые примеры находятся в [`examples/scenarios/`](examples/scenarios/), поэтому этот файл не дублирует полный справочник правил.
 
-## ChangeIntent
+## Намерение изменения `ChangeIntent`
 
 `ChangeIntent` — непривилегированное описание формы изменения. Предпочтительная форма в PR или связанной задаче:
 
@@ -124,7 +124,7 @@ expected_effects:
 
 `check-pr` сначала ищет `ChangeIntent` в теле PR. Если его нет и PR однозначно связывает одну задачу через `Fixes #N`, `Closes #N` или `Resolves #N`, намерение может быть прочитано из этой задачи. Схема: [`schemas/change-intent.schema.json`](schemas/change-intent.schema.json).
 
-## GovernanceGrant и trusted BASE
+## Управляющая санкция `GovernanceGrant` и доверенная база
 
 Изменение путей из `paths.governance_paths` требует отдельной доверенной санкции в связанной задаче:
 
@@ -137,7 +137,7 @@ allow_policy_relaxation: []
 
 `repo-guard-grant` читается только из связанной задачи; такой блок в PR не считается источником доверия. Схема: [`schemas/governance-grant.schema.json`](schemas/governance-grant.schema.json).
 
-`authorized_governance_paths` разрешает перечисленные управляющие пути. `allow_policy_relaxation` разрешает только явно указанные ослабления. Если trusted BASE, базовую политику или доверенный источник санкции получить нельзя, проверка завершается ошибкой.
+`authorized_governance_paths` разрешает перечисленные управляющие пути. `allow_policy_relaxation` разрешает только явно указанные ослабления. Если доверенную базовую ветку, базовую политику или доверенный источник санкции получить нельзя, проверка завершается ошибкой.
 
 ## Источники истины
 
@@ -145,7 +145,7 @@ allow_policy_relaxation: []
 - [`schemas/`](schemas/) — публичные машинные контракты.
 - [`examples/scenarios/`](examples/scenarios/) — канонические исполняемые положительные и отрицательные сценарии.
 - [`templates/`](templates/) — актуальные consumer-примеры интеграции.
-- [`RELEASING.md`](RELEASING.md) — процедура выпуска и правила release ref.
+- [`RELEASING.md`](RELEASING.md) — процедура выпуска и правила ссылки выпуска.
 - [`docs/self-hosting-coverage.md`](docs/self-hosting-coverage.md) — границы самоприменения.
 
 Неизвестная семантика при сравнении политик обрабатывается fail-closed. `repo-guard` не заменяет предметные тесты, проверку безопасности или инженерное ревью: его задача — сделать структурные ограничения изменения репозитория воспроизводимыми и исполняемыми.
