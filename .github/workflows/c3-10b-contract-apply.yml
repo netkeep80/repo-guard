@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent="0eb89079375428e27ee441c12c9e3a3c595753ff"
+          expected_parent="cff6b9a48370d7c345d05ff4844df255c1c16ae6"
           test "$(git rev-parse HEAD^)" = "$expected_parent"
           test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/c3-10b-contract-apply.yml"
 
@@ -85,6 +85,23 @@ jobs:
               raise SystemExit(f"expected one anum_docs pack close, got {section.count(old_close)}")
           section = section.replace(old_close, new_close, 1)
           p.write_text(prefix + section)
+
+      - name: Align strictness corpus with lowered pack boundary
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("tests/test-policy-delta-rules.mjs")
+          s = p.read_text()
+          child_assert = 'assert.equal(resolved.policy.packs["contract-conformance"], undefined);'
+          count = s.count(child_assert)
+          if count != 2:
+              raise SystemExit(f"expected two lowered pack child assertions, got {count}")
+          s = s.replace(child_assert, 'assert.equal(resolved.policy.packs, undefined);')
+          old_delete = 'delete baseline.packs["contract-conformance"];'
+          if s.count(old_delete) != 1:
+              raise SystemExit(f"expected one contract pack baseline deletion, got {s.count(old_delete)}")
+          s = s.replace(old_delete, 'delete baseline.packs;', 1)
+          p.write_text(s)
 
       - name: Build official dist
         run: npm run build
