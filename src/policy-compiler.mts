@@ -14,7 +14,6 @@ interface PolicyProjection {
   new_file_classes?: unknown;
   anchors?: { types?: unknown };
   trace_rules?: unknown;
-  paths?: { public_api?: unknown };
   content_rules?: unknown;
   cochange_groups?: unknown;
   document_relations?: unknown;
@@ -177,8 +176,4 @@ export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): Se
     }
   }
   return errors;
-}
-
-export function warnReservedPolicyFields(policy: PolicyProjection = {}): string[] {
-  return list(policy.paths?.public_api).length ? ["paths.public_api: defined but reserved for future use; not enforced at runtime"] : [];
 }
