@@ -10,7 +10,6 @@
   "files": [
     "dist/",
     "schemas/",
-    "templates/",
     "docs/",
     "examples/",
     "README.md",
