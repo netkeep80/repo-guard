@@ -159,7 +159,7 @@ function evaluateVersionPack(baseVersion, headVersion, mirrorVersion = headVersi
     policy: resolvedVersion.policy,
     changeIntent: null,
     diff: { files: { checked: [{ path: "src/change.mjs", status: "modified", addedLines: ["x"], deletedLines: [] }] } },
-  }, { executionPhase: "transaction" });
+  }, { executionPhase: "both" });
   return new Map(entries
     .filter((entry) => entry.name.startsWith("document-relation:pack:version-governance:"))
     .map((entry) => [entry.name, entry.check]));
