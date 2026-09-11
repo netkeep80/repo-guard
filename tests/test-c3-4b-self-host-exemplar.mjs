@@ -6,6 +6,7 @@ import { parse as parseYaml } from "yaml";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
+import { renderInitScaffold } from "../dist/init.mjs";
 
 const ACCEPTED_BASE = "25560cf62e3336cdd089a779a9032db01b0c71f1";
 const read = (path) => readFileSync(path, "utf8");
@@ -95,7 +96,7 @@ describe("C3.4b canonical self-host exemplar", () => {
     for (const expected of expectedRelations) assert.deepEqual(relationById.get(expected.id), expected);
   });
 
-  it("derives the real self-host execution topology from the live CI and templates", () => {
+  it("derives the real self-host execution topology from the live CI and repository forms", () => {
     assert.match(validateRuns, /npm run check:dist/);
     assert.match(validateRuns, /npm run compression:metrics/);
     assert.match(validateRuns, /npx repo-guard(?:\n|$)/);
@@ -129,10 +130,18 @@ describe("C3.4b canonical self-host exemplar", () => {
     }
   });
 
-  it("keeps consumer templates aligned with the accepted public contract", () => {
-    assert.equal(json("templates/repo-policy.min.json").policy_format_version, "0.3.0");
-    const exampleWorkflow = parseYaml(read("templates/example-workflow.yml"));
-    const steps = Object.values(exampleWorkflow.jobs || {}).flatMap((job) => job.steps || []);
+  it("keeps generated consumer scaffold aligned with the accepted public contract", () => {
+    const scaffold = renderInitScaffold({
+      preset: "application",
+      mode: "blocking",
+      actionRef: "0123456789abcdef0123456789abcdef01234567",
+    });
+    assert.equal(JSON.parse(scaffold["repo-policy.json"]).policy_format_version, "0.3.0");
+    const consumerWorkflow = parseYaml(scaffold[".github/workflows/repo-guard.yml"]);
+    const steps = Object.values(consumerWorkflow.jobs || {}).flatMap((job) => job.steps || []);
     assert.ok(steps.some((step) => step.uses === "actions/checkout@v6"));
+    assert.deepEqual(consumerWorkflow.permissions, { contents: "read", "pull-requests": "read", issues: "read" });
+    assert.match(scaffold[".github/workflows/repo-guard.yml"], /fetch-depth: 0/);
+    assert.doesNotMatch(Object.values(scaffold).join("\n"), /surface_debt/);
   });
 });

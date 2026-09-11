@@ -144,7 +144,7 @@ allow_policy_relaxation: []
 - [Обсерватория политики](https://netkeep80.github.io/repo-guard/) — текущее принятое состояние политики и архитектуры.
 - [`schemas/`](schemas/) — публичные машинные контракты.
 - [`examples/scenarios/`](examples/scenarios/) — канонические исполняемые положительные и отрицательные сценарии.
-- [`templates/`](templates/) — актуальные consumer-примеры интеграции.
+- `repo-guard init` и [`tests/test-init.mjs`](tests/test-init.mjs) — единственный генератор и исполняемый контракт начальной конфигурации.
 - [`RELEASING.md`](RELEASING.md) — процедура выпуска и правила ссылки выпуска.
 - [`tests/test-c3-4b-self-host-exemplar.mjs`](tests/test-c3-4b-self-host-exemplar.mjs) — исполняемое доказательство границ самоприменения.
 - [`docs/self-hosting-coverage.json`](docs/self-hosting-coverage.json) — явные исключения из самоприменения.
@@ -160,6 +160,6 @@ npm test
 npm run compression:metrics
 ```
 
-Репозиторий применяет собственную политику к себе. Для внешнего репозитория достаточно обычного Action-вызова `check-pr`; пример находится в [`templates/example-workflow.yml`](templates/example-workflow.yml).
+Репозиторий применяет собственную политику к себе. Для внешнего репозитория начальная конфигурация создаётся одной командой `repo-guard init --action-ref <ref>`; сгенерированный рабочий процесс проверяется [`tests/test-init.mjs`](tests/test-init.mjs).
 
 Роль проекта в портфеле описана в [`PORTFOLIO.md`](PORTFOLIO.md).

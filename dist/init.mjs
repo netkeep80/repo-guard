@@ -42,11 +42,15 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
 jobs:
   policy-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Проверить политику репозитория
         uses: ${ACTION}@${ref}

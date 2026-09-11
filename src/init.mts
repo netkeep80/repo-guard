@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, relative, dirname } from "node:path";
 import { normalizeEnforcementMode } from "./enforcement.mjs";
-
 const ACTION = "netkeep80/repo-guard";
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 const VERSION_TAG = /^v\d+\.\d+\.\d+$/;
@@ -11,12 +10,10 @@ const PRESETS = {
   tooling: ["tooling", ["*.bak"], ["README.md"], { max_new_docs: 2, max_new_files: 15, max_net_added_lines: 2000 }, [{ if_changed: ["src/**"], must_change_any: ["tests/**"] }]],
   documentation: ["documentation", [], ["README.md"], { max_new_docs: 10, max_new_files: 20 }, []],
 } as const;
-
 export type PresetName = keyof typeof PRESETS;
 type EnforcementInput = Parameters<typeof normalizeEnforcementMode>[0];
 interface InitRoots { packageRoot: string; repoRoot: string; enforcementMode?: EnforcementInput; }
 export interface RenderInitScaffoldInput { preset: PresetName; mode: string; actionRef: string; }
-
 function buildPolicy(name: PresetName, mode: string) {
   const [repository_kind, forbidden, canonical_docs, diff_rules, cochange_rules] = PRESETS[name];
   return { policy_format_version: "0.3.0", repository_kind, enforcement: { mode }, paths: { forbidden, canonical_docs, governance_paths: ["repo-policy.json"] }, diff_rules, content_rules: [], cochange_rules };
@@ -44,11 +41,15 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
 jobs:
   policy-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Проверить политику репозитория
         uses: ${ACTION}@${ref}
@@ -112,7 +113,6 @@ body:
         \`\`\`
     validations: { required: false }
 `;
-
 export function renderInitScaffold({ preset, mode, actionRef }: RenderInitScaffoldInput): Record<string, string> {
   return {
     "repo-policy.json": `${JSON.stringify(buildPolicy(preset, mode), null, 2)}\n`,
