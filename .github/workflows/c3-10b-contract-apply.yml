@@ -1,0 +1,107 @@
+name: C3.10b contract pack bounded apply
+
+on:
+  push:
+    branches:
+      - c3.10b/507-policy-packs-design
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact transport head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Verify exact transport parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_parent="d5aaec7e0a2d263a99c177c8e8a194de0a2ce47d"
+          test "$(git rev-parse HEAD^)" = "$expected_parent"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/c3-10b-contract-apply.yml"
+
+      - name: Normalize transport diagnostic vocabulary
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("tests/c3-10b-contract-apply.py")
+          s = p.read_text()
+          needle = "s = s.replace('field: `contract_conformance.', 'field: `${fieldPrefix}.')\n"
+          replacement = needle + 's = s.replace("contract_conformance generated", "contract-conformance generated")\n'
+          if s.count(needle) != 1:
+              raise SystemExit(f"expected one transport insertion point, got {s.count(needle)}")
+          p.write_text(s.replace(needle, replacement, 1))
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply reviewed contract pack patch
+        run: python3 tests/c3-10b-contract-apply.py
+
+      - name: Build official dist
+        run: npm run build
+
+      - name: Verify targeted contract cutover corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/test-c3-10b-contract-surface-cutover.mjs
+          node tests/test-policy-profiles.mjs
+          node tests/test-policy-delta-rules.mjs
+          node tests/test-contract-conformance-current-promotion.mjs
+          node tests/test-c3-10a-external-base-cutover.mjs
+          node tests/validate-schemas.mjs
+          node tests/test-c3-10b-policy-packs.mjs
+          node tests/test-c3-10b-repo-guard-workflow-pack.mjs
+          ! grep -n 'contract_conformance' src/policy-profiles.mts
+          ! grep -n '"contract_conformance"' schemas/repo-policy.schema.json
+          git diff --check
+
+      - name: Verify bounded production diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm tests/c3-10b-contract-apply.py .github/workflows/c3-10b-contract-apply.yml
+          mapfile -t changed < <(git status --short | sed -E 's/^.. //' | sort)
+          printf '%s\n' "${changed[@]}"
+          allowed=(
+            dist/policy-profiles.mjs
+            schemas/repo-policy.schema.json
+            src/policy-profiles.mts
+            tests/test-policy-profiles.mjs
+            tests/test-policy-delta-rules.mjs
+            tests/test-contract-conformance-current-promotion.mjs
+            tests/c3-10b-contract-apply.py
+            .github/workflows/c3-10b-contract-apply.yml
+          )
+          for path in "${changed[@]}"; do
+            found=0
+            for candidate in "${allowed[@]}"; do
+              if [[ "$path" == "$candidate" ]]; then found=1; break; fi
+            done
+            test "$found" -eq 1 || { echo "Unexpected changed path: $path"; exit 1; }
+          done
+
+      - name: Commit, verify dist freshness, and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "C3.10b: converge contract conformance into packs"
+          npm run check:dist
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:c3.10b/507-policy-packs-design
