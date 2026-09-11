@@ -56,9 +56,13 @@ function projectValue(rootSchema, rawSchema, value) {
         const itemSchema = schema.items;
         if (!itemSchema)
             return value;
-        return value
+        const projected = value
             .map((item) => projectValue(rootSchema, itemSchema, item))
             .filter((item) => item !== OMIT);
+        if (value.length > 0 && projected.length === 0 && typeof schema.minItems === "number" && schema.minItems > 0) {
+            return OMIT;
+        }
+        return projected;
     }
     if (value && typeof value === "object") {
         const projected = { ...value };
@@ -67,7 +71,9 @@ function projectValue(rootSchema, rawSchema, value) {
             if (!Object.hasOwn(projected, key))
                 continue;
             const child = projectValue(rootSchema, propertySchema, projected[key]);
-            if (child !== OMIT)
+            if (child === OMIT)
+                delete projected[key];
+            else
                 projected[key] = child;
         }
         return projected;
