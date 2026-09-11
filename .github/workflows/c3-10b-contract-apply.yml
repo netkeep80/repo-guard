@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent="fc90b6e1d5952f334e62e25191f23fa33e61e5ac"
+          expected_parent="0eb89079375428e27ee441c12c9e3a3c595753ff"
           test "$(git rev-parse HEAD^)" = "$expected_parent"
           test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/c3-10b-contract-apply.yml"
 
@@ -63,6 +63,28 @@ jobs:
 
       - name: Apply reviewed contract pack patch
         run: python3 tests/c3-10b-contract-apply.py
+
+      - name: Complete anum_docs fixture authoring migration
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("tests/test-policy-profiles.mjs")
+          s = p.read_text()
+          marker = '--- anum_docs-shaped current topology is data only ---'
+          start = s.index(marker)
+          prefix = s[:start]
+          section = s[start:]
+          old_open = '    contract_conformance: contractConformanceMacro({\n'
+          new_open = '    packs: { "contract-conformance": contractConformanceMacro({\n'
+          if section.count(old_open) != 1:
+              raise SystemExit(f"expected one anum_docs legacy override, got {section.count(old_open)}")
+          section = section.replace(old_open, new_open, 1)
+          old_close = '    }),\n  });'
+          new_close = '    }) },\n  });'
+          if section.count(old_close) != 1:
+              raise SystemExit(f"expected one anum_docs pack close, got {section.count(old_close)}")
+          section = section.replace(old_close, new_close, 1)
+          p.write_text(prefix + section)
 
       - name: Build official dist
         run: npm run build
