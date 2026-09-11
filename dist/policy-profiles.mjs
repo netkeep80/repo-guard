@@ -122,7 +122,8 @@ function generatedRuleIds(macro) {
     ];
 }
 const VERSION_GOVERNANCE_PACK = "version-governance";
-export const listBuiltInPacks = () => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK].sort();
+const REPO_GUARD_WORKFLOW_PACK = "repo-guard-workflow";
+export const listBuiltInPacks = () => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK].sort();
 export const listBuiltInProfiles = () => Object.keys(PACKS).sort();
 function validateRequirementsConfig(fieldPrefix, value, errors) {
     if (!isObject(value)) {
@@ -238,6 +239,68 @@ function materializeVersionGovernance(base, value) {
     }
     base.document_relations = { ...relations, documents, rules };
 }
+const REPO_GUARD_WORKFLOW_DOCUMENT = "pack:repo-guard-workflow:workflow";
+const REPO_GUARD_WORKFLOW_RULES = [
+    ["action-pin", "/jobs/policy-check/steps/1/uses"],
+    ["mode", "/jobs/policy-check/steps/1/with/mode"],
+    ["enforcement", "/jobs/policy-check/steps/1/with/enforcement"],
+    ["permission:contents", "/permissions/contents"],
+    ["permission:issues", "/permissions/issues"],
+    ["permission:pull-requests", "/permissions/pull-requests"],
+];
+function repoGuardWorkflowRuleId(suffix) {
+    return `pack:repo-guard-workflow:${suffix}`;
+}
+function validateRepoGuardWorkflowConfig(fieldPrefix, value, source, errors) {
+    if (!isObject(value)) {
+        errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+        return;
+    }
+    const path = normalizeDocumentPath(value.path);
+    if (!path)
+        errors.push({ field: `${fieldPrefix}.path`, message: `${fieldPrefix}.path must be a canonical repository path` });
+    else if (!(path.toLowerCase().endsWith(".yml") || path.toLowerCase().endsWith(".yaml")))
+        errors.push({ field: `${fieldPrefix}.path`, message: `${fieldPrefix}.path must be a YAML workflow path` });
+    if (typeof value.sha !== "string" || !/^[0-9a-f]{40}$/.test(value.sha)) {
+        errors.push({ field: `${fieldPrefix}.sha`, message: `${fieldPrefix}.sha must be exactly 40 lowercase hex characters` });
+    }
+    const explicitRelations = isObject(source.document_relations) ? source.document_relations : {};
+    const explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
+    if (Object.hasOwn(explicitDocuments, REPO_GUARD_WORKFLOW_DOCUMENT)) {
+        errors.push({ field: "document_relations.documents", message: `repo-guard-workflow generated document "${REPO_GUARD_WORKFLOW_DOCUMENT}" collides with explicit document_relations` });
+    }
+    const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
+    for (const [suffix] of REPO_GUARD_WORKFLOW_RULES) {
+        const id = repoGuardWorkflowRuleId(suffix);
+        if (explicitRuleIds.has(id))
+            errors.push({ field: "document_relations.rules", message: `repo-guard-workflow generated rule "${id}" collides with explicit document_relations` });
+    }
+}
+function materializeRepoGuardWorkflow(base, value) {
+    const path = normalizeDocumentPath(value.path);
+    const sha = value.sha;
+    const relations = isObject(base.document_relations) ? clone(base.document_relations) : {};
+    const documents = isObject(relations.documents) ? clone(relations.documents) : {};
+    const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [];
+    documents[REPO_GUARD_WORKFLOW_DOCUMENT] = { path, format: "yaml" };
+    const values = {
+        "action-pin": `netkeep80/repo-guard@${sha}`,
+        mode: "check-pr",
+        enforcement: "blocking",
+        "permission:contents": "read",
+        "permission:issues": "read",
+        "permission:pull-requests": "read",
+    };
+    for (const [suffix, pointer] of REPO_GUARD_WORKFLOW_RULES) {
+        rules.push({
+            id: repoGuardWorkflowRuleId(suffix),
+            kind: "scalar_equals_literal",
+            source: { document: REPO_GUARD_WORKFLOW_DOCUMENT, pointer, type: "string" },
+            value: values[suffix],
+        });
+    }
+    base.document_relations = { ...relations, documents, rules };
+}
 export function compileProfilePolicy(policy) {
     const source = policy;
     const errors = [], profile = source?.profile, overrides = source?.profile_overrides, packs = source?.packs;
@@ -259,6 +322,8 @@ export function compileProfilePolicy(policy) {
             for (const [name, config] of entries) {
                 if (name === VERSION_GOVERNANCE_PACK)
                     validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
+                else if (name === REPO_GUARD_WORKFLOW_PACK)
+                    validateRepoGuardWorkflowConfig(`packs.${name}`, config, source || {}, errors);
                 else {
                     const spec = PACKS[name];
                     if (!spec)
@@ -370,6 +435,10 @@ export function expandPolicyProfile(policy) {
                 continue;
             if (name === VERSION_GOVERNANCE_PACK) {
                 materializeVersionGovernance(base, config);
+                continue;
+            }
+            if (name === REPO_GUARD_WORKFLOW_PACK) {
+                materializeRepoGuardWorkflow(base, config);
                 continue;
             }
             const spec = PACKS[name];

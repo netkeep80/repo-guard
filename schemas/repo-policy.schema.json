@@ -353,7 +353,17 @@
       "additionalProperties": false,
       "properties": {
         "requirements-strict": { "$ref": "#/definitions/profile_overrides" },
-        "version-governance": { "$ref": "#/definitions/version_governance_pack" }
+        "version-governance": { "$ref": "#/definitions/version_governance_pack" },
+        "repo-guard-workflow": { "$ref": "#/definitions/repo_guard_workflow_pack" }
+      }
+    },
+    "repo_guard_workflow_pack": {
+      "type": "object",
+      "required": ["path", "sha"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
       }
     },
     "version_governance_document": {
