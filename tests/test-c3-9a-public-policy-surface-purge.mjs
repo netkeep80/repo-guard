@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { describe, it } from "node:test";
 import Ajv from "ajv";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
