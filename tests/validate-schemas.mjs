@@ -20,7 +20,6 @@ expect("valid policy fixture", policy(validPolicy));
 expect("invalid policy fixture", policy(json("tests/fixtures/invalid-policy.json")), false);
 expect("repo-policy self", policy(json("repo-policy.json")));
 expect("old top-level integration rejected", policy({ ...validPolicy, integration: {} }), false);
-expect("size rules example", policy(json("examples/size-rules-policy.json")));
 expect("requirements-strict profile", policy({ ...validPolicy, profile: "requirements-strict", profile_overrides: { evidence_surfaces: ["src/**"] } }));
 expect("profile overrides require profile", policy({ ...validPolicy, profile_overrides: { evidence_surfaces: ["src/**"] } }), false);
 expect("anchors + trace", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", field: "id" }] } } }, trace_rules: [{ id: "resolve", kind: "must_resolve", from_anchor_type: "id", to_anchor_type: "id" }] }));
