@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex, warnReservedPolicyFields } from "../policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex } from "../policy-compiler.mjs";
 import { resolvePolicyProfile } from "../policy-profiles.mjs";
 export const loadJSON = (path) => JSON.parse(readFileSync(path, "utf-8"));
 // Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
@@ -45,9 +45,6 @@ export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
                     console.error(`  ${format(error)}`);
             }
         }
-    if (!quiet)
-        for (const warning of warnReservedPolicyFields(policy))
-            console.warn(`WARN: ${warning}`);
     return { ok, ajv, policy, changeIntentSchema, governanceGrantSchema };
 }
 export function loadPolicyRuntime(roots, options = {}) {
