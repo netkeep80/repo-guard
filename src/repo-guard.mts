@@ -52,7 +52,7 @@ export function resolveRoots(args: string[]): CliRoots {
   const filtered: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const option = args[i];
-    if (!["--repo-root", "--enforcement", "--enforcement-mode"].includes(option)) { filtered.push(option); continue; }
+    if (!["--repo-root", "--enforcement"].includes(option)) { filtered.push(option); continue; }
     const next = args[++i];
     if (!next || next.startsWith("-")) throw new Error(`${option} requires ${option === "--repo-root" ? "a path" : "a mode"} argument\n${USAGE}`);
     if (option === "--repo-root") repoRoot = resolve(next); else enforcementMode = next;

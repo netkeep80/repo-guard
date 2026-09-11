@@ -98,18 +98,18 @@ console.log("\n--- advisory check-diff reports but does not fail ---");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- warn alias can be supplied after the command ---");
-{
+console.log("\n--- compatibility enforcement values are rejected ---");
+for (const alias of ["warn", "enforce"]) {
   const repo = makeRepo();
   const result = await runCliCaptured([
     "check-diff",
     "--repo-root", repo.dir,
     "--base", repo.base,
     "--head", repo.head,
-    "--enforcement", "warn",
+    "--enforcement", alias,
   ]);
-  expect("warn alias exit code", result.code, 0);
-  expectIncludes("warn alias resolves to advisory", result.output, "mode: advisory");
+  expect(`${alias} alias exit code`, result.code, 1);
+  expectIncludes(`${alias} alias is rejected`, result.output, "Must be one of: advisory, blocking.");
   rmSync(repo.dir, { recursive: true });
 }
 

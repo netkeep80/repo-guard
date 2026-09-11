@@ -34,7 +34,7 @@ export function resolveRoots(args) {
     const filtered = [];
     for (let i = 0; i < args.length; i++) {
         const option = args[i];
-        if (!["--repo-root", "--enforcement", "--enforcement-mode"].includes(option)) {
+        if (!["--repo-root", "--enforcement"].includes(option)) {
             filtered.push(option);
             continue;
         }

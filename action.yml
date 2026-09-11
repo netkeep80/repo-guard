@@ -17,9 +17,9 @@ inputs:
 
   enforcement:
     description: >
-      Policy enforcement behavior. `blocking`/`enforce` fails the job when
-      policy violations are found. `advisory`/`warn` reports violations but
-      exits successfully so teams can observe noise before enforcing.
+      Policy enforcement behavior. `blocking` fails the job when policy
+      violations are found. `advisory` reports violations but exits
+      successfully so teams can observe noise before enforcing.
     required: false
     default: "blocking"
 

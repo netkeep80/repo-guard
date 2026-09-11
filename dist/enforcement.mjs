@@ -1,16 +1,14 @@
-const MODE_ALIASES = new Map([
+const ENFORCEMENT_MODES = new Map([
     ["advisory", "advisory"],
-    ["warn", "advisory"],
     ["blocking", "blocking"],
-    ["enforce", "blocking"],
 ]);
 export function normalizeEnforcementMode(value, label = "enforcement") {
     const raw = String(value || "").trim().toLowerCase();
-    const mode = MODE_ALIASES.get(raw);
+    const mode = ENFORCEMENT_MODES.get(raw);
     if (!mode) {
         return {
             ok: false,
-            message: `Unknown ${label}: ${value}. Must be one of: advisory, warn, blocking, enforce.`,
+            message: `Unknown ${label}: ${value}. Must be one of: advisory, blocking.`,
         };
     }
     return { ok: true, mode };
