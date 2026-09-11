@@ -28,21 +28,33 @@ AnalysisReport
 
 Доверие отделено от намерения изменения. `ChangeIntent` сообщает, что PR намерен изменить. `GovernanceGrant` сообщает, что доверенный внешний субъект разрешил изменить. Проверка PR исполняется политикой доверенной базовой ветки; PR не может сам выдать себе управляющую санкцию.
 
-## Установка
+## Установка текущего кандидата
 
-Требуется `Node.js` 20 или новее.
+Требуется `Node.js` 20 или новее. Текущее состояние пакета имеет версию `3.0.0`, но официальный `v3.0.0` ещё не опубликован. До завершения release gate непинованные npm/npx-вызовы не считаются способом получить текущий v3-кандидат; полный процесс выпуска описан в [`RELEASING.md`](RELEASING.md).
+
+Для consumer-проверки закрепляйте GitHub Action за полным accepted SHA:
+
+```yaml
+- uses: netkeep80/repo-guard@<40-char-SHA>
+```
+
+Для локальной проверки используйте точный checkout того же принятого коммита:
 
 ```bash
-npm install -g repo-guard
-# либо
-npx repo-guard
+export REPO_GUARD_SHA=<40-char-SHA>
+git clone https://github.com/netkeep80/repo-guard.git
+cd repo-guard
+git checkout "$REPO_GUARD_SHA"
+npm ci
 ```
 
 ## Быстрый старт
 
+Из этого exact checkout:
+
 ```bash
-repo-guard init --action-ref "$REPO_GUARD_SHA" --preset application --mode advisory
-repo-guard doctor
+node dist/repo-guard.mjs init --action-ref "$REPO_GUARD_SHA" --preset application --mode advisory
+node dist/repo-guard.mjs doctor
 ```
 
 `REPO_GUARD_SHA` должен содержать полный 40-символьный SHA коммита. После официального выпуска можно явно передать тег вида `vX.Y.Z`, если он соответствует версии пакета. `init` не подставляет `main` или `latest` и без `--action-ref` завершается ошибкой до создания файлов.
@@ -160,6 +172,6 @@ npm test
 npm run compression:metrics
 ```
 
-Репозиторий применяет собственную политику к себе. Для внешнего репозитория начальная конфигурация создаётся одной командой `repo-guard init --action-ref <ref>`; сгенерированный рабочий процесс проверяется [`tests/test-init.mjs`](tests/test-init.mjs).
+Репозиторий применяет собственную политику к себе. Для внешнего репозитория начальная конфигурация создаётся командой `repo-guard init --action-ref <ref>` из проверенного экземпляра; сгенерированный рабочий процесс проверяется [`tests/test-init.mjs`](tests/test-init.mjs).
 
 Роль проекта в портфеле описана в [`PORTFOLIO.md`](PORTFOLIO.md).
