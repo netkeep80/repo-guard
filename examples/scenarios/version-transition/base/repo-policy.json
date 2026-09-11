@@ -16,16 +16,15 @@
   "cochange_rules": [],
   "document_relations": {
     "documents": {
-      "base-revision": { "path": "meta/REVISION", "format": "plain_text", "snapshot": "base" },
-      "head-revision": { "path": "meta/REVISION", "format": "plain_text", "snapshot": "head" }
+      "revision": { "path": "meta/REVISION", "format": "plain_text" }
     },
     "rules": [
       {
         "id": "release-revision",
         "kind": "scalar_strictly_greater",
         "comparator": "semver",
-        "left": { "document": "head-revision", "pointer": "", "type": "string" },
-        "right": { "document": "base-revision", "pointer": "", "type": "string" }
+        "left": { "document": "revision", "snapshot": "head", "pointer": "", "type": "string" },
+        "right": { "document": "revision", "snapshot": "base", "pointer": "", "type": "string" }
       }
     ]
   }
