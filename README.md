@@ -146,7 +146,8 @@ allow_policy_relaxation: []
 - [`examples/scenarios/`](examples/scenarios/) — канонические исполняемые положительные и отрицательные сценарии.
 - [`templates/`](templates/) — актуальные consumer-примеры интеграции.
 - [`RELEASING.md`](RELEASING.md) — процедура выпуска и правила ссылки выпуска.
-- [`docs/self-hosting-coverage.md`](docs/self-hosting-coverage.md) — границы самоприменения.
+- [`tests/test-c3-4b-self-host-exemplar.mjs`](tests/test-c3-4b-self-host-exemplar.mjs) — исполняемое доказательство границ самоприменения.
+- [`docs/self-hosting-coverage.json`](docs/self-hosting-coverage.json) — явные исключения из самоприменения.
 
 Неизвестная семантика при сравнении политик обрабатывается fail-closed. `repo-guard` не заменяет предметные тесты, проверку безопасности или инженерное ревью: его задача — сделать структурные ограничения изменения репозитория воспроизводимыми и исполняемыми.
 
