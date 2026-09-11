@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
-import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
+import { listBuiltInPacks } from "../dist/policy-profiles.mjs";
 import { renderInitScaffold } from "../dist/init.mjs";
 
 const ACCEPTED_BASE = "25560cf62e3336cdd089a779a9032db01b0c71f1";
@@ -113,20 +113,20 @@ describe("C3.4b canonical self-host exemplar", () => {
     assert.match(read(".github/ISSUE_TEMPLATE/change-intent.yml"), /```repo-guard-yaml/);
   });
 
-  it("derives command, rule-family and profile authority instead of duplicating it", () => {
+  it("derives command, rule-family and pack authority instead of duplicating it", () => {
     for (const command of COMMANDS) {
       assert.ok(observedCommands.has(command) || commandExceptions.has(command), `command is neither self-hosted nor excepted: ${command}`);
     }
     assert.deepEqual([...commandExceptions].sort(), ["init"]);
 
     const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
-    const profiles = new Set(listBuiltInProfiles());
+    const packs = new Set(listBuiltInPacks());
     for (const key of exceptionKeys) {
       const reason = exceptions[key];
       assert.equal(typeof reason, "string");
       assert.ok(reason.trim().length > 0, `empty self-host exception reason: ${key}`);
       if (key.startsWith("rule:")) assert.ok(ruleIds.has(key.slice("rule:".length)), `unknown rule exception: ${key}`);
-      if (key.startsWith("profile:")) assert.ok(profiles.has(key.slice("profile:".length)), `unknown profile exception: ${key}`);
+      if (key.startsWith("pack:")) assert.ok(packs.has(key.slice("pack:".length)), `unknown pack exception: ${key}`);
     }
   });
 
