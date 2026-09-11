@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_parent="cff6b9a48370d7c345d05ff4844df255c1c16ae6"
+          expected_parent="bc25b6c907ae7f7eacb6f75cced39c957f8956f9"
           test "$(git rev-parse HEAD^)" = "$expected_parent"
           test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/c3-10b-contract-apply.yml"
 
@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm tests/c3-10b-contract-apply.py .github/workflows/c3-10b-contract-apply.yml
+          git rm -f tests/c3-10b-contract-apply.py .github/workflows/c3-10b-contract-apply.yml
           mapfile -t changed < <(git status --short | sed -E 's/^.. //' | sort)
           printf '%s\n' "${changed[@]}"
           allowed=(
