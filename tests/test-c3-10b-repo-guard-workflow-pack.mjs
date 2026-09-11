@@ -34,7 +34,7 @@ assert.equal(
 );
 
 const resolved = resolvePolicyProfile(policy);
-assert.equal(resolved.ok, true, "repo-guard-workflow must lower successfully");
+assert.equal(resolved.ok, true, `repo-guard-workflow must lower successfully; errors: ${JSON.stringify(resolved.errors)}`);
 assert.equal(Object.hasOwn(resolved.policy, "packs"), false, "repo-guard-workflow must disappear after lowering");
 
 const documents = resolved.policy.document_relations?.documents || {};
