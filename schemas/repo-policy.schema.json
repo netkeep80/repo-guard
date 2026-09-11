@@ -447,27 +447,13 @@
       }
     },
     "document_relation_document": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": ["path", "format"],
-          "additionalProperties": false,
-          "properties": {
-            "path": { "$ref": "#/definitions/non_empty_string" },
-            "format": { "type": "string", "enum": ["json", "yaml"] }
-          }
-        },
-        {
-          "type": "object",
-          "required": ["path", "format", "snapshot"],
-          "additionalProperties": false,
-          "properties": {
-            "path": { "$ref": "#/definitions/non_empty_string" },
-            "format": { "const": "plain_text" },
-            "snapshot": { "type": "string", "enum": ["base", "head"] }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["path", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "format": { "type": "string", "enum": ["json", "yaml", "plain_text"] }
+      }
     },
     "document_scalar_selector": {
       "type": "object",
@@ -475,6 +461,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "type": { "type": "string", "enum": ["scalar", "string", "boolean"] }
       }
@@ -485,6 +472,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "type": { "const": "string" }
       }
@@ -495,6 +483,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values"] },
         "type": { "const": "repository_path_set" }
@@ -506,6 +495,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values", "object_keys"] },
         "type": { "const": "string_set" }
