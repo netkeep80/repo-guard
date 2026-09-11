@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
-import { getDiff, readBasePolicy, readFileAtRef, resolveRemoteBaseRef } from "./git.mjs";
+import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
@@ -9,23 +9,6 @@ import { runPolicyPipeline } from "./runtime/pipeline.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"];
-function readOptionalBaseSchema(base, repoRoot, path) {
-    let raw;
-    try {
-        raw = readFileAtRef(base, path, repoRoot);
-    }
-    catch {
-        return undefined;
-    }
-    return raw == null ? undefined : JSON.parse(raw);
-}
-function readBaseSchemaSnapshot(base, repoRoot) {
-    return {
-        repoPolicy: readOptionalBaseSchema(base, repoRoot, "schemas/repo-policy.schema.json"),
-        changeIntent: readOptionalBaseSchema(base, repoRoot, "schemas/change-intent.schema.json"),
-        governanceGrant: readOptionalBaseSchema(base, repoRoot, "schemas/governance-grant.schema.json"),
-    };
-}
 export function loadGitHubEvent() {
     const eventPath = process.env.GITHUB_EVENT_PATH;
     if (!eventPath)
@@ -155,7 +138,7 @@ export function runCheckPR(roots, args = []) {
     else {
         runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, {
             label: "repo-policy.json (base)",
-            schemas: readBaseSchemaSnapshot(base, roots.repoRoot),
+            historicalBase: true,
         }), "repo-policy.json (base)", "Base policy compilation failed");
         if (!runtime)
             return 1;

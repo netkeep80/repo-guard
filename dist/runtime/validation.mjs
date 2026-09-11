@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import Ajv from "ajv";
 import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex } from "../policy-compiler.mjs";
 import { resolvePolicyProfile } from "../policy-profiles.mjs";
+import { projectPolicyToCurrentVocabulary } from "../policy-vocabulary.mjs";
 export const loadJSON = (path) => JSON.parse(readFileSync(path, "utf-8"));
 // Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
 // разрешаем этот стандартный синтаксис, чтобы валидная policy не писала warning в stderr.
@@ -24,9 +25,12 @@ export function validationCheck(ajv, schema, data, label) {
 export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
     const schema = (key, name) => options.schemas?.[key] ?? loadJSON(resolve(roots.packageRoot, `schemas/${name}.schema.json`));
     const policySchema = schema("repoPolicy", "repo-policy"), changeIntentSchema = schema("changeIntent", "change-intent"), governanceGrantSchema = schema("governanceGrant", "governance-grant");
+    const observedPolicy = options.historicalBase
+        ? projectPolicyToCurrentVocabulary(rawPolicy, policySchema)
+        : rawPolicy;
     const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
-    let ok = validate(ajv, policySchema, rawPolicy, label, { quiet });
-    const profile = resolvePolicyProfile(rawPolicy), policy = profile.policy;
+    let ok = validate(ajv, policySchema, observedPolicy, label, { quiet });
+    const profile = resolvePolicyProfile(observedPolicy), policy = profile.policy;
     const semanticGroups = [
         ["profile compilation", profile.errors, (error) => error.message],
         ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (error) => `[${error.rule_id}] invalid regex /${error.pattern}/: ${error.message}`],
