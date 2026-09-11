@@ -57,9 +57,13 @@ function projectValue(rootSchema: JsonObject, rawSchema: unknown, value: unknown
   if (Array.isArray(value)) {
     const itemSchema = schema.items;
     if (!itemSchema) return value;
-    return value
+    const projected = value
       .map((item) => projectValue(rootSchema, itemSchema, item))
       .filter((item) => item !== OMIT);
+    if (value.length > 0 && projected.length === 0 && typeof schema.minItems === "number" && schema.minItems > 0) {
+      return OMIT;
+    }
+    return projected;
   }
 
   if (value && typeof value === "object") {
@@ -68,7 +72,8 @@ function projectValue(rootSchema: JsonObject, rawSchema: unknown, value: unknown
     for (const [key, propertySchema] of Object.entries(properties)) {
       if (!Object.hasOwn(projected, key)) continue;
       const child = projectValue(rootSchema, propertySchema, projected[key]);
-      if (child !== OMIT) projected[key] = child;
+      if (child === OMIT) delete projected[key];
+      else projected[key] = child;
     }
     return projected;
   }
