@@ -53,8 +53,6 @@ type ProfileConfig = Record<string, unknown>;
 type PairRole = "current.contract" | "current.conformance" | "previous.contract" | "previous.conformance";
 type ContractRole = PairRole | "acceptance";
 interface PolicyProjection extends Record<string, unknown> {
-  profile?: string;
-  profile_overrides?: unknown;
   packs?: unknown;
   anchors?: unknown;
   trace_rules?: unknown;
@@ -66,7 +64,6 @@ interface PolicyProjection extends Record<string, unknown> {
 }
 interface ProfileValidationError {
   field: string;
-  profile?: string;
   message: string;
 }
 
@@ -160,7 +157,6 @@ const VERSION_GOVERNANCE_PACK = "version-governance";
 const REPO_GUARD_WORKFLOW_PACK = "repo-guard-workflow";
 
 export const listBuiltInPacks = (): string[] => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK].sort();
-export const listBuiltInProfiles = (): string[] => Object.keys(PACKS).sort();
 
 function validateRequirementsConfig(fieldPrefix: string, value: unknown, errors: ProfileValidationError[]) {
   if (!isObject(value)) {
@@ -335,13 +331,9 @@ function materializeRepoGuardWorkflow(base: PolicyProjection, value: Record<stri
 
 export function compileProfilePolicy(policy: unknown): ProfileValidationError[] {
   const source = policy as PolicyProjection | null | undefined;
-  const errors: ProfileValidationError[] = [], profile = source?.profile, overrides = source?.profile_overrides, packs = source?.packs;
-  if (overrides !== undefined && !profile) errors.push({ field: "profile_overrides", message: "profile_overrides requires top-level profile" });
-  if (profile !== undefined && !(PACKS as unknown as Record<string, ProfileSpec>)[profile]) errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
-  if (overrides !== undefined) validateRequirementsConfig("profile_overrides", overrides, errors);
+  const errors: ProfileValidationError[] = [], packs = source?.packs;
 
   if (packs !== undefined) {
-    if (profile !== undefined || overrides !== undefined) errors.push({ field: "packs", message: "packs cannot be combined with profile or profile_overrides" });
     if (!isObject(packs)) errors.push({ field: "packs", message: "packs must be an object" });
     else {
       const entries = Object.entries(packs);
@@ -461,10 +453,7 @@ export function expandPolicyProfile(policy: unknown) {
     }
     return base;
   }
-  const spec = (PACKS as unknown as Record<string, ProfileSpec>)[base.profile as string];
-  if (!spec) return base;
-  const patch = materializePack(spec, (base.profile_overrides as Record<string, unknown>) || {});
-  return { ...base, anchors: base.anchors || patch.anchors, trace_rules: base.trace_rules || patch.trace_rules };
+  return base;
 }
 
 export function expandContractConformancePolicy(policy: unknown) {

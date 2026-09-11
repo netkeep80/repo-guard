@@ -124,7 +124,6 @@ function generatedRuleIds(macro) {
 const VERSION_GOVERNANCE_PACK = "version-governance";
 const REPO_GUARD_WORKFLOW_PACK = "repo-guard-workflow";
 export const listBuiltInPacks = () => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK].sort();
-export const listBuiltInProfiles = () => Object.keys(PACKS).sort();
 function validateRequirementsConfig(fieldPrefix, value, errors) {
     if (!isObject(value)) {
         errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
@@ -303,16 +302,8 @@ function materializeRepoGuardWorkflow(base, value) {
 }
 export function compileProfilePolicy(policy) {
     const source = policy;
-    const errors = [], profile = source?.profile, overrides = source?.profile_overrides, packs = source?.packs;
-    if (overrides !== undefined && !profile)
-        errors.push({ field: "profile_overrides", message: "profile_overrides requires top-level profile" });
-    if (profile !== undefined && !PACKS[profile])
-        errors.push({ field: "profile", profile, message: `profile "${profile}" is not supported; use ${listBuiltInProfiles().join(", ")}` });
-    if (overrides !== undefined)
-        validateRequirementsConfig("profile_overrides", overrides, errors);
+    const errors = [], packs = source?.packs;
     if (packs !== undefined) {
-        if (profile !== undefined || overrides !== undefined)
-            errors.push({ field: "packs", message: "packs cannot be combined with profile or profile_overrides" });
         if (!isObject(packs))
             errors.push({ field: "packs", message: "packs must be an object" });
         else {
@@ -452,11 +443,7 @@ export function expandPolicyProfile(policy) {
         }
         return base;
     }
-    const spec = PACKS[base.profile];
-    if (!spec)
-        return base;
-    const patch = materializePack(spec, base.profile_overrides || {});
-    return { ...base, anchors: base.anchors || patch.anchors, trace_rules: base.trace_rules || patch.trace_rules };
+    return base;
 }
 export function expandContractConformancePolicy(policy) {
     const base = clone(policy), macro = contractMacro(base);
