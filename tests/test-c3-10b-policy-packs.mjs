@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import Ajv from "ajv";
+import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -40,6 +41,12 @@ for (const format of ["json", "yaml", "plain_text"]) {
     true,
     `${format} document selectors must expose canonical base/head snapshots; schema errors: ${JSON.stringify(validate.errors)}`,
   );
+
+  const relation = compileConstraintProgram(policy).find((entry) => entry.runtime?.relation_id === `version-monotonic-${format}`)?.runtime;
+  assert.ok(relation, `${format} version relation must lower into the canonical Constraint Program`);
+  assert.equal(relation.operands.left.selector.snapshot, "head", `${format} left operand must lower to HEAD FactRef`);
+  assert.equal(relation.operands.right.selector.snapshot, "base", `${format} right operand must lower to BASE FactRef`);
+  assert.equal(relation.kind, "primitive_relation", `${format} lowering must keep the single canonical runtime kind`);
 }
 
 const invalidSnapshotPolicy = {
