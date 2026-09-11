@@ -69,11 +69,6 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Glob patterns for operational bot-artifact files that are allowed as special-case paths in diffs"
-        },
-        "public_api": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Reserved for future use. Accepted by schema but not enforced at runtime. Non-empty values will produce a diagnostic warning."
         }
       }
     },
@@ -123,7 +118,7 @@
     },
     "change_profiles": {
       "type": "object",
-      "description": "Per-change-type policy constraints keyed by ChangeIntent change_type. Each profile fully describes the change intent: allowed/forbidden/required surfaces, new-file class rules, and per-type budgets. Replaces the deprecated change_classes, surface_matrix, new_file_rules, and change_type_rules fields.",
+      "description": "Per-change-type policy constraints keyed by ChangeIntent change_type. Each profile describes allowed, forbidden, and required surfaces, new-file class rules, and per-type budgets.",
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
@@ -205,7 +200,7 @@
     },
     "advisory_text_rules": {
       "type": "object",
-      "description": "Optional heuristic markdown duplication advisories. These warnings never block the PR in v1.",
+      "description": "Optional heuristic markdown duplication advisories. These warnings are advisory and never block a PR.",
       "additionalProperties": false,
       "properties": {
         "canonical_files": {

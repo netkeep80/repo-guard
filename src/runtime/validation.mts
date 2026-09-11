@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex, warnReservedPolicyFields } from "../policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex } from "../policy-compiler.mjs";
 import { resolvePolicyProfile } from "../policy-profiles.mjs";
 
 type AjvErrorProjection = { instancePath?: string; message?: string };
@@ -54,7 +54,6 @@ export function loadPolicyRuntimeFromObject(roots: RuntimeRoots, rawPolicy: unkn
     ok = false;
     if (!quiet) { console.error(`FAIL: ${group}`); for (const error of errors) console.error(`  ${format(error)}`); }
   }
-  if (!quiet) for (const warning of warnReservedPolicyFields(policy)) console.warn(`WARN: ${warning}`);
   return { ok, ajv, policy, changeIntentSchema, governanceGrantSchema };
 }
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex, warnReservedPolicyFields } from "../dist/policy-compiler.mjs";
+import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex } from "../dist/policy-compiler.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../dist/github-pr.mjs";
 
@@ -58,7 +58,6 @@ describe("semantic compiler hardening", () => {
     ] }).some((e) => e.message.includes("duplicates")));
     assert.equal(compileAnchorPolicy({ anchors: { types: { ref: { sources: [{ kind: "regex", glob: "src/**", pattern: "[bad" }] } } } }).length, 1);
   });
-  it("keeps only the remaining policy reservation visible", () => assert.equal(warnReservedPolicyFields({ paths: { public_api: ["src/api/**"] } }).length, 1));
 });
 
 describe("runtime hardening", () => {

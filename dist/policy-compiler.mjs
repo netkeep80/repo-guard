@@ -192,6 +192,3 @@ export function compileEvidenceBindingsPolicy(policy = {}) {
     }
     return errors;
 }
-export function warnReservedPolicyFields(policy = {}) {
-    return list(policy.paths?.public_api).length ? ["paths.public_api: defined but reserved for future use; not enforced at runtime"] : [];
-}
