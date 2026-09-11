@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import Ajv from "ajv";
 import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
+import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
@@ -100,3 +101,79 @@ const unknownPackPolicy = {
 assert.equal(validate(unknownPackPolicy), false, "unknown or user-defined packs must fail closed at the public schema");
 
 console.log("C3.10b closed built-in packs surface contract passed");
+
+const versionPackPolicy = {
+  ...basePolicy,
+  packs: {
+    "version-governance": {
+      authority: { path: "package.json", pointer: "/version" },
+      advance: "semver",
+      mirrors: [{ path: "package-lock.json", pointer: "/version" }],
+    },
+  },
+};
+
+assert.equal(
+  validate(versionPackPolicy),
+  true,
+  `version-governance must be accepted as a closed built-in pack; schema errors: ${JSON.stringify(validate.errors)}`,
+);
+const resolvedVersion = resolvePolicyProfile(versionPackPolicy);
+assert.equal(resolvedVersion.ok, true, "version-governance must lower successfully");
+assert.equal(Object.hasOwn(resolvedVersion.policy, "packs"), false, "version-governance must disappear after lowering");
+
+const versionDocuments = resolvedVersion.policy.document_relations?.documents || {};
+assert.deepEqual(versionDocuments["pack:version-governance:authority"], { path: "package.json", format: "json" });
+assert.deepEqual(versionDocuments["pack:version-governance:mirror:0"], { path: "package-lock.json", format: "json" });
+
+const versionRules = new Map((resolvedVersion.policy.document_relations?.rules || []).map((rule) => [rule.id, rule]));
+assert.deepEqual(versionRules.get("pack:version-governance:advance"), {
+  id: "pack:version-governance:advance",
+  kind: "scalar_strictly_greater",
+  comparator: "semver",
+  left: { document: "pack:version-governance:authority", snapshot: "head", pointer: "/version", type: "string" },
+  right: { document: "pack:version-governance:authority", snapshot: "base", pointer: "/version", type: "string" },
+});
+assert.deepEqual(versionRules.get("pack:version-governance:mirror:0"), {
+  id: "pack:version-governance:mirror:0",
+  kind: "scalar_equal",
+  left: { document: "pack:version-governance:authority", snapshot: "head", pointer: "/version", type: "string" },
+  right: { document: "pack:version-governance:mirror:0", snapshot: "head", pointer: "/version", type: "string" },
+});
+
+const versionProgram = compileConstraintProgram(resolvedVersion.policy).filter((entry) => entry.key.startsWith("document-relation:pack:version-governance:"));
+assert.equal(versionProgram.length, 2, "version-governance must lower to exactly two ordinary document relations for one mirror");
+assert.ok(versionProgram.every((entry) => entry.runtime?.kind === "primitive_relation"), "version-governance must not create a pack-specific runtime kind");
+
+function evaluateVersionPack(baseVersion, headVersion, mirrorVersion = headVersion) {
+  const entries = evaluateConstraintIR({
+    repositoryRoot: process.cwd(),
+    baseRef: "BASE",
+    headRef: "HEAD",
+    readFileAtRef: (ref, path) => {
+      if (path === "package.json") return JSON.stringify({ version: ref === "BASE" ? baseVersion : headVersion });
+      if (path === "package-lock.json") return JSON.stringify({ version: mirrorVersion });
+      throw new Error(`unexpected version-governance path: ${path}`);
+    },
+    policy: resolvedVersion.policy,
+    changeIntent: null,
+    diff: { files: { checked: [{ path: "src/change.mjs", status: "modified", addedLines: ["x"], deletedLines: [] }] } },
+  }, { executionPhase: "transaction" });
+  return new Map(entries
+    .filter((entry) => entry.name.startsWith("document-relation:pack:version-governance:"))
+    .map((entry) => [entry.name, entry.check]));
+}
+
+const noBump = evaluateVersionPack("0.5.0", "0.5.0");
+assert.equal(noBump.get("document-relation:pack:version-governance:advance")?.ok, false, "equal BASE/HEAD versions must fail");
+assert.equal(noBump.get("document-relation:pack:version-governance:mirror:0")?.ok, true, "matching HEAD mirror must remain valid on the no-bump falsifier");
+
+const bumped = evaluateVersionPack("0.5.0", "0.5.1");
+assert.equal(bumped.get("document-relation:pack:version-governance:advance")?.ok, true, "strict semver increase must pass");
+assert.equal(bumped.get("document-relation:pack:version-governance:mirror:0")?.ok, true, "matching mirror must pass");
+
+const staleMirror = evaluateVersionPack("0.5.0", "0.5.1", "0.5.0");
+assert.equal(staleMirror.get("document-relation:pack:version-governance:advance")?.ok, true, "version advance must remain independently valid");
+assert.equal(staleMirror.get("document-relation:pack:version-governance:mirror:0")?.ok, false, "stale mirror must fail independently");
+
+console.log("C3.10b version-governance pure-lowering contract passed");
