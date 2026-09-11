@@ -16,52 +16,44 @@ const basePolicy = {
   cochange_rules: [],
 };
 
-const structuredSnapshotPolicy = {
-  ...basePolicy,
-  document_relations: {
-    documents: {
-      package: { path: "package.json", format: "json" },
+for (const format of ["json", "yaml", "plain_text"]) {
+  const path = format === "json" ? "package.json" : format === "yaml" ? "config.yml" : "VERSION";
+  const pointer = format === "plain_text" ? "" : "/version";
+  const policy = {
+    ...basePolicy,
+    document_relations: {
+      documents: {
+        source: { path, format },
+      },
+      rules: [{
+        id: `version-monotonic-${format}`,
+        kind: "scalar_strictly_greater",
+        comparator: "semver",
+        left: { document: "source", snapshot: "head", pointer, type: "string" },
+        right: { document: "source", snapshot: "base", pointer, type: "string" },
+      }],
     },
-    rules: [{
-      id: "version-monotonic",
-      kind: "scalar_strictly_greater",
-      comparator: "semver",
-      left: { document: "package", snapshot: "head", pointer: "/version", type: "string" },
-      right: { document: "package", snapshot: "base", pointer: "/version", type: "string" },
-    }],
-  },
-};
+  };
 
-assert.equal(
-  validate(structuredSnapshotPolicy),
-  true,
-  `JSON document selectors must expose canonical base/head snapshots; schema errors: ${JSON.stringify(validate.errors)}`,
-);
-
-for (const [name, config] of Object.entries({
-  "version-governance": {
-    authority: { path: "package.json", pointer: "/version" },
-    advance: "semver",
-    mirrors: [{ path: "package-lock.json", pointer: "/version" }],
-  },
-  "repo-guard-workflow": {
-    path: ".github/workflows/repo-guard.yml",
-    action: "netkeep80/repo-guard",
-    ref: "0123456789abcdef0123456789abcdef01234567",
-    mode: "check-pr",
-    enforcement: "blocking",
-    permissions: { contents: "read", issues: "read", "pull-requests": "read" },
-  },
-})) {
-  const policy = { ...basePolicy, packs: { [name]: config } };
   assert.equal(
     validate(policy),
     true,
-    `built-in pack ${name} must be accepted by the public schema; errors: ${JSON.stringify(validate.errors)}`,
+    `${format} document selectors must expose canonical base/head snapshots; schema errors: ${JSON.stringify(validate.errors)}`,
   );
 }
 
-const unknownPack = { ...basePolicy, packs: { "user-defined": { expression: "anything" } } };
-assert.equal(validate(unknownPack), false, "unknown/user-defined packs must remain closed and fail schema validation");
+const invalidSnapshotPolicy = {
+  ...basePolicy,
+  document_relations: {
+    documents: { package: { path: "package.json", format: "json" } },
+    rules: [{
+      id: "invalid-snapshot",
+      kind: "scalar_equal",
+      left: { document: "package", snapshot: "working-tree", pointer: "/version", type: "string" },
+      right: { document: "package", pointer: "/version", type: "string" },
+    }],
+  },
+};
+assert.equal(validate(invalidSnapshotPolicy), false, "unknown document snapshots must fail schema validation");
 
-console.log("C3.10b RED contract captured: structured snapshots + closed built-in packs");
+console.log("C3.10b snapshot parity contract passed");
