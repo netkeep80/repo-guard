@@ -116,7 +116,6 @@ function materializePack(spec: PackSpec, overrides: Record<string, unknown>) {
   return { anchors: { types }, trace_rules };
 }
 
-
 function pairDocuments(value: unknown, prefix: "current" | "previous") {
   const pair = isObject(value) ? value : {};
   return {
@@ -199,7 +198,7 @@ function validateVersionDocument(fieldPrefix: string, value: unknown, errors: Pa
   if (typeof value.pointer !== "string") errors.push({ field: `${fieldPrefix}.pointer`, message: `${fieldPrefix}.pointer must be a JSON Pointer string` });
   const format = path ? inferVersionDocumentFormat(path, value.format) : null;
   if (!format) errors.push({ field: `${fieldPrefix}.format`, message: `${fieldPrefix}.format must be json, yaml, or plain_text when it cannot be inferred from the path` });
-  return path && typeof value.pointer === "string" && format ? { path, pointer, format } : null;
+  return path && typeof value.pointer === "string" && format ? { path, pointer: value.pointer, format } : null;
 }
 
 function validateVersionGovernanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: PackValidationError[]) {
@@ -457,7 +456,6 @@ export function expandPolicyPacks(policy: unknown) {
 }
 
 function materializeContractConformance(base: PolicyProjection, macro: Record<string, unknown>) {
-
   const roleDefinitions = configuredRoleDocuments(macro);
   const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition!.path)!])) as Record<ContractRole, string>;
   const relations = isObject(base.document_relations) ? clone(base.document_relations) : {}, documents = isObject(relations.documents) ? clone(relations.documents) : {};
