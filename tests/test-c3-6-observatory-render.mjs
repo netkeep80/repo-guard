@@ -86,13 +86,13 @@ assert.equal((first.match(/data-scenario-id=/g) ?? []).length, 5);
 assert.equal((first.match(/data-case-result="PASS"/g) ?? []).length, 5);
 assert.equal((first.match(/data-case-result="FAIL"/g) ?? []).length, 5);
 
-assert.match(first, /Пакет: <code>3\.0\.0<\/code>/);
-assert.match(first, /Совпадающий тег: <code>v3\.0\.0<\/code>/);
+assert.match(first, /Пакет: <code>3\.1\.0<\/code>/);
+assert.match(first, /Совпадающий тег: <code>v3\.1\.0<\/code>/);
 assert.match(first, /Выпуск: не опубликован для совпадающего тега/);
 assert.match(first, /Коммит выпуска: отсутствует/);
 
 const releaseCommit = "d".repeat(40);
-const releaseUrl = "https://example.invalid/releases/v3.0.0";
+const releaseUrl = "https://example.invalid/releases/v3.1.0";
 const publishedSnapshot = {
   ...snapshot,
   version: {
