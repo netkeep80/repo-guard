@@ -5,7 +5,10 @@
     "command:init": "Команда создаёт стартовую конфигурацию для нового потребительского репозитория; запускать её против принятого repo-guard ради самопроверки было бы искусственно, поведение покрыто специализированными тестами.",
     "rule:advisory-text-rules": "Репозиторий намеренно не хранит дублирующий Markdown ради проверки эвристики похожих документов.",
     "rule:anchor-extraction": "В repo-guard нет собственных requirement anchors; механизм покрывается специализированными тестами.",
+    "pack:contract-conformance": "repo-guard не является потребителем contract/conformance topology; добавлять фиктивные contract artifacts ради самоприменения было бы искусственно. Lowering и runtime покрыты исполняемым contract-evidence сценарием и специализированными тестами.",
+    "pack:repo-guard-workflow": "Собственный CI repo-guard намеренно исполняет текущий checkout через uses: ./, тогда как этот pack описывает внешний consumer workflow с immutable Action ref. Его lowering покрыт init и workflow-pack тестами.",
     "pack:requirements-strict": "Data-driven policy pack требует канонические requirements/*.json; добавлять фиктивные требования ради dogfooding нельзя.",
+    "pack:version-governance": "Обычный PR repo-guard не обязан продвигать package version, поэтому включение pack в self-policy сделало бы каждое нерелизное изменение ложным version transition. Семантика покрыта version-transition сценарием и внешним transition consumer proof.",
     "change-intent-format:repo-guard-json": "YAML является канонической собственной формой; второй JSON-блок в шаблоне был бы искусственным покрытием, формат проверяется тестами parser-а."
   }
 }

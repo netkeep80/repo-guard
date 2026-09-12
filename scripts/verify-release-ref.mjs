@@ -14,6 +14,10 @@ const MAX_TAG_OBJECT_DEPTH = 16;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const defaultPackageRoot = resolve(__dirname, "..");
 
+function missingFetchMessage() {
+  return `No fetch implementation is available in ${process.version}; repo-guard requires Node >=20 for release verification`;
+}
+
 function loadPackageVersion(packageRoot) {
   const packagePath = resolve(packageRoot, "package.json");
   const packageJson = JSON.parse(readFileSync(packagePath, "utf-8"));
@@ -175,7 +179,7 @@ export async function observeReleaseTruth({
     throw new Error("Release tag must be a non-empty string");
   }
   if (typeof fetchImpl !== "function") {
-    throw new Error("No fetch implementation is available");
+    throw new Error(missingFetchMessage());
   }
 
   const encodedTag = encodeURIComponent(tag);
@@ -232,7 +236,7 @@ export async function verifyReleaseRef({
   let expectedTag = null;
 
   if (!fetchImpl) {
-    checks.push(fail("github-api-client", "No fetch implementation is available"));
+    checks.push(fail("github-api-client", missingFetchMessage()));
     return { ok: false, packageVersion, expectedTag, repo, checks };
   }
 
