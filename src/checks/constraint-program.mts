@@ -56,7 +56,7 @@ export interface RuntimeProgramConstraint extends RuntimeConstraint { key: strin
 type StrictnessProgramEntry = StrictnessConstraint & { key: string };
 
 interface DiffRulesProjection { max_new_docs?: number; max_new_files?: number; max_net_added_lines?: number; }
-interface PathsProjection { forbidden?: unknown; governance_paths?: unknown; operational_paths?: unknown; canonical_docs?: unknown; }
+interface PathsProjection { forbidden?: unknown; governance_paths?: unknown; operational_paths?: unknown; canonical_docs?: unknown; pr_immutable?: unknown; }
 interface SizeRuleProjection {
   id: string; glob?: unknown; max?: number; scope?: unknown; metric?: unknown; applies_to_change_types?: unknown;
   level?: EnforcementMode; count?: CountMode; ignore?: unknown; max_growth?: number;
@@ -129,6 +129,7 @@ const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata
 const exact = (value: unknown, metadata: StrictnessMetadata): ExactStrictness => compare("equal_or_incomparable", value, metadata) as ExactStrictness;
 const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("required_entity", true, metadata) as EntityStrictness;
 const leftSubsetPrimitive = relationDescriptorForSetComparison("left_subset").kind;
+const equalSetPrimitive = relationDescriptorForSetComparison("equal").kind;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -151,6 +152,13 @@ function compileFactRef(selectorValue: unknown, documents: Record<string, Docume
 }
 function diffFact(type: DocumentFactType, selector: DiffFactSelector): FactRef {
   return { source: "diff", selector, type };
+}
+function policyStringSetFact(snapshot: "base" | "head", pointer: string): FactRef {
+  return {
+    source: "document",
+    selector: { path: "repo-policy.json", format: "json", snapshot, pointer, projection: "array_items" },
+    type: "string_set",
+  };
 }
 function repositoryAnchorFact(anchorType: unknown): FactRef {
   return { source: "repository", selector: { kind: "anchor_values", anchor_type: String(anchorType ?? "") }, type: "string_set" };
@@ -245,6 +253,17 @@ export function compileConstraintProgram(
     source: diffFact("repository_path_set", { kind: "changed_paths", patterns: forbidden, exclude_statuses: ["deleted"] }),
   }, { max: 0 }),
   set("superset_stricter", policy.paths?.forbidden, { pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern", message: (item) => `paths.forbidden removed: ${item}` }));
+
+  const prImmutable = strings(policy.paths?.pr_immutable);
+  if (prImmutable.length) {
+    add("paths:pr-immutable:mutation", primitiveRuntime("pr-immutable-paths", "paths:pr-immutable:mutation", "numeric_bound", {
+      source: diffFact("repository_path_set", { kind: "changed_paths", patterns: prImmutable, include_previous_paths: true }),
+    }, { max: 0 }, "transaction"));
+    add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", equalSetPrimitive, {
+      left: policyStringSetFact("base", "/paths/pr_immutable"),
+      right: policyStringSetFact("head", "/paths/pr_immutable"),
+    }, {}, "transaction"));
+  }
 
   for (const [field, metric, name] of [
     ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
@@ -451,7 +470,7 @@ const jsonPointerToken = (value: string): string => value.replace(/~/g, "~0").re
 const clone = <T,>(value: T): T | undefined => value === undefined ? undefined : structuredClone(value);
 function unknownProjection(policy: ConstraintPolicyProjection = {}): ConstraintPolicyProjection {
   const copy = clone(policy) || {}; delete copy.enforcement; delete copy.diff_rules; delete copy.size_rules; delete copy.cochange_rules; delete copy.cochange_groups; delete copy.document_relations; delete copy.evidence_bindings;
-  if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
+  if (copy.paths) { for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs", "pr_immutable"]) delete copy.paths[field as keyof PathsProjection]; if (!Object.keys(copy.paths).length) delete copy.paths; }
   return copy;
 }
 const relaxation = (entry: StrictnessProgramEntry, before: unknown, after: unknown = null, kind = entry.weakenKind as string, message: string | null = null, extra: Record<string, unknown> = {}): PolicyRelaxation => ({

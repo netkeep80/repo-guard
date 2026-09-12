@@ -2,6 +2,7 @@ export type DiffFileStatus = "modified" | "added" | "deleted";
 
 export interface ParsedDiffFile {
   path: string;
+  previousPath?: string;
   addedLines: string[];
   deletedLines: string[];
   status: DiffFileStatus;
@@ -25,6 +26,10 @@ export function parseDiff(diffText: string): ParsedDiffFile[] {
       current.status = "added";
     } else if (line.startsWith("deleted file")) {
       current.status = "deleted";
+    } else if (line.startsWith("rename from ")) {
+      current.previousPath = line.slice("rename from ".length);
+    } else if (line.startsWith("rename to ")) {
+      current.path = line.slice("rename to ".length);
     } else if (line.startsWith("+") && !line.startsWith("+++")) {
       current.addedLines.push(line.slice(1));
     } else if (line.startsWith("-") && !line.startsWith("---")) {

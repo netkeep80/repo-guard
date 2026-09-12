@@ -75,6 +75,7 @@ export type DiffFactSelector =
       patterns: readonly string[];
       mode?: "matching" | "outside";
       exclude_statuses?: readonly DiffFileStatus[];
+      include_previous_paths?: boolean;
     }
   | {
       kind: "metric";
@@ -401,10 +402,15 @@ function diffFactSource(context: FactReadContext, selector: DiffFactSelector): u
   const patterns = [...selector.patterns];
   const excluded = new Set(selector.exclude_statuses || []);
   const candidates = files.filter((file) => !excluded.has(file.status));
-  const paths = selector.mode === "outside"
-    ? uniqueSorted(candidates.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path))
-    : selectPaths(candidates, patterns);
-  return paths;
+  if (!selector.include_previous_paths) {
+    return selector.mode === "outside"
+      ? uniqueSorted(candidates.filter((file) => !matchesAny(file.path, patterns)).map((file) => file.path))
+      : selectPaths(candidates, patterns);
+  }
+  const candidatePaths = uniqueSorted(candidates.flatMap((file) => file.previousPath ? [file.path, file.previousPath] : [file.path]));
+  return selector.mode === "outside"
+    ? uniqueSorted(candidatePaths.filter((path) => !matchesAny(path, patterns)))
+    : uniqueSorted(candidatePaths.filter((path) => matchesAny(path, patterns)));
 }
 
 function anchorFactInstance(instance: AnchorFactInputInstance): AnchorFactInstance {

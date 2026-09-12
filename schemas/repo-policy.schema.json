@@ -63,6 +63,13 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Glob patterns for operational bot-artifact files that are allowed as special-case paths in diffs"
+        },
+        "pr_immutable": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Glob patterns that trusted BASE policy forbids any PR transaction from changing. When present in BASE, both matching path mutations and changes to this set are blocked independently of GovernanceGrant; change this field only outside check-pr, for example by a direct owner commit to main."
         }
       }
     },
