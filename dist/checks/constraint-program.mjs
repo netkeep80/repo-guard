@@ -37,6 +37,13 @@ function compileFactRef(selectorValue, documents) {
 function diffFact(type, selector) {
     return { source: "diff", selector, type };
 }
+function policyStringSetFact(snapshot, pointer) {
+    return {
+        source: "document",
+        selector: { path: "repo-policy.json", format: "json", snapshot, pointer, projection: "array_items" },
+        type: "string_set",
+    };
+}
 function repositoryAnchorFact(anchorType) {
     return { source: "repository", selector: { kind: "anchor_values", anchor_type: String(anchorType ?? "") }, type: "string_set" };
 }
@@ -120,6 +127,16 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
     add("paths:forbidden", primitiveRuntime("forbidden-paths", "paths:forbidden", "numeric_bound", {
         source: diffFact("repository_path_set", { kind: "changed_paths", patterns: forbidden, exclude_statuses: ["deleted"] }),
     }, { max: 0 }), set("superset_stricter", policy.paths?.forbidden, { pointer: "/paths/forbidden", weakenKind: "forbidden_path_removed", itemField: "pattern", message: (item) => `paths.forbidden removed: ${item}` }));
+    const prImmutable = strings(policy.paths?.pr_immutable);
+    if (prImmutable.length) {
+        add("paths:pr-immutable:mutation", primitiveRuntime("pr-immutable-paths", "paths:pr-immutable:mutation", "numeric_bound", {
+            source: diffFact("repository_path_set", { kind: "changed_paths", patterns: prImmutable, include_previous_paths: true }),
+        }, { max: 0 }, "transaction"));
+        add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", "set_equal", {
+            left: policyStringSetFact("base", "/paths/pr_immutable"),
+            right: policyStringSetFact("head", "/paths/pr_immutable"),
+        }, {}, "transaction"));
+    }
     for (const [field, metric, name] of [
         ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
     ]) {
@@ -337,7 +354,7 @@ function unknownProjection(policy = {}) {
     delete copy.document_relations;
     delete copy.evidence_bindings;
     if (copy.paths) {
-        for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs"])
+        for (const field of ["forbidden", "governance_paths", "operational_paths", "canonical_docs", "pr_immutable"])
             delete copy.paths[field];
         if (!Object.keys(copy.paths).length)
             delete copy.paths;
