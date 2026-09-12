@@ -12,10 +12,10 @@ const packageLock = JSON.parse(
   readFileSync(resolve(root, "package-lock.json"), "utf8"),
 );
 
-assert.equal(packageJson.version, "3.0.0");
+assert.equal(packageJson.version, "3.1.0");
 assert.equal(packageLock.version, packageJson.version);
 assert.equal(packageLock.packages?.[""]?.version, packageJson.version);
-assert.equal(expectedTagForVersion(packageJson.version), "v3.0.0");
+assert.equal(expectedTagForVersion(packageJson.version), "v3.1.0");
 
 for (const path of [
   "VERSION",
