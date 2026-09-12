@@ -17,6 +17,12 @@ export function parseDiff(diffText) {
         else if (line.startsWith("deleted file")) {
             current.status = "deleted";
         }
+        else if (line.startsWith("rename from ")) {
+            current.previousPath = line.slice("rename from ".length);
+        }
+        else if (line.startsWith("rename to ")) {
+            current.path = line.slice("rename to ".length);
+        }
         else if (line.startsWith("+") && !line.startsWith("+++")) {
             current.addedLines.push(line.slice(1));
         }
