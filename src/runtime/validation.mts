@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
 import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex } from "../policy-compiler.mjs";
-import { resolvePolicyProfile } from "../policy-profiles.mjs";
+import { resolvePolicyPacks } from "../policy-packs.mjs";
 import { projectPolicyToCurrentVocabulary } from "../policy-vocabulary.mjs";
 
 type AjvErrorProjection = { instancePath?: string; message?: string };
@@ -44,9 +44,9 @@ export function loadPolicyRuntimeFromObject(roots: RuntimeRoots, rawPolicy: unkn
     : rawPolicy;
   const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
   let ok = validate(ajv, policySchema, observedPolicy, label, { quiet });
-  const profile = resolvePolicyProfile(observedPolicy), policy = profile.policy as RuntimePolicyProjection;
+  const packResult = resolvePolicyPacks(observedPolicy), policy = packResult.policy as RuntimePolicyProjection;
   const semanticGroups: SemanticGroup[] = [
-    ["profile compilation", profile.errors, (error) => (error as { message: string }).message],
+    ["pack compilation", packResult.errors, (error) => (error as { message: string }).message],
     ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (error) => `[${(error as { rule_id?: unknown }).rule_id}] invalid regex /${(error as { pattern?: unknown }).pattern}/: ${(error as { message: string }).message}`],
     ["change_profiles compilation", compileChangeProfiles(policy), (error) => (error as { message: string }).message],
     ["anchor policy compilation", compileAnchorPolicy(policy), (error) => (error as { message: string }).message],

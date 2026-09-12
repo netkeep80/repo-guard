@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import Ajv from "ajv";
 import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
-import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -83,7 +83,7 @@ assert.equal(
   `known built-in packs must be a public closed policy surface; schema errors: ${JSON.stringify(validate.errors)}`,
 );
 
-const resolvedPack = resolvePolicyProfile(requirementsPackPolicy);
+const resolvedPack = resolvePolicyPacks(requirementsPackPolicy);
 assert.equal(resolvedPack.ok, true, "known built-in pack must lower successfully");
 assert.equal(Object.hasOwn(resolvedPack.policy, "packs"), false, "packs must disappear after frontend lowering");
 assert.ok(resolvedPack.policy.anchors?.types?.requirement_id, "requirements-strict must lower to its existing canonical anchor policy");
@@ -118,7 +118,7 @@ assert.equal(
   true,
   `version-governance must be accepted as a closed built-in pack; schema errors: ${JSON.stringify(validate.errors)}`,
 );
-const resolvedVersion = resolvePolicyProfile(versionPackPolicy);
+const resolvedVersion = resolvePolicyPacks(versionPackPolicy);
 assert.equal(resolvedVersion.ok, true, "version-governance must lower successfully");
 assert.equal(Object.hasOwn(resolvedVersion.policy, "packs"), false, "version-governance must disappear after lowering");
 

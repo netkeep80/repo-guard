@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
-import { listBuiltInPacks, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { listBuiltInPacks, resolvePolicyPacks } from "../dist/policy-packs.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const json = (path) => JSON.parse(readFileSync(resolve(root, path), "utf-8"));
@@ -45,7 +45,7 @@ assert.equal(validate(packPolicy), true, `packs.contract-conformance must be sch
 const legacyPolicy = { ...packPolicy, packs: undefined, contract_conformance: contractPack };
 assert.equal(validate(legacyPolicy), false, "top-level contract_conformance must be removed from the v3 public policy surface");
 
-const resolved = resolvePolicyProfile(packPolicy);
+const resolved = resolvePolicyPacks(packPolicy);
 assert.equal(resolved.ok, true, `contract-conformance pack must resolve: ${JSON.stringify(resolved.errors)}`);
 assert.equal(resolved.policy.packs, undefined, "pack source field must disappear after lowering");
 assert.equal(resolved.policy.contract_conformance, undefined, "legacy contract source field must not survive lowering");

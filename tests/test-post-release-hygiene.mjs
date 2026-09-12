@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { listBuiltInPacks } from "../dist/policy-profiles.mjs";
+import { listBuiltInPacks } from "../dist/policy-packs.mjs";
 import { verifyReleaseRef } from "../scripts/verify-release-ref.mjs";
 
 const read = (path) => readFileSync(path, "utf8");

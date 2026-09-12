@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Ajv from "ajv";
 import { compileAnchorPolicy, compileChangeProfiles, compileCochangeGroupsPolicy, compileDocumentRelationsPolicy, compileEvidenceBindingsPolicy, compileForbidRegex } from "../policy-compiler.mjs";
-import { resolvePolicyProfile } from "../policy-profiles.mjs";
+import { resolvePolicyPacks } from "../policy-packs.mjs";
 import { projectPolicyToCurrentVocabulary } from "../policy-vocabulary.mjs";
 export const loadJSON = (path) => JSON.parse(readFileSync(path, "utf-8"));
 // Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
@@ -30,9 +30,9 @@ export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
         : rawPolicy;
     const ajv = createAjv(), quiet = options.quiet || false, label = options.label || "repo-policy.json";
     let ok = validate(ajv, policySchema, observedPolicy, label, { quiet });
-    const profile = resolvePolicyProfile(observedPolicy), policy = profile.policy;
+    const packResult = resolvePolicyPacks(observedPolicy), policy = packResult.policy;
     const semanticGroups = [
-        ["profile compilation", profile.errors, (error) => error.message],
+        ["pack compilation", packResult.errors, (error) => error.message],
         ["forbid_regex compilation", compileForbidRegex(policy.content_rules), (error) => `[${error.rule_id}] invalid regex /${error.pattern}/: ${error.message}`],
         ["change_profiles compilation", compileChangeProfiles(policy), (error) => error.message],
         ["anchor policy compilation", compileAnchorPolicy(policy), (error) => error.message],

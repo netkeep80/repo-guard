@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import Ajv from "ajv";
 import { compileAnchorPolicy, compileForbidRegex } from "./policy-compiler.mjs";
-import { resolvePolicyProfile } from "./policy-profiles.mjs";
+import { resolvePolicyPacks } from "./policy-packs.mjs";
 
 const PASS = "PASS";
 const WARN = "WARN";
@@ -25,7 +25,7 @@ interface AjvRuntime {
 }
 type AjvConstructor = new (options?: { allErrors?: boolean }) => AjvRuntime;
 type EffectivePolicyProjection = NonNullable<Parameters<typeof compileAnchorPolicy>[0]>
-  & { content_rules?: unknown; profile?: unknown; repository_kind?: unknown; policy_format_version?: unknown };
+  & { content_rules?: unknown; repository_kind?: unknown; policy_format_version?: unknown };
 
 function check(name: string, fn: () => DoctorCheck): DoctorCheck {
   try {
@@ -110,13 +110,13 @@ function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
       return { name: "repo-policy.json", status: FAIL, message: `Schema validation failed: ${errors}`, hint: "Fix the policy to match the schema — see schemas/repo-policy.schema.json" };
     }
 
-    const profileResult = resolvePolicyProfile(policy as Parameters<typeof resolvePolicyProfile>[0]);
-    if (!profileResult.ok) {
-      const details = profileResult.errors.map(e => e.message).join("; ");
-      return { name: "repo-policy.json", status: FAIL, message: `Invalid profile policy: ${details}`, hint: "Fix profile and profile_overrides in repo-policy.json" };
+    const packResult = resolvePolicyPacks(policy as Parameters<typeof resolvePolicyPacks>[0]);
+    if (!packResult.ok) {
+      const details = packResult.errors.map(e => e.message).join("; ");
+      return { name: "repo-policy.json", status: FAIL, message: `Invalid policy packs: ${details}`, hint: "Fix packs in repo-policy.json" };
     }
 
-    const effectivePolicy = profileResult.policy as EffectivePolicyProjection;
+    const effectivePolicy = packResult.policy as EffectivePolicyProjection;
 
     const regexErrors = compileForbidRegex(effectivePolicy.content_rules || []);
     if (regexErrors.length > 0) {
@@ -130,8 +130,7 @@ function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
       return { name: "repo-policy.json", status: FAIL, message: `Invalid anchor policy: ${details}`, hint: "Fix anchors and trace_rules references in repo-policy.json" };
     }
 
-    const profileSuffix = effectivePolicy.profile ? `, profile ${effectivePolicy.profile as string}` : "";
-    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind as string}, format ${effectivePolicy.policy_format_version as string}${profileSuffix})` };
+    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind as string}, format ${effectivePolicy.policy_format_version as string})` };
   });
 }
 

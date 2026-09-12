@@ -4,7 +4,7 @@ import Ajv from "ajv";
 import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 import { createDocumentReader } from "../dist/document-facts.mjs";
-import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -34,7 +34,7 @@ assert.equal(
   `repo-guard-workflow must be accepted as a closed built-in pack; schema errors: ${JSON.stringify(validate.errors)}`,
 );
 
-const resolved = resolvePolicyProfile(policy);
+const resolved = resolvePolicyPacks(policy);
 assert.equal(resolved.ok, true, `repo-guard-workflow must lower successfully; errors: ${JSON.stringify(resolved.errors)}`);
 assert.equal(Object.hasOwn(resolved.policy, "packs"), false, "repo-guard-workflow must disappear after lowering");
 

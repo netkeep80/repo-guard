@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
-import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 
 const explicitRule = (source = "src/api.mjs", required = "docs/api.md") => ({
   if_changed: [source],
@@ -45,7 +45,7 @@ const macroSource = (cochangeRules = []) => ({
 });
 
 const resolvedMacro = (cochangeRules = []) => {
-  const resolved = resolvePolicyProfile(macroSource(cochangeRules));
+  const resolved = resolvePolicyPacks(macroSource(cochangeRules));
   assert.equal(resolved.ok, true);
   return resolved.policy;
 };

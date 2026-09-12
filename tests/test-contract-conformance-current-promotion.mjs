@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import Ajv from "ajv";
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { checkPolicyRelaxation } from "../dist/checks/rules/policy-delta-rules.mjs";
-import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { loadJSON } from "../dist/runtime/validation.mjs";
 
 const CURRENT_PROMOTION_POINTERS = [
@@ -62,7 +62,7 @@ function sourcePolicy(version) {
 }
 
 function resolve(source) {
-  const resolved = resolvePolicyProfile(source);
+  const resolved = resolvePolicyPacks(source);
   assert.equal(resolved.ok, true);
   return resolved.policy;
 }

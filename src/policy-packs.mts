@@ -42,14 +42,14 @@ const PACKS = {
   },
 };
 
-type ProfileSource = { kind: string; globs: string | string[]; field?: string; pattern?: string };
-type ProfileRule = Record<string, unknown>;
-interface ProfileSpec {
+type PackSource = { kind: string; globs: string | string[]; field?: string; pattern?: string };
+type PackRule = Record<string, unknown>;
+interface PackSpec {
   defaults: Record<string, string[]>;
-  anchors: Record<string, ProfileSource>;
-  trace_rules: ProfileRule[];
+  anchors: Record<string, PackSource>;
+  trace_rules: PackRule[];
 }
-type ProfileConfig = Record<string, unknown>;
+type PackConfig = Record<string, unknown>;
 type PairRole = "current.contract" | "current.conformance" | "previous.contract" | "previous.conformance";
 type ContractRole = PairRole | "acceptance";
 interface PolicyProjection extends Record<string, unknown> {
@@ -61,7 +61,7 @@ interface PolicyProjection extends Record<string, unknown> {
   cochange_groups?: unknown;
   paths?: Record<string, unknown>;
 }
-interface ProfileValidationError {
+interface PackValidationError {
   field: string;
   message: string;
 }
@@ -91,18 +91,18 @@ const ACCEPTANCE_RULE_IDS = [
 ];
 const clone = <T,>(value: T): T => structuredClone(value);
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
-const ref = (value: unknown, config: ProfileConfig): unknown => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
+const ref = (value: unknown, config: PackConfig): unknown => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
 const stringList = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
-function configFor(spec: ProfileSpec, overrides: Record<string, unknown> = {}): ProfileConfig {
-  const config: ProfileConfig = clone(spec.defaults);
+function configFor(spec: PackSpec, overrides: Record<string, unknown> = {}): PackConfig {
+  const config: PackConfig = clone(spec.defaults);
   for (const [key, value] of Object.entries(overrides)) config[key] = clone(value);
   config.changed_requirement_evidence_surfaces ||= clone(config.evidence_surfaces);
   config.affected_evidence_surfaces ||= clone(config.evidence_surfaces);
   return config;
 }
 
-function materializePack(spec: ProfileSpec, overrides: Record<string, unknown>) {
+function materializePack(spec: PackSpec, overrides: Record<string, unknown>) {
   const config = configFor(spec, overrides), types: Record<string, { sources: Array<Record<string, unknown>> }> = {};
   for (const [name, source] of Object.entries(spec.anchors)) {
     const globs = ref(source.globs, config) as string[];
@@ -115,7 +115,6 @@ function materializePack(spec: ProfileSpec, overrides: Record<string, unknown>) 
   ));
   return { anchors: { types }, trace_rules };
 }
-
 
 function pairDocuments(value: unknown, prefix: "current" | "previous") {
   const pair = isObject(value) ? value : {};
@@ -155,7 +154,7 @@ const CONTRACT_CONFORMANCE_PACK = "contract-conformance";
 
 export const listBuiltInPacks = (): string[] => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK, CONTRACT_CONFORMANCE_PACK].sort();
 
-function validateRequirementsConfig(fieldPrefix: string, value: unknown, errors: ProfileValidationError[]) {
+function validateRequirementsConfig(fieldPrefix: string, value: unknown, errors: PackValidationError[]) {
   if (!isObject(value)) {
     errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
     return;
@@ -189,7 +188,7 @@ function versionDocument(value: unknown): VersionDocument | null {
   return format ? { path, pointer: value.pointer, format } : null;
 }
 
-function validateVersionDocument(fieldPrefix: string, value: unknown, errors: ProfileValidationError[]): VersionDocument | null {
+function validateVersionDocument(fieldPrefix: string, value: unknown, errors: PackValidationError[]): VersionDocument | null {
   if (!isObject(value)) {
     errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
     return null;
@@ -202,7 +201,7 @@ function validateVersionDocument(fieldPrefix: string, value: unknown, errors: Pr
   return path && typeof value.pointer === "string" && format ? { path, pointer: value.pointer, format } : null;
 }
 
-function validateVersionGovernanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: ProfileValidationError[]) {
+function validateVersionGovernanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: PackValidationError[]) {
   if (!isObject(value)) {
     errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
     return;
@@ -275,7 +274,7 @@ function repoGuardWorkflowRuleId(suffix: string): string {
   return `pack:repo-guard-workflow:${suffix}`;
 }
 
-function validateRepoGuardWorkflowConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: ProfileValidationError[]) {
+function validateRepoGuardWorkflowConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: PackValidationError[]) {
   if (!isObject(value)) {
     errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
     return;
@@ -326,9 +325,9 @@ function materializeRepoGuardWorkflow(base: PolicyProjection, value: Record<stri
   base.document_relations = { ...relations, documents, rules };
 }
 
-export function compileProfilePolicy(policy: unknown): ProfileValidationError[] {
+export function validatePolicyPacks(policy: unknown): PackValidationError[] {
   const source = policy as PolicyProjection | null | undefined;
-  const errors: ProfileValidationError[] = [], packs = source?.packs;
+  const errors: PackValidationError[] = [], packs = source?.packs;
 
   if (packs !== undefined) {
     if (!isObject(packs)) errors.push({ field: "packs", message: "packs must be an object" });
@@ -340,7 +339,7 @@ export function compileProfilePolicy(policy: unknown): ProfileValidationError[] 
         else if (name === VERSION_GOVERNANCE_PACK) validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
         else if (name === REPO_GUARD_WORKFLOW_PACK) validateRepoGuardWorkflowConfig(`packs.${name}`, config, source || {}, errors);
         else {
-          const spec = (PACKS as unknown as Record<string, ProfileSpec>)[name];
+          const spec = (PACKS as unknown as Record<string, PackSpec>)[name];
           if (!spec) errors.push({ field: `packs.${name}`, message: `pack "${name}" is not supported; use ${listBuiltInPacks().join(", ")}` });
           else validateRequirementsConfig(`packs.${name}`, config, errors);
         }
@@ -353,10 +352,10 @@ export function compileProfilePolicy(policy: unknown): ProfileValidationError[] 
   return errors;
 }
 
-function validateContractConformanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection): ProfileValidationError[] {
+function validateContractConformanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection): PackValidationError[] {
   if (!isObject(value)) return [{ field: fieldPrefix, message: `${fieldPrefix} must be an object` }];
 
-  const macro = value, errors: ProfileValidationError[] = [];
+  const macro = value, errors: PackValidationError[] = [];
   const roles = configuredRoleDocuments(macro), paths = new Map<ContractRole, string>();
   for (const [role, definition] of Object.entries(roles) as Array<[ContractRole, Record<string, unknown>]>) {
     const path = normalizeDocumentPath(definition.path), format = definition.format;
@@ -424,7 +423,7 @@ function validateContractConformanceConfig(fieldPrefix: string, value: unknown, 
   return errors;
 }
 
-export function expandPolicyProfile(policy: unknown) {
+export function expandPolicyPacks(policy: unknown) {
   const base: PolicyProjection = clone(policy as PolicyProjection);
   if (isObject(base.packs)) {
     const configuredPacks = clone(base.packs);
@@ -443,7 +442,7 @@ export function expandPolicyProfile(policy: unknown) {
         materializeRepoGuardWorkflow(base, config);
         continue;
       }
-      const spec = (PACKS as unknown as Record<string, ProfileSpec>)[name];
+      const spec = (PACKS as unknown as Record<string, PackSpec>)[name];
       if (!spec) continue;
       const patch = materializePack(spec, config);
       if (name === "requirements-strict") {
@@ -457,7 +456,6 @@ export function expandPolicyProfile(policy: unknown) {
 }
 
 function materializeContractConformance(base: PolicyProjection, macro: Record<string, unknown>) {
-
   const roleDefinitions = configuredRoleDocuments(macro);
   const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition!.path)!])) as Record<ContractRole, string>;
   const relations = isObject(base.document_relations) ? clone(base.document_relations) : {}, documents = isObject(relations.documents) ? clone(relations.documents) : {};
@@ -502,8 +500,8 @@ function materializeContractConformance(base: PolicyProjection, macro: Record<st
   return base;
 }
 
-export function resolvePolicyProfile(policy: unknown) {
-  const errors = compileProfilePolicy(policy);
+export function resolvePolicyPacks(policy: unknown) {
+  const errors = validatePolicyPacks(policy);
   if (errors.length) return { ok: false, policy: clone(policy), errors };
-  return { ok: true, policy: expandPolicyProfile(policy), errors };
+  return { ok: true, policy: expandPolicyPacks(policy), errors };
 }

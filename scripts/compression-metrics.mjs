@@ -126,7 +126,7 @@ function architecture(target) {
   const relationKernel = optionalSourceModuleTextAt(target, "src/checks/relation-kernel");
   const policyCompiler = optionalSourceModuleTextAt(target, "src/policy-compiler");
   const constraintEvaluator = optionalSourceModuleTextAt(target, "src/checks/rules/constraints");
-  const policyProfiles = optionalSourceModuleTextAt(target, "src/policy-profiles");
+  const policyPacks = optionalSourceModuleTextAt(target, "src/policy-packs");
   const corpus = sourceCorpus(target);
   const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
   const relationKinds = schemaConstKinds(policySchema, "document_relation_rule");
@@ -153,7 +153,7 @@ function architecture(target) {
   const canonicalCore = [constraintProgram, relationKernel, policyCompiler, constraintEvaluator].join("\n");
   const contractRoleVocabulary = count(canonicalCore, /ContractConformanceRole|CONTRACT_CONFORMANCE_DOCUMENT_ROLES|contractConformanceRolesByPath|current\.contract|current\.conformance|previous\.contract|previous\.conformance/g);
   const generatedEdgeHelpers = count(canonicalCore, /CochangeRoleEdge|cochangeRoleEdge|generatedContractConformanceCochange/g);
-  const macroCochangeConstraints = count(policyProfiles, /cochangeGroups\.push\(\{\s*id:\s*"contract-conformance"/g);
+  const macroCochangeConstraints = count(policyPacks, /cochangeGroups\.push\(\{\s*id:\s*"contract-conformance"/g);
   const macroPositionalIdentity = count(canonicalCore, /contract-conformance/g);
   const highLevelPackCoreEditSites = count(canonicalCore, /contract_conformance|contract-conformance|current\.contract|current\.conformance|previous\.contract|previous\.conformance/g);
 
@@ -185,8 +185,8 @@ function architecture(target) {
     relation_kernel_operation_names: relationKernelOperations,
     execution_phases: ["both", "state", "transaction"],
     constraint_program_knows_contract_conformance_roles: /type ContractConformanceRole\b/.test(constraintProgram),
-    policy_profiles_has_contract_conformance_macro: /compileContractConformancePolicy\b/.test(policyProfiles),
-    policy_profiles_has_requirements_strict_pack: /"requirements-strict"/.test(policyProfiles),
+    policy_packs_has_contract_conformance_macro: /compileContractConformancePolicy\b/.test(policyPacks),
+    policy_packs_has_requirements_strict_pack: /"requirements-strict"/.test(policyPacks),
 
     // C3.1 targeted amplification metrics. Schema and tests are deliberate structural edit-sites
     // and are therefore excluded from the semantic kernel edit-site count.
@@ -200,7 +200,7 @@ function architecture(target) {
     independent_document_relation_switch_files: independentRelationSwitchFiles,
     semantic_edit_sites_per_new_primitive: descriptorRegistryCount + independentRelationSwitchFiles.length,
 
-    // C3.2 structural-compression proof. The high-level pack may exist in policy-profiles,
+    // C3.2 structural-compression proof. The high-level pack may exist in policy-packs,
     // but canonical compilation/evaluation/strictness must not know its domain vocabulary.
     contract_conformance_role_vocabulary_in_canonical_core: contractRoleVocabulary,
     generated_edge_recognition_helpers: generatedEdgeHelpers,

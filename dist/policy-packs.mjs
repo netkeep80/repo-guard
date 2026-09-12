@@ -298,7 +298,7 @@ function materializeRepoGuardWorkflow(base, value) {
     }
     base.document_relations = { ...relations, documents, rules };
 }
-export function compileProfilePolicy(policy) {
+export function validatePolicyPacks(policy) {
     const source = policy;
     const errors = [], packs = source?.packs;
     if (packs !== undefined) {
@@ -413,7 +413,7 @@ function validateContractConformanceConfig(fieldPrefix, value, source) {
     }
     return errors;
 }
-export function expandPolicyProfile(policy) {
+export function expandPolicyPacks(policy) {
     const base = clone(policy);
     if (isObject(base.packs)) {
         const configuredPacks = clone(base.packs);
@@ -479,9 +479,9 @@ function materializeContractConformance(base, macro) {
     base.paths = paths;
     return base;
 }
-export function resolvePolicyProfile(policy) {
-    const errors = compileProfilePolicy(policy);
+export function resolvePolicyPacks(policy) {
+    const errors = validatePolicyPacks(policy);
     if (errors.length)
         return { ok: false, policy: clone(policy), errors };
-    return { ok: true, policy: expandPolicyProfile(policy), errors };
+    return { ok: true, policy: expandPolicyPacks(policy), errors };
 }
