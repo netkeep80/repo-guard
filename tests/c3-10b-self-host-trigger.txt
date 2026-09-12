@@ -1,1 +1,0 @@
-Temporary user-authored self-host CI trigger; removed by the next commit.
