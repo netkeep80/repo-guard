@@ -41,7 +41,7 @@ test("README contains only current product/release truth", () => {
     assert.equal(readme.includes(heading), false, `retired README section must stay absent: ${heading}`);
   }
 
-  assert.match(readme, /3\.0\.0[^\n]{0,120}(?:не опублик|unreleased)|(?:не опублик|unreleased)[^\n]{0,120}3\.0\.0/i);
+  assert.doesNotMatch(readme, /официальный\s+`v\d+\.\d+\.\d+`\s+ещё\s+не\s+опубликован/i);
   assert.doesNotMatch(readme, /^\s*npm install -g repo-guard\s*$/m);
   assert.doesNotMatch(readme, /^\s*npx repo-guard\s*$/m);
   assert.match(readme, /uses:\s*netkeep80\/repo-guard@<40-char-SHA>/);
