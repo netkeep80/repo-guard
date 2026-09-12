@@ -8,7 +8,7 @@ import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
 const PROTECTED = "docs/research/Новое осмысление МТС.md";
 const MOVED = "docs/research/Новое осмысление МТС — moved.md";
 
-function policy(prImmutable = [PROTECTED]) {
+function policy(prImmutable) {
   return {
     paths: {
       forbidden: [],
@@ -33,7 +33,10 @@ function file(path, status = "modified", previousPath = undefined) {
   };
 }
 
-function facts(files, { baseImmutable = [PROTECTED], headImmutable = [PROTECTED], governanceGrant = null } = {}) {
+function facts(files, options = {}) {
+  const baseImmutable = Object.hasOwn(options, "baseImmutable") ? options.baseImmutable : [PROTECTED];
+  const headImmutable = Object.hasOwn(options, "headImmutable") ? options.headImmutable : [PROTECTED];
+  const governanceGrant = options.governanceGrant ?? null;
   const basePolicy = policy(baseImmutable);
   const headPolicy = policy(headImmutable);
   return {
