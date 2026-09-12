@@ -3,9 +3,10 @@ import { describe, it } from "node:test";
 import Ajv from "ajv";
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { checkPolicyRelaxation, classifyChangedFiles, computePolicyDelta, policyRelaxationRuleFamily } from "../dist/checks/rules/policy-delta-rules.mjs";
-import { compileContractConformancePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 import { loadJSON } from "../dist/runtime/validation.mjs";
 
+const contractErrors = (policy) => resolvePolicyProfile(policy).errors;
 const file = (path, extra = {}) => ({ path, status: "modified", addedLines: [], deletedLines: [], ...extra });
 const TRUSTED = { issue_author_permission_trusted: true };
 const UNTRUSTED = { issue_author_permission_trusted: false, governance_approved_label: false, codeowner_approved: false, trusted_team_approval: false };
@@ -68,7 +69,7 @@ const evidencePolicy = () => {
 const macroPolicy = () => ({
   ...structuredClone(BASE),
   cochange_rules: [],
-  contract_conformance: {
+  packs: { "contract-conformance": {
     current: {
       contract: { path: "contracts/spec-v2.json", format: "json" },
       conformance: { path: "contracts/checks-v2.json", format: "json" },
@@ -86,31 +87,31 @@ const macroPolicy = () => ({
     required_paths: [{ document: "current.contract", pointer: "/owners", projection: "object_values" }],
     cochange: ["current.contract", "current.conformance"],
     control_paths: ["contracts/**"],
-  },
+  } },
 });
 const historyMacroPolicy = () => {
   const policy = macroPolicy();
-  policy.contract_conformance.previous = {
+  policy.packs["contract-conformance"].previous = {
     contract: { path: "contracts/spec-v1.json", format: "json" },
     conformance: { path: "contracts/checks-v1.json", format: "json" },
   };
-  policy.contract_conformance.acceptance = {
+  policy.packs["contract-conformance"].acceptance = {
     document: { path: "cutover/acceptance.json", format: "json" },
     current_contract_path: "/current/contract",
     current_conformance_path: "/current/conformance",
   };
-  policy.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"];
-  policy.contract_conformance.control_paths = ["contracts/**", "cutover/**"];
+  policy.packs["contract-conformance"].cochange = ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"];
+  policy.packs["contract-conformance"].control_paths = ["contracts/**", "cutover/**"];
   return policy;
 };
-const macroSchemaPolicy = (contractConformance = macroPolicy().contract_conformance) => ({
+const macroSchemaPolicy = (contractConformance = macroPolicy().packs["contract-conformance"]) => ({
   policy_format_version: "0.3.0",
   repository_kind: "tooling",
   paths: { forbidden: [], canonical_docs: [], governance_paths: ["repo-policy.json"] },
   diff_rules: { max_new_files: 5, max_new_docs: 2 },
   content_rules: [],
   cochange_rules: [],
-  contract_conformance: structuredClone(contractConformance),
+  packs: { "contract-conformance": structuredClone(contractConformance) },
 });
 
 describe("Constraint Program strictness projection", () => {
@@ -231,43 +232,43 @@ describe("contract/conformance macro source schema", () => {
   });
 
   it("accepts a complete previous pair plus optional acceptance pointer", () => {
-    assert.equal(validate(macroSchemaPolicy(historyMacroPolicy().contract_conformance)), true);
+    assert.equal(validate(macroSchemaPolicy(historyMacroPolicy().packs["contract-conformance"])), true);
   });
 
   it("rejects an incomplete previous pair", () => {
-    const source = macroSchemaPolicy(historyMacroPolicy().contract_conformance);
-    delete source.contract_conformance.previous.conformance;
+    const source = macroSchemaPolicy(historyMacroPolicy().packs["contract-conformance"]);
+    delete source.packs["contract-conformance"].previous.conformance;
     assert.equal(validate(source), false);
   });
 
   it("rejects an incomplete acceptance pointer", () => {
-    const source = macroSchemaPolicy(historyMacroPolicy().contract_conformance);
-    delete source.contract_conformance.acceptance.current_conformance_path;
+    const source = macroSchemaPolicy(historyMacroPolicy().packs["contract-conformance"]);
+    delete source.packs["contract-conformance"].acceptance.current_conformance_path;
     assert.equal(validate(source), false);
   });
 });
 
 describe("contract/conformance macro semantic boundary", () => {
   it("accepts complete configured history roles", () => {
-    assert.deepEqual(compileContractConformancePolicy(historyMacroPolicy()), []);
+    assert.deepEqual(contractErrors(historyMacroPolicy()), []);
   });
 
   it("rejects duplicate artifact paths across current, previous and acceptance", () => {
     const source = historyMacroPolicy();
-    source.contract_conformance.previous.contract.path = source.contract_conformance.current.contract.path;
-    assert.ok(compileContractConformancePolicy(source).some((item) => /duplicates current\.contract/.test(item.message)));
+    source.packs["contract-conformance"].previous.contract.path = source.packs["contract-conformance"].current.contract.path;
+    assert.ok(contractErrors(source).some((item) => /duplicates current\.contract/.test(item.message)));
   });
 
   it("rejects cochange roles that are not configured", () => {
     const source = macroPolicy();
-    source.contract_conformance.cochange = ["current.contract", "acceptance"];
-    assert.ok(compileContractConformancePolicy(source).some((item) => /unavailable role "acceptance"/.test(item.message)));
+    source.packs["contract-conformance"].cochange = ["current.contract", "acceptance"];
+    assert.ok(contractErrors(source).some((item) => /unavailable role "acceptance"/.test(item.message)));
   });
 
   it("requires control paths to cover previous and acceptance artifacts", () => {
     const source = historyMacroPolicy();
-    source.contract_conformance.control_paths = ["contracts/**"];
-    assert.ok(compileContractConformancePolicy(source).some((item) => /do not cover acceptance path/.test(item.message)));
+    source.packs["contract-conformance"].control_paths = ["contracts/**"];
+    assert.ok(contractErrors(source).some((item) => /do not cover acceptance path/.test(item.message)));
   });
 });
 
@@ -275,10 +276,10 @@ describe("contract/conformance macro strictness", () => {
   it("compares only expanded ordinary policy", () => {
     const source = macroPolicy(), resolved = resolvePolicyProfile(source);
     assert.equal(resolved.ok, true);
-    assert.equal(resolved.policy.contract_conformance, undefined);
+    assert.equal(resolved.policy.packs, undefined);
 
     const baseline = structuredClone(source);
-    delete baseline.contract_conformance;
+    delete baseline.packs;
     const adoption = compareConstraintPrograms(baseline, resolved.policy);
     assert.notEqual(adoption.relation, "equal");
     assert.notEqual(adoption.relation, "weaker");
@@ -302,7 +303,7 @@ describe("contract/conformance macro strictness", () => {
     };
     const resolved = resolvePolicyProfile(source);
     assert.equal(resolved.ok, true);
-    assert.equal(resolved.policy.contract_conformance, undefined);
+    assert.equal(resolved.policy.packs, undefined);
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.previous.contract"].path, "contracts/spec-v1.json");
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.previous.conformance"].path, "contracts/checks-v1.json");
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.acceptance"].path, "cutover/acceptance.json");
@@ -330,12 +331,12 @@ describe("contract/conformance macro strictness", () => {
 
   it("represents the anum_docs v0.6/v0.7 acceptance topology without domain fields", () => {
     const source = historyMacroPolicy();
-    source.contract_conformance.current.contract.path = "contracts/mts-contract-v0.7.json";
-    source.contract_conformance.current.conformance.path = "contracts/mts-conformance-v0.7.json";
-    source.contract_conformance.previous.contract.path = "contracts/mts-contract-v0.6.json";
-    source.contract_conformance.previous.conformance.path = "contracts/mts-conformance-v0.6.json";
-    source.contract_conformance.acceptance.document.path = "cutover/foundation-v2-c9-acceptance-v0.1.json";
-    source.contract_conformance.control_paths = ["contracts/**", "cutover/**"];
+    source.packs["contract-conformance"].current.contract.path = "contracts/mts-contract-v0.7.json";
+    source.packs["contract-conformance"].current.conformance.path = "contracts/mts-conformance-v0.7.json";
+    source.packs["contract-conformance"].previous.contract.path = "contracts/mts-contract-v0.6.json";
+    source.packs["contract-conformance"].previous.conformance.path = "contracts/mts-conformance-v0.6.json";
+    source.packs["contract-conformance"].acceptance.document.path = "cutover/foundation-v2-c9-acceptance-v0.1.json";
+    source.packs["contract-conformance"].control_paths = ["contracts/**", "cutover/**"];
     const resolved = resolvePolicyProfile(source);
     assert.equal(resolved.ok, true);
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.current.contract"].path, "contracts/mts-contract-v0.7.json");

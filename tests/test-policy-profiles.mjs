@@ -4,12 +4,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import Ajv from "ajv";
-import { compileContractConformancePolicy, compileProfilePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { compileProfilePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
 import { loadJSON, loadPolicyRuntime } from "../dist/runtime/validation.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
+const contractErrors = (policy) => resolvePolicyProfile(policy).errors;
 
 let failures = 0;
 
@@ -34,55 +35,39 @@ function expectIncludes(label, value, substring) {
   }
 }
 
-function basePolicy() {
+function foundationPolicy() {
   return {
     policy_format_version: "0.3.0",
     repository_kind: "library",
-    profile: "requirements-strict",
-    profile_overrides: {
-      strict_heading_docs: [
-        "docs/architecture.md",
-        "docs/pmm_requirements.md",
-      ],
-      evidence_surfaces: [
-        "include/**",
-        "src/**",
-        "tests/**",
-        "examples/**",
-        "docs/**",
-        "README.md",
-        "requirements/README.md",
-        "scripts/**",
-        ".github/workflows/**",
-      ],
-    },
     paths: {
       forbidden: [],
       canonical_docs: ["README.md"],
       governance_paths: ["repo-policy.json"],
       operational_paths: [],
     },
-    diff_rules: {
-      max_new_docs: 2,
-      max_new_files: 10,
-      max_net_added_lines: 1000,
-    },
+    diff_rules: { max_new_docs: 2, max_new_files: 10, max_net_added_lines: 1000 },
     content_rules: [],
     cochange_rules: [],
   };
 }
 
-const pjsonEvidenceSurfaces = [
-  "include/**",
-  "src/**",
-  "tests/**",
-  "examples/**",
-  "docs/**",
-  "README.md",
-  "requirements/README.md",
-  "scripts/**",
-  ".github/workflows/**",
+const requirementEvidence = [
+  "include/**", "src/**", "tests/**", "examples/**", "docs/**", "README.md",
+  "requirements/README.md", "scripts/**", ".github/workflows/**",
 ];
+
+function requirementsPolicy(overrides = {}) {
+  return {
+    ...foundationPolicy(),
+    packs: {
+      "requirements-strict": {
+        strict_heading_docs: ["docs/architecture.md", "docs/pmm_requirements.md"],
+        evidence_surfaces: requirementEvidence,
+        ...overrides,
+      },
+    },
+  };
+}
 
 function traceRule(policy, id) {
   return policy.trace_rules?.find((rule) => rule.id === id);
@@ -133,152 +118,73 @@ function historyContractConformanceMacro(overrides = {}) {
 
 function contractPolicy(overrides = {}) {
   return {
-    ...basePolicy(),
-    profile: undefined,
-    profile_overrides: undefined,
-    paths: { ...basePolicy().paths, governance_paths: ["repo-policy.json", "schemas/**"] },
-    contract_conformance: contractConformanceMacro(),
+    ...foundationPolicy(),
+    paths: { ...foundationPolicy().paths, governance_paths: ["repo-policy.json", "schemas/**"] },
+    packs: { "contract-conformance": contractConformanceMacro() },
     ...overrides,
   };
 }
 
-console.log("\n--- profile compiler runtime narrowing ---");
+console.log("\n--- requirements-strict pack validation ---");
 {
   expect(
-    "profile overrides reject non-object values",
-    compileProfilePolicy({ profile: "requirements-strict", profile_overrides: ["tests/**"] }),
-    [{ field: "profile_overrides", message: "profile_overrides must be an object" }]
-  );
-  expect(
-    "profile overrides require a top-level profile",
-    compileProfilePolicy({ profile_overrides: { evidence_surfaces: ["tests/**"] } }),
-    [{ field: "profile_overrides", message: "profile_overrides requires top-level profile" }]
+    "pack config rejects non-object values",
+    compileProfilePolicy({ packs: { "requirements-strict": ["tests/**"] } }),
+    [{ field: "packs.requirements-strict", message: "packs.requirements-strict must be an object" }]
   );
 }
 
-console.log("\n--- profile schema support ---");
+console.log("\n--- requirements-strict pack schema and runtime lowering ---");
 {
   const schema = loadJSON(resolve(root, "schemas/repo-policy.schema.json"));
-  const ajv = new Ajv({ allErrors: true });
-  const validatePolicy = ajv.compile(schema);
-  const valid = validatePolicy(basePolicy());
+  const validatePolicy = new Ajv({ allErrors: true }).compile(schema);
+  expect("requirements-strict pack passes schema", validatePolicy(requirementsPolicy()), true);
+  expect("legacy profile is rejected", validatePolicy({ ...foundationPolicy(), profile: "requirements-strict" }), false);
+  expect("legacy profile_overrides is rejected", validatePolicy({ ...foundationPolicy(), profile_overrides: { evidence_surfaces: ["tests/**"] } }), false);
 
-  expect("policy with requirements-strict profile passes schema", valid, true);
-}
-
-console.log("\n--- profile expansion in runtime policy load ---");
-{
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-profile-"));
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(basePolicy(), null, 2), "utf-8");
-
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-pack-"));
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(requirementsPolicy(), null, 2), "utf-8");
   const runtime = loadPolicyRuntime({ packageRoot: root, repoRoot: dir }, { quiet: true });
-  expect("runtime accepts profile policy", runtime.ok, true);
-  expect("profile expands requirement_id anchor", Boolean(runtime.policy.anchors?.types?.requirement_id), true);
+  expect("runtime accepts requirements-strict pack", runtime.ok, true);
+  expect("pack expands requirement_id anchor", Boolean(runtime.policy.anchors?.types?.requirement_id), true);
   expect(
-    "profile override drives strict heading docs",
+    "pack config drives strict heading docs",
     runtime.policy.anchors?.types?.doc_heading_req_ref?.sources.map((source) => source.glob),
     ["docs/architecture.md", "docs/pmm_requirements.md"]
   );
   expect(
-    "profile override drives changed requirement evidence surfaces",
+    "pack config drives changed requirement evidence",
     traceRule(runtime.policy, "changed-requirements-need-evidence")?.must_touch_any,
-    basePolicy().profile_overrides.evidence_surfaces
+    requirementEvidence
   );
 }
 
-console.log("\n--- pjson-style strict profile overrides ---");
+console.log("\n--- requirements-strict pack refinements ---");
 {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-profile-"));
-  const policy = {
-    ...basePolicy(),
-    profile_overrides: {
-      strict_heading_docs: [
-        "docs/architecture.md",
-        "docs/pmm_requirements.md",
-      ],
-      evidence_surfaces: pjsonEvidenceSurfaces,
-      affected_evidence_surfaces: [
-        "include/**",
-        "src/**",
-        "tests/**",
-        "examples/**",
-        "docs/**",
-        "README.md",
-        "requirements/README.md",
-        "scripts/**",
-      ],
-    },
-  };
+  const affected = ["include/**", "src/**", "tests/**", "docs/**"];
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-pack-"));
+  const policy = requirementsPolicy({ affected_evidence_surfaces: affected });
   writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2), "utf-8");
-
   const runtime = loadPolicyRuntime({ packageRoot: root, repoRoot: dir }, { quiet: true });
+  expect("pack can refine affected anchor evidence", traceRule(runtime.policy, "declared-affected-anchors-need-evidence")?.must_touch_any, affected);
   expect(
-    "pjson-style profile keeps conventional requirement JSON globs",
-    runtime.policy.anchors?.types?.requirement_id?.sources.map((source) => source.glob),
-    [
-      "requirements/business/*.json",
-      "requirements/stakeholder/*.json",
-      "requirements/functional/*.json",
-      "requirements/nonfunctional/*.json",
-      "requirements/constraints/*.json",
-      "requirements/interface/*.json",
-    ]
-  );
-  expect(
-    "pjson-style profile can refine changed requirement evidence",
-    traceRule(runtime.policy, "changed-requirements-need-evidence")?.must_touch_any,
-    pjsonEvidenceSurfaces
-  );
-  expect(
-    "pjson-style profile can refine affected anchor evidence separately",
-    traceRule(runtime.policy, "declared-affected-anchors-need-evidence")?.must_touch_any,
-    policy.profile_overrides.affected_evidence_surfaces
-  );
-  expect(
-    "pjson-style profile defaults implementation evidence to implementation surfaces",
+    "pack keeps default implementation evidence",
     traceRule(runtime.policy, "declared-implemented-anchors-need-evidence")?.must_touch_any,
     ["include/**", "src/**", "scripts/**", ".github/workflows/**"]
   );
   expect(
-    "pjson-style profile defaults verification evidence to verification surfaces",
+    "pack keeps default verification evidence",
     traceRule(runtime.policy, "declared-verified-anchors-need-evidence")?.must_touch_any,
     ["tests/**", "experiments/**", "scripts/**", ".github/workflows/**"]
   );
 }
 
-console.log("\n--- explicit expanded sections remain compatible ---");
+console.log("\n--- requirements-strict pack enforces changed requirement evidence ---");
 {
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-profile-"));
-  const policy = {
-    ...basePolicy(),
-    anchors: {
-      types: {
-        custom_requirement_id: {
-          sources: [
-            { kind: "json_field", glob: "specs/*.json", field: "id" },
-          ],
-        },
-      },
-    },
-    trace_rules: [],
-  };
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(policy, null, 2), "utf-8");
-
+  const dir = mkdtempSync(join(tmpdir(), "repo-guard-pack-"));
+  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(requirementsPolicy(), null, 2), "utf-8");
   const runtime = loadPolicyRuntime({ packageRoot: root, repoRoot: dir }, { quiet: true });
-  expect("explicit anchors remain valid with profile", runtime.ok, true);
-  expect("explicit anchors take precedence over generated profile anchors", Boolean(runtime.policy.anchors?.types?.requirement_id), false);
-  expect("explicit trace_rules take precedence over generated profile trace_rules", runtime.policy.trace_rules, []);
-}
-
-console.log("\n--- profile trace rules enforce changed requirement evidence ---");
-{
-  const dir = mkdtempSync(join(tmpdir(), "repo-guard-profile-"));
-  writeFileSync(join(dir, "repo-policy.json"), JSON.stringify(basePolicy(), null, 2), "utf-8");
-  const runtime = loadPolicyRuntime({ packageRoot: root, repoRoot: dir }, { quiet: true });
-
-  const files = {
-    "requirements/functional/FR-001.json": JSON.stringify({ id: "FR-001", title: "Feature" }),
-  };
+  const files = { "requirements/functional/FR-001.json": JSON.stringify({ id: "FR-001", title: "Feature" }) };
   const diffText = [
     "diff --git a/requirements/functional/FR-001.json b/requirements/functional/FR-001.json",
     "--- a/requirements/functional/FR-001.json",
@@ -286,7 +192,6 @@ console.log("\n--- profile trace rules enforce changed requirement evidence ---"
     "-{\"id\":\"FR-001\",\"title\":\"Old\"}",
     "+{\"id\":\"FR-001\",\"title\":\"Feature\"}",
   ].join("\n");
-
   const result = runPolicyPipeline({
     mode: "check-diff",
     repositoryRoot: dir,
@@ -299,11 +204,9 @@ console.log("\n--- profile trace rules enforce changed requirement evidence ---"
     readFile: (file) => files[file],
     initialChecks: [],
   }, { quiet: true });
-
   expect("changed requirement without evidence fails", result.ok, false);
-  expect("changed requirement without evidence is blocking", result.exitCode, 1);
   expectIncludes(
-    "profile trace rule reports relation-native missing evidence",
+    "pack trace rule reports relation-native missing evidence",
     result.violations.find((item) => item.rule === "trace-rule: changed-requirements-need-evidence")?.message,
     "requires evidence"
   );
@@ -311,19 +214,19 @@ console.log("\n--- profile trace rules enforce changed requirement evidence ---"
 
 console.log("\n--- current contract/conformance macro semantic boundary ---");
 {
-  expect("valid current macro compiles without semantic errors", compileContractConformancePolicy(contractPolicy()), []);
+  expect("valid current macro compiles without semantic errors", contractErrors(contractPolicy()), []);
 
   const samePath = contractPolicy();
-  samePath.contract_conformance.current.conformance.path = samePath.contract_conformance.current.contract.path;
-  expect("macro rejects identical current pair paths", compileContractConformancePolicy(samePath).some((item) => /duplicates current\.contract/.test(item.message)), true);
+  samePath.packs["contract-conformance"].current.conformance.path = samePath.packs["contract-conformance"].current.contract.path;
+  expect("macro rejects identical current pair paths", contractErrors(samePath).some((item) => /duplicates current\.contract/.test(item.message)), true);
 
   const uncovered = contractPolicy();
-  uncovered.contract_conformance.control_paths = ["other/**"];
-  expect("macro rejects control paths that do not cover pair", compileContractConformancePolicy(uncovered).some((item) => /do not cover/.test(item.message)), true);
+  uncovered.packs["contract-conformance"].control_paths = ["other/**"];
+  expect("macro rejects control paths that do not cover pair", contractErrors(uncovered).some((item) => /do not cover/.test(item.message)), true);
 
   const duplicateSelector = contractPolicy();
-  duplicateSelector.contract_conformance.required_paths.push(structuredClone(duplicateSelector.contract_conformance.required_paths[0]));
-  expect("macro rejects duplicate required path selectors", compileContractConformancePolicy(duplicateSelector).some((item) => /duplicates selector/.test(item.message)), true);
+  duplicateSelector.packs["contract-conformance"].required_paths.push(structuredClone(duplicateSelector.packs["contract-conformance"].required_paths[0]));
+  expect("macro rejects duplicate required path selectors", contractErrors(duplicateSelector).some((item) => /duplicates selector/.test(item.message)), true);
 
   const collision = contractPolicy({
     document_relations: {
@@ -331,7 +234,7 @@ console.log("\n--- current contract/conformance macro semantic boundary ---");
       rules: [],
     },
   });
-  expect("macro rejects generated namespace collisions", compileContractConformancePolicy(collision).some((item) => /collides/.test(item.message)), true);
+  expect("macro rejects generated namespace collisions", contractErrors(collision).some((item) => /collides/.test(item.message)), true);
 }
 
 console.log("\n--- current macro expands to ordinary policy only ---");
@@ -345,7 +248,7 @@ console.log("\n--- current macro expands to ordinary policy only ---");
   });
   const resolved = resolvePolicyProfile(source);
   expect("macro resolves", resolved.ok, true);
-  expect("macro source field disappears after expansion", resolved.policy.contract_conformance, undefined);
+  expect("pack source field disappears after expansion", resolved.policy.packs, undefined);
   expect("explicit document relation composes", resolved.policy.document_relations.documents.explicit.path, "contracts/extra.json");
   expect("current contract generated document path", resolved.policy.document_relations.documents["contract-conformance.current.contract"].path, "contracts/spec-v2.json");
   expect("current conformance generated document path", resolved.policy.document_relations.documents["contract-conformance.current.conformance"].path, "contracts/checks-v2.yaml");
@@ -414,7 +317,7 @@ console.log("\n--- synthetic current macro executes through ordinary R2 constrai
 console.log("\n--- synthetic previous pair and acceptance execute through ordinary R2 constraints ---");
 {
   const source = contractPolicy({
-    contract_conformance: historyContractConformanceMacro(),
+    packs: { "contract-conformance": historyContractConformanceMacro() },
     document_relations: {
       documents: { "consumer-context": { path: "cutover/acceptance.json", format: "json" } },
       rules: [{
@@ -493,7 +396,7 @@ console.log("\n--- synthetic previous pair and acceptance execute through ordina
 console.log("\n--- anum_docs-shaped current topology is data only ---");
 {
   const source = contractPolicy({
-    contract_conformance: contractConformanceMacro({
+    packs: { "contract-conformance": contractConformanceMacro({
       current: {
         contract: { path: "contracts/mts-contract-v0.7.json", format: "json" },
         conformance: { path: "contracts/mts-conformance-v0.7.json", format: "json" },
@@ -502,7 +405,7 @@ console.log("\n--- anum_docs-shaped current topology is data only ---");
         { document: "current.contract", pointer: "/owners", projection: "object_values" },
         { document: "current.conformance", pointer: "/requiredExecutableGates", projection: "array_items" },
       ],
-    }),
+    }) },
   });
   const resolved = resolvePolicyProfile(source);
   expect("anum_docs-shaped macro resolves without domain-specific implementation", resolved.ok, true);

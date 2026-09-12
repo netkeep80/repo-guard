@@ -63,8 +63,8 @@ interface SizeRuleProjection {
 }
 interface CochangeRuleProjection { if_changed?: unknown; must_change_any?: unknown; [key: string]: unknown; }
 interface CochangeGroupProjection { id?: unknown; members?: unknown; }
-interface DocumentDefinitionProjection { path?: unknown; format?: unknown; snapshot?: unknown; }
-interface DocumentSelectorProjection { document?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
+interface DocumentDefinitionProjection { path?: unknown; format?: unknown; }
+interface DocumentSelectorProjection { document?: unknown; snapshot?: unknown; pointer?: unknown; projection?: unknown; type?: unknown; }
 interface DocumentRelationRuleProjection { id?: unknown; kind?: unknown; [key: string]: unknown; }
 interface DocumentRelationsProjection { documents?: Record<string, DocumentDefinitionProjection>; rules?: DocumentRelationRuleProjection[]; }
 interface EvidenceBindingProjection {
@@ -134,12 +134,12 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 function canonicalDocumentPath(value: unknown): string {
-  try { return normalizeDocumentFact(value, "repository_path") as string; }
-  catch { return typeof value === "string" ? value : String(value ?? ""); }
+  try { return normalizeDocumentFact(value, "repository_path") as string;
+  } catch { return typeof value === "string" ? value : String(value ?? ""); }
 }
 function compileFactRef(selectorValue: unknown, documents: Record<string, DocumentDefinitionProjection>): FactRef {
   const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
-  const snapshot = definition.snapshot === "base" || definition.snapshot === "head" ? definition.snapshot : "state";
+  const snapshot = selector.snapshot === "base" || selector.snapshot === "head" ? selector.snapshot : "state";
   const documentSelector: Extract<FactRef, { source: "document" }>["selector"] = {
     path: canonicalDocumentPath(definition.path),
     format: definition.format as FactFormat,

@@ -35,7 +35,7 @@ function sourcePolicy(version) {
     },
     diff_rules: { max_new_files: 5, max_new_docs: 2, max_net_added_lines: 50 },
     cochange_rules: [],
-    contract_conformance: {
+    packs: { "contract-conformance": {
       current: {
         contract: { path: `contracts/spec-${version}.json`, format: "json" },
         conformance: { path: `contracts/checks-${version}.json`, format: "json" },
@@ -57,7 +57,7 @@ function sourcePolicy(version) {
       }],
       cochange: ["current.contract", "current.conformance"],
       control_paths: ["contracts/**"],
-    },
+    } },
   };
 }
 
@@ -92,11 +92,11 @@ function schemaPolicy(version = "v1") {
     diff_rules: { max_new_files: 5, max_new_docs: 2 },
     content_rules: [],
     cochange_rules: [],
-    contract_conformance: structuredClone(source.contract_conformance),
+    packs: { "contract-conformance": structuredClone(source.packs["contract-conformance"]) },
   };
 }
 
-describe("contract_conformance.current promotion strictness", () => {
+describe("packs.contract-conformance.current promotion strictness", () => {
   it("reports generated current-pair and semantic cochange-group pointers when current paths change", () => {
     assert.deepEqual(comparisonPointers(resolvedPolicy("v1"), resolvedPolicy("v2")), CURRENT_PROMOTION_POINTERS);
   });
@@ -138,21 +138,21 @@ describe("contract_conformance.current promotion strictness", () => {
     assert.ok(!pointers.includes("/"));
   });
 
-  it("treats contract_conformance.cochange role reordering as a semantic no-op", () => {
+  it("treats packs.contract-conformance.cochange role reordering as a semantic no-op", () => {
     const baseSource = sourcePolicy("v1"), headSource = structuredClone(baseSource);
-    headSource.contract_conformance.cochange = ["current.conformance", "current.contract"];
+    headSource.packs["contract-conformance"].cochange = ["current.conformance", "current.contract"];
     assert.deepEqual(comparisonPointers(resolve(baseSource), resolve(headSource)), []);
   });
 
-  it("keeps contract_conformance.cochange membership edits fail-closed through one semantic group", () => {
+  it("keeps packs.contract-conformance.cochange membership edits fail-closed through one semantic group", () => {
     const baseSource = sourcePolicy("v1");
-    baseSource.contract_conformance.previous = {
+    baseSource.packs["contract-conformance"].previous = {
       contract: { path: "contracts/previous-spec-v0.json", format: "json" },
       conformance: { path: "contracts/previous-checks-v0.json", format: "json" },
     };
-    baseSource.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.contract"];
+    baseSource.packs["contract-conformance"].cochange = ["current.contract", "current.conformance", "previous.contract"];
     const headSource = structuredClone(baseSource);
-    headSource.contract_conformance.cochange = ["current.contract", "current.conformance", "previous.conformance"];
+    headSource.packs["contract-conformance"].cochange = ["current.contract", "current.conformance", "previous.conformance"];
     assert.deepEqual(
       comparisonPointers(resolve(baseSource), resolve(headSource)),
       ["/cochange_groups/contract-conformance"],
@@ -161,14 +161,14 @@ describe("contract_conformance.current promotion strictness", () => {
 
   it("keeps pair_fields edits fail-closed through generated relation semantics", () => {
     const baseSource = sourcePolicy("v1"), headSource = structuredClone(baseSource);
-    headSource.contract_conformance.pair_fields.contract_id = "/otherSchema";
+    headSource.packs["contract-conformance"].pair_fields.contract_id = "/otherSchema";
     const pointers = comparisonPointers(resolve(baseSource), resolve(headSource));
     assert.ok(pointers.includes("/document_relations/rules/contract-conformance:current-id"));
   });
 
   it("keeps accepted_state edits fail-closed through generated relation semantics", () => {
     const baseSource = sourcePolicy("v1"), headSource = structuredClone(baseSource);
-    headSource.contract_conformance.accepted_state.status = "candidate";
+    headSource.packs["contract-conformance"].accepted_state.status = "candidate";
     const pointers = comparisonPointers(resolve(baseSource), resolve(headSource));
     assert.ok(pointers.includes("/document_relations/rules/contract-conformance:current-contract-status"));
     assert.ok(pointers.includes("/document_relations/rules/contract-conformance:current-conformance-status"));
@@ -176,7 +176,7 @@ describe("contract_conformance.current promotion strictness", () => {
 
   it("keeps required_paths semantic edits fail-closed through their generated relation", () => {
     const baseSource = sourcePolicy("v1"), headSource = structuredClone(baseSource);
-    headSource.contract_conformance.required_paths[0].pointer = "/otherRepositoryPaths";
+    headSource.packs["contract-conformance"].required_paths[0].pointer = "/otherRepositoryPaths";
     assert.ok(comparisonPointers(resolve(baseSource), resolve(headSource)).includes(
       "/document_relations/rules/contract-conformance:required-path:0",
     ));
@@ -185,7 +185,7 @@ describe("contract_conformance.current promotion strictness", () => {
   it("keeps unknown contract_conformance siblings rejected by the source schema", () => {
     const validate = new Ajv({ allErrors: true }).compile(loadJSON(new URL("../schemas/repo-policy.schema.json", import.meta.url)));
     const source = schemaPolicy();
-    source.contract_conformance.unmodeled = { allow: true };
+    source.packs["contract-conformance"].unmodeled = { allow: true };
     assert.equal(validate(source), false);
   });
 });

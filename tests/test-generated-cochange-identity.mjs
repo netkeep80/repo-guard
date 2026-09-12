@@ -12,33 +12,35 @@ const explicitRule = (source = "src/api.mjs", required = "docs/api.md") => ({
 
 const macroSource = (cochangeRules = []) => ({
   cochange_rules: structuredClone(cochangeRules),
-  contract_conformance: {
-    current: {
-      contract: { path: "contracts/spec-v2.json", format: "json" },
-      conformance: { path: "contracts/checks-v2.json", format: "json" },
+  packs: {
+    "contract-conformance": {
+      current: {
+        contract: { path: "contracts/spec-v2.json", format: "json" },
+        conformance: { path: "contracts/checks-v2.json", format: "json" },
+      },
+      previous: {
+        contract: { path: "contracts/spec-v1.json", format: "json" },
+        conformance: { path: "contracts/checks-v1.json", format: "json" },
+      },
+      acceptance: {
+        document: { path: "contracts/acceptance.json", format: "json" },
+        current_contract_path: "/currentContract",
+        current_conformance_path: "/currentConformance",
+      },
+      pair_fields: {
+        contract_id: "/schema",
+        conformance_contract_id: "/contract",
+        contract_conformance_path: "/conformanceCorpus",
+        contract_status: "/status",
+        conformance_status: "/status",
+        contract_accepted: "/accepted",
+        conformance_accepted: "/accepted",
+      },
+      accepted_state: { status: "accepted", accepted: true },
+      required_paths: [],
+      cochange: ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"],
+      control_paths: ["contracts/**"],
     },
-    previous: {
-      contract: { path: "contracts/spec-v1.json", format: "json" },
-      conformance: { path: "contracts/checks-v1.json", format: "json" },
-    },
-    acceptance: {
-      document: { path: "contracts/acceptance.json", format: "json" },
-      current_contract_path: "/currentContract",
-      current_conformance_path: "/currentConformance",
-    },
-    pair_fields: {
-      contract_id: "/schema",
-      conformance_contract_id: "/contract",
-      contract_conformance_path: "/conformanceCorpus",
-      contract_status: "/status",
-      conformance_status: "/status",
-      contract_accepted: "/accepted",
-      conformance_accepted: "/accepted",
-    },
-    accepted_state: { status: "accepted", accepted: true },
-    required_paths: [],
-    cochange: ["current.contract", "current.conformance", "previous.contract", "previous.conformance", "acceptance"],
-    control_paths: ["contracts/**"],
   },
 });
 

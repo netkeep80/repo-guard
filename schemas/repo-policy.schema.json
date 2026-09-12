@@ -13,8 +13,7 @@
   ],
   "additionalProperties": false,
   "dependencies": {
-    "change_profiles": ["surfaces"],
-    "profile_overrides": ["profile"]
+    "change_profiles": ["surfaces"]
   },
   "properties": {
     "policy_format_version": {
@@ -25,14 +24,9 @@
       "type": "string",
       "enum": ["library", "application", "tooling", "documentation"]
     },
-    "profile": {
-      "type": "string",
-      "enum": ["requirements-strict"],
-      "description": "Optional built-in policy profile expanded before runtime checks. Explicit anchors or trace_rules in the policy override the generated profile sections."
-    },
-    "profile_overrides": {
-      "$ref": "#/definitions/profile_overrides",
-      "description": "Profile-specific refinements applied while expanding a built-in profile."
+    "packs": {
+      "$ref": "#/definitions/packs",
+      "description": "Closed built-in policy packs expanded before runtime checks."
     },
     "enforcement": {
       "type": "object",
@@ -192,9 +186,6 @@
     "document_relations": {
       "$ref": "#/definitions/document_relations"
     },
-    "contract_conformance": {
-      "$ref": "#/definitions/contract_conformance"
-    },
     "evidence_bindings": {
       "$ref": "#/definitions/evidence_bindings"
     },
@@ -343,7 +334,52 @@
       "items": { "type": "string", "minLength": 1 },
       "minItems": 1
     },
-    "contract_conformance": {
+    "packs": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "requirements-strict": { "$ref": "#/definitions/requirements_strict_pack" },
+        "version-governance": { "$ref": "#/definitions/version_governance_pack" },
+        "repo-guard-workflow": { "$ref": "#/definitions/repo_guard_workflow_pack" },
+        "contract-conformance": { "$ref": "#/definitions/contract_conformance_pack" }
+      }
+    },
+    "repo_guard_workflow_pack": {
+      "type": "object",
+      "required": ["path", "sha"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "version_governance_document": {
+      "type": "object",
+      "required": ["path", "pointer"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "pointer": { "type": "string" },
+        "format": { "type": "string", "enum": ["json", "yaml", "plain_text"] }
+      }
+    },
+    "version_governance_pack": {
+      "type": "object",
+      "required": ["authority", "advance"],
+      "additionalProperties": false,
+      "properties": {
+        "authority": { "$ref": "#/definitions/version_governance_document" },
+        "advance": { "const": "semver" },
+        "mirrors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/version_governance_document" }
+        }
+      }
+    },
+    "contract_conformance_pack": {
       "type": "object",
       "required": ["current", "pair_fields", "accepted_state", "required_paths", "cochange", "control_paths"],
       "additionalProperties": false,
@@ -447,27 +483,13 @@
       }
     },
     "document_relation_document": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": ["path", "format"],
-          "additionalProperties": false,
-          "properties": {
-            "path": { "$ref": "#/definitions/non_empty_string" },
-            "format": { "type": "string", "enum": ["json", "yaml"] }
-          }
-        },
-        {
-          "type": "object",
-          "required": ["path", "format", "snapshot"],
-          "additionalProperties": false,
-          "properties": {
-            "path": { "$ref": "#/definitions/non_empty_string" },
-            "format": { "const": "plain_text" },
-            "snapshot": { "type": "string", "enum": ["base", "head"] }
-          }
-        }
-      ]
+      "type": "object",
+      "required": ["path", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/definitions/non_empty_string" },
+        "format": { "type": "string", "enum": ["json", "yaml", "plain_text"] }
+      }
     },
     "document_scalar_selector": {
       "type": "object",
@@ -475,6 +497,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "type": { "type": "string", "enum": ["scalar", "string", "boolean"] }
       }
@@ -485,6 +508,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "type": { "const": "string" }
       }
@@ -495,6 +519,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values"] },
         "type": { "const": "repository_path_set" }
@@ -506,6 +531,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
+        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values", "object_keys"] },
         "type": { "const": "string_set" }
@@ -612,7 +638,7 @@
         }
       ]
     },
-    "profile_overrides": {
+    "requirements_strict_pack": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

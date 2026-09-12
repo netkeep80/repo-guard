@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { listBuiltInProfiles } from "../dist/policy-profiles.mjs";
+import { listBuiltInPacks } from "../dist/policy-profiles.mjs";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
@@ -109,9 +109,13 @@ describe("derived capability inventory", () => {
     }
   });
 
-  it("derives built-in profiles and requires rationale for unused ones", () => {
-    for (const profile of listBuiltInProfiles()) {
-      if (policy.profile !== profile) assert.ok(hasException(`profile:${profile}`), `unused profile ${profile} lacks rationale`);
+  it("derives built-in pack authority without mirroring unused packs", () => {
+    const packs = new Set(listBuiltInPacks());
+    for (const configured of Object.keys(policy.packs || {})) {
+      assert.ok(packs.has(configured), `unknown configured pack ${configured}`);
+    }
+    for (const id of Object.keys(exceptions).filter((id) => id.startsWith("pack:"))) {
+      assert.ok(packs.has(id.slice(5)), `stale pack exception ${id}`);
     }
   });
 
