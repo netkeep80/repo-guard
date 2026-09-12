@@ -1,0 +1,509 @@
+import { normalizeDocumentFact } from "./document-facts.mjs";
+import { matchesAny } from "./utils/path-patterns.mjs";
+
+const REQUIREMENT_ID = "(?:BR|SR|FR|NFR|CR|IR)-[0-9]{3}";
+
+const PACKS = {
+  "requirements-strict": {
+    defaults: {
+      requirement_json_globs: [
+        "requirements/business/*.json", "requirements/stakeholder/*.json", "requirements/functional/*.json",
+        "requirements/nonfunctional/*.json", "requirements/constraints/*.json", "requirements/interface/*.json",
+      ],
+      code_reference_globs: [
+        "scripts/**/*.js", "include/**/*.{h,hpp,hh}", "src/**/*.{h,hpp,hh,c,cc,cpp,cxx}",
+        "tests/**/*.{h,hpp,hh,c,cc,cpp,cxx,js,mjs}", "examples/**/*.{h,hpp,hh,c,cc,cpp,cxx,js,mjs}",
+      ],
+      doc_reference_globs: ["*.md", "docs/**/*.md", "requirements/**/*.md", ".github/**/*.md"],
+      strict_heading_docs: ["docs/**/*.md"],
+      evidence_surfaces: ["src/**", "tests/**", "docs/**", "README.md", "requirements/README.md"],
+      implementation_evidence_surfaces: ["include/**", "src/**", "scripts/**", ".github/workflows/**"],
+      verification_evidence_surfaces: ["tests/**", "experiments/**", "scripts/**", ".github/workflows/**"],
+    },
+    anchors: {
+      requirement_id: { kind: "json_field", globs: "$requirement_json_globs", field: "id" },
+      requirement_json_req_ref: { kind: "regex", globs: "$requirement_json_globs", pattern: `"(${REQUIREMENT_ID})"` },
+      code_req_ref: { kind: "regex", globs: "$code_reference_globs", pattern: `(?:@req\\s+|,\\s*)(${REQUIREMENT_ID})` },
+      doc_req_ref: { kind: "regex", globs: "$doc_reference_globs", pattern: `(?:^|[^A-Z0-9])(${REQUIREMENT_ID})(?![0-9])` },
+      doc_heading_req_ref: { kind: "regex", globs: "$strict_heading_docs", pattern: `(?:^|\\n)#{1,6}\\s+[^\\n]*?\\[(${REQUIREMENT_ID})\\]` },
+      doc_heading_without_req_ref: { kind: "regex", globs: "$strict_heading_docs", pattern: `(?:^|\\n)(#{1,6}\\s+(?![^\\n]*\\[${REQUIREMENT_ID}\\])[^\\n]*)` },
+    },
+    trace_rules: [
+      { id: "requirement-json-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "requirement_json_req_ref", to_anchor_type: "requirement_id" },
+      { id: "code-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "code_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "doc_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-heading-req-refs-must-resolve", kind: "must_resolve", from_anchor_type: "doc_heading_req_ref", to_anchor_type: "requirement_id" },
+      { id: "doc-headings-must-have-req-ref", kind: "must_resolve", from_anchor_type: "doc_heading_without_req_ref", to_anchor_type: "requirement_id" },
+      { id: "changed-requirements-need-evidence", kind: "changed_files_require_evidence", if_changed: "$requirement_json_globs", must_touch_any: "$changed_requirement_evidence_surfaces" },
+      { id: "declared-affected-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.affects", must_touch_any: "$affected_evidence_surfaces" },
+      { id: "declared-implemented-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.implements", must_touch_any: "$implementation_evidence_surfaces" },
+      { id: "declared-verified-anchors-need-evidence", kind: "declared_anchors_require_evidence", change_intent_field: "anchors.verifies", must_touch_any: "$verification_evidence_surfaces" },
+    ],
+  },
+};
+
+type PackSource = { kind: string; globs: string | string[]; field?: string; pattern?: string };
+type PackRule = Record<string, unknown>;
+interface PackSpec {
+  defaults: Record<string, string[]>;
+  anchors: Record<string, PackSource>;
+  trace_rules: PackRule[];
+}
+type PackConfig = Record<string, unknown>;
+type PairRole = "current.contract" | "current.conformance" | "previous.contract" | "previous.conformance";
+type ContractRole = PairRole | "acceptance";
+interface PolicyProjection extends Record<string, unknown> {
+  packs?: unknown;
+  anchors?: unknown;
+  trace_rules?: unknown;
+  document_relations?: unknown;
+  cochange_rules?: unknown;
+  cochange_groups?: unknown;
+  paths?: Record<string, unknown>;
+}
+interface PackValidationError {
+  field: string;
+  message: string;
+}
+
+const OVERRIDE_FIELDS = new Set([
+  ...Object.keys(PACKS["requirements-strict"].defaults),
+  "changed_requirement_evidence_surfaces", "affected_evidence_surfaces",
+]);
+const GENERATED_DOCUMENTS: Record<ContractRole, string> = {
+  "current.contract": "contract-conformance.current.contract",
+  "current.conformance": "contract-conformance.current.conformance",
+  "previous.contract": "contract-conformance.previous.contract",
+  "previous.conformance": "contract-conformance.previous.conformance",
+  acceptance: "contract-conformance.acceptance",
+};
+const pairRuleIds = (prefix: "current" | "previous") => [
+  `contract-conformance:${prefix}-id`,
+  `contract-conformance:${prefix}-conformance-path`,
+  `contract-conformance:${prefix}-contract-status`,
+  `contract-conformance:${prefix}-conformance-status`,
+  `contract-conformance:${prefix}-contract-accepted`,
+  `contract-conformance:${prefix}-conformance-accepted`,
+];
+const ACCEPTANCE_RULE_IDS = [
+  "contract-conformance:acceptance-current-contract",
+  "contract-conformance:acceptance-current-conformance",
+];
+const clone = <T,>(value: T): T => structuredClone(value);
+const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+const ref = (value: unknown, config: PackConfig): unknown => typeof value === "string" && value.startsWith("$") ? clone(config[value.slice(1)]) : clone(value);
+const stringList = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+function configFor(spec: PackSpec, overrides: Record<string, unknown> = {}): PackConfig {
+  const config: PackConfig = clone(spec.defaults);
+  for (const [key, value] of Object.entries(overrides)) config[key] = clone(value);
+  config.changed_requirement_evidence_surfaces ||= clone(config.evidence_surfaces);
+  config.affected_evidence_surfaces ||= clone(config.evidence_surfaces);
+  return config;
+}
+
+function materializePack(spec: PackSpec, overrides: Record<string, unknown>) {
+  const config = configFor(spec, overrides), types: Record<string, { sources: Array<Record<string, unknown>> }> = {};
+  for (const [name, source] of Object.entries(spec.anchors)) {
+    const globs = ref(source.globs, config) as string[];
+    types[name] = { sources: globs.map((glob) => source.kind === "json_field"
+      ? { kind: source.kind, glob, field: source.field }
+      : { kind: source.kind, glob, pattern: source.pattern }) };
+  }
+  const trace_rules = spec.trace_rules.map((rule) => Object.fromEntries(
+    Object.entries(rule).map(([key, value]) => [key, ref(value, config)])
+  ));
+  return { anchors: { types }, trace_rules };
+}
+
+
+function pairDocuments(value: unknown, prefix: "current" | "previous") {
+  const pair = isObject(value) ? value : {};
+  return {
+    [`${prefix}.contract`]: isObject(pair.contract) ? pair.contract : {},
+    [`${prefix}.conformance`]: isObject(pair.conformance) ? pair.conformance : {},
+  } as Record<PairRole, Record<string, unknown>>;
+}
+
+function configuredRoleDocuments(macro: Record<string, unknown>): Partial<Record<ContractRole, Record<string, unknown>>> {
+  const roles: Partial<Record<ContractRole, Record<string, unknown>>> = { ...pairDocuments(macro.current, "current") };
+  if (isObject(macro.previous)) Object.assign(roles, pairDocuments(macro.previous, "previous"));
+  if (isObject(macro.acceptance)) {
+    const acceptance = macro.acceptance;
+    roles.acceptance = isObject(acceptance.document) ? acceptance.document : {};
+  }
+  return roles;
+}
+
+function normalizeDocumentPath(value: unknown): string | null {
+  try { return normalizeDocumentFact(value, "repository_path") as string; }
+  catch { return null; }
+}
+
+function generatedRuleIds(macro: Record<string, unknown>): string[] {
+  return [
+    ...pairRuleIds("current"),
+    ...(isObject(macro.previous) ? pairRuleIds("previous") : []),
+    ...(isObject(macro.acceptance) ? ACCEPTANCE_RULE_IDS : []),
+    ...((Array.isArray(macro.required_paths) ? macro.required_paths : []).map((_, index) => `contract-conformance:required-path:${index}`)),
+  ];
+}
+
+const VERSION_GOVERNANCE_PACK = "version-governance";
+const REPO_GUARD_WORKFLOW_PACK = "repo-guard-workflow";
+const CONTRACT_CONFORMANCE_PACK = "contract-conformance";
+
+export const listBuiltInPacks = (): string[] => [...Object.keys(PACKS), VERSION_GOVERNANCE_PACK, REPO_GUARD_WORKFLOW_PACK, CONTRACT_CONFORMANCE_PACK].sort();
+
+function validateRequirementsConfig(fieldPrefix: string, value: unknown, errors: PackValidationError[]) {
+  if (!isObject(value)) {
+    errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+    return;
+  }
+  for (const [field, fieldValue] of Object.entries(value)) {
+    const qualified = `${fieldPrefix}.${field}`;
+    if (!OVERRIDE_FIELDS.has(field)) errors.push({ field: qualified, message: `${qualified} is not supported` });
+    else if (!Array.isArray(fieldValue) || !fieldValue.length || fieldValue.some((item) => typeof item !== "string" || !item.trim())) {
+      errors.push({ field: qualified, message: `${qualified} must be a non-empty array of non-empty strings` });
+    }
+  }
+}
+
+type VersionDocumentFormat = "json" | "yaml" | "plain_text";
+type VersionDocument = { path: string; pointer: string; format: VersionDocumentFormat };
+
+function inferVersionDocumentFormat(path: string, explicit: unknown): VersionDocumentFormat | null {
+  if (explicit === "json" || explicit === "yaml" || explicit === "plain_text") return explicit;
+  if (explicit !== undefined) return null;
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".json")) return "json";
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
+  return null;
+}
+
+function versionDocument(value: unknown): VersionDocument | null {
+  if (!isObject(value)) return null;
+  const path = normalizeDocumentPath(value.path);
+  if (!path || typeof value.pointer !== "string") return null;
+  const format = inferVersionDocumentFormat(path, value.format);
+  return format ? { path, pointer: value.pointer, format } : null;
+}
+
+function validateVersionDocument(fieldPrefix: string, value: unknown, errors: PackValidationError[]): VersionDocument | null {
+  if (!isObject(value)) {
+    errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+    return null;
+  }
+  const path = normalizeDocumentPath(value.path);
+  if (!path) errors.push({ field: `${fieldPrefix}.path`, message: `${fieldPrefix}.path must be a canonical repository path` });
+  if (typeof value.pointer !== "string") errors.push({ field: `${fieldPrefix}.pointer`, message: `${fieldPrefix}.pointer must be a JSON Pointer string` });
+  const format = path ? inferVersionDocumentFormat(path, value.format) : null;
+  if (!format) errors.push({ field: `${fieldPrefix}.format`, message: `${fieldPrefix}.format must be json, yaml, or plain_text when it cannot be inferred from the path` });
+  return path && typeof value.pointer === "string" && format ? { path, pointer, format } : null;
+}
+
+function validateVersionGovernanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: PackValidationError[]) {
+  if (!isObject(value)) {
+    errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+    return;
+  }
+  const authority = validateVersionDocument(`${fieldPrefix}.authority`, value.authority, errors);
+  if (value.advance !== "semver") errors.push({ field: `${fieldPrefix}.advance`, message: `${fieldPrefix}.advance must be semver` });
+  const mirrors = value.mirrors;
+  if (mirrors !== undefined && (!Array.isArray(mirrors) || !mirrors.length)) {
+    errors.push({ field: `${fieldPrefix}.mirrors`, message: `${fieldPrefix}.mirrors must be a non-empty array when present` });
+  }
+  const seen = new Set<string>();
+  if (authority) seen.add(`${authority.path}|${authority.pointer}`);
+  for (const [index, mirror] of (Array.isArray(mirrors) ? mirrors : []).entries()) {
+    const normalized = validateVersionDocument(`${fieldPrefix}.mirrors[${index}]`, mirror, errors);
+    if (!normalized) continue;
+    const key = `${normalized.path}|${normalized.pointer}`;
+    if (seen.has(key)) errors.push({ field: `${fieldPrefix}.mirrors[${index}]`, message: `${fieldPrefix}.mirrors[${index}] duplicates the authority or another mirror` });
+    seen.add(key);
+  }
+
+  const explicitRelations = isObject(source.document_relations) ? source.document_relations : {};
+  const explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
+  const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
+  const generatedDocuments = ["pack:version-governance:authority", ...(Array.isArray(mirrors) ? mirrors.map((_, index) => `pack:version-governance:mirror:${index}`) : [])];
+  const generatedRules = ["pack:version-governance:advance", ...(Array.isArray(mirrors) ? mirrors.map((_, index) => `pack:version-governance:mirror:${index}`) : [])];
+  for (const id of generatedDocuments) if (Object.hasOwn(explicitDocuments, id)) errors.push({ field: "document_relations.documents", message: `version-governance generated document "${id}" collides with explicit document_relations` });
+  for (const id of generatedRules) if (explicitRuleIds.has(id)) errors.push({ field: "document_relations.rules", message: `version-governance generated rule "${id}" collides with explicit document_relations` });
+}
+
+function materializeVersionGovernance(base: PolicyProjection, value: Record<string, unknown>) {
+  const authority = versionDocument(value.authority)!;
+  const mirrors = (Array.isArray(value.mirrors) ? value.mirrors : []).map((item) => versionDocument(item)!);
+  const relations = isObject(base.document_relations) ? clone(base.document_relations) : {};
+  const documents = isObject(relations.documents) ? clone(relations.documents) : {};
+  const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [];
+  const authorityId = "pack:version-governance:authority";
+  documents[authorityId] = { path: authority.path, format: authority.format };
+  const selector = (document: string, snapshot: "base" | "head", pointer: string) => ({ document, snapshot, pointer, type: "string" as const });
+  rules.push({
+    id: "pack:version-governance:advance",
+    kind: "scalar_strictly_greater",
+    comparator: "semver",
+    left: selector(authorityId, "head", authority.pointer),
+    right: selector(authorityId, "base", authority.pointer),
+  });
+  for (const [index, mirror] of mirrors.entries()) {
+    const mirrorId = `pack:version-governance:mirror:${index}`;
+    documents[mirrorId] = { path: mirror.path, format: mirror.format };
+    rules.push({
+      id: mirrorId,
+      kind: "scalar_equal",
+      left: selector(authorityId, "head", authority.pointer),
+      right: selector(mirrorId, "head", mirror.pointer),
+    });
+  }
+  base.document_relations = { ...relations, documents, rules };
+}
+
+const REPO_GUARD_WORKFLOW_DOCUMENT = "pack:repo-guard-workflow:workflow";
+const REPO_GUARD_WORKFLOW_RULES = [
+  ["action-pin", "/jobs/policy-check/steps/1/uses"],
+  ["mode", "/jobs/policy-check/steps/1/with/mode"],
+  ["enforcement", "/jobs/policy-check/steps/1/with/enforcement"],
+  ["permission:contents", "/permissions/contents"],
+  ["permission:issues", "/permissions/issues"],
+  ["permission:pull-requests", "/permissions/pull-requests"],
+] as const;
+
+function repoGuardWorkflowRuleId(suffix: string): string {
+  return `pack:repo-guard-workflow:${suffix}`;
+}
+
+function validateRepoGuardWorkflowConfig(fieldPrefix: string, value: unknown, source: PolicyProjection, errors: PackValidationError[]) {
+  if (!isObject(value)) {
+    errors.push({ field: fieldPrefix, message: `${fieldPrefix} must be an object` });
+    return;
+  }
+  const path = normalizeDocumentPath(value.path);
+  if (!path) errors.push({ field: `${fieldPrefix}.path`, message: `${fieldPrefix}.path must be a canonical repository path` });
+  else if (!(path.toLowerCase().endsWith(".yml") || path.toLowerCase().endsWith(".yaml"))) errors.push({ field: `${fieldPrefix}.path`, message: `${fieldPrefix}.path must be a YAML workflow path` });
+  if (typeof value.sha !== "string" || !/^[0-9a-f]{40}$/.test(value.sha)) {
+    errors.push({ field: `${fieldPrefix}.sha`, message: `${fieldPrefix}.sha must be exactly 40 lowercase hex characters` });
+  }
+
+  const explicitRelations = isObject(source.document_relations) ? source.document_relations : {};
+  const explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
+  if (Object.hasOwn(explicitDocuments, REPO_GUARD_WORKFLOW_DOCUMENT)) {
+    errors.push({ field: "document_relations.documents", message: `repo-guard-workflow generated document "${REPO_GUARD_WORKFLOW_DOCUMENT}" collides with explicit document_relations` });
+  }
+  const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
+  for (const [suffix] of REPO_GUARD_WORKFLOW_RULES) {
+    const id = repoGuardWorkflowRuleId(suffix);
+    if (explicitRuleIds.has(id)) errors.push({ field: "document_relations.rules", message: `repo-guard-workflow generated rule "${id}" collides with explicit document_relations` });
+  }
+}
+
+function materializeRepoGuardWorkflow(base: PolicyProjection, value: Record<string, unknown>) {
+  const path = normalizeDocumentPath(value.path)!;
+  const sha = value.sha as string;
+  const relations = isObject(base.document_relations) ? clone(base.document_relations) : {};
+  const documents = isObject(relations.documents) ? clone(relations.documents) : {};
+  const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [];
+  documents[REPO_GUARD_WORKFLOW_DOCUMENT] = { path, format: "yaml" };
+
+  const values: Record<string, string> = {
+    "action-pin": `netkeep80/repo-guard@${sha}`,
+    mode: "check-pr",
+    enforcement: "blocking",
+    "permission:contents": "read",
+    "permission:issues": "read",
+    "permission:pull-requests": "read",
+  };
+  for (const [suffix, pointer] of REPO_GUARD_WORKFLOW_RULES) {
+    rules.push({
+      id: repoGuardWorkflowRuleId(suffix),
+      kind: "scalar_equals_literal",
+      source: { document: REPO_GUARD_WORKFLOW_DOCUMENT, pointer, type: "string" },
+      value: values[suffix],
+    });
+  }
+  base.document_relations = { ...relations, documents, rules };
+}
+
+export function validatePolicyPacks(policy: unknown): PackValidationError[] {
+  const source = policy as PolicyProjection | null | undefined;
+  const errors: PackValidationError[] = [], packs = source?.packs;
+
+  if (packs !== undefined) {
+    if (!isObject(packs)) errors.push({ field: "packs", message: "packs must be an object" });
+    else {
+      const entries = Object.entries(packs);
+      if (!entries.length) errors.push({ field: "packs", message: "packs must contain at least one built-in pack" });
+      for (const [name, config] of entries) {
+        if (name === CONTRACT_CONFORMANCE_PACK) errors.push(...validateContractConformanceConfig(`packs.${name}`, config, source || {}));
+        else if (name === VERSION_GOVERNANCE_PACK) validateVersionGovernanceConfig(`packs.${name}`, config, source || {}, errors);
+        else if (name === REPO_GUARD_WORKFLOW_PACK) validateRepoGuardWorkflowConfig(`packs.${name}`, config, source || {}, errors);
+        else {
+          const spec = (PACKS as unknown as Record<string, PackSpec>)[name];
+          if (!spec) errors.push({ field: `packs.${name}`, message: `pack "${name}" is not supported; use ${listBuiltInPacks().join(", ")}` });
+          else validateRequirementsConfig(`packs.${name}`, config, errors);
+        }
+      }
+      if (Object.hasOwn(packs, "requirements-strict") && (source?.anchors !== undefined || source?.trace_rules !== undefined)) {
+        errors.push({ field: "packs.requirements-strict", message: "requirements-strict cannot be combined with explicit anchors or trace_rules" });
+      }
+    }
+  }
+  return errors;
+}
+
+function validateContractConformanceConfig(fieldPrefix: string, value: unknown, source: PolicyProjection): PackValidationError[] {
+  if (!isObject(value)) return [{ field: fieldPrefix, message: `${fieldPrefix} must be an object` }];
+
+  const macro = value, errors: PackValidationError[] = [];
+  const roles = configuredRoleDocuments(macro), paths = new Map<ContractRole, string>();
+  for (const [role, definition] of Object.entries(roles) as Array<[ContractRole, Record<string, unknown>]>) {
+    const path = normalizeDocumentPath(definition.path), format = definition.format;
+    if (!path) errors.push({ field: `${fieldPrefix}.${role}.path`, message: `${role} path must be a canonical repository path` });
+    else paths.set(role, path);
+    if (format !== "json" && format !== "yaml") errors.push({ field: `${fieldPrefix}.${role}.format`, message: `${role} format must be json or yaml` });
+  }
+  const pathOwners = new Map<string, ContractRole>();
+  for (const [role, path] of paths) {
+    const previousOwner = pathOwners.get(path);
+    if (previousOwner) errors.push({ field: fieldPrefix, message: `${role} path duplicates ${previousOwner} path "${path}"` });
+    else pathOwners.set(path, role);
+  }
+
+  const pairFields = isObject(macro.pair_fields) ? macro.pair_fields : {};
+  for (const field of ["contract_id", "conformance_contract_id", "contract_conformance_path", "contract_status", "conformance_status", "contract_accepted", "conformance_accepted"]) {
+    if (typeof pairFields[field] !== "string") errors.push({ field: `${fieldPrefix}.pair_fields.${field}`, message: `${field} must be a JSON Pointer string` });
+  }
+  const acceptedState = isObject(macro.accepted_state) ? macro.accepted_state : {};
+  if (typeof acceptedState.status !== "string") errors.push({ field: "contract_conformance.accepted_state.status", message: "accepted_state.status must be a string" });
+  if (typeof acceptedState.accepted !== "boolean") errors.push({ field: "contract_conformance.accepted_state.accepted", message: "accepted_state.accepted must be a boolean" });
+
+  if (isObject(macro.acceptance)) {
+    if (typeof macro.acceptance.current_contract_path !== "string") errors.push({ field: "contract_conformance.acceptance.current_contract_path", message: "acceptance.current_contract_path must be a JSON Pointer string" });
+    if (typeof macro.acceptance.current_conformance_path !== "string") errors.push({ field: "contract_conformance.acceptance.current_conformance_path", message: "acceptance.current_conformance_path must be a JSON Pointer string" });
+  }
+
+  const availableRoles = new Set(Object.keys(roles) as ContractRole[]);
+  const selectors = Array.isArray(macro.required_paths) ? macro.required_paths : [], selectorKeys = new Set<string>();
+  for (const [index, rawSelector] of selectors.entries()) {
+    const selector = isObject(rawSelector) ? rawSelector : {}, role = selector.document as ContractRole;
+    if (!availableRoles.has(role)) errors.push({ field: `${fieldPrefix}.required_paths[${index}].document`, message: `required_paths[${index}] references unavailable role "${selector.document}"` });
+    const key = `${selector.document}|${selector.pointer}|${selector.projection}`;
+    if (selectorKeys.has(key)) errors.push({ field: `${fieldPrefix}.required_paths[${index}]`, message: `required_paths[${index}] duplicates selector ${key}` });
+    selectorKeys.add(key);
+  }
+
+  const cochange = stringList(macro.cochange), seenRoles = new Set<string>();
+  for (const [index, role] of cochange.entries()) {
+    if (!availableRoles.has(role as ContractRole)) errors.push({ field: `${fieldPrefix}.cochange[${index}]`, message: `cochange references unavailable role "${role}"` });
+    if (seenRoles.has(role)) errors.push({ field: `${fieldPrefix}.cochange[${index}]`, message: `cochange duplicates role "${role}"` });
+    seenRoles.add(role);
+  }
+  if (cochange.length < 2) errors.push({ field: "contract_conformance.cochange", message: "cochange must contain at least two distinct roles" });
+
+  const controlPaths = stringList(macro.control_paths).map((item) => item.trim()).filter(Boolean);
+  if (!controlPaths.length) errors.push({ field: "contract_conformance.control_paths", message: "control_paths must contain at least one non-empty pattern" });
+  for (const [role, path] of paths) if (controlPaths.length && !matchesAny(path, controlPaths)) {
+    errors.push({ field: "contract_conformance.control_paths", message: `control_paths do not cover ${role} path "${path}"` });
+  }
+
+  const explicitRelations = isObject(source.document_relations) ? source.document_relations : {}, explicitDocuments = isObject(explicitRelations.documents) ? explicitRelations.documents : {};
+  for (const role of availableRoles) {
+    const name = GENERATED_DOCUMENTS[role];
+    if (Object.hasOwn(explicitDocuments, name)) errors.push({ field: "document_relations.documents", message: `contract-conformance generated document "${name}" collides with explicit document_relations` });
+  }
+  const explicitRuleIds = new Set((Array.isArray(explicitRelations.rules) ? explicitRelations.rules : []).map((rule) => isObject(rule) ? rule.id : undefined));
+  for (const id of generatedRuleIds(macro)) if (explicitRuleIds.has(id)) {
+    errors.push({ field: "document_relations.rules", message: `contract-conformance generated rule "${id}" collides with explicit document_relations` });
+  }
+  const explicitCochangeGroups = Array.isArray(source.cochange_groups) ? source.cochange_groups : [];
+  if (explicitCochangeGroups.some((group) => isObject(group) && group.id === "contract-conformance")) {
+    errors.push({ field: "cochange_groups", message: "contract-conformance generated cochange group \"contract-conformance\" collides with explicit cochange_groups" });
+  }
+  return errors;
+}
+
+export function expandPolicyPacks(policy: unknown) {
+  const base: PolicyProjection = clone(policy as PolicyProjection);
+  if (isObject(base.packs)) {
+    const configuredPacks = clone(base.packs);
+    delete base.packs;
+    for (const [name, config] of Object.entries(configuredPacks)) {
+      if (!isObject(config)) continue;
+      if (name === CONTRACT_CONFORMANCE_PACK) {
+        materializeContractConformance(base, config);
+        continue;
+      }
+      if (name === VERSION_GOVERNANCE_PACK) {
+        materializeVersionGovernance(base, config);
+        continue;
+      }
+      if (name === REPO_GUARD_WORKFLOW_PACK) {
+        materializeRepoGuardWorkflow(base, config);
+        continue;
+      }
+      const spec = (PACKS as unknown as Record<string, PackSpec>)[name];
+      if (!spec) continue;
+      const patch = materializePack(spec, config);
+      if (name === "requirements-strict") {
+        base.anchors = patch.anchors;
+        base.trace_rules = patch.trace_rules;
+      }
+    }
+    return base;
+  }
+  return base;
+}
+
+function materializeContractConformance(base: PolicyProjection, macro: Record<string, unknown>) {
+
+  const roleDefinitions = configuredRoleDocuments(macro);
+  const rolePaths = Object.fromEntries(Object.entries(roleDefinitions).map(([role, definition]) => [role, normalizeDocumentPath(definition!.path)!])) as Record<ContractRole, string>;
+  const relations = isObject(base.document_relations) ? clone(base.document_relations) : {}, documents = isObject(relations.documents) ? clone(relations.documents) : {};
+  const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [], pairFields = macro.pair_fields as Record<string, string>, acceptedState = macro.accepted_state as { status: string; accepted: boolean };
+  for (const [role, definition] of Object.entries(roleDefinitions) as Array<[ContractRole, Record<string, unknown>]>) {
+    documents[GENERATED_DOCUMENTS[role]] = { path: rolePaths[role], format: definition.format };
+  }
+  const selector = (role: ContractRole, pointer: string, type: "string" | "boolean") => ({ document: GENERATED_DOCUMENTS[role], pointer, type });
+  const addPair = (prefix: "current" | "previous") => {
+    const contractRole = `${prefix}.contract` as PairRole, conformanceRole = `${prefix}.conformance` as PairRole, ids = pairRuleIds(prefix);
+    rules.push(
+      { id: ids[0], kind: "scalar_equal", left: selector(conformanceRole, pairFields.conformance_contract_id, "string"), right: selector(contractRole, pairFields.contract_id, "string") },
+      { id: ids[1], kind: "scalar_equals_literal", source: selector(contractRole, pairFields.contract_conformance_path, "string"), value: rolePaths[conformanceRole] },
+      { id: ids[2], kind: "scalar_equals_literal", source: selector(contractRole, pairFields.contract_status, "string"), value: acceptedState.status },
+      { id: ids[3], kind: "scalar_equals_literal", source: selector(conformanceRole, pairFields.conformance_status, "string"), value: acceptedState.status },
+      { id: ids[4], kind: "scalar_equals_literal", source: selector(contractRole, pairFields.contract_accepted, "boolean"), value: acceptedState.accepted },
+      { id: ids[5], kind: "scalar_equals_literal", source: selector(conformanceRole, pairFields.conformance_accepted, "boolean"), value: acceptedState.accepted },
+    );
+  };
+  addPair("current");
+  if (roleDefinitions["previous.contract"] && roleDefinitions["previous.conformance"]) addPair("previous");
+  if (isObject(macro.acceptance)) {
+    const acceptance = macro.acceptance;
+    rules.push(
+      { id: ACCEPTANCE_RULE_IDS[0], kind: "scalar_equals_literal", source: selector("acceptance", acceptance.current_contract_path as string, "string"), value: rolePaths["current.contract"] },
+      { id: ACCEPTANCE_RULE_IDS[1], kind: "scalar_equals_literal", source: selector("acceptance", acceptance.current_conformance_path as string, "string"), value: rolePaths["current.conformance"] },
+    );
+  }
+  for (const [index, rawSelector] of (macro.required_paths as Array<Record<string, unknown>> || []).entries()) {
+    const source = rawSelector as { document: ContractRole; pointer: string; projection: "array_items" | "object_values" };
+    rules.push({ id: `contract-conformance:required-path:${index}`, kind: "referenced_paths_exist", source: { document: GENERATED_DOCUMENTS[source.document], pointer: source.pointer, projection: source.projection, type: "repository_path_set" } });
+  }
+  base.document_relations = { ...relations, documents, rules };
+
+  const cochange = macro.cochange as ContractRole[], cochangeGroups = Array.isArray(base.cochange_groups) ? clone(base.cochange_groups) : [];
+  cochangeGroups.push({ id: "contract-conformance", members: cochange.map((role) => rolePaths[role]).sort() });
+  base.cochange_groups = cochangeGroups;
+
+  const paths = isObject(base.paths) ? clone(base.paths) : {}, governance = stringList(paths.governance_paths), controlPaths = stringList(macro.control_paths);
+  paths.governance_paths = [...new Set([...governance, ...controlPaths])].sort();
+  base.paths = paths;
+  return base;
+}
+
+export function resolvePolicyPacks(policy: unknown) {
+  const errors = validatePolicyPacks(policy);
+  if (errors.length) return { ok: false, policy: clone(policy), errors };
+  return { ok: true, policy: expandPolicyPacks(policy), errors };
+}
