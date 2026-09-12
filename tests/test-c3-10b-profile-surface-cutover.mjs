@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import Ajv from "ajv";
-import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 
 const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.json", import.meta.url), "utf8"));
 const validate = new Ajv({ allErrors: true, strict: false }).compile(schema);
@@ -25,7 +25,7 @@ const compact = {
   },
 };
 assert.equal(validate(compact), true, `requirements-strict pack must remain valid: ${JSON.stringify(validate.errors)}`);
-const resolved = resolvePolicyProfile(compact);
+const resolved = resolvePolicyPacks(compact);
 assert.equal(resolved.ok, true, `requirements-strict pack must lower: ${JSON.stringify(resolved.errors)}`);
 assert.ok(resolved.policy.anchors?.types?.requirement_id, "pack must retain requirement anchor semantics");
 assert.ok(resolved.policy.trace_rules?.some((rule) => rule.id === "changed-requirements-need-evidence"), "pack must retain requirement evidence semantics");

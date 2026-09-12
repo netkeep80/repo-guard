@@ -4,13 +4,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import Ajv from "ajv";
-import { compileProfilePolicy, resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { validatePolicyPacks, resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { loadJSON, loadPolicyRuntime } from "../dist/runtime/validation.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
-const contractErrors = (policy) => resolvePolicyProfile(policy).errors;
+const contractErrors = (policy) => resolvePolicyPacks(policy).errors;
 
 let failures = 0;
 
@@ -129,7 +129,7 @@ console.log("\n--- requirements-strict pack validation ---");
 {
   expect(
     "pack config rejects non-object values",
-    compileProfilePolicy({ packs: { "requirements-strict": ["tests/**"] } }),
+    validatePolicyPacks({ packs: { "requirements-strict": ["tests/**"] } }),
     [{ field: "packs.requirements-strict", message: "packs.requirements-strict must be an object" }]
   );
 }
@@ -246,7 +246,7 @@ console.log("\n--- current macro expands to ordinary policy only ---");
     },
     cochange_rules: [{ if_changed: ["docs/**"], must_change_any: ["tests/**"] }],
   });
-  const resolved = resolvePolicyProfile(source);
+  const resolved = resolvePolicyPacks(source);
   expect("macro resolves", resolved.ok, true);
   expect("pack source field disappears after expansion", resolved.policy.packs, undefined);
   expect("explicit document relation composes", resolved.policy.document_relations.documents.explicit.path, "contracts/extra.json");
@@ -266,7 +266,7 @@ console.log("\n--- current macro expands to ordinary policy only ---");
 console.log("\n--- synthetic current macro executes through ordinary R2 constraints ---");
 {
   const source = contractPolicy();
-  const resolved = resolvePolicyProfile(source);
+  const resolved = resolvePolicyPacks(source);
   const files = {
     "contracts/spec-v2.json": JSON.stringify({
       schema: "spec-v2",
@@ -328,7 +328,7 @@ console.log("\n--- synthetic previous pair and acceptance execute through ordina
       }],
     },
   });
-  const resolved = resolvePolicyProfile(source);
+  const resolved = resolvePolicyPacks(source);
   const files = {
     "contracts/spec-v2.json": JSON.stringify({
       schema: "spec-v2",
@@ -407,7 +407,7 @@ console.log("\n--- anum_docs-shaped current topology is data only ---");
       ],
     }) },
   });
-  const resolved = resolvePolicyProfile(source);
+  const resolved = resolvePolicyPacks(source);
   expect("anum_docs-shaped macro resolves without domain-specific implementation", resolved.ok, true);
   expect("anum_docs contract/conformance cross-link uses configured pointers", resolved.policy.document_relations.rules[0], {
     id: "contract-conformance:current-id",
@@ -420,5 +420,5 @@ console.log("\n--- anum_docs-shaped current topology is data only ---");
   expect("anum_docs executable gates use generic array_items path projection", resolved.policy.document_relations.rules[7].source.projection, "array_items");
 }
 
-console.log(`\n${failures === 0 ? "All policy profile tests passed" : `${failures} test(s) failed`}`);
+console.log(`\n${failures === 0 ? "All policy pack tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);

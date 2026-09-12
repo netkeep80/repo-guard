@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { listBuiltInPacks } from "../dist/policy-profiles.mjs";
+import { listBuiltInPacks } from "../dist/policy-packs.mjs";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);

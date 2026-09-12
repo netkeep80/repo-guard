@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
-import { listBuiltInPacks } from "../dist/policy-profiles.mjs";
+import { listBuiltInPacks } from "../dist/policy-packs.mjs";
 import { renderInitScaffold } from "../dist/init.mjs";
 
 const ACCEPTED_BASE = "25560cf62e3336cdd089a779a9032db01b0c71f1";

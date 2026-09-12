@@ -3,10 +3,10 @@ import { describe, it } from "node:test";
 import Ajv from "ajv";
 import { compareConstraintPrograms } from "../dist/checks/constraint-program.mjs";
 import { checkPolicyRelaxation, classifyChangedFiles, computePolicyDelta, policyRelaxationRuleFamily } from "../dist/checks/rules/policy-delta-rules.mjs";
-import { resolvePolicyProfile } from "../dist/policy-profiles.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { loadJSON } from "../dist/runtime/validation.mjs";
 
-const contractErrors = (policy) => resolvePolicyProfile(policy).errors;
+const contractErrors = (policy) => resolvePolicyPacks(policy).errors;
 const file = (path, extra = {}) => ({ path, status: "modified", addedLines: [], deletedLines: [], ...extra });
 const TRUSTED = { issue_author_permission_trusted: true };
 const UNTRUSTED = { issue_author_permission_trusted: false, governance_approved_label: false, codeowner_approved: false, trusted_team_approval: false };
@@ -274,7 +274,7 @@ describe("contract/conformance macro semantic boundary", () => {
 
 describe("contract/conformance macro strictness", () => {
   it("compares only expanded ordinary policy", () => {
-    const source = macroPolicy(), resolved = resolvePolicyProfile(source);
+    const source = macroPolicy(), resolved = resolvePolicyPacks(source);
     assert.equal(resolved.ok, true);
     assert.equal(resolved.policy.packs, undefined);
 
@@ -301,7 +301,7 @@ describe("contract/conformance macro strictness", () => {
         value: false,
       }],
     };
-    const resolved = resolvePolicyProfile(source);
+    const resolved = resolvePolicyPacks(source);
     assert.equal(resolved.ok, true);
     assert.equal(resolved.policy.packs, undefined);
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.previous.contract"].path, "contracts/spec-v1.json");
@@ -323,7 +323,7 @@ describe("contract/conformance macro strictness", () => {
       ],
     }]);
 
-    const currentOnly = resolvePolicyProfile(macroPolicy()).policy;
+    const currentOnly = resolvePolicyPacks(macroPolicy()).policy;
     const historyComparison = compareConstraintPrograms(currentOnly, resolved.policy);
     assert.notEqual(historyComparison.relation, "weaker");
     assert.ok(historyComparison.incomparable.every((item) => item.pointer !== "/" && !item.pointer?.startsWith("/contract_conformance")));
@@ -337,7 +337,7 @@ describe("contract/conformance macro strictness", () => {
     source.packs["contract-conformance"].previous.conformance.path = "contracts/mts-conformance-v0.6.json";
     source.packs["contract-conformance"].acceptance.document.path = "cutover/foundation-v2-c9-acceptance-v0.1.json";
     source.packs["contract-conformance"].control_paths = ["contracts/**", "cutover/**"];
-    const resolved = resolvePolicyProfile(source);
+    const resolved = resolvePolicyPacks(source);
     assert.equal(resolved.ok, true);
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.current.contract"].path, "contracts/mts-contract-v0.7.json");
     assert.equal(resolved.policy.document_relations.documents["contract-conformance.previous.contract"].path, "contracts/mts-contract-v0.6.json");
