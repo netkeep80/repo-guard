@@ -69,9 +69,9 @@ assert.equal(first.accepted.sha, acceptedSha);
 assert.equal(first.accepted.ci.conclusion, "success");
 assert.equal(first.accepted.provenance.origin, "accepted_ci");
 assert.equal(first.accepted.provenance.sha, acceptedSha);
-assert.equal(packageJson.version, "3.0.0");
-assert.equal(first.version.package_version, "3.0.0");
-assert.equal(first.version.matching_release_tag, "v3.0.0");
+assert.equal(packageJson.version, "3.1.0");
+assert.equal(first.version.package_version, "3.1.0");
+assert.equal(first.version.matching_release_tag, "v3.1.0");
 assert.equal(first.version.matching_published_release, false);
 assert.equal(first.version.release_commit, null);
 assert.equal(first.version.release_url, null);
@@ -79,7 +79,7 @@ assert.equal(first.version.release_truth_status, "package_only");
 assert.equal(first.version.provenance.origin, "github_observation");
 assert.equal(first.version.provenance.sha, acceptedSha);
 
-const publishedReleaseUrl = "https://example.invalid/releases/v3.0.0";
+const publishedReleaseUrl = "https://example.invalid/releases/v3.1.0";
 const exactPublishedFetch = async (url) => {
   if (url.includes("/git/ref/tags/")) {
     return response(200, {
@@ -88,7 +88,7 @@ const exactPublishedFetch = async (url) => {
   }
   if (url.includes("/releases/tags/")) {
     return response(200, {
-      tag_name: "v3.0.0",
+      tag_name: "v3.1.0",
       draft: false,
       prerelease: false,
       html_url: publishedReleaseUrl,
@@ -114,7 +114,7 @@ function nonOfficialReleaseFetch({ draft, prerelease, url }) {
     }
     if (requestUrl.includes("/releases/tags/")) {
       return response(200, {
-        tag_name: "v3.0.0",
+        tag_name: "v3.1.0",
         draft,
         prerelease,
         html_url: url,
@@ -130,7 +130,7 @@ for (const [name, fetchImpl] of [
     nonOfficialReleaseFetch({
       draft: false,
       prerelease: true,
-      url: "https://example.invalid/releases/v3.0.0-rc",
+      url: "https://example.invalid/releases/v3.1.0-rc",
     }),
   ],
   [
@@ -138,7 +138,7 @@ for (const [name, fetchImpl] of [
     nonOfficialReleaseFetch({
       draft: true,
       prerelease: false,
-      url: "https://example.invalid/releases/v3.0.0-draft",
+      url: "https://example.invalid/releases/v3.1.0-draft",
     }),
   ],
 ]) {
