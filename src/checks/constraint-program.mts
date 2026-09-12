@@ -129,6 +129,7 @@ const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata
 const exact = (value: unknown, metadata: StrictnessMetadata): ExactStrictness => compare("equal_or_incomparable", value, metadata) as ExactStrictness;
 const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("required_entity", true, metadata) as EntityStrictness;
 const leftSubsetPrimitive = relationDescriptorForSetComparison("left_subset").kind;
+const equalSetPrimitive = relationDescriptorForSetComparison("equal").kind;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -258,7 +259,7 @@ export function compileConstraintProgram(
     add("paths:pr-immutable:mutation", primitiveRuntime("pr-immutable-paths", "paths:pr-immutable:mutation", "numeric_bound", {
       source: diffFact("repository_path_set", { kind: "changed_paths", patterns: prImmutable, include_previous_paths: true }),
     }, { max: 0 }, "transaction"));
-    add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", "set_equal", {
+    add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", equalSetPrimitive, {
       left: policyStringSetFact("base", "/paths/pr_immutable"),
       right: policyStringSetFact("head", "/paths/pr_immutable"),
     }, {}, "transaction"));
