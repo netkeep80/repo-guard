@@ -107,6 +107,12 @@ function materializeCase(scenarioRoot, testCase) {
       resolve(temp, ".scenario-change-intent.json"),
     );
   }
+
+  // check-pr now refreshes an advertised base ref. Keep the synthetic fixture honest:
+  // checkout remains exact H, while origin/main names the exact BASE commit.
+  git(temp, "checkout", "--detach", head);
+  git(temp, "branch", "-f", "main", base);
+  git(temp, "remote", "add", "origin", temp);
   return { temp, base, head };
 }
 
