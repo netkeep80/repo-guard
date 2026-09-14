@@ -85,6 +85,7 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
       checkedFiles: facts.diff.files.checked.length,
       skippedOperationalFiles: facts.diagnostics.skippedOperationalFiles,
     },
+    ...(facts.repositoryObservation ? { repositoryObservation: facts.repositoryObservation } : {}),
     ...(options.executionPhase ? { executionPhase: options.executionPhase } : {}),
     ...anchorDiagnostics,
   });
