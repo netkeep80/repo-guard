@@ -30,11 +30,29 @@ export function extractGovernanceGrant(markdown) {
         return { ok: false, error: "multiple_governance_grants", message: `Found ${blocks.length} repo-guard-grant blocks; expected at most one` };
     return parseBlock(blocks[0], { "repo-guard-grant": "YAML" }, "grant");
 }
-const ISSUE_LINK_RE = /(?:Fixes|Closes|Resolves)\s+(?:[\w.-]+\/[\w.-]+)?#(\d+)/gi;
+const ISSUE_LINK_RE = /(?:Fixes|Closes|Resolves)\s+(?:([\w.-]+\/[\w.-]+))?#(\d+)/gi;
+export function extractLinkedIssueReferences(text, currentRepository) {
+    if (!text || typeof text !== "string")
+        return [];
+    const localRepository = typeof currentRepository === "string" ? currentRepository : "";
+    const seen = new Set(), result = [];
+    for (const match of text.matchAll(ISSUE_LINK_RE)) {
+        const repository = match[1] || localRepository;
+        const number = Number(match[2]);
+        if (!repository || !Number.isInteger(number) || number <= 0)
+            continue;
+        const key = `${repository.toLowerCase()}#${number}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        result.push({ repository, number });
+    }
+    return result;
+}
 export function extractLinkedIssueNumbers(text) {
     if (!text || typeof text !== "string")
         return [];
-    return [...new Set([...text.matchAll(ISSUE_LINK_RE)].map((match) => Number(match[1])))];
+    return [...new Set([...text.matchAll(ISSUE_LINK_RE)].map((match) => Number(match[2])))];
 }
 export function resolveChangeIntent(prBody, issueBody) {
     const direct = extractChangeIntent(prBody);

@@ -6,12 +6,9 @@ interface UserProjection {
 }
 
 interface IssueContextProjection {
+  body?: unknown;
   user?: UserProjection | null;
   author_association?: unknown;
-  labels?: unknown;
-}
-
-interface PullRequestContextProjection {
   labels?: unknown;
 }
 
@@ -20,46 +17,38 @@ interface PermissionProjection {
   role_name?: unknown;
 }
 
-interface TrustedAuthorizerOptions {
-  governanceApprovedLabel?: unknown;
-  trustedTeamApproval?: unknown;
-  codeownerApproved?: unknown;
-}
+export type RepositoryPermissionObservation =
+  | { status: "observed"; permission: unknown; role_name?: unknown }
+  | { status: "unavailable"; permission: null; reason: string };
 
 interface LocalTrustedAuthorizerInput {
   issueContext?: unknown;
-  prContext?: unknown;
-  permission?: unknown;
-  governanceApprovedLabel?: unknown;
-  trustedTeamApproval?: unknown;
-  codeownerApproved?: unknown;
+  permissionObservation?: unknown;
 }
 
 interface ResolveTrustedAuthorizerInput {
   repoFullName: unknown;
   issueNumber?: unknown;
-  prNumber?: unknown;
   issueContext?: unknown;
-  options?: TrustedAuthorizerOptions;
 }
 
 export interface TrustedAuthorizerSummary {
-  issue_author_permission_trusted: boolean;
-  governance_approved_label: boolean;
-  codeowner_approved: boolean;
-  trusted_team_approval: boolean;
-  issue_author_is_bot: boolean;
-  detected_label: unknown | null;
-  detected_author_login: unknown | null;
-  detected_author_permission: unknown | null;
-  detected_author_association: unknown | null;
+  trusted: boolean;
+  source: "repository_permission";
+  principal: {
+    login: string | null;
+    user_type: string | null;
+    is_bot: boolean;
+    author_association: string | null;
+  };
+  permission: RepositoryPermissionObservation;
+  observed_labels: string[];
+  reason: "trusted_permission" | "permission_insufficient" | "permission_unavailable" | "bot_principal" | "principal_missing";
 }
 
 const GITHUB_REPO_FULL_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const POSITIVE_INTEGER = /^[1-9][0-9]*$/;
 const TRUSTED_PERMISSIONS = new Set<string>(["admin", "maintain", "write"]);
-const TRUSTED_AUTHOR_ASSOCIATIONS = new Set<string>(["OWNER", "MEMBER", "COLLABORATOR"]);
-const DEFAULT_GOVERNANCE_LABEL = "governance-approved";
 
 function isValidRepo(repoFullName: unknown): repoFullName is string {
   return typeof repoFullName === "string" && GITHUB_REPO_FULL_NAME.test(repoFullName);
@@ -88,117 +77,84 @@ export function fetchIssueAuthorContext(repoFullName: unknown, issueNumber: unkn
   ]);
 }
 
-export function fetchPullRequestContext(repoFullName: unknown, prNumber: unknown): unknown | null {
-  if (!isValidRepo(repoFullName) || !isValidIssueNumber(prNumber)) return null;
-  return safeGhJson([
-    "api",
-    `repos/${repoFullName}/pulls/${prNumber as string | number | bigint}`,
-    "--jq",
-    "{labels: [.labels[].name]}",
-  ]);
-}
-
-export function fetchUserRepoPermission(repoFullName: unknown, username: unknown): unknown | null {
-  if (!isValidRepo(repoFullName)) return null;
-  if (typeof username !== "string" || username.length === 0) return null;
+export function fetchUserRepoPermission(repoFullName: unknown, username: unknown): RepositoryPermissionObservation {
+  if (!isValidRepo(repoFullName) || typeof username !== "string" || username.length === 0) {
+    return { status: "unavailable", permission: null, reason: "invalid_permission_lookup_input" };
+  }
   const encodedUsername = encodeURIComponent(username);
-  const result = safeGhJson([
-    "api",
-    `repos/${repoFullName}/collaborators/${encodedUsername}/permission`,
-    "--jq",
-    "{permission, role_name}",
-  ]) as PermissionProjection | null;
-  if (!result) return null;
-  return result.permission || null;
+  try {
+    const out = execFileSync("gh", [
+      "api",
+      `repos/${repoFullName}/collaborators/${encodedUsername}/permission`,
+      "--jq",
+      "{permission, role_name}",
+    ], { encoding: "utf-8", timeout: 30000 });
+    const result = out.trim() ? JSON.parse(out) as PermissionProjection : null;
+    if (!result || typeof result.permission !== "string") {
+      return { status: "unavailable", permission: null, reason: "permission_response_invalid" };
+    }
+    return { status: "observed", permission: result.permission, role_name: result.role_name };
+  } catch {
+    return { status: "unavailable", permission: null, reason: "permission_lookup_failed" };
+  }
 }
 
 export function isPermissionTrusted(permission: unknown): boolean {
-  if (typeof permission !== "string") return false;
-  return TRUSTED_PERMISSIONS.has(permission);
-}
-
-export function isAuthorAssociationTrusted(authorAssociation: unknown): boolean {
-  if (typeof authorAssociation !== "string") return false;
-  return TRUSTED_AUTHOR_ASSOCIATIONS.has(authorAssociation);
+  return typeof permission === "string" && TRUSTED_PERMISSIONS.has(permission);
 }
 
 export function isBotUser(user: unknown): boolean {
   if (!user || typeof user !== "object") return false;
   if ((user as UserProjection).type === "Bot") return true;
-  if (typeof (user as UserProjection).login === "string" && /\[bot\]$/i.test((user as UserProjection).login as string)) return true;
-  return false;
+  return typeof (user as UserProjection).login === "string" && /\[bot\]$/i.test((user as UserProjection).login as string);
 }
 
-export function detectTrustedAuthorizerLocally({
-  issueContext,
-  prContext,
-  permission,
-  governanceApprovedLabel = DEFAULT_GOVERNANCE_LABEL,
-  trustedTeamApproval = false,
-  codeownerApproved = false,
-}: LocalTrustedAuthorizerInput): TrustedAuthorizerSummary {
-  const summary: TrustedAuthorizerSummary = {
-    issue_author_permission_trusted: false,
-    governance_approved_label: false,
-    codeowner_approved: Boolean(codeownerApproved),
-    trusted_team_approval: Boolean(trustedTeamApproval),
-    issue_author_is_bot: false,
-    detected_label: null,
-    detected_author_login: null,
-    detected_author_permission: null,
-    detected_author_association: null,
-  };
-
-  if (issueContext && typeof issueContext === "object") {
-    summary.detected_author_login = (issueContext as IssueContextProjection).user?.login || null;
-    summary.detected_author_association = (issueContext as IssueContextProjection).author_association || null;
-    summary.issue_author_is_bot = isBotUser((issueContext as IssueContextProjection).user);
-    if (!summary.issue_author_is_bot) {
-      if (isPermissionTrusted(permission)) {
-        summary.issue_author_permission_trusted = true;
-        summary.detected_author_permission = permission;
-      } else if (isAuthorAssociationTrusted((issueContext as IssueContextProjection).author_association)) {
-        summary.issue_author_permission_trusted = true;
-        summary.detected_author_permission = (issueContext as IssueContextProjection).author_association;
-      }
-    }
-
-    const labels = Array.isArray((issueContext as IssueContextProjection).labels) ? (issueContext as IssueContextProjection).labels as unknown[] : [];
-    if (labels.includes(governanceApprovedLabel)) {
-      summary.governance_approved_label = true;
-      summary.detected_label = governanceApprovedLabel;
-    }
+function normalizePermissionObservation(value: unknown): RepositoryPermissionObservation {
+  if (value && typeof value === "object") {
+    const candidate = value as Partial<RepositoryPermissionObservation>;
+    if (candidate.status === "observed") return { status: "observed", permission: candidate.permission, ...("role_name" in candidate ? { role_name: candidate.role_name } : {}) };
+    if (candidate.status === "unavailable") return { status: "unavailable", permission: null, reason: typeof candidate.reason === "string" ? candidate.reason : "permission_unavailable" };
   }
-
-  if (prContext && typeof prContext === "object") {
-    const labels = Array.isArray((prContext as PullRequestContextProjection).labels) ? (prContext as PullRequestContextProjection).labels as unknown[] : [];
-    if (labels.includes(governanceApprovedLabel)) {
-      summary.governance_approved_label = true;
-      summary.detected_label = governanceApprovedLabel;
-    }
-  }
-
-  return summary;
+  return { status: "unavailable", permission: null, reason: "permission_not_observed" };
 }
 
-export function resolveTrustedAuthorizer({ repoFullName, issueNumber, prNumber, issueContext, options = {} }: ResolveTrustedAuthorizerInput): TrustedAuthorizerSummary {
-  const governanceApprovedLabel = options.governanceApprovedLabel || DEFAULT_GOVERNANCE_LABEL;
-  const observedIssueContext = issueContext === undefined ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null) : issueContext;
-  const prContext = prNumber ? fetchPullRequestContext(repoFullName, prNumber) : null;
-  const username = (observedIssueContext as IssueContextProjection | null)?.user?.login;
-  const permission = username && !isBotUser((observedIssueContext as IssueContextProjection).user)
-    ? fetchUserRepoPermission(repoFullName, username)
-    : null;
+export function detectTrustedAuthorizerLocally({ issueContext, permissionObservation }: LocalTrustedAuthorizerInput): TrustedAuthorizerSummary {
+  const context = issueContext && typeof issueContext === "object" ? issueContext as IssueContextProjection : null;
+  const user = context?.user && typeof context.user === "object" ? context.user : null;
+  const login = typeof user?.login === "string" && user.login ? user.login : null;
+  const userType = typeof user?.type === "string" && user.type ? user.type : null;
+  const authorAssociation = typeof context?.author_association === "string" ? context.author_association : null;
+  const labels = Array.isArray(context?.labels) ? context.labels.filter((label): label is string => typeof label === "string") : [];
+  const permission = normalizePermissionObservation(permissionObservation);
+  const bot = isBotUser(user);
+  const positivePermission = permission.status === "observed" && isPermissionTrusted(permission.permission);
+  const trusted = Boolean(login && !bot && positivePermission);
+  const reason: TrustedAuthorizerSummary["reason"] = !login
+    ? "principal_missing"
+    : bot
+      ? "bot_principal"
+      : permission.status === "unavailable"
+        ? "permission_unavailable"
+        : positivePermission
+          ? "trusted_permission"
+          : "permission_insufficient";
 
-  // codeowner_approved / trusted_team_approval are accepted as trust sources by
-  // the rule engine but are not yet auto-resolved from the GitHub API here.
-  // They flow in only through caller-provided options for tests / future work.
-  return detectTrustedAuthorizerLocally({
-    issueContext: observedIssueContext,
-    prContext,
+  return {
+    trusted,
+    source: "repository_permission",
+    principal: { login, user_type: userType, is_bot: bot, author_association: authorAssociation },
     permission,
-    governanceApprovedLabel,
-    trustedTeamApproval: options.trustedTeamApproval,
-    codeownerApproved: options.codeownerApproved,
-  });
+    observed_labels: labels,
+    reason,
+  };
+}
+
+export function resolveTrustedAuthorizer({ repoFullName, issueNumber, issueContext }: ResolveTrustedAuthorizerInput): TrustedAuthorizerSummary {
+  const observedIssueContext = issueContext === undefined ? (issueNumber ? fetchIssueAuthorContext(repoFullName, issueNumber) : null) : issueContext;
+  const context = observedIssueContext && typeof observedIssueContext === "object" ? observedIssueContext as IssueContextProjection : null;
+  const username = context?.user?.login;
+  const permissionObservation = typeof username === "string" && username.length && !isBotUser(context?.user)
+    ? fetchUserRepoPermission(repoFullName, username)
+    : { status: "unavailable", permission: null, reason: isBotUser(context?.user) ? "bot_principal" : "principal_missing" } as RepositoryPermissionObservation;
+  return detectTrustedAuthorizerLocally({ issueContext: observedIssueContext, permissionObservation });
 }

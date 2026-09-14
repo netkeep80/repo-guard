@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "../dist/change-intent.mjs";
+import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "../dist/change-intent.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const issueTemplatePath = ".github/ISSUE_TEMPLATE/change-intent.yml";
@@ -61,6 +61,19 @@ describe("GovernanceGrant extraction", () => {
 });
 
 describe("linked issue references", () => {
-  assert.deepEqual(extractLinkedIssueNumbers("Fixes #5\nCloses #5\nResolves owner/repo#7"), [5, 7]);
-  assert.deepEqual(extractLinkedIssueNumbers("normal text"), []);
+  it("keeps the legacy number projection for callers that only need numbers", () => {
+    assert.deepEqual(extractLinkedIssueNumbers("Fixes #5\nCloses #5\nResolves owner/repo#7"), [5, 7]);
+    assert.deepEqual(extractLinkedIssueNumbers("normal text"), []);
+  });
+
+  it("preserves explicit repository identity and assigns local shorthand to the current repository", () => {
+    assert.deepEqual(
+      extractLinkedIssueReferences("Fixes #5\nCloses netkeep80/repo-guard#6\nResolves owner/repo#7", "netkeep80/repo-guard"),
+      [
+        { repository: "netkeep80/repo-guard", number: 5 },
+        { repository: "netkeep80/repo-guard", number: 6 },
+        { repository: "owner/repo", number: 7 },
+      ],
+    );
+  });
 });

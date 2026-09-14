@@ -8,6 +8,7 @@ type ChangeIntentSuccess = { ok: true; changeIntent: unknown };
 type GovernanceGrantSuccess = { ok: true; grant: unknown | null };
 export type ChangeIntentExtraction = ChangeIntentSuccess | ExtractionFailure;
 export type GovernanceGrantExtraction = GovernanceGrantSuccess | ExtractionFailure;
+export interface LinkedIssueReference { repository: string; number: number; }
 
 function parseBlock<Field extends string>(block: MarkdownCodeBlock, formats: Readonly<Record<string, string>>, field: Field, errorPrefix = field): ({ ok: true } & Record<Field, unknown>) | ExtractionFailure {
   try {
@@ -35,10 +36,26 @@ export function extractGovernanceGrant(markdown: unknown): GovernanceGrantExtrac
   return parseBlock(blocks[0]!, { "repo-guard-grant": "YAML" }, "grant");
 }
 
-const ISSUE_LINK_RE = /(?:Fixes|Closes|Resolves)\s+(?:[\w.-]+\/[\w.-]+)?#(\d+)/gi;
+const ISSUE_LINK_RE = /(?:Fixes|Closes|Resolves)\s+(?:([\w.-]+\/[\w.-]+))?#(\d+)/gi;
+export function extractLinkedIssueReferences(text: unknown, currentRepository: unknown): LinkedIssueReference[] {
+  if (!text || typeof text !== "string") return [];
+  const localRepository = typeof currentRepository === "string" ? currentRepository : "";
+  const seen = new Set<string>(), result: LinkedIssueReference[] = [];
+  for (const match of text.matchAll(ISSUE_LINK_RE)) {
+    const repository = match[1] || localRepository;
+    const number = Number(match[2]);
+    if (!repository || !Number.isInteger(number) || number <= 0) continue;
+    const key = `${repository.toLowerCase()}#${number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ repository, number });
+  }
+  return result;
+}
+
 export function extractLinkedIssueNumbers(text: unknown): number[] {
   if (!text || typeof text !== "string") return [];
-  return [...new Set([...text.matchAll(ISSUE_LINK_RE)].map((match) => Number(match[1])))];
+  return [...new Set([...text.matchAll(ISSUE_LINK_RE)].map((match) => Number(match[2])))];
 }
 
 export function resolveChangeIntent(prBody: unknown, issueBody: unknown): ChangeIntentExtraction {

@@ -9,10 +9,8 @@ interface GovernanceGrantProjection {
 }
 
 interface TrustedAuthorizerProjection {
-  issue_author_permission_trusted?: unknown;
-  governance_approved_label?: unknown;
-  codeowner_approved?: unknown;
-  trusted_team_approval?: unknown;
+  trusted?: unknown;
+  source?: unknown;
 }
 
 interface GovernanceCheckInput {
@@ -49,9 +47,7 @@ const expand = (pattern: unknown): string[] => typeof pattern !== "string" || !p
 export function expandGovernancePatterns(patterns: unknown[] = []): string[] {
   return [...new Set(patterns.flatMap(expand))];
 }
-const trusted = (authorizer: TrustedAuthorizerProjection | null | undefined): boolean => Boolean(authorizer && (
-  authorizer.issue_author_permission_trusted || authorizer.governance_approved_label || authorizer.codeowner_approved || authorizer.trusted_team_approval
-));
+const trusted = (authorizer: TrustedAuthorizerProjection | null | undefined): boolean => authorizer?.trusted === true && authorizer.source === "repository_permission";
 const uniqueSorted = (paths: string[]): string[] => [...new Set(paths)].sort();
 
 export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null }: GovernanceCheckInput): GovernanceCheckResult {
@@ -63,10 +59,6 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
   const touched = uniqueSorted(identities.filter(matchesBoundary));
   const declared = Array.isArray(governanceGrant?.authorized_governance_paths) ? governanceGrant.authorized_governance_paths as string[] : [];
   const sourceTrusted = trusted(trustedAuthorizer), authorized = sourceTrusted ? declared : [];
-  // Mixed files are allowed only for an explicitly trusted atomic cutover.
-  // This does not authorize governance files themselves: those still require
-  // matching authorized_governance_paths below, and ordinary scope/must-not
-  // rules remain independent vetoes.
   const atomicGovernanceCutover = governanceChange
     && governanceGrant?.allow_atomic_governance_cutover === true
     && sourceTrusted;
@@ -81,7 +73,7 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
     ...unauthorized.map((path) => `governance path ${path} changed without matching GovernanceGrant authorization`),
   ];
   if (atomicGovernanceCutover) details.push("Trusted atomic governance cutover permits scoped non-governance files");
-  if (declared.length && !sourceTrusted) details.push("GovernanceGrant is ignored because no trusted authorizer was detected");
+  if (declared.length && !sourceTrusted) details.push("GovernanceGrant is ignored because positive repository permission authority was not established");
   const ok = !nonGovernance.length && !unauthorized.length;
   return {
     ok,
@@ -95,7 +87,7 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
     untrusted_governance_grant_ignored: declared.length > 0 && !sourceTrusted,
     atomic_governance_cutover: atomicGovernanceCutover,
     details,
-    hint: ok ? undefined : "Use a dedicated governance-only diff, or a trusted atomic governance cutover, and authorize every touched governance path from a trusted linked-issue GovernanceGrant.",
+    hint: ok ? undefined : "Use a dedicated governance-only diff, or a trusted atomic governance cutover, and authorize every touched governance path from a linked-issue GovernanceGrant whose human author has positive write/maintain/admin repository permission.",
   };
 }
 

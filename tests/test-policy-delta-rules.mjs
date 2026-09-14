@@ -8,8 +8,8 @@ import { loadJSON } from "../dist/runtime/validation.mjs";
 
 const contractErrors = (policy) => resolvePolicyPacks(policy).errors;
 const file = (path, extra = {}) => ({ path, status: "modified", addedLines: [], deletedLines: [], ...extra });
-const TRUSTED = { issue_author_permission_trusted: true };
-const UNTRUSTED = { issue_author_permission_trusted: false, governance_approved_label: false, codeowner_approved: false, trusted_team_approval: false };
+const TRUSTED = { trusted: true, source: "repository_permission" };
+const UNTRUSTED = { trusted: false, source: "repository_permission", reason: "positive_repository_permission_not_established" };
 const BASE = {
   enforcement: { mode: "blocking" },
   paths: { forbidden: ["secrets/**"], governance_paths: ["repo-policy.json", "schemas/"] },
@@ -364,7 +364,7 @@ describe("GovernanceGrant relaxation authorization", () => {
   it("accepts parent pointers", () => assert.equal(check({ governanceGrant: grant("/size_rules/max-source") }).ok, true));
   it("blocks missing grant", () => assert.ok(check({ governanceGrant: null }).blocked_reasons.includes("governance_grant_missing")));
   it("blocks incomplete grant", () => assert.ok(check({ governanceGrant: grant("/diff_rules/max_new_files") }).blocked_reasons.includes("governance_grant_does_not_cover_all_relaxations")));
-  it("blocks untrusted authorizer", () => assert.ok(check({ trustedAuthorizer: UNTRUSTED }).blocked_reasons.includes("no_trusted_authorization_source")));
+  it("blocks untrusted authorizer", () => assert.ok(check({ trustedAuthorizer: UNTRUSTED }).blocked_reasons.includes("positive_repository_permission_not_established")));
   it("blocks non-governance intent", () => assert.ok(check({ changeIntentType: "feature" }).blocked_reasons.includes("change_intent_type_is_not_governance")));
   it("blocks mixing relaxation with source changes", () => {
     const result = check({ changedFiles: [file("repo-policy.json"), file("src/a.mjs")] });
@@ -372,7 +372,11 @@ describe("GovernanceGrant relaxation authorization", () => {
   });
   for (const [name, source] of [
     ["label", { governance_approved_label: true }], ["CODEOWNERS", { codeowner_approved: true }], ["team", { trusted_team_approval: true }],
-  ]) it(`accepts trusted ${name} source`, () => assert.equal(check({ trustedAuthorizer: { ...UNTRUSTED, ...source } }).ok, true));
+  ]) it(`does not accept retired ${name} source as authority`, () => {
+    const result = check({ trustedAuthorizer: { ...UNTRUSTED, ...source } });
+    assert.equal(result.ok, false);
+    assert.ok(result.blocked_reasons.includes("positive_repository_permission_not_established"));
+  });
   it("does not require grants when policy is unchanged", () => assert.equal(checkPolicyRelaxation({ basePolicy: BASE, headPolicy: BASE, changedFiles: [], trustedAuthorizer: null, governanceGrant: null }).ok, true));
 });
 
