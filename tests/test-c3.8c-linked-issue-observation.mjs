@@ -25,7 +25,7 @@ authorized_governance_paths:
 allow_policy_relaxation: []
 \`\`\``;
 
-test("check-pr reuses one linked-issue observation across grant and trust resolution", () => {
+test("check-pr reuses one linked-issue observation and needs only positive repository permission authority", () => {
   const root = mkdtempSync(join(tmpdir(), "rg-c38c-"));
   const fakeDir = mkdtempSync(join(tmpdir(), "rg-c38c-gh-"));
   try {
@@ -99,9 +99,9 @@ if (route.endsWith('/issues/77')) {
     assert.equal(result.status, 0, output);
     assert.match(output, /PASS: governance-change-authorization/);
     assert.deepEqual(summarizeCalls(readCalls()), {
-      totalRestReads: 3,
+      totalRestReads: 2,
       linkedIssueReads: 1,
-      prReads: 1,
+      prReads: 0,
       permissionReads: 1,
     });
 
@@ -111,9 +111,9 @@ if (route.endsWith('/issues/77')) {
     assert.equal(failed.status, 1, failedOutput);
     assert.doesNotMatch(failedOutput, /PASS: governance-change-authorization/);
     assert.deepEqual(summarizeCalls(readCalls()), {
-      totalRestReads: 2,
+      totalRestReads: 1,
       linkedIssueReads: 1,
-      prReads: 1,
+      prReads: 0,
       permissionReads: 0,
     });
   } finally {
