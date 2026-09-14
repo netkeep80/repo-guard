@@ -76,7 +76,7 @@ test("public check-pr blocks PR-controlled widening of policy max_new_files=0", 
       repository_kind: "library",
       enforcement: { mode: "blocking" },
       paths: { forbidden: [], canonical_docs: [], governance_paths: [] },
-      diff_rules: { max_new_files: 0, max_net_added_lines: 1000 },
+      diff_rules: { max_new_docs: 10, max_new_files: 0, max_net_added_lines: 1000 },
       content_rules: [],
       cochange_rules: [],
     }));
