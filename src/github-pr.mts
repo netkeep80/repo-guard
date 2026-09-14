@@ -1,16 +1,23 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
-import { getDiffObservation, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
+import {
+  acquirePullRequestObservation,
+  getDiffObservation,
+  listTrackedFilesAtRef,
+  readBasePolicy,
+  readFileAtRef,
+  type RepositoryObservation,
+} from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
-import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
+import { loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 
-type PolicyRuntime = ReturnType<typeof loadPolicyRuntime>;
+type PolicyRuntime = ReturnType<typeof loadPolicyRuntimeFromObject>;
 type RuntimePolicy = PolicyRuntime["policy"];
-type CheckPrRoots = Parameters<typeof loadPolicyRuntime>[0] & {
+type CheckPrRoots = Parameters<typeof loadPolicyRuntimeFromObject>[0] & {
   enforcementMode?: Parameters<typeof resolveEnforcementMode>[0]["cliValue"];
 };
 type GovernanceGrantResult = ReturnType<typeof extractGovernanceGrant>;
@@ -114,6 +121,14 @@ function fetchLinkedIssue({ prBody, repoFullName }: { prBody: unknown; repoFullN
   return { linkedIssues, issueBody, issueContext, fatal: false };
 }
 
+function headPolicyRuntime(roots: CheckPrRoots, observation: RepositoryObservation): PolicyRuntime | null {
+  return loadRuntime(() => {
+    const raw = readFileAtRef(observation.evaluated.commit_sha, "repo-policy.json", roots.repoRoot);
+    if (raw == null) throw new Error("repo-policy.json is unavailable at exact PR head");
+    return loadPolicyRuntimeFromObject(roots, JSON.parse(raw), { label: "repo-policy.json (PR head)" });
+  }, "repo-policy.json (PR head)", "Proposed policy compilation failed");
+}
+
 export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   if (args.length) { console.error(`Unexpected argument for check-pr: ${args[0]}`); return 1; }
   const prereqs = checkPrerequisites();
@@ -123,15 +138,25 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const { base: eventBase, baseRef, head, prBody, prNumber, repoFullName } = event;
   if (!eventBase || !head) { console.error("ERROR: pull_request event missing base/head SHA"); return 1; }
 
-  let base = eventBase as string;
-  if (baseRef) {
-    try { base = resolveRemoteBaseRef(baseRef, roots.repoRoot); }
-    catch (error: unknown) { console.error(`ERROR: cannot resolve current PR base ref ${baseRef as string}: ${(error as Error).message}`); return 1; }
-    if (base !== eventBase) console.log(`Base ref ${baseRef as string} advanced from event snapshot ${(eventBase as string).slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
+  let observation: RepositoryObservation;
+  try {
+    observation = acquirePullRequestObservation({
+      repository: typeof repoFullName === "string" ? repoFullName : "",
+      baseRef: typeof baseRef === "string" && baseRef ? baseRef : null,
+      eventBaseSha: eventBase as string,
+      headSha: head as string,
+      cwd: roots.repoRoot,
+    });
+  } catch (error: unknown) {
+    console.error(`ERROR: ${(error as Error).message}`);
+    return 1;
   }
-  console.log(`PR #${prNumber as string | number}: checking ChangeIntent and diff (${base.slice(0, 7)}..${(head as string).slice(0, 7)})`);
+  const base = observation.base.sha, exactHead = observation.head.sha;
+  if (observation.base.advanced_since_event) console.log(`Base ref ${String(observation.base.ref)} advanced from event snapshot ${observation.base.event_sha.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
+  console.log(`PR #${prNumber as string | number}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
+  console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
 
-  const headRuntime = loadRuntime(() => loadPolicyRuntime(roots, { label: "repo-policy.json (PR head)" }), "repo-policy.json (PR head)", "Proposed policy compilation failed");
+  const headRuntime = headPolicyRuntime(roots, observation);
   if (!headRuntime) return 1;
   const initialChecks: InitialCheck[] = [], baseRead = readBasePolicy(base, roots.repoRoot);
   let runtime = headRuntime, basePolicy: RuntimePolicy | null = null, trustedGovernancePaths: unknown = [];
@@ -170,14 +195,19 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     if (check.ok) governanceGrant = (resolved.grantResult as { grant?: unknown }).grant;
   }
 
-  let diff;
-  try { diff = getDiffObservation(base, head as string, roots.repoRoot); }
-  catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
+  let diff, trackedFiles: string[];
+  try {
+    diff = getDiffObservation(base, exactHead, roots.repoRoot);
+    trackedFiles = listTrackedFilesAtRef(observation.evaluated.commit_sha, roots.repoRoot);
+  } catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
+  const readEvaluatedFile = (path: string) => readFileAtRef(observation.evaluated.commit_sha, path, roots.repoRoot);
+  const readSnapshotFile = (ref: string, path: string) => readFileAtRef(ref, path, roots.repoRoot);
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
   if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
 
   const baseInput = {
-    mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
+    mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
+    repositoryObservation: observation, trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement,
     diffText: diff.diffText, diffFiles: diff.files, initialChecks,
   } as Parameters<typeof runPolicyPipeline>[0];
@@ -186,7 +216,8 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const proposedEnforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: headRuntime.policy } as Parameters<typeof resolveEnforcementMode>[0]);
   if (!proposedEnforcement.ok) { console.error(`ERROR: proposed policy enforcement: ${proposedEnforcement.message}`); return 1; }
   const proposedInput = {
-    mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
+    mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
+    repositoryObservation: observation, trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
     enforcement: proposedEnforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks: [],
   } as Parameters<typeof runPolicyPipeline>[0];
