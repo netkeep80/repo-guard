@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
-import { getDiffObservation, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
+import { acquirePullRequestObservation, getDiffObservation, listTrackedFilesAtRef, readBasePolicy, readFileAtRef, } from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
-import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
+import { loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
@@ -107,6 +107,14 @@ function fetchLinkedIssue({ prBody, repoFullName }) {
         console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
     return { linkedIssues, issueBody, issueContext, fatal: false };
 }
+function headPolicyRuntime(roots, observation) {
+    return loadRuntime(() => {
+        const raw = readFileAtRef(observation.evaluated.commit_sha, "repo-policy.json", roots.repoRoot);
+        if (raw == null)
+            throw new Error("repo-policy.json is unavailable at exact PR head");
+        return loadPolicyRuntimeFromObject(roots, JSON.parse(raw), { label: "repo-policy.json (PR head)" });
+    }, "repo-policy.json (PR head)", "Proposed policy compilation failed");
+}
 export function runCheckPR(roots, args = []) {
     if (args.length) {
         console.error(`Unexpected argument for check-pr: ${args[0]}`);
@@ -127,20 +135,26 @@ export function runCheckPR(roots, args = []) {
         console.error("ERROR: pull_request event missing base/head SHA");
         return 1;
     }
-    let base = eventBase;
-    if (baseRef) {
-        try {
-            base = resolveRemoteBaseRef(baseRef, roots.repoRoot);
-        }
-        catch (error) {
-            console.error(`ERROR: cannot resolve current PR base ref ${baseRef}: ${error.message}`);
-            return 1;
-        }
-        if (base !== eventBase)
-            console.log(`Base ref ${baseRef} advanced from event snapshot ${eventBase.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
+    let observation;
+    try {
+        observation = acquirePullRequestObservation({
+            repository: typeof repoFullName === "string" ? repoFullName : "",
+            baseRef: typeof baseRef === "string" && baseRef ? baseRef : null,
+            eventBaseSha: eventBase,
+            headSha: head,
+            cwd: roots.repoRoot,
+        });
     }
-    console.log(`PR #${prNumber}: checking ChangeIntent and diff (${base.slice(0, 7)}..${head.slice(0, 7)})`);
-    const headRuntime = loadRuntime(() => loadPolicyRuntime(roots, { label: "repo-policy.json (PR head)" }), "repo-policy.json (PR head)", "Proposed policy compilation failed");
+    catch (error) {
+        console.error(`ERROR: ${error.message}`);
+        return 1;
+    }
+    const base = observation.base.sha, exactHead = observation.head.sha;
+    if (observation.base.advanced_since_event)
+        console.log(`Base ref ${String(observation.base.ref)} advanced from event snapshot ${observation.base.event_sha.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
+    console.log(`PR #${prNumber}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
+    console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
+    const headRuntime = headPolicyRuntime(roots, observation);
     if (!headRuntime)
         return 1;
     const initialChecks = [], baseRead = readBasePolicy(base, roots.repoRoot);
@@ -188,14 +202,17 @@ export function runCheckPR(roots, args = []) {
         if (check.ok)
             governanceGrant = resolved.grantResult.grant;
     }
-    let diff;
+    let diff, trackedFiles;
     try {
-        diff = getDiffObservation(base, head, roots.repoRoot);
+        diff = getDiffObservation(base, exactHead, roots.repoRoot);
+        trackedFiles = listTrackedFilesAtRef(observation.evaluated.commit_sha, roots.repoRoot);
     }
     catch (error) {
         console.error(`ERROR: ${error.message}`);
         return 1;
     }
+    const readEvaluatedFile = (path) => readFileAtRef(observation.evaluated.commit_sha, path, roots.repoRoot);
+    const readSnapshotFile = (ref, path) => readFileAtRef(ref, path, roots.repoRoot);
     let trustedAuthorizer = null;
     if (basePolicy && repoFullName)
         try {
@@ -203,7 +220,8 @@ export function runCheckPR(roots, args = []) {
         }
         catch { }
     const baseInput = {
-        mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head,
+        mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
+        repositoryObservation: observation, trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
         changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement,
         diffText: diff.diffText, diffFiles: diff.files, initialChecks,
     };
@@ -215,7 +233,8 @@ export function runCheckPR(roots, args = []) {
         return 1;
     }
     const proposedInput = {
-        mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head,
+        mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
+        repositoryObservation: observation, trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
         changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
         enforcement: proposedEnforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks: [],
     };
