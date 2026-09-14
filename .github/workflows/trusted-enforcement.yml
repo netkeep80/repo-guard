@@ -1,0 +1,48 @@
+name: Trusted enforcement
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+concurrency:
+  group: trusted-enforcement-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - name: Checkout accepted enforcement source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Acquire candidate head as Git evidence
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --prune origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head"
+          OBSERVED_HEAD="$(git rev-parse refs/remotes/pull/${PR_NUMBER}/head)"
+          test "$OBSERVED_HEAD" = "$EXPECTED_HEAD_SHA"
+
+      - name: Run accepted repo-guard
+        uses: ./
+        with:
+          mode: check-pr
+          enforcement: blocking
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
