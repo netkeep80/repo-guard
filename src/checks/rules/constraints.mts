@@ -41,6 +41,8 @@ interface ConstraintContext {
 interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
 
+const BUDGET_EVIDENCE_FIELDS = ["policy_limit", "intent_limit", "effective_limit"] as const;
+
 function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
   const phase = context.executionPhase ?? "both";
   if (phase !== "transaction" && phase !== "state" && phase !== "both") {
@@ -75,6 +77,16 @@ function primitiveRelation(constraint: RuntimeConstraint): PrimitiveRelation {
   };
 }
 
+function withConstraintEvidence(check: unknown, constraint: RuntimeConstraint): unknown {
+  if (!check || typeof check !== "object" || Array.isArray(check)) return check;
+  const parameters = constraint.parameters || {};
+  const evidence = Object.fromEntries(BUDGET_EVIDENCE_FIELDS.flatMap((field) => Object.hasOwn(parameters, field) ? [[field, parameters[field]]] : []));
+  if (!Object.keys(evidence).length) return check;
+  const record = check as Record<string, unknown>;
+  const data = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data as Record<string, unknown> : {};
+  return { ...record, ...evidence, data: { ...data, ...evidence } };
+}
+
 function advisoryCheck(check: unknown, advisory: boolean | undefined): unknown {
   if (!advisory || !check || typeof check !== "object" || Array.isArray(check)) return check;
   return { ...(check as Record<string, unknown>), advisory: true };
@@ -86,7 +98,8 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
   for (const constraint of constraints) {
     if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
     if (constraint.kind !== "primitive_relation") throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
-    const check = advisoryCheck(evaluatePrimitiveRelation(facts, primitiveRelation(constraint)), constraint.advisory);
+    const evaluated = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
+    const check = advisoryCheck(withConstraintEvidence(evaluated, constraint), constraint.advisory);
     results.push({ name: constraint.name, check });
   }
   return results;
