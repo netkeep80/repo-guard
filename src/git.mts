@@ -31,6 +31,39 @@ export interface GitDiffObservation {
   files: ParsedDiffFile[];
 }
 
+export interface PullRequestObservationInput {
+  repository: string;
+  baseRef?: string | null;
+  eventBaseSha: string;
+  headSha: string;
+  cwd: string;
+  remote?: string;
+}
+
+export interface RepositoryObservation {
+  contract: "exact_head";
+  repository: string;
+  source: "github_pull_request";
+  observed_at: string;
+  base: {
+    ref: string | null;
+    event_sha: string;
+    sha: string;
+    tree_sha: string;
+    advanced_since_event: boolean;
+  };
+  merge_base: { sha: string; tree_sha: string };
+  head: { sha: string; tree_sha: string };
+  evaluated: { commit_sha: string; tree_sha: string };
+  checkout: {
+    commit_sha: string;
+    tree_sha: string;
+    matches_head: boolean;
+    dirty: boolean;
+  };
+  cache_key: string;
+}
+
 function childProcessMessage(error: unknown): string {
   const stderr = (error as ChildProcessFailure | null | undefined)?.stderr?.toString?.().trim();
   if (stderr) return stderr;
@@ -64,6 +97,35 @@ export function runGit(args: string[], options: RunGitOptions = {}): string {
   }
 }
 
+function exactCommit(ref: string, cwd: string, label: string): string {
+  try {
+    const sha = runGit(["rev-parse", "--verify", `${ref}^{commit}`], { cwd }).trim();
+    if (!sha) throw new Error("empty object id");
+    return sha;
+  } catch (error: unknown) {
+    throw new Error(`repository observation failed: cannot resolve ${label}: ${(error as Error).message}`);
+  }
+}
+
+function exactTree(ref: string, cwd: string, label: string): string {
+  try {
+    const sha = runGit(["rev-parse", "--verify", `${ref}^{tree}`], { cwd }).trim();
+    if (!sha) throw new Error("empty tree id");
+    return sha;
+  } catch (error: unknown) {
+    throw new Error(`repository observation failed: cannot resolve ${label} tree: ${(error as Error).message}`);
+  }
+}
+
+function refreshRemoteBaseRef(baseRef: string, cwd: string, remote: string): void {
+  try {
+    runGit(["check-ref-format", "--branch", baseRef], { cwd });
+    runGit(["fetch", "--no-tags", "--prune", remote, `+refs/heads/${baseRef}:refs/remotes/${remote}/${baseRef}`], { cwd });
+  } catch (error: unknown) {
+    throw new Error(`repository observation failed: cannot refresh base ${remote}/${baseRef}: ${(error as Error).message}`);
+  }
+}
+
 export function resolveRemoteBaseRef(baseRef: unknown, cwd: string, remote = "origin"): string {
   if (typeof baseRef !== "string" || baseRef.length === 0) {
     throw new Error("missing PR base ref");
@@ -74,6 +136,69 @@ export function resolveRemoteBaseRef(baseRef: unknown, cwd: string, remote = "or
     throw new Error(`current base ref ${ref} resolved to an empty object id`);
   }
   return sha;
+}
+
+export function listTrackedFilesAtRef(ref: string, cwd: string): string[] {
+  const output = runGit(["ls-tree", "-r", "-z", "--name-only", ref], { cwd });
+  return output.split("\0").filter(Boolean);
+}
+
+export function acquirePullRequestObservation(input: PullRequestObservationInput): RepositoryObservation {
+  const remote = input.remote || "origin";
+  if (!input.repository) throw new Error("repository observation failed: missing repository identity");
+  if (!input.eventBaseSha) throw new Error("repository observation failed: missing event base SHA");
+  if (!input.headSha) throw new Error("repository observation failed: missing PR head SHA");
+
+  const eventBase = exactCommit(input.eventBaseSha, input.cwd, "event BASE");
+  if (input.baseRef) refreshRemoteBaseRef(input.baseRef, input.cwd, remote);
+  const base = input.baseRef
+    ? exactCommit(`refs/remotes/${remote}/${input.baseRef}`, input.cwd, "current BASE")
+    : eventBase;
+  const head = exactCommit(input.headSha, input.cwd, "PR HEAD");
+
+  let mergeBase: string;
+  try {
+    mergeBase = runGit(["merge-base", base, head], { cwd: input.cwd }).trim();
+  } catch {
+    throw new Error("repository observation failed: missing merge base");
+  }
+  if (!mergeBase) throw new Error("repository observation failed: missing merge base");
+
+  const baseTree = exactTree(base, input.cwd, "BASE");
+  const mergeBaseTree = exactTree(mergeBase, input.cwd, "merge base");
+  const headTree = exactTree(head, input.cwd, "PR HEAD");
+  const checkoutCommit = exactCommit("HEAD", input.cwd, "checkout HEAD");
+  const checkoutTree = exactTree(checkoutCommit, input.cwd, "checkout");
+  let dirty: boolean;
+  try {
+    dirty = runGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: input.cwd }).length > 0;
+  } catch (error: unknown) {
+    throw new Error(`repository observation failed: cannot inspect checkout state: ${(error as Error).message}`);
+  }
+
+  return {
+    contract: "exact_head",
+    repository: input.repository,
+    source: "github_pull_request",
+    observed_at: new Date().toISOString(),
+    base: {
+      ref: input.baseRef || null,
+      event_sha: eventBase,
+      sha: base,
+      tree_sha: baseTree,
+      advanced_since_event: base !== eventBase,
+    },
+    merge_base: { sha: mergeBase, tree_sha: mergeBaseTree },
+    head: { sha: head, tree_sha: headTree },
+    evaluated: { commit_sha: head, tree_sha: headTree },
+    checkout: {
+      commit_sha: checkoutCommit,
+      tree_sha: checkoutTree,
+      matches_head: checkoutCommit === head,
+      dirty,
+    },
+    cache_key: `${input.repository}:${headTree}`,
+  };
 }
 
 function diffArgs(...args: string[]): string[] {
