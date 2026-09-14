@@ -9,11 +9,13 @@
     "change_type": { "type": "string", "minLength": 1 },
     "scope": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
     "budgets": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "description": "Optional PR-authored tightening requests. When repo-policy.json defines the corresponding diff_rules ceiling, the effective limit is min(policy, ChangeIntent); ChangeIntent cannot widen the trusted repository ceiling.",
+      "additionalProperties": false,
       "properties": {
-        "max_new_files": { "type": "integer", "minimum": 0 },
-        "max_new_docs": { "type": "integer", "minimum": 0 },
-        "max_net_added_lines": { "type": "integer", "minimum": 0 }
+        "max_new_files": { "type": "integer", "minimum": 0, "description": "Additional maximum for new files; may tighten but never widen diff_rules.max_new_files." },
+        "max_new_docs": { "type": "integer", "minimum": 0, "description": "Additional maximum for new documents; may tighten but never widen diff_rules.max_new_docs." },
+        "max_net_added_lines": { "type": "integer", "minimum": 0, "description": "Additional maximum for net added lines; may tighten but never widen diff_rules.max_net_added_lines." }
       }
     },
     "anchors": {

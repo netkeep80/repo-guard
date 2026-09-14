@@ -141,14 +141,26 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
     for (const [field, metric, name] of [
         ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
     ]) {
-        const value = diff[field], effective = budgets[field] ?? value;
+        const value = diff[field], intentLimit = budgets[field];
+        const effective = typeof value === "number" && typeof intentLimit === "number"
+            ? Math.min(value, intentLimit)
+            : typeof value === "number"
+                ? value
+                : typeof intentLimit === "number"
+                    ? intentLimit
+                    : undefined;
         const runtime = effective === undefined ? null : primitiveRuntime(name, `diff:${field}`, "numeric_bound", {
             source: diffFact("scalar", {
                 kind: "metric",
                 metric,
                 ...(metric === "new_docs" ? { exclude_paths: strings(policy.paths?.canonical_docs) } : {}),
             }),
-        }, { max: effective });
+        }, {
+            max: effective,
+            ...(typeof value === "number" ? { policy_limit: value } : {}),
+            ...(typeof intentLimit === "number" ? { intent_limit: intentLimit } : {}),
+            effective_limit: effective,
+        });
         add(`diff:${field}`, runtime, typeof value === "number" ? scalar("lower_stricter", value, {
             pointer: `/diff_rules/${field}`, weakenKind: "diff_rule_budget_increased", removeKind: "diff_rule_budget_removed", field,
             message: (before, after) => `diff_rules.${field}: ${before} -> ${after}`, removeMessage: `diff_rules.${field} removed (was ${value})`,
