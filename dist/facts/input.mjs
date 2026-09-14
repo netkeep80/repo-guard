@@ -8,7 +8,7 @@ import { readFileAtRef as readGitFileAtRef } from "../git.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
 export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files", "-z"], { encoding: "utf-8", cwd: repoRoot }).split("\0").filter(Boolean);
 export function buildPolicyFacts(input) {
-    const { mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null, trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null, trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null, } = input;
+    const { mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null, repositoryObservation = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null, trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null, trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null, } = input;
     const allFiles = diffFiles || parseDiff(diffText);
     const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths, policy.paths.pr_immutable);
     const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map();
@@ -21,7 +21,8 @@ export function buildPolicyFacts(input) {
     const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
     const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
     return {
-        mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, changeIntent, changeIntentSource, governanceGrant,
+        mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryObservation,
+        changeIntent, changeIntentSource, governanceGrant,
         trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
         enforcementMode: enforcement.mode, enforcement,
         diff: { files: { all: allFiles, checked: checkedFiles, skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)) } },
