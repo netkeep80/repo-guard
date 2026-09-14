@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { parseMachineDiff } from "./diff/parser.mjs";
 function childProcessMessage(error) {
     const stderr = error?.stderr?.toString?.().trim();
     if (stderr)
@@ -47,6 +48,12 @@ export function resolveRemoteBaseRef(baseRef, cwd, remote = "origin") {
 function diffArgs(...args) {
     return ["-c", "core.quotepath=false", "diff", ...args];
 }
+function selectedDiffOperands(base, head, cwd) {
+    if (base && head)
+        return [`${base}...${head}`];
+    const staged = runGit(diffArgs("--cached"), { cwd });
+    return staged.trim() ? ["--cached"] : ["HEAD"];
+}
 export function getDiff(base, head, cwd) {
     if (base && head) {
         return runGit(diffArgs(`${base}...${head}`), { cwd });
@@ -55,6 +62,12 @@ export function getDiff(base, head, cwd) {
     if (staged.trim())
         return staged;
     return runGit(diffArgs("HEAD"), { cwd });
+}
+export function getDiffObservation(base, head, cwd) {
+    const operands = selectedDiffOperands(base, head, cwd);
+    const diffText = runGit(diffArgs(...operands), { cwd });
+    const nameStatusZ = runGit(["diff", "--name-status", "-z", ...operands], { cwd });
+    return { diffText, files: parseMachineDiff(diffText, nameStatusZ) };
 }
 export function readFileAtRef(ref, path, cwd) {
     if (!ref || !path)

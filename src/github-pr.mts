@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
-import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
+import { getDiffObservation, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
@@ -156,15 +156,16 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     if (check.ok) governanceGrant = (resolved.grantResult as { grant?: unknown }).grant;
   }
 
-  let diffText: string;
-  try { diffText = getDiff(base, head as string, roots.repoRoot); }
+  let diff;
+  try { diff = getDiffObservation(base, head as string, roots.repoRoot); }
   catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
   if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber, issueContext }); } catch {}
 
   const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
-    changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
+    changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement,
+    diffText: diff.diffText, diffFiles: diff.files, initialChecks,
   } as Parameters<typeof runPolicyPipeline>[0];
   if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy)) return runPolicyPipeline(baseInput).exitCode;
 
@@ -173,7 +174,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const proposedInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
-    enforcement: proposedEnforcement, diffText, initialChecks: [],
+    enforcement: proposedEnforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks: [],
   } as Parameters<typeof runPolicyPipeline>[0];
   const proposedOptions = {
     printEnforcement: false,

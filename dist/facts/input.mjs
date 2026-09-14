@@ -6,11 +6,11 @@ import { parseDiff } from "../diff/parser.mjs";
 import { extractAnchors } from "../extractors/anchors.mjs";
 import { readFileAtRef as readGitFileAtRef } from "../git.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
-export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files"], { encoding: "utf-8", cwd: repoRoot }).split(/\r?\n/).filter(Boolean);
+export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files", "-z"], { encoding: "utf-8", cwd: repoRoot }).split("\0").filter(Boolean);
 export function buildPolicyFacts(input) {
-    const { mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null, trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null, } = input;
-    const allFiles = parseDiff(diffText);
-    const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths);
+    const { mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null, trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null, trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null, } = input;
+    const allFiles = diffFiles || parseDiff(diffText);
+    const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths, policy.paths.pr_immutable);
     const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map();
     const cachedReadFile = (path) => {
         if (!cache.has(path))

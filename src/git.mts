@@ -1,4 +1,5 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { parseMachineDiff, type ParsedDiffFile } from "./diff/parser.mjs";
 
 interface ChildProcessFailure {
   stderr?: { toString?: () => string } | null;
@@ -23,6 +24,11 @@ export interface BasePolicyReadResult {
 export interface BaseGovernancePathsResult {
   governancePaths: unknown[] | null;
   error: string | null;
+}
+
+export interface GitDiffObservation {
+  diffText: string;
+  files: ParsedDiffFile[];
 }
 
 function childProcessMessage(error: unknown): string {
@@ -74,6 +80,12 @@ function diffArgs(...args: string[]): string[] {
   return ["-c", "core.quotepath=false", "diff", ...args];
 }
 
+function selectedDiffOperands(base: string | null | undefined, head: string | null | undefined, cwd: string): string[] {
+  if (base && head) return [`${base}...${head}`];
+  const staged = runGit(diffArgs("--cached"), { cwd });
+  return staged.trim() ? ["--cached"] : ["HEAD"];
+}
+
 export function getDiff(base: string | null | undefined, head: string | null | undefined, cwd: string): string {
   if (base && head) {
     return runGit(diffArgs(`${base}...${head}`), { cwd });
@@ -81,6 +93,13 @@ export function getDiff(base: string | null | undefined, head: string | null | u
   const staged = runGit(diffArgs("--cached"), { cwd });
   if (staged.trim()) return staged;
   return runGit(diffArgs("HEAD"), { cwd });
+}
+
+export function getDiffObservation(base: string | null | undefined, head: string | null | undefined, cwd: string): GitDiffObservation {
+  const operands = selectedDiffOperands(base, head, cwd);
+  const diffText = runGit(diffArgs(...operands), { cwd });
+  const nameStatusZ = runGit(["diff", "--name-status", "-z", ...operands], { cwd });
+  return { diffText, files: parseMachineDiff(diffText, nameStatusZ) };
 }
 
 export function readFileAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): string | null {
