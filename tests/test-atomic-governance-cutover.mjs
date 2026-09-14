@@ -4,13 +4,8 @@ import { checkGovernanceChangeAuthorization } from "../dist/checks/rules/governa
 import { checkPolicyRelaxation } from "../dist/checks/rules/policy-delta-rules.mjs";
 
 const file = (path) => ({ path, status: "modified", addedLines: [], deletedLines: [] });
-const TRUSTED = { issue_author_permission_trusted: true };
-const UNTRUSTED = {
-  issue_author_permission_trusted: false,
-  governance_approved_label: false,
-  codeowner_approved: false,
-  trusted_team_approval: false,
-};
+const TRUSTED = { trusted: true, source: "repository_permission", reason: "trusted_permission" };
+const UNTRUSTED = { trusted: false, source: "repository_permission", reason: "permission_insufficient" };
 const BASE = {
   paths: { governance_paths: ["repo-policy.json"] },
   surfaces: { source: ["src/**"], tests: ["tests/**"], schemas: ["schemas/**"] },
@@ -64,7 +59,7 @@ describe("atomic governance cutover authorization", () => {
   it("does not trust the opt-in by itself", () => {
     const result = check({ trustedAuthorizer: UNTRUSTED });
     assert.equal(result.ok, false);
-    assert.ok(result.blocked_reasons.includes("no_trusted_authorization_source"));
+    assert.ok(result.blocked_reasons.includes("permission_insufficient"));
     assert.ok(result.blocked_reasons.includes("policy_relaxation_mixed_with_non_governance_changes"));
   });
 
