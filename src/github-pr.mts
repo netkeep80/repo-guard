@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
 import { getDiffObservation, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
-import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
+import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
@@ -85,16 +85,30 @@ function loadRuntime(load: () => PolicyRuntime, label: string, failure: string):
 }
 function printMissing(title: string, missing: readonly string[]) { console.error(title); for (const item of missing) console.error(`  - ${item}`); }
 function fetchLinkedIssue({ prBody, repoFullName }: { prBody: unknown; repoFullName: unknown }) {
-  const linkedIssues = extractLinkedIssueNumbers(prBody), pr = extractChangeIntent(prBody);
-  const hasChangeIntent = pr.ok, needsFallback = !hasChangeIntent && pr.error === "change_intent_not_found" && linkedIssues.length === 1;
-  if (linkedIssues.length !== 1 || (!needsFallback && !hasChangeIntent)) return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
+  const repository = typeof repoFullName === "string" ? repoFullName : "";
+  const references = extractLinkedIssueReferences(prBody, repository);
+  const local = references.filter((reference) => reference.repository.toLowerCase() === repository.toLowerCase());
+  const foreign = references.filter((reference) => reference.repository.toLowerCase() !== repository.toLowerCase());
+  const linkedIssues = local.map((reference) => reference.number);
+  const pr = extractChangeIntent(prBody), hasChangeIntent = pr.ok;
+  const needsFallback = !hasChangeIntent && pr.error === "change_intent_not_found";
+
+  if (foreign.length && needsFallback) {
+    console.error(`ERROR: linked issue fallback must belong to ${repository}; refusing ${foreign.map((reference) => `${reference.repository}#${reference.number}`).join(", ")}`);
+    return { linkedIssues, issueBody: null, issueContext: null, fatal: true };
+  }
+  if (local.length !== 1 || (!needsFallback && !hasChangeIntent)) {
+    if (foreign.length && hasChangeIntent) console.warn("WARN: cross-repository closing references are not eligible GovernanceGrant sources");
+    return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
+  }
+
   console.log(needsFallback ? `No ChangeIntent in PR body; trying linked issue #${linkedIssues[0]}...` : `Fetching linked issue #${linkedIssues[0]} for GovernanceGrant...`);
   const missing = checkIssueFallbackPrerequisites();
   if (missing.length) {
     if (needsFallback) { printMissing("ERROR: linked issue fallback prerequisites not met:", missing); return { linkedIssues, issueBody: null, issueContext: null, fatal: true }; }
     console.warn("WARN: linked issue lookup unavailable; GovernanceGrant cannot be established"); return { linkedIssues, issueBody: null, issueContext: null, fatal: false };
   }
-  const issueContext = fetchIssueAuthorContext(repoFullName, linkedIssues[0]), observedBody = (issueContext as { body?: unknown } | null)?.body;
+  const issueContext = fetchIssueAuthorContext(repository, linkedIssues[0]), observedBody = (issueContext as { body?: unknown } | null)?.body;
   const issueBody = typeof observedBody === "string" ? observedBody : null;
   if (issueBody === null && hasChangeIntent) console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
   return { linkedIssues, issueBody, issueContext, fatal: false };
@@ -137,8 +151,8 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const linked = fetchLinkedIssue({ prBody, repoFullName });
   if (linked.fatal) return 1;
   const { linkedIssues, issueBody, issueContext } = linked;
-  let resolved = resolvePRChangeIntentFacts({ prBody, issueBody });
-  if (!resolved.ok && resolved.linkedIssues.length === 1 && issueBody === null && resolved.error !== "issue_link_ambiguous") resolved = { ...resolved, error: "issue_fetch_failed", message: `Could not fetch issue #${resolved.linkedIssues[0]} body` };
+  let resolved = resolvePRChangeIntentFacts({ prBody, issueBody, linkedIssueCount: linkedIssues.length });
+  if (!resolved.ok && linkedIssues.length === 1 && issueBody === null && resolved.error !== "issue_link_ambiguous") resolved = { ...resolved, error: "issue_fetch_failed", message: `Could not fetch issue #${linkedIssues[0]} body` };
 
   let changeIntent: unknown = null, changeIntentSource = resolved.changeIntentSource || "none";
   if (!resolved.ok) initialChecks.push({ name: "change-intent", check: { ok: false, message: `[${resolved.error}]: ${resolved.message}` } });
@@ -160,7 +174,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   try { diff = getDiffObservation(base, head as string, roots.repoRoot); }
   catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; }
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
-  if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, prNumber, issueContext }); } catch {}
+  if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
 
   const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head as string,
