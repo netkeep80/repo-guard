@@ -8,6 +8,7 @@ const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const cli = resolve(projectRoot, "dist/repo-guard.mjs");
 const OLD_SHA = "be59be254eddf753e938f62ba1d749ec7a37fe8a";
 const NEW_SHA = "f4e77cb58cd01274a4cecb6374c71b04f288c44a";
+const BROKEN_SHA = "1111111111111111111111111111111111111111";
 const ACTION_PIN_POINTER = "/document_relations/rules/pack:repo-guard-workflow:action-pin";
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
 const commit = (cwd, message) => { git(cwd, "add", "-A"); git(cwd, "commit", "-m", message); return git(cwd, "rev-parse", "HEAD"); };
@@ -99,7 +100,7 @@ else console.log(JSON.stringify({}));
   return root;
 }
 
-function setup({ bumpVersion }) {
+function setup({ bumpVersion, workflowSha = NEW_SHA }) {
   const sandbox = mkdtempSync(join(tmpdir(), "rg-p0-4-state-cutover-"));
   const remote = join(sandbox, "origin.git"), root = join(sandbox, "worker");
   git(sandbox, "init", "--bare", remote);
@@ -116,14 +117,14 @@ function setup({ bumpVersion }) {
   git(root, "push", "-u", "origin", "main");
   git(root, "switch", "-c", "repin");
   writeFileSync(join(root, "repo-policy.json"), JSON.stringify(policy(NEW_SHA), null, 2));
-  writeFileSync(join(root, ".github/workflows/repo-guard.yml"), workflow(NEW_SHA));
+  writeFileSync(join(root, ".github/workflows/repo-guard.yml"), workflow(workflowSha));
   if (bumpVersion) writeVersionFiles(root, "0.5.2");
   const head = commit(root, bumpVersion ? "repin with version bump" : "repin without version bump");
   return { sandbox, root, base, head };
 }
 
-function runScenario({ bumpVersion, permission = "write" }) {
-  const fixture = setup({ bumpVersion });
+function runScenario({ bumpVersion, permission = "write", workflowSha = NEW_SHA }) {
+  const fixture = setup({ bumpVersion, workflowSha });
   const issueBody = grant();
   const fakeDir = fakeGh(issueBody, permission);
   const eventPath = join(fixture.root, "event.json");
@@ -165,6 +166,18 @@ function runScenario({ bumpVersion, permission = "write" }) {
   assert.match(output, /State obligation plan: replaced 1 exact BASE state constraint\(s\): document-relation:pack:repo-guard-workflow:action-pin/);
   assert.match(output, /PASS: proposed-policy:document-relation:pack:repo-guard-workflow:action-pin/);
   assert.doesNotMatch(output, /FAIL: document-relation:pack:repo-guard-workflow:action-pin/);
+  assert.doesNotMatch(output, /FAIL: policy-relaxation/);
+  assert.doesNotMatch(output, /FAIL: governance-change-authorization/);
+}
+
+{
+  const { result, output } = runScenario({ bumpVersion: true, workflowSha: BROKEN_SHA });
+  assert.equal(result.status, 1, output);
+  assert.match(output, /State obligation plan: replaced 1 exact BASE state constraint\(s\): document-relation:pack:repo-guard-workflow:action-pin/);
+  assert.match(output, /FAIL: proposed-policy:document-relation:pack:repo-guard-workflow:action-pin/,
+    "replacement of the obsolete BASE literal must not suppress the HEAD state veto");
+  assert.doesNotMatch(output, /FAIL: document-relation:pack:repo-guard-workflow:action-pin/,
+    "obsolete BASE literal must remain replaced even when HEAD itself is invalid");
   assert.doesNotMatch(output, /FAIL: policy-relaxation/);
   assert.doesNotMatch(output, /FAIL: governance-change-authorization/);
 }
