@@ -4,7 +4,10 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { describe, it, test } from "node:test";
-import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs";
+import Ajv from "ajv";
+import { compileConstraintProgram, runtimeConstraints } from "../dist/checks/constraint-program.mjs";
+import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
+import { loadJSON } from "../dist/runtime/validation.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const cli = resolve(projectRoot, "dist/repo-guard.mjs");
@@ -47,6 +50,72 @@ describe("trusted diff budget ceilings", () => {
     });
     it(`${field}: zero policy ceiling cannot be widened`, () => {
       assert.equal(compiledBudget(field, 0, 100)?.parameters?.max, 0);
+    });
+  }
+
+  it("keeps profile budgets as independent additional vetoes", () => {
+    const program = runtimeConstraints(compileConstraintProgram({
+      diff_rules: { max_new_files: 5 },
+      paths: { forbidden: [], canonical_docs: [] },
+      change_profiles: { bugfix: { budgets: { max_new_files: 2 } } },
+    }, { change_type: "bugfix", budgets: { max_new_files: 9 } }));
+    assert.equal(program.find((item) => item.key === "diff:max_new_files")?.parameters?.max, 5);
+    assert.equal(program.find((item) => item.key === "change-profile:bugfix:budget:max-new-files")?.parameters?.max, 2);
+  });
+
+  it("reports policy, intent and effective limits through canonical rule results", () => {
+    const result = evaluateConstraintIR({
+      policy: {
+        paths: { forbidden: [], canonical_docs: [], operational_paths: [] },
+        diff_rules: { max_new_files: 0 },
+      },
+      changeIntent: { change_type: "bugfix", budgets: { max_new_files: 100 } },
+      diff: { files: { checked: [{ path: "src/new.mjs", status: "added", addedLines: ["+x"], deletedLines: [] }] } },
+    }).find((item) => item.name === "max-new-files");
+    assert.equal(result?.check?.ok, false);
+    assert.equal(result?.check?.policy_limit, 0);
+    assert.equal(result?.check?.intent_limit, 100);
+    assert.equal(result?.check?.effective_limit, 0);
+    assert.equal(result?.check?.data?.policy_limit, 0);
+    assert.equal(result?.check?.data?.intent_limit, 100);
+    assert.equal(result?.check?.data?.effective_limit, 0);
+  });
+});
+
+describe("budget schema boundary", () => {
+  const ajv = new Ajv({ allErrors: true });
+  const validateIntent = ajv.compile(loadJSON(new URL("../schemas/change-intent.schema.json", import.meta.url)));
+  const validatePolicy = new Ajv({ allErrors: true }).compile(loadJSON(new URL("../schemas/repo-policy.schema.json", import.meta.url)));
+  const baseIntent = {
+    change_type: "bugfix",
+    scope: ["**"],
+    budgets: {},
+    anchors: { affects: [], implements: [], verifies: [] },
+    must_touch: [],
+    must_not_touch: [],
+    expected_effects: ["budget contract"],
+  };
+  const basePolicy = {
+    policy_format_version: "0.3.0",
+    repository_kind: "library",
+    enforcement: { mode: "blocking" },
+    paths: { forbidden: [], canonical_docs: [], governance_paths: [] },
+    diff_rules: { max_new_docs: 0, max_new_files: 0, max_net_added_lines: 0 },
+    content_rules: [],
+    cochange_rules: [],
+  };
+
+  for (const field of BUDGET_FIELDS) {
+    it(`${field}: accepts zero and rejects negative, fractional and string ChangeIntent limits`, () => {
+      assert.equal(validateIntent({ ...baseIntent, budgets: { [field]: 0 } }), true);
+      assert.equal(validateIntent({ ...baseIntent, budgets: { [field]: -1 } }), false);
+      assert.equal(validateIntent({ ...baseIntent, budgets: { [field]: 1.5 } }), false);
+      assert.equal(validateIntent({ ...baseIntent, budgets: { [field]: "9" } }), false);
+    });
+    it(`${field}: rejects negative, fractional and string trusted policy ceilings`, () => {
+      assert.equal(validatePolicy({ ...basePolicy, diff_rules: { ...basePolicy.diff_rules, [field]: -1 } }), false);
+      assert.equal(validatePolicy({ ...basePolicy, diff_rules: { ...basePolicy.diff_rules, [field]: 1.5 } }), false);
+      assert.equal(validatePolicy({ ...basePolicy, diff_rules: { ...basePolicy.diff_rules, [field]: "9" } }), false);
     });
   }
 });
