@@ -1,4 +1,5 @@
 import type { ParsedDiffFile } from "../../diff/parser.mjs";
+import { diffFilePathIdentities } from "../../diff/filters.mjs";
 import { matchesAny } from "../../utils/path-patterns.mjs";
 import type { RuleFamily } from "../rule-registry.mjs";
 
@@ -39,7 +40,7 @@ interface GovernanceRuleFacts {
   trustedGovernancePaths?: unknown;
   policy: { paths?: { governance_paths?: string[] } };
   changeIntent?: { change_type?: string } | null;
-  diff: { files: { checked: ParsedDiffFile[] } };
+  diff: { files: { all: ParsedDiffFile[] } };
   governanceGrant?: GovernanceGrantProjection | null;
   trustedAuthorizer?: TrustedAuthorizerProjection | null;
 }
@@ -51,13 +52,15 @@ export function expandGovernancePatterns(patterns: unknown[] = []): string[] {
 const trusted = (authorizer: TrustedAuthorizerProjection | null | undefined): boolean => Boolean(authorizer && (
   authorizer.issue_author_permission_trusted || authorizer.governance_approved_label || authorizer.codeowner_approved || authorizer.trusted_team_approval
 ));
+const uniqueSorted = (paths: string[]): string[] => [...new Set(paths)].sort();
 
 export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null }: GovernanceCheckInput): GovernanceCheckResult {
   const patterns = expandGovernancePatterns(governancePaths || []), governanceChange = changeIntentType === "governance";
   const matchesBoundary = (path: string): boolean => matchesAny(path, patterns);
   if (!patterns.length && !governanceChange) return { ok: true };
 
-  const touched = files.filter((file) => matchesBoundary(file.path)).map((file) => file.path);
+  const identities = files.flatMap(diffFilePathIdentities);
+  const touched = uniqueSorted(identities.filter(matchesBoundary));
   const declared = Array.isArray(governanceGrant?.authorized_governance_paths) ? governanceGrant.authorized_governance_paths as string[] : [];
   const sourceTrusted = trusted(trustedAuthorizer), authorized = sourceTrusted ? declared : [];
   // Mixed files are allowed only for an explicitly trusted atomic cutover.
@@ -68,7 +71,7 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
     && governanceGrant?.allow_atomic_governance_cutover === true
     && sourceTrusted;
   const nonGovernance = governanceChange && !atomicGovernanceCutover
-    ? files.filter((file) => !matchesBoundary(file.path)).map((file) => file.path)
+    ? uniqueSorted(identities.filter((path) => !matchesBoundary(path)))
     : [];
   if (!governanceChange && !touched.length) return { ok: true, touched_governance_paths: [] };
 
@@ -105,7 +108,7 @@ export const governancePathsRuleFamily: RuleFamily = {
   evaluate(facts) {
     const governancePaths = Array.isArray((facts as GovernanceRuleFacts).trustedGovernancePaths) ? (facts as GovernanceRuleFacts).trustedGovernancePaths as string[] : (facts as GovernanceRuleFacts).policy.paths?.governance_paths;
     return { name: "governance-change-authorization", check: checkGovernanceChangeAuthorization({
-      files: (facts as GovernanceRuleFacts).diff.files.checked, governancePaths, governanceGrant: (facts as GovernanceRuleFacts).governanceGrant, trustedAuthorizer: (facts as GovernanceRuleFacts).trustedAuthorizer,
+      files: (facts as GovernanceRuleFacts).diff.files.all, governancePaths, governanceGrant: (facts as GovernanceRuleFacts).governanceGrant, trustedAuthorizer: (facts as GovernanceRuleFacts).trustedAuthorizer,
       changeIntentType: (facts as GovernanceRuleFacts).changeIntent?.change_type,
     }) };
   },

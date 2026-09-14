@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { getDiff } from "./git.mjs";
+import { getDiffObservation } from "./git.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { renderAnalysisReport } from "./reporting/renderers.mjs";
 import { loadJSON, loadPolicyRuntime, validationCheck } from "./runtime/validation.mjs";
@@ -29,10 +29,10 @@ export function runCheckDiff(roots: CheckDiffRoots, args: string[] = []) {
     if (check.ok) changeIntent = loaded;
   } catch (error: unknown) { initialChecks.push({ name: "change-intent", check: { ok: false, message: `Cannot read ${changeIntentPath}: ${(error as Error).message}` } }); }
 
-  let diffText: string;
-  try { diffText = getDiff(base, head, roots.repoRoot); }
+  let diff;
+  try { diff = getDiffObservation(base, head, roots.repoRoot); }
   catch (error: unknown) { console.error(`Error: ${(error as Error).message}`); return 1; }
-  const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, baseRef: base ?? null, headRef: head ?? null, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText, initialChecks } as Parameters<typeof runPolicyPipeline>[0], { quiet });
+  const report = runPolicyPipeline({ mode: "check-diff", repositoryRoot: roots.repoRoot, policy, baseRef: base ?? null, headRef: head ?? null, changeIntent, changeIntentSource: changeIntentPath ? "cli file" : "none", enforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks } as Parameters<typeof runPolicyPipeline>[0], { quiet });
   const output = renderAnalysisReport(report, { format });
   if (output) console.log(output);
   return report.exitCode;

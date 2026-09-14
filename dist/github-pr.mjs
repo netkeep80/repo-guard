@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
-import { getDiff, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
+import { getDiffObservation, readBasePolicy, resolveRemoteBaseRef } from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntime, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
@@ -176,9 +176,9 @@ export function runCheckPR(roots, args = []) {
         if (check.ok)
             governanceGrant = resolved.grantResult.grant;
     }
-    let diffText;
+    let diff;
     try {
-        diffText = getDiff(base, head, roots.repoRoot);
+        diff = getDiffObservation(base, head, roots.repoRoot);
     }
     catch (error) {
         console.error(`ERROR: ${error.message}`);
@@ -192,7 +192,8 @@ export function runCheckPR(roots, args = []) {
         catch { }
     const baseInput = {
         mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head,
-        changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText, initialChecks,
+        changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement,
+        diffText: diff.diffText, diffFiles: diff.files, initialChecks,
     };
     if (!basePolicy || isDeepStrictEqual(basePolicy, headRuntime.policy))
         return runPolicyPipeline(baseInput).exitCode;
@@ -204,7 +205,7 @@ export function runCheckPR(roots, args = []) {
     const proposedInput = {
         mode: "check-pr", repositoryRoot: roots.repoRoot, policy: headRuntime.policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: head,
         changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer,
-        enforcement: proposedEnforcement, diffText, initialChecks: [],
+        enforcement: proposedEnforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks: [],
     };
     const proposedOptions = {
         printEnforcement: false,

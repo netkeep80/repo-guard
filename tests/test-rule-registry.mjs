@@ -74,6 +74,12 @@ const policyForFixture = {
   },
 };
 
+const changedFiles = [
+  { path: "src/feature.mjs", addedLines: ["const feature = true;"], deletedLines: [], status: "modified" },
+  { path: "tests/feature.test.mjs", addedLines: ["assert.ok(true);"], deletedLines: [], status: "modified" },
+  { path: "docs/notes.md", addedLines: ["A short implementation note."], deletedLines: [], status: "modified" },
+];
+
 const facts = {
   repositoryRoot: process.cwd(),
   basePolicy: policyForFixture,
@@ -144,11 +150,8 @@ const facts = {
   },
   diff: {
     files: {
-      checked: [
-        { path: "src/feature.mjs", addedLines: ["const feature = true;"], deletedLines: [], status: "modified" },
-        { path: "tests/feature.test.mjs", addedLines: ["assert.ok(true);"], deletedLines: [], status: "modified" },
-        { path: "docs/notes.md", addedLines: ["A short implementation note."], deletedLines: [], status: "modified" },
-      ],
+      all: changedFiles,
+      checked: changedFiles,
     },
   },
   trackedFiles: [...content.keys()],
