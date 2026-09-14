@@ -1,5 +1,6 @@
 import { compileConstraintProgram, runtimeConstraints } from "../constraint-program.mjs";
 import { evaluatePrimitiveRelation, relationDescriptor, } from "../relation-kernel.mjs";
+const BUDGET_EVIDENCE_FIELDS = ["policy_limit", "intent_limit", "effective_limit"];
 function requestedExecutionPhase(context) {
     const phase = context.executionPhase ?? "both";
     if (phase !== "transaction" && phase !== "state" && phase !== "both") {
@@ -30,6 +31,17 @@ function primitiveRelation(constraint) {
         parameters: constraint.parameters,
     };
 }
+function withConstraintEvidence(check, constraint) {
+    if (!check || typeof check !== "object" || Array.isArray(check))
+        return check;
+    const parameters = constraint.parameters || {};
+    const evidence = Object.fromEntries(BUDGET_EVIDENCE_FIELDS.flatMap((field) => Object.hasOwn(parameters, field) ? [[field, parameters[field]]] : []));
+    if (!Object.keys(evidence).length)
+        return check;
+    const record = check;
+    const data = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data : {};
+    return { ...record, ...evidence, data: { ...data, ...evidence } };
+}
 function advisoryCheck(check, advisory) {
     if (!advisory || !check || typeof check !== "object" || Array.isArray(check))
         return check;
@@ -43,7 +55,8 @@ export function evaluateConstraintIR(facts, context = {}) {
             continue;
         if (constraint.kind !== "primitive_relation")
             throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);
-        const check = advisoryCheck(evaluatePrimitiveRelation(facts, primitiveRelation(constraint)), constraint.advisory);
+        const evaluated = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
+        const check = advisoryCheck(withConstraintEvidence(evaluated, constraint), constraint.advisory);
         results.push({ name: constraint.name, check });
     }
     return results;
