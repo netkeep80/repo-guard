@@ -93,7 +93,7 @@ test("public check-pr blocks PR-controlled widening of policy max_new_files=0", 
     writeFileSync(eventPath, JSON.stringify({
       pull_request: {
         number: 42,
-        base: { sha: "HEAD~1", ref: "main" },
+        base: { sha: "HEAD~1" },
         head: { sha: "HEAD" },
         body: intent,
       },
