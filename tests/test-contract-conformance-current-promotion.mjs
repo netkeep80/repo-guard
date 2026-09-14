@@ -16,6 +16,7 @@ const CURRENT_PROMOTION_POINTERS = [
   "/document_relations/rules/contract-conformance:current-conformance-accepted",
   "/document_relations/rules/contract-conformance:required-path:0",
 ].sort();
+const TRUSTED = { trusted: true, source: "repository_permission", reason: "trusted_permission" };
 
 const changedPolicyFile = {
   path: "repo-policy.json",
@@ -106,7 +107,7 @@ describe("packs.contract-conformance.current promotion strictness", () => {
       basePolicy: resolvedPolicy("v1"),
       headPolicy: resolvedPolicy("v2"),
       changedFiles: [changedPolicyFile],
-      trustedAuthorizer: { issue_author_permission_trusted: true },
+      trustedAuthorizer: TRUSTED,
       governanceGrant: { allow_policy_relaxation: CURRENT_PROMOTION_POINTERS },
       changeIntentType: "governance",
     });
@@ -119,7 +120,7 @@ describe("packs.contract-conformance.current promotion strictness", () => {
       basePolicy: resolvedPolicy("v1"),
       headPolicy: resolvedPolicy("v2"),
       changedFiles: [changedPolicyFile],
-      trustedAuthorizer: { issue_author_permission_trusted: true },
+      trustedAuthorizer: TRUSTED,
       governanceGrant: null,
       changeIntentType: "governance",
     });
