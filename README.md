@@ -59,7 +59,7 @@ node dist/repo-guard.mjs init --action-ref "$REPO_GUARD_SHA" --preset applicatio
 node dist/repo-guard.mjs doctor
 ```
 
-`REPO_GUARD_SHA` — полный 40-символьный SHA; после официального выпуска можно явно передать соответствующий тег `vX.Y.Z`. `init` не подставляет `main` или `latest` и без `--action-ref` завершается до создания файлов.
+`REPO_GUARD_SHA` — полный 40-символьный SHA коммита; после официального выпуска можно явно передать соответствующий тег `vX.Y.Z`. `init` не подставляет `main` или `latest` и без `--action-ref` завершается до создания файлов.
 
 `init` создаёт, не перезаписывая существующие файлы:
 
