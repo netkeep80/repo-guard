@@ -162,7 +162,8 @@ function runScenario({ bumpVersion, permission = "write" }) {
 {
   const { result, output } = runScenario({ bumpVersion: true });
   assert.equal(result.status, 0, output);
-  assert.match(output, /PASS: document-relation:pack:repo-guard-workflow:action-pin/);
+  assert.match(output, /State obligation plan: replaced 1 exact BASE state constraint\(s\): document-relation:pack:repo-guard-workflow:action-pin/);
+  assert.match(output, /PASS: proposed-policy:document-relation:pack:repo-guard-workflow:action-pin/);
   assert.doesNotMatch(output, /FAIL: document-relation:pack:repo-guard-workflow:action-pin/);
   assert.doesNotMatch(output, /FAIL: policy-relaxation/);
   assert.doesNotMatch(output, /FAIL: governance-change-authorization/);
