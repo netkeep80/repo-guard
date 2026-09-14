@@ -56,14 +56,12 @@ function grantCoversRelaxation(governanceGrant, relaxations) {
 }
 function trust(authorizer) {
     if (!authorizer)
-        return { trusted: false, reasons: ["trusted_authorizer_missing"] };
-    const sources = [
-        authorizer.issue_author_permission_trusted && "issue_author_permission",
-        authorizer.governance_approved_label && "governance_approved_label",
-        authorizer.codeowner_approved && "codeowner_approval",
-        authorizer.trusted_team_approval && "trusted_team_approval",
-    ].filter(Boolean);
-    return sources.length ? { trusted: true, reasons: [], detected_sources: sources } : { trusted: false, reasons: ["no_trusted_authorization_source"], detected_sources: [] };
+        return { trusted: false, reasons: ["trusted_authorizer_missing"], detected_sources: [] };
+    if (authorizer.trusted === true && authorizer.source === "repository_permission") {
+        return { trusted: true, reasons: [], detected_sources: ["repository_permission"] };
+    }
+    const reason = typeof authorizer.reason === "string" ? authorizer.reason : "positive_repository_permission_not_established";
+    return { trusted: false, reasons: [reason], detected_sources: [] };
 }
 export function checkPolicyRelaxation({ basePolicy, headPolicy, changedFiles, trustedAuthorizer, governanceGrant, changeIntentType, configuredProtectedSurfaces = null, }) {
     if (!basePolicy || !headPolicy)
@@ -77,9 +75,6 @@ export function checkPolicyRelaxation({ basePolicy, headPolicy, changedFiles, tr
     if (!grant.ok)
         reasons.push(grant.reason);
     const governanceOnly = !classified.protectedFiles.length && !classified.otherFiles.length && classified.governanceFiles.length > 0;
-    // Atomic cutover is deliberately narrower than a generic policy bypass: it
-    // only removes the mixed-diff veto after trust, full pointer coverage and a
-    // governance ChangeIntent have all been proven independently.
     const atomicGovernanceCutover = governanceGrant?.allow_atomic_governance_cutover === true
         && classified.governanceFiles.length > 0
         && authorizer.trusted
@@ -103,7 +98,7 @@ export function checkPolicyRelaxation({ basePolicy, headPolicy, changedFiles, tr
         protected_files: classified.protectedFiles, governance_files: classified.governanceFiles,
         other_files: classified.otherFiles, protected_patterns: classified.protectedPatterns,
         trusted_authorizer: authorizer,
-        hint: ok ? undefined : "Policy relaxation requires a dedicated governance change or an explicitly authorized atomic governance cutover, plus a trusted GovernanceGrant covering every relaxed pointer.",
+        hint: ok ? undefined : "Policy relaxation requires a dedicated governance change or an explicitly authorized atomic governance cutover, plus a linked-issue GovernanceGrant whose human author has positive write/maintain/admin repository permission and covers every relaxed pointer.",
     };
 }
 export const policyRelaxationRuleFamily = {
