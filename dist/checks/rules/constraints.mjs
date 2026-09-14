@@ -49,9 +49,12 @@ function advisoryCheck(check, advisory) {
 }
 export function evaluateConstraintIR(facts, context = {}) {
     const executionPhase = requestedExecutionPhase(context);
+    const replacedStateConstraints = new Set(context.replacedStateConstraintKeys || []);
     const { constraints } = compileConstraintIR(facts), results = [];
     for (const constraint of constraints) {
         if (!constraintAppliesToPhase(constraint, executionPhase))
+            continue;
+        if (replacedStateConstraints.has(constraint.key) && constraintPhase(constraint) === "state")
             continue;
         if (constraint.kind !== "primitive_relation")
             throw new Error(`runtime constraint kind "${constraint.kind}" is unsupported`);

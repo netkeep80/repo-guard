@@ -2,6 +2,7 @@ import type { RepositoryFactsInput } from "../facts/input.mjs";
 import { buildPolicyFacts } from "../facts/input.mjs";
 import { runPolicyChecks } from "../checks/orchestrator.mjs";
 import type { ExecutionPhase } from "../checks/rule-registry.mjs";
+import { buildStateObligationPlan } from "../checks/state-obligation-plan.mjs";
 import { compileChangeProfiles } from "../policy-compiler.mjs";
 import { buildAnchorDiagnostics } from "../reporting/anchor-diagnostics.mjs";
 import { createAnalysisCollector } from "./analysis-report.mjs";
@@ -68,6 +69,11 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
     console.log(`\n${renderDiffAnalysis(facts)}`);
   }
 
+  const obligationPlan = buildStateObligationPlan(facts);
+  const replacedStateConstraintKeys = obligationPlan?.replaced_base_state_constraints.map((item) => item.key) || [];
+  if (!quiet && replacedStateConstraintKeys.length) {
+    console.log(`State obligation plan: replaced ${replacedStateConstraintKeys.length} exact BASE state constraint(s): ${replacedStateConstraintKeys.join(", ")}`);
+  }
   const anchorDiagnostics = buildAnchorDiagnostics(facts);
   // Префикс меняет только diagnostic namespace; вычисление остаётся в одном canonical
   // pipeline и одном RuleRegistry, чтобы base/head не получили разные semantics engines.
@@ -75,6 +81,7 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
     anchorDiagnostics,
     excludeFamilies: options.excludeRuleFamilies,
     executionPhase: options.executionPhase,
+    replacedStateConstraintKeys,
   });
 
   return reporter.finish({
@@ -86,6 +93,7 @@ export function runPolicyPipeline(input: PolicyPipelineInput, options: PolicyPip
       skippedOperationalFiles: facts.diagnostics.skippedOperationalFiles,
     },
     ...(facts.repositoryObservation ? { repositoryObservation: facts.repositoryObservation } : {}),
+    ...(obligationPlan ? { obligationPlan } : {}),
     ...(options.executionPhase ? { executionPhase: options.executionPhase } : {}),
     ...anchorDiagnostics,
   });
