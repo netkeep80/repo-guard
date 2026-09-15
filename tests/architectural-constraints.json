@@ -37,6 +37,24 @@
         "buildTraceRuleDiagnostics",
         "checkTraceRuleResult"
       ]
+    },
+    {
+      "path": "tests/test-c3-7-version-truth.mjs",
+      "tokens": [
+        "3.1.0"
+      ]
+    },
+    {
+      "path": "tests/test-c3-6-observatory-render.mjs",
+      "tokens": [
+        "3.1.0"
+      ]
+    },
+    {
+      "path": "tests/test-c3-6-observatory-snapshot.mjs",
+      "tokens": [
+        "3.1.0"
+      ]
     }
   ]
 }
