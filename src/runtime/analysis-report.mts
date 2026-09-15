@@ -30,6 +30,7 @@ interface NormalizedCheckResult {
   message?: unknown;
   hint?: unknown;
   data?: LooseObject;
+  evidence?: LooseObject;
 }
 interface AnalysisPresenter {
   check?: (event: { check: NormalizedCheckResult; mode: unknown; outcome: Outcome }) => void;
@@ -114,16 +115,12 @@ export function detailFromCheck(check: unknown): string[] {
   ];
 }
 
-function normalizeCheckResult(name: string, check: unknown): NormalizedCheckResult {
-  const ok = Boolean((check as CheckInput).ok);
+function normalizeCheckResult(name: string, check: unknown, evidence: LooseObject = {}): NormalizedCheckResult {
+  const ok = Boolean((check as CheckInput).ok), severity: Severity = ok ? "pass" : (check as CheckInput).advisory ? "warning" : "failure", data = checkData(check);
   const result: NormalizedCheckResult = {
-    rule: name,
-    ok,
-    severity: ok ? "pass" : (check as CheckInput).advisory ? "warning" : "failure",
-    details: detailFromCheck(check),
+    rule: name, ok, severity, details: detailFromCheck(check),
+    evidence: { ruleId: name, ...evidence, ...(typeof data.kind === "string" ? { relation: data.kind } : {}), ok, reasonCode: `${name}.${severity}` },
   };
-  const data = checkData(check);
-
   if ((check as CheckInput).message) result.message = (check as CheckInput).message;
   if ((check as CheckInput).hint) result.hint = (check as CheckInput).hint;
   if (Object.keys(data).length > 0) result.data = data;
@@ -148,8 +145,8 @@ export function createAnalysisCollector(enforcementInput: unknown, options: Coll
   const hints: Array<{ rule: string; message: unknown }> = [];
 
   return {
-    report(name: string, check: unknown) {
-      const normalized = normalizeCheckResult(name, check);
+    report(name: string, check: unknown, evidence: LooseObject = {}) {
+      const normalized = normalizeCheckResult(name, check, evidence);
       ruleResults.push(normalized);
 
       if ((check as CheckInput).ok) {

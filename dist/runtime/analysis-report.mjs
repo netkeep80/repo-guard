@@ -86,15 +86,12 @@ export function detailFromCheck(check) {
         ...asList(check.hint).map((hint) => `hint: ${hint}`),
     ];
 }
-function normalizeCheckResult(name, check) {
-    const ok = Boolean(check.ok);
+function normalizeCheckResult(name, check, evidence = {}) {
+    const ok = Boolean(check.ok), severity = ok ? "pass" : check.advisory ? "warning" : "failure", data = checkData(check);
     const result = {
-        rule: name,
-        ok,
-        severity: ok ? "pass" : check.advisory ? "warning" : "failure",
-        details: detailFromCheck(check),
+        rule: name, ok, severity, details: detailFromCheck(check),
+        evidence: { ruleId: name, ...evidence, ...(typeof data.kind === "string" ? { relation: data.kind } : {}), ok, reasonCode: `${name}.${severity}` },
     };
-    const data = checkData(check);
     if (check.message)
         result.message = check.message;
     if (check.hint)
@@ -120,8 +117,8 @@ export function createAnalysisCollector(enforcementInput, options = {}) {
     const warningDetails = [];
     const hints = [];
     return {
-        report(name, check) {
-            const normalized = normalizeCheckResult(name, check);
+        report(name, check, evidence = {}) {
+            const normalized = normalizeCheckResult(name, check, evidence);
             ruleResults.push(normalized);
             if (check.ok) {
                 passed++;
