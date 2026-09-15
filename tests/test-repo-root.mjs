@@ -211,7 +211,7 @@ function writeIntent(dir) {
   let report = null;
   try { report = JSON.parse(result.stdout.trim()); } catch {}
   expect("pre-command --repo-root check-pr enters check-pr mode", report?.command, "check-pr");
-  expect("pre-command --repo-root check-pr keeps structured no-event reason", report?.reasonCode, "check_pr.no_event");
+  expect("pre-command --repo-root check-pr returns structured configuration error", report?.result, "error");
   rmSync(tmp, { recursive: true });
 }
 
