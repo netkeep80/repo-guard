@@ -11,7 +11,12 @@
     "dist/checks/trace-rules.mjs",
     "tests/test-c3-8a-ci-runtime.mjs",
     "tests/test-c3-8d-smoke-pack-install-dedup.mjs",
-    "tests/test-c3-8f-minimal-git-evidence.mjs"
+    "tests/test-c3-8f-minimal-git-evidence.mjs",
+    "src/branch-hygiene.mts",
+    "dist/branch-hygiene.mjs",
+    "docs/branch-hygiene.md",
+    "tests/test-branch-hygiene-analysis.mjs",
+    "tests/test-c3-9i-branch-hygiene-purge.mjs"
   ],
   "required_text": [],
   "forbidden_text": [
