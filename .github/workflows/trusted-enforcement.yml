@@ -48,6 +48,7 @@ jobs:
           test "$OBSERVED_HEAD" = "$EXPECTED_HEAD_SHA"
           test "$MERGE_HEAD" = "$EXPECTED_HEAD_SHA"
           test "$MERGE_BASE" = "$CURRENT_BASE"
+          echo "head_sha=$OBSERVED_HEAD" >> "$GITHUB_OUTPUT"
           echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Mint dedicated trusted-enforcement App token
@@ -61,10 +62,10 @@ jobs:
       - name: Mark trusted enforcement pending
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          MERGE_SHA: ${{ steps.evidence.outputs.merge_sha }}
+          HEAD_SHA: ${{ steps.evidence.outputs.head_sha }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${MERGE_SHA}" \
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
             -f state=pending \
             -f context=trusted-enforcement \
             -f description="accepted repo-guard is evaluating this PR" \
@@ -84,7 +85,7 @@ jobs:
         if: ${{ always() && steps.app-token.outcome == 'success' && steps.evidence.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          MERGE_SHA: ${{ steps.evidence.outputs.merge_sha }}
+          HEAD_SHA: ${{ steps.evidence.outputs.head_sha }}
           ENFORCEMENT_OUTCOME: ${{ steps.enforcement.outcome }}
         run: |
           set -euo pipefail
@@ -95,7 +96,7 @@ jobs:
             STATE=failure
             DESCRIPTION="accepted repo-guard rejected this PR"
           fi
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${MERGE_SHA}" \
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
             -f state="$STATE" \
             -f context=trusted-enforcement \
             -f description="$DESCRIPTION" \
