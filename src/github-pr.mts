@@ -170,7 +170,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     if (!proposedEnforcement.ok) return fail(roots, format, "check_pr.proposed_enforcement", proposedEnforcement.message);
     plan.push({
       policyOrigin: "head",
-      input: { ...baseInput, policy: headRuntime.policy, enforcement: proposedEnforcement, initialChecks: [] },
+      input: { ...baseInput, policy: headRuntime.policy, enforcement: proposedEnforcement, initialChecks: [] } as PipelineInput,
       options: { quiet: true, printEnforcement: false, ruleNamePrefix: "proposed-policy:", excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES, policyOrigin: "head" },
     });
   }
