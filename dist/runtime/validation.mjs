@@ -18,6 +18,7 @@ const canonical = (value) => Array.isArray(value)
         ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
         : value;
 const digest = (value) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+const invocationContexts = new WeakMap();
 export const loadJSON = (path) => JSON.parse(readFileSync(path, "utf-8"));
 // Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
 // разрешаем этот стандартный синтаксис, чтобы валидная policy не писала warning в stderr.
@@ -57,6 +58,18 @@ export function createPolicyNormalizationContext(roots, options = {}) {
     };
     return { roots, ajv, schemas, authorities, validatorFor };
 }
+function runtimeContext(roots, options) {
+    if (options.context)
+        return options.context;
+    if (options.schemas)
+        return createPolicyNormalizationContext(roots, options);
+    let context = invocationContexts.get(roots);
+    if (!context) {
+        context = createPolicyNormalizationContext(roots);
+        invocationContexts.set(roots, context);
+    }
+    return context;
+}
 export function validate(ajv, schema, data, label, { quiet = false } = {}) {
     const valid = ajv.validate(schema, data);
     if (!quiet) {
@@ -69,10 +82,6 @@ export function validate(ajv, schema, data, label, { quiet = false } = {}) {
 }
 export function validationCheck(ajv, schema, data, label) {
     return ajv.validate(schema, data) ? { ok: true } : { ok: false, message: `${label} failed schema validation`, errors: ajvErrors(ajv.errors) };
-}
-export function validationContextCheck(context, key, data, label) {
-    const validator = context.validatorFor(key), valid = validator(data);
-    return valid ? { ok: true } : { ok: false, message: `${label} failed schema validation`, errors: ajvErrors(validator.errors) };
 }
 function packNames(policy) {
     const packs = object(object(policy).packs);
@@ -161,7 +170,7 @@ export function normalizePolicy(context, rawPolicy, options = {}) {
     }
 }
 export function loadPolicyRuntimeFromObject(roots, rawPolicy, options = {}) {
-    const context = options.context ?? createPolicyNormalizationContext(roots, options), normalized = normalizePolicy(context, rawPolicy, options);
+    const context = runtimeContext(roots, options), normalized = normalizePolicy(context, rawPolicy, options);
     const policy = (normalized.policy ?? normalized.observedPolicy);
     return {
         ok: normalized.ok,
