@@ -205,11 +205,13 @@ function writeIntent(dir) {
 {
   const tmp = mkdtempSync(join(tmpdir(), "rg-precommand-pr-"));
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy()));
-  const result = await runCliCaptured(["--repo-root", tmp, "check-pr"], {
+  const result = await runCliCaptured(["--repo-root", tmp, "check-pr", "--format", "json"], {
     env: { GITHUB_EVENT_PATH: null },
   });
-  const isCheckPR = result.output.includes("check-pr") && !result.output.includes("ENOENT");
-  expect("pre-command --repo-root check-pr enters check-pr mode", isCheckPR, true);
+  let report = null;
+  try { report = JSON.parse(result.stdout.trim()); } catch {}
+  expect("pre-command --repo-root check-pr enters check-pr mode", report?.command, "check-pr");
+  expect("pre-command --repo-root check-pr returns structured configuration error", report?.result, "error");
   rmSync(tmp, { recursive: true });
 }
 

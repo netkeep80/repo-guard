@@ -59,13 +59,12 @@ inputs:
 outputs:
   result:
     description: >
-      Enforcement result: `passed` if all checks passed, `failed` if any check
-      failed (including advisory violations), or `error` if repo-guard could not
-      run (e.g. missing policy file).
+      Enforcement result derived from the structured report: `passed`, `failed`,
+      or `error` when repo-guard could not produce a valid machine report.
     value: ${{ steps.run-repo-guard.outputs.result }}
 
   summary:
-    description: "Human-readable one-line summary of the enforcement run."
+    description: "Human-readable one-line summary derived from the structured report."
     value: ${{ steps.run-repo-guard.outputs.summary }}
 
 runs:
@@ -79,7 +78,6 @@ runs:
     - name: Install repo-guard dependencies
       shell: bash
       run: |
-        # Install runtime dependencies for the checked-out Action source.
         cd "${GITHUB_ACTION_PATH}"
         npm install --omit=dev --silent
 
@@ -88,73 +86,64 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ env.GH_TOKEN }}
+        RG_MODE: ${{ inputs.mode }}
+        RG_ENFORCEMENT: ${{ inputs.enforcement }}
+        RG_REPO_ROOT: ${{ inputs.repo-root }}
+        RG_BASE: ${{ inputs.base }}
+        RG_HEAD: ${{ inputs.head }}
+        RG_CHANGE_INTENT: ${{ inputs.change-intent }}
       run: |
         set +e
+        REPO_ROOT="${RG_REPO_ROOT:-${GITHUB_WORKSPACE:-$PWD}}"
+        REPORT_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/repo-guard-report.XXXXXX.json")"
+        ARGS=(node "${GITHUB_ACTION_PATH}/dist/repo-guard.mjs" --repo-root "$REPO_ROOT")
+        if [ -n "$RG_ENFORCEMENT" ]; then ARGS+=(--enforcement "$RG_ENFORCEMENT"); fi
 
-        # Always run the checked, generated runtime shipped with the Action.
-        BIN="node ${GITHUB_ACTION_PATH}/dist/repo-guard.mjs"
+        case "$RG_MODE" in
+          check-pr)
+            ARGS+=(check-pr --format json)
+            ;;
+          check-diff)
+            ARGS+=(check-diff --format json)
+            if [ -n "$RG_BASE" ]; then ARGS+=(--base "$RG_BASE"); fi
+            if [ -n "$RG_HEAD" ]; then ARGS+=(--head "$RG_HEAD"); fi
+            if [ -n "$RG_CHANGE_INTENT" ]; then ARGS+=(--change-intent "$RG_CHANGE_INTENT"); fi
+            ;;
+          *)
+            : > "$REPORT_FILE"
+            CLI_EXIT=1
+            ;;
+        esac
 
-        # Build the command
-        CMD="$BIN"
-
-        # Append --repo-root if provided; fall back to GITHUB_WORKSPACE
-        REPO_ROOT="${{ inputs.repo-root }}"
-        if [ -z "$REPO_ROOT" ]; then
-          REPO_ROOT="${GITHUB_WORKSPACE:-$PWD}"
-        fi
-        CMD="$CMD --repo-root $REPO_ROOT"
-
-        # Append enforcement behavior and command mode / sub-command
-        ENFORCEMENT="${{ inputs.enforcement }}"
-        if [ -n "$ENFORCEMENT" ]; then
-          CMD="$CMD --enforcement $ENFORCEMENT"
-        fi
-
-        MODE="${{ inputs.mode }}"
-        CMD="$CMD $MODE"
-
-        # Append check-diff specific flags
-        if [ "$MODE" = "check-diff" ]; then
-          if [ -n "${{ inputs.base }}" ]; then
-            CMD="$CMD --base ${{ inputs.base }}"
-          fi
-          if [ -n "${{ inputs.head }}" ]; then
-            CMD="$CMD --head ${{ inputs.head }}"
-          fi
-          if [ -n "${{ inputs.change-intent }}" ]; then
-            CMD="$CMD --change-intent ${{ inputs.change-intent }}"
-          fi
+        if [ "$RG_MODE" = "check-pr" ] || [ "$RG_MODE" = "check-diff" ]; then
+          "${ARGS[@]}" > "$REPORT_FILE"
+          CLI_EXIT=$?
         fi
 
-        echo "Running: $CMD"
-        OUTPUT=$($CMD 2>&1)
-        EXIT_CODE=$?
-
-        echo "$OUTPUT"
-
-        # Derive result and summary outputs. Advisory mode can exit 0 while
-        # still reporting policy violations, so prefer the CLI Result line.
-        CLI_RESULT=$(echo "$OUTPUT" | sed -nE 's/^Result: ([a-z]+).*/\1/p' | tail -1)
-        SUMMARY=$(echo "$OUTPUT" | grep -E "^Summary:" | tail -1)
-
-        if [ $EXIT_CODE -eq 0 ]; then
-          RESULT="${CLI_RESULT:-passed}"
-          if [ -z "$SUMMARY" ]; then
-            SUMMARY="repo-guard: all checks passed"
-          fi
-        else
-          # Distinguish configuration/runtime errors from enforcement failures
-          if echo "$OUTPUT" | grep -qE "^(ERROR|FAIL: repo-policy)"; then
-            RESULT="error"
-          else
-            RESULT="${CLI_RESULT:-failed}"
-          fi
-          if [ -z "$SUMMARY" ]; then
-            SUMMARY="repo-guard: one or more checks failed (exit $EXIT_CODE)"
-          fi
-        fi
-
-        echo "result=$RESULT" >> "$GITHUB_OUTPUT"
-        echo "summary=$SUMMARY" >> "$GITHUB_OUTPUT"
-
-        exit $EXIT_CODE
+        node --input-type=module - "$REPORT_FILE" "$GITHUB_OUTPUT" "$CLI_EXIT" <<'NODE'
+        import { readFileSync, appendFileSync } from "node:fs";
+        const [reportPath, outputPath, cliExitRaw] = process.argv.slice(2);
+        const cliExit = Number(cliExitRaw);
+        let report = null;
+        try { report = JSON.parse(readFileSync(reportPath, "utf8")); } catch {}
+        const machineResult = report?.result;
+        const validResult = machineResult === "failed" || machineResult === "error"
+          || machineResult === "passed" || machineResult === "passed_with_warnings";
+        const validExit = Number.isInteger(report?.exitCode) && (report.exitCode === 0 || report.exitCode === 1);
+        const invalid = !validResult || !validExit || report.exitCode !== cliExit;
+        const result = invalid ? "error"
+          : machineResult === "failed" ? "failed"
+          : machineResult === "error" ? "error"
+          : "passed";
+        const number = (value) => Number.isFinite(value) ? value : 0;
+        const mode = report?.mode === "advisory" ? "advisory" : report?.mode === "blocking" ? "blocking" : "unknown";
+        const summary = invalid
+          ? "repo-guard: error; structured report unavailable or inconsistent"
+          : `repo-guard: ${result}; ${number(report.passed)} passed, ${number(report.violationCount)} violation(s), ${number(report.warnings)} warning(s); mode ${mode}`;
+        appendFileSync(outputPath, `result=${result}\nsummary=${summary}\n`);
+        if (invalid) process.exitCode = 1;
+        else process.exitCode = report.exitCode;
+        NODE
+        ADAPTER_EXIT=$?
+        rm -f "$REPORT_FILE"
+        exit "$ADAPTER_EXIT"

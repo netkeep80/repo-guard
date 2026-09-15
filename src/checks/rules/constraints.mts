@@ -82,11 +82,11 @@ function primitiveRelation(constraint: RuntimeConstraint): PrimitiveRelation {
 function withConstraintEvidence(check: unknown, constraint: RuntimeConstraint): unknown {
   if (!check || typeof check !== "object" || Array.isArray(check)) return check;
   const parameters = constraint.parameters || {};
-  const evidence = Object.fromEntries(BUDGET_EVIDENCE_FIELDS.flatMap((field) => Object.hasOwn(parameters, field) ? [[field, parameters[field]]] : []));
-  if (!Object.keys(evidence).length) return check;
+  const budget = Object.fromEntries(BUDGET_EVIDENCE_FIELDS.flatMap((field) => Object.hasOwn(parameters, field) ? [[field, parameters[field]]] : []));
+  const relation = { relation_id: constraint.relation_id, kind: constraint.primitive, operands: constraint.operands };
   const record = check as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data as Record<string, unknown> : {};
-  return { ...record, ...evidence, data: { ...data, ...evidence } };
+  return { ...record, ...budget, data: { ...data, ...relation, ...budget } };
 }
 
 function advisoryCheck(check: unknown, advisory: boolean | undefined): unknown {

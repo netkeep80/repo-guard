@@ -1,131 +1,68 @@
-const CHECK_FIELDS = new Set([
-    "ok",
-    "advisory",
-    "message",
-    "details",
-    "errors",
-    "hint",
-    "rule",
-    "severity",
-    "data",
-]);
-function isPlainObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function isScalar(value) {
-    return value === null || ["string", "number", "boolean"].includes(typeof value);
-}
-function formatList(values) {
-    return values.length > 0 ? values.join(", ") : "(none)";
-}
-function compactValue(value) {
+const CHECK_FIELDS = new Set(["ok", "advisory", "message", "details", "errors", "hint", "rule", "severity", "data"]);
+const plain = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const scalar = (value) => value === null || ["string", "number", "boolean"].includes(typeof value);
+const list = (value) => !value ? [] : Array.isArray(value) ? value.map(String) : [String(value)];
+function compact(value) {
     if (Array.isArray(value))
-        return value.map(compactValue).filter((item) => item !== undefined);
-    if (!isPlainObject(value))
+        return value.map(compact).filter((item) => item !== undefined);
+    if (!plain(value))
         return value;
-    const compacted = {};
-    for (const [key, nested] of Object.entries(value)) {
-        const clean = compactValue(nested);
-        if (clean !== undefined)
-            compacted[key] = clean;
-    }
-    return compacted;
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, compact(nested)]).filter(([, nested]) => nested !== undefined));
 }
 function checkData(check) {
-    if (isPlainObject(check.data))
+    if (plain(check.data))
         return check.data;
-    const data = {};
-    for (const [key, value] of Object.entries(check || {})) {
+    return Object.fromEntries(Object.entries(check || {}).flatMap(([key, value]) => {
         if (CHECK_FIELDS.has(key) || value === undefined)
-            continue;
-        const compacted = compactValue(value);
-        if (Array.isArray(compacted) && compacted.length === 0)
-            continue;
-        if (isPlainObject(compacted) && Object.keys(compacted).length === 0)
-            continue;
-        data[key] = compacted;
-    }
-    return data;
+            return [];
+        const clean = compact(value);
+        if ((Array.isArray(clean) && !clean.length) || (plain(clean) && !Object.keys(clean).length))
+            return [];
+        return [[key, clean]];
+    }));
 }
-function dataDetails(data, { includeComplex }) {
-    const details = [];
-    for (const [key, value] of Object.entries(data)) {
+function dataDetails(data, includeComplex) {
+    return Object.entries(data).flatMap(([key, value]) => {
         if (value === undefined || value === null)
-            continue;
-        if (isScalar(value)) {
-            details.push(`${key}: ${value}`);
-        }
-        else if (Array.isArray(value) && value.every(isScalar)) {
-            if (value.length > 0)
-                details.push(`${key}: ${formatList(value)}`);
-        }
-        else if (includeComplex && isPlainObject(value) && Object.values(value).every(isScalar)) {
-            details.push(`${key}: ${JSON.stringify(value)}`);
-        }
-        else if (includeComplex && Array.isArray(value) && value.length > 0) {
-            details.push(`${key}: ${value.length} item(s)`);
-        }
-    }
-    return details;
-}
-function asList(value) {
-    if (!value)
-        return [];
-    return Array.isArray(value) ? value.map(String) : [String(value)];
+            return [];
+        if (scalar(value))
+            return [`${key}: ${value}`];
+        if (Array.isArray(value) && value.every(scalar))
+            return value.length ? [`${key}: ${value.join(", ")}`] : [];
+        if (includeComplex && plain(value) && Object.values(value).every(scalar))
+            return [`${key}: ${JSON.stringify(value)}`];
+        return includeComplex && Array.isArray(value) && value.length ? [`${key}: ${value.length} item(s)`] : [];
+    });
 }
 export function detailFromCheck(check) {
-    const explicitDetails = asList(check.details);
-    const errors = asList(check.errors);
-    const data = checkData(check);
-    const includeComplex = explicitDetails.length === 0 && errors.length === 0;
-    return [
-        ...asList(check.message),
-        ...dataDetails(data, { includeComplex }),
-        ...explicitDetails,
-        ...errors,
-        ...asList(check.hint).map((hint) => `hint: ${hint}`),
-    ];
+    const details = list(check.details), errors = list(check.errors), data = checkData(check);
+    return [...list(check.message), ...dataDetails(data, !details.length && !errors.length), ...details, ...errors, ...list(check.hint).map((hint) => `hint: ${hint}`)];
 }
-function normalizeCheckResult(name, check) {
-    const ok = Boolean(check.ok);
-    const result = {
-        rule: name,
-        ok,
-        severity: ok ? "pass" : check.advisory ? "warning" : "failure",
-        details: detailFromCheck(check),
-    };
-    const data = checkData(check);
+function normalizeCheckResult(name, check, evidence) {
+    const ok = Boolean(check.ok), severity = ok ? "pass" : check.advisory ? "warning" : "failure", data = checkData(check);
+    const { enforcementMode: _enforcementMode, ...publicEvidence } = evidence;
+    const relationId = typeof data.relation_id === "string" ? data.relation_id : name, operands = plain(data.operands) ? data.operands : undefined;
+    const result = { rule: name, ok, severity, details: detailFromCheck(check), evidence: { ...publicEvidence, ruleId: relationId, ...(typeof data.kind === "string" ? { relation: data.kind } : {}), ...(operands ? { operands } : {}), ok, reasonCode: `${relationId}.${severity}` } };
     if (check.message)
         result.message = check.message;
     if (check.hint)
         result.hint = check.hint;
-    if (Object.keys(data).length > 0)
+    if (Object.keys(data).length)
         result.data = data;
     return result;
 }
-function normalizeEnforcement(enforcement) {
-    if (typeof enforcement === "string")
-        return { mode: enforcement };
-    return enforcement || { mode: "blocking" };
-}
+const enforcement = (value) => typeof value === "string" ? { mode: value } : value || { mode: "blocking" };
 export function createAnalysisCollector(enforcementInput, options = {}) {
-    const enforcement = normalizeEnforcement(enforcementInput);
-    const mode = enforcement.mode;
-    const presenter = options.presenter || null;
-    let passed = 0;
-    let violations = 0;
-    let warnings = 0;
-    const ruleResults = [];
-    const violationDetails = [];
-    const warningDetails = [];
-    const hints = [];
+    const mode = enforcement(enforcementInput).mode, presenter = options.presenter || null;
+    let passed = 0, violations = 0, warnings = 0, enforcedFailures = 0;
+    const ruleResults = [], violationDetails = [], warningDetails = [], hints = [];
     return {
-        report(name, check) {
-            const normalized = normalizeCheckResult(name, check);
+        report(name, check, evidence = {}) {
+            const effectiveMode = evidence.enforcementMode ?? mode, normalized = normalizeCheckResult(name, check, evidence);
             ruleResults.push(normalized);
             if (check.ok) {
                 passed++;
-                presenter?.check?.({ check: normalized, mode, outcome: "pass" });
+                presenter?.check?.({ check: normalized, mode: effectiveMode, outcome: "pass" });
                 return;
             }
             if (check.advisory) {
@@ -133,40 +70,23 @@ export function createAnalysisCollector(enforcementInput, options = {}) {
                 warningDetails.push(normalized);
                 if (normalized.hint)
                     hints.push({ rule: name, message: normalized.hint });
-                presenter?.check?.({ check: normalized, mode, outcome: "warning" });
+                presenter?.check?.({ check: normalized, mode: effectiveMode, outcome: "warning" });
                 return;
             }
             violations++;
+            if (effectiveMode === "blocking")
+                enforcedFailures++;
             violationDetails.push(normalized);
             if (normalized.hint)
                 hints.push({ rule: name, message: normalized.hint });
-            presenter?.check?.({ check: normalized, mode, outcome: "violation" });
+            presenter?.check?.({ check: normalized, mode: effectiveMode, outcome: "violation" });
         },
         finish(extra = {}) {
-            const enforcedFailures = mode === "blocking" ? violations : 0;
-            const exitCode = enforcedFailures > 0 ? 1 : 0;
-            const result = violations > 0 ? "failed" : warnings > 0 ? "passed_with_warnings" : "passed";
-            const report = {
-                command: extra.command || null,
-                mode,
-                ok: violations === 0,
-                result,
-                passed,
-                violations: violationDetails,
-                advisoryWarnings: warningDetails,
-                warnings,
-                violationCount: violations,
-                failed: enforcedFailures,
-                exitCode,
-                ruleResults,
-                hints,
-                ...extra,
-            };
+            const exitCode = enforcedFailures ? 1 : 0, result = violations ? "failed" : warnings ? "passed_with_warnings" : "passed";
+            const report = { command: extra.command || null, mode, ok: violations === 0, result, passed, violations: violationDetails, advisoryWarnings: warningDetails, warnings, violationCount: violations, failed: enforcedFailures, exitCode, ruleResults, hints, ...extra };
             presenter?.finish?.(report);
             return report;
         },
-        get violations() {
-            return violations;
-        },
+        get violations() { return violations; },
     };
 }

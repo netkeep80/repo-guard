@@ -31,7 +31,7 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "dist/repo-guard.mjs")), true);
 
   const action = read("action.yml");
-  assert.match(action, /node \$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs/);
+  assert.match(action, /ARGS=\(node "\$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs"/);
   assert.doesNotMatch(action, /GITHUB_ACTION_PATH\}\/src\/repo-guard\.(?:mjs|mts)/);
   assert.match(action, /npm install --omit=dev --silent/);
 

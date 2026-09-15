@@ -35,12 +35,11 @@ function withConstraintEvidence(check, constraint) {
     if (!check || typeof check !== "object" || Array.isArray(check))
         return check;
     const parameters = constraint.parameters || {};
-    const evidence = Object.fromEntries(BUDGET_EVIDENCE_FIELDS.flatMap((field) => Object.hasOwn(parameters, field) ? [[field, parameters[field]]] : []));
-    if (!Object.keys(evidence).length)
-        return check;
+    const budget = Object.fromEntries(BUDGET_EVIDENCE_FIELDS.flatMap((field) => Object.hasOwn(parameters, field) ? [[field, parameters[field]]] : []));
+    const relation = { relation_id: constraint.relation_id, kind: constraint.primitive, operands: constraint.operands };
     const record = check;
     const data = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data : {};
-    return { ...record, ...evidence, data: { ...data, ...evidence } };
+    return { ...record, ...budget, data: { ...data, ...relation, ...budget } };
 }
 function advisoryCheck(check, advisory) {
     if (!advisory || !check || typeof check !== "object" || Array.isArray(check))
