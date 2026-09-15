@@ -88,7 +88,13 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
         }
         if (!runtime.ok) {
             const details = runtime.errors.map((error) => `${error.group}: ${error.message}`).join("; ");
-            return { name: "repo-policy.json", status: FAIL, message: `Policy normalization failed: ${details}`, hint: "Fix repo-policy.json using the canonical validation diagnostics" };
+            const schemaOnly = runtime.errors.length > 0 && runtime.errors.every((error) => error.stage === "schema");
+            return {
+                name: "repo-policy.json",
+                status: FAIL,
+                message: `${schemaOnly ? "Schema validation failed" : "Policy normalization failed"}: ${details}`,
+                hint: "Fix repo-policy.json using the canonical validation diagnostics",
+            };
         }
         const effectivePolicy = runtime.policy;
         return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind}, format ${effectivePolicy.policy_format_version})` };
