@@ -107,6 +107,8 @@ BASE и HEAD не создают самостоятельные финальны
 - evaluation plan summary;
 - evidence.
 
+`AnalysisReport.result` сохраняет существующие значения `passed`, `passed_with_warnings`, `failed` и получает явное значение `error` для configuration/runtime failure, когда полноценная policy evaluation не может быть завершена. В таком случае report всё равно остаётся единственным машинным результатом команды и несёт стабильный `reasonCode`, безопасное сообщение и `exitCode=1`.
+
 Запрещено вычислять финальный статус отдельным `Math.max(base.exitCode, head.exitCode)` или аналогичной внешней агрегацией.
 
 ## 4. Evidence envelope
@@ -139,45 +141,60 @@ Evidence не должна включать:
 
 ## 5. Structured output `check-pr`
 
-`check-pr` получает тот же машинный output contract, что уже применяется для других структурированных команд:
+`check-pr` получает существующий для `check-diff` принцип выбора renderer:
 
 ```text
+repo-guard check-pr --format text
 repo-guard check-pr --format json
-repo-guard check-pr --format json --output <file>
+repo-guard check-pr --format summary
 ```
 
-`--format json` печатает один сериализованный итоговый `AnalysisReport` без необходимости разбирать human-readable строки.
+`text` остаётся значением по умолчанию.
 
-`--output <file>` записывает тот же объект в файл. Код возврата процесса берётся только из `AnalysisReport.exitCode`.
+`json` печатает ровно один сериализованный итоговый `AnalysisReport` в stdout. Human diagnostics в этом режиме не смешиваются с JSON.
 
-Human-readable renderer остаётся отдельным presentation layer над тем же report.
+Отдельный CLI-флаг `--output` не вводится: для Action и других машинных consumers достаточно обычного перенаправления stdout в файл. Это уменьшает публичную CLI-поверхность и использует уже существующий renderer contract.
+
+Код возврата процесса берётся только из `AnalysisReport.exitCode`.
 
 ## 6. Контракт Action
 
 Текущий публичный output vocabulary сохраняется:
 
-- `passed` — нет нарушений;
-- `failed` — есть policy violations, включая advisory violations;
-- `error` — repo-guard не смог получить корректный итоговый анализ из-за configuration/runtime failure.
+- `passed` — AnalysisReport имеет `result=passed` или `result=passed_with_warnings`;
+- `failed` — AnalysisReport имеет `result=failed`, включая advisory policy violations;
+- `error` — AnalysisReport имеет `result=error` из-за configuration/runtime failure.
+
+Отображение внутреннего report vocabulary в Action output фиксировано и не зависит от текста diagnostics:
+
+```text
+passed              -> passed
+passed_with_warnings -> passed
+failed              -> failed
+error               -> error
+```
 
 Для advisory policy violation:
 
 ```text
-result = failed
+AnalysisReport.result = failed
+Action result = failed
 exitCode = 0
 ```
 
 Для blocking policy violation:
 
 ```text
-result = failed
+AnalysisReport.result = failed
+Action result = failed
 exitCode = 1
 ```
 
 Для configuration/runtime error:
 
 ```text
-result = error
+AnalysisReport.result = error
+Action result = error
 exitCode = 1
 ```
 
@@ -185,11 +202,14 @@ exitCode = 1
 
 Он должен:
 
-1. передать все пользовательские значения как отдельные argv элементы или environment data;
-2. вызвать `check-pr`/`check-diff` с structured output file;
-3. прочитать JSON небольшим Node-вызовом;
-4. перенести `result` и `summary` в `$GITHUB_OUTPUT`;
-5. завершиться тем же exit code, который вернул repo-guard.
+1. получать composite-action inputs через `env`, чтобы `${{ inputs.* }}` не попадали непосредственно в исполняемый shell syntax;
+2. собирать argv как bash array с отдельным элементом на каждое значение;
+3. вызвать `check-pr`/`check-diff` с `--format json` и перенаправить stdout в временный report file;
+4. прочитать JSON небольшим Node-вызовом;
+5. применить только фиксированное отображение `AnalysisReport.result -> Action result` выше;
+6. сформировать `summary` из структурированных counters/reason, не из prose parsing;
+7. перенести `result` и `summary` в `$GITHUB_OUTPUT`;
+8. завершиться тем же exit code, который вернул repo-guard.
 
 Запрещаются:
 
@@ -206,11 +226,11 @@ exitCode = 1
 
 - `src/github-pr.mts` — один orchestration flow, один report;
 - `src/runtime/pipeline.mts` — оценка в существующий collector/context вместо обязательного создания собственного final report;
-- `src/runtime/analysis-report.mts` — финальный report contract и evidence metadata;
+- `src/runtime/analysis-report.mts` — финальный report contract, `error` outcome и evidence metadata;
 - `src/facts/input.mts` — принятие общего immutable observation/read context;
 - `src/checks/rule-registry.mts` — pre-evaluation family selection;
 - `src/checks/orchestrator.mts` — упрощение после переноса фильтрации;
-- `src/repo-guard.mts` — опции structured output для `check-pr`;
+- `src/repo-guard.mts` — `--format` для `check-pr`;
 - `action.yml` — argv-safe запуск и JSON consumption;
 - соответствующий generated `dist/**`.
 
@@ -236,11 +256,11 @@ src/** net added lines <= 0
 
 Обязательные случаи:
 
-1. `BASE FAIL + HEAD PASS` → финальный `result=failed`, blocking `exitCode=1`;
-2. `BASE PASS + HEAD FAIL` → финальный `result=failed`, blocking `exitCode=1`;
-3. advisory violation → `result=failed`, `exitCode=0`;
-4. warning без violation → `passed_with_warnings` внутри AnalysisReport, при этом Action contract остаётся согласован с документированным output;
-5. configuration/runtime failure → Action `result=error`;
+1. `BASE FAIL + HEAD PASS` → финальный `AnalysisReport.result=failed`, blocking `exitCode=1`;
+2. `BASE PASS + HEAD FAIL` → финальный `AnalysisReport.result=failed`, blocking `exitCode=1`;
+3. advisory violation → `AnalysisReport.result=failed`, Action `result=failed`, `exitCode=0`;
+4. warning без violation → `AnalysisReport.result=passed_with_warnings`, Action `result=passed`;
+5. configuration/runtime failure → `AnalysisReport.result=error`, Action `result=error`;
 6. missing BASE file;
 7. wrong scalar type;
 8. invalid pointer;
@@ -251,7 +271,9 @@ src/** net added lines <= 0
 13. read counters → один immutable file/snapshot read для одинакового ключа внутри invocation;
 14. token marker, полный issue body и полный PR body отсутствуют в serialized report;
 15. observation `B/M/H/T` присутствует в итоговом report;
-16. existing P0.4 state-obligation replacement semantics не изменились.
+16. existing P0.4 state-obligation replacement semantics не изменились;
+17. `check-pr --format json` пишет только JSON в stdout и согласованный diagnostics stream в stderr;
+18. текущий `check-diff --format json` contract остаётся совместимым.
 
 После GREEN локального corpus обязательны:
 
@@ -261,7 +283,7 @@ src/** net added lines <= 0
 - `validate`;
 - `smoke-pack`;
 - dedicated `trusted-enforcement` на exact PR head;
-- реальный composite Action smoke;
+- реальный composite Action smoke с path containing spaces и literal shell metacharacters;
 - post-merge CI на exact merge commit.
 
 ## 10. Совместимость
@@ -270,7 +292,9 @@ Human-readable CLI текст может стать проще, но machine sem
 
 Публичные Action outputs `result` и `summary` сохраняются.
 
-Существующий `AnalysisReport` contract расширяется совместимо, если поле уже используется внешними consumers. Удаление или переименование существующего публичного поля допускается только при отдельном доказательстве, что оно не является поддерживаемым contract.
+Существующий `check-diff --format json` envelope не ломается.
+
+Существующий `AnalysisReport` contract расширяется совместимо. Удаление или переименование существующего публичного поля допускается только при отдельном доказательстве, что оно не является поддерживаемым contract.
 
 Никакие accidental `sed/grep` parser quirks не считаются контрактом.
 
@@ -285,7 +309,8 @@ Human-readable CLI текст может стать проще, но machine sem
 - изменение схем policy;
 - изменение trusted-enforcement topology;
 - consumer-specific bypass;
-- расширение GovernanceGrant для обхода self-policy.
+- расширение GovernanceGrant для обхода self-policy;
+- новый общий transport/protocol layer между CLI и Action.
 
 ## Критерий завершения
 
@@ -296,7 +321,7 @@ Human-readable CLI текст может стать проще, но machine sem
 - BASE/HEAD используют один immutable observation context;
 - excluded families не исполняются;
 - duplicate immutable reads устранены для одинакового observation key;
-- structured `check-pr` является machine authority для Action;
+- `check-pr --format json` является machine authority для Action;
 - Action не строит одну interpolated shell command и не парсит prose;
 - секреты и полные issue/PR bodies не попадают в report;
 - self-policy принимает refactor без GovernanceGrant;
