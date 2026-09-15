@@ -99,6 +99,11 @@ function fetchLinkedIssue({ prBody, repoFullName, quiet = false }) {
         console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
     return { linkedIssues, issueBody, issueContext, fatal: false };
 }
+export function memoizeSnapshotReader(read) {
+    const reads = new Map();
+    return (ref, path) => { const key = `${ref}\0${path}`; if (!reads.has(key))
+        reads.set(key, read(ref, path)); return reads.get(key); };
+}
 function policyAt(reader, ref) {
     try {
         const raw = reader(ref, "repo-policy.json");
@@ -159,12 +164,7 @@ export function runCheckPR(roots, args = []) {
         console.log(`PR #${prNumber}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
         console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
     }
-    const reads = new Map(), readSnapshotFile = (ref, path) => {
-        const key = `${ref}\0${path}`;
-        if (!reads.has(key))
-            reads.set(key, readFileAtRef(ref, path, roots.repoRoot));
-        return reads.get(key);
-    };
+    const readSnapshotFile = memoizeSnapshotReader((ref, path) => readFileAtRef(ref, path, roots.repoRoot));
     const readEvaluatedFile = (path) => readSnapshotFile(observation.evaluated.commit_sha, path);
     const headRuntime = headPolicyRuntime(roots, observation, readSnapshotFile, quiet);
     if (!headRuntime)
