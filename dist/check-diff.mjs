@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { getDiffObservation } from "./git.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { renderAnalysisReport } from "./reporting/renderers.mjs";
-import { loadJSON, loadPolicyRuntime, validationCheck } from "./runtime/validation.mjs";
+import { createPolicyNormalizationContext, loadJSON, loadPolicyRuntime, validationContextCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
 const value = (args, name) => { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; };
 export function runCheckDiff(roots, args = []) {
@@ -12,8 +12,8 @@ export function runCheckDiff(roots, args = []) {
         console.error(`Unknown check-diff format: ${format}`);
         return 1;
     }
-    const quiet = format !== "text", runtime = loadPolicyRuntime(roots, { quiet });
-    const { ajv, policy, changeIntentSchema } = runtime;
+    const quiet = format !== "text", context = createPolicyNormalizationContext(roots), runtime = loadPolicyRuntime(roots, { quiet, context });
+    const { policy } = runtime;
     if (!runtime.ok) {
         if (!quiet)
             console.error("\nPolicy compilation failed; aborting enforcement.");
@@ -28,7 +28,7 @@ export function runCheckDiff(roots, args = []) {
     const initialChecks = [];
     if (changeIntentPath)
         try {
-            const loaded = loadJSON(changeIntentPath), check = validationCheck(ajv, changeIntentSchema, loaded, changeIntentPath);
+            const loaded = loadJSON(changeIntentPath), check = validationContextCheck(context, "changeIntent", loaded, changeIntentPath);
             initialChecks.push({ name: "change-intent", check });
             if (check.ok)
                 changeIntent = loaded;
