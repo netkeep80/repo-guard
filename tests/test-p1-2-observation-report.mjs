@@ -111,14 +111,15 @@ describe("P1.2: composite Action остаётся тонким adapter", () => {
   it("исполняет checked dist через argv-array и не парсит prose", () => {
     const action = source("action.yml");
     const runStep = action.slice(action.indexOf("- name: Run repo-guard"));
-    assert.match(runStep, /ARGS=\(node "\$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs"/);
-    assert.match(runStep, /"\$\{ARGS\[@\]\}" > "\$REPORT_FILE"/);
-    assert.match(runStep, /ARGS\+=\(--change-intent "\$RG_CHANGE_INTENT"\)/);
-    assert.doesNotMatch(runStep, /\$\{\{\s*inputs\./);
-    assert.doesNotMatch(runStep, /CMD="\$CMD/);
-    assert.doesNotMatch(runStep, /\beval\b/);
-    assert.doesNotMatch(runStep, /\bsed\b/);
-    assert.doesNotMatch(runStep, /\bgrep\b/);
-    assert.match(runStep, /--format json/);
+    const script = runStep.slice(runStep.indexOf("      run: |"));
+    assert.match(script, /ARGS=\(node "\$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs"/);
+    assert.match(script, /"\$\{ARGS\[@\]\}" > "\$REPORT_FILE"/);
+    assert.match(script, /ARGS\+=\(--change-intent "\$RG_CHANGE_INTENT"\)/);
+    assert.doesNotMatch(script, /\$\{\{\s*inputs\./);
+    assert.doesNotMatch(script, /CMD="\$CMD/);
+    assert.doesNotMatch(script, /\beval\b/);
+    assert.doesNotMatch(script, /\bsed\b/);
+    assert.doesNotMatch(script, /\bgrep\b/);
+    assert.match(script, /--format json/);
   });
 });

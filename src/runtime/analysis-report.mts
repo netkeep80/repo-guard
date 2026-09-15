@@ -42,7 +42,8 @@ export function detailFromCheck(check: unknown): string[] {
 function normalizeCheckResult(name: string, check: unknown, evidence: ReportEvidence): NormalizedCheckResult {
   const ok = Boolean((check as CheckInput).ok), severity: Severity = ok ? "pass" : (check as CheckInput).advisory ? "warning" : "failure", data = checkData(check);
   const { enforcementMode: _enforcementMode, ...publicEvidence } = evidence;
-  const result: NormalizedCheckResult = { rule: name, ok, severity, details: detailFromCheck(check), evidence: { ruleId: name, ...publicEvidence, ...(typeof data.kind === "string" ? { relation: data.kind } : {}), ok, reasonCode: `${name}.${severity}` } };
+  const relationId = typeof data.relation_id === "string" ? data.relation_id : name, operands = plain(data.operands) ? data.operands : undefined;
+  const result: NormalizedCheckResult = { rule: name, ok, severity, details: detailFromCheck(check), evidence: { ...publicEvidence, ruleId: relationId, ...(typeof data.kind === "string" ? { relation: data.kind } : {}), ...(operands ? { operands } : {}), ok, reasonCode: `${relationId}.${severity}` } };
   if ((check as CheckInput).message) result.message = (check as CheckInput).message;
   if ((check as CheckInput).hint) result.hint = (check as CheckInput).hint;
   if (Object.keys(data).length) result.data = data;

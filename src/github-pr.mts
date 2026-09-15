@@ -78,6 +78,10 @@ function fetchLinkedIssue({ prBody, repoFullName, quiet = false }: { prBody: unk
   if (issueBody === null && hasChangeIntent) console.warn(`WARN: could not fetch linked issue #${linkedIssues[0]}; GovernanceGrant unavailable`);
   return { linkedIssues, issueBody, issueContext, fatal: false };
 }
+export function memoizeSnapshotReader(read: SnapshotReader): SnapshotReader {
+  const reads = new Map<string, string | null>();
+  return (ref, path) => { const key = `${ref}\0${path}`; if (!reads.has(key)) reads.set(key, read(ref, path)); return reads.get(key)!; };
+}
 function policyAt(reader: SnapshotReader, ref: string) {
   try { const raw = reader(ref, "repo-policy.json"); return raw == null ? { policy: null, error: "empty_base_policy" } : { policy: JSON.parse(raw), error: null }; }
   catch (error: unknown) { return { policy: null, error: `base_policy_read_error: ${(error as Error).message}` }; }
@@ -118,11 +122,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     console.log(`PR #${prNumber as string | number}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
     console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
   }
-  const reads = new Map<string, string | null>(), readSnapshotFile: SnapshotReader = (ref, path) => {
-    const key = `${ref}\0${path}`;
-    if (!reads.has(key)) reads.set(key, readFileAtRef(ref, path, roots.repoRoot));
-    return reads.get(key)!;
-  };
+  const readSnapshotFile = memoizeSnapshotReader((ref, path) => readFileAtRef(ref, path, roots.repoRoot));
   const readEvaluatedFile = (path: string) => readSnapshotFile(observation.evaluated.commit_sha, path);
   const headRuntime = headPolicyRuntime(roots, observation, readSnapshotFile, quiet);
   if (!headRuntime) return fail(roots, format, "check_pr.head_policy", "Proposed policy compilation failed");
