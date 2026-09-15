@@ -17,4 +17,14 @@ describe("C3.2 architecture compression metrics", () => {
     assert.equal(architecture.macro_generated_positional_identity, 0);
     assert.equal(architecture.high_level_pack_semantic_edit_sites_in_canonical_core, 0);
   });
+
+  it("reports current runtime vocabulary without historical stage-name proxies", () => {
+    const architecture = metrics().architecture;
+
+    assert.deepEqual(architecture.runtime_constraint_kind_names, ["primitive_relation"]);
+    assert.equal(
+      Object.hasOwn(architecture, "c33a_historical_runtime_kinds_remaining"),
+      false,
+    );
+  });
 });
