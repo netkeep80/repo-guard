@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { runCli } from "../dist/repo-guard.mjs";
+import { COMMANDS, runCli } from "../dist/repo-guard.mjs";
+
+assert.deepEqual(
+  [...COMMANDS].sort(),
+  ["validate", "check-diff", "check-pr", "init", "doctor"].sort(),
+);
 
 const originalError = console.error, errors = [];
 console.error = (...args) => errors.push(args.join(" "));
@@ -23,4 +28,4 @@ try {
   console.error = originalError;
 }
 
-console.log("Declarative provider-free CLI grammar contract passed.");
+console.log("Declarative provider-free CLI grammar and public command surface contract passed.");
