@@ -69,17 +69,23 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
         if (!existsSync(policyPath)) {
             return { name: "repo-policy.json", status: FAIL, message: `Not found at ${policyPath}`, hint: "Create repo-policy.json or run 'repo-guard init' to scaffold one" };
         }
-        try {
-            JSON.parse(readFileSync(policyPath, "utf-8"));
-        }
-        catch (e) {
-            return { name: "repo-policy.json", status: FAIL, message: `Parse error: ${e.message}`, hint: "Fix JSON syntax in repo-policy.json" };
-        }
         const schemaPath = resolve(packageRoot, "schemas/repo-policy.schema.json");
         if (!existsSync(schemaPath)) {
             return { name: "repo-policy.json", status: FAIL, message: "Policy schema not found at package root", hint: "Reinstall repo-guard — schema files are missing" };
         }
-        const runtime = loadPolicyRuntime({ repoRoot, packageRoot }, { quiet: true });
+        let runtime;
+        try {
+            runtime = loadPolicyRuntime({ repoRoot, packageRoot }, { quiet: true });
+        }
+        catch (e) {
+            const parse = e instanceof SyntaxError;
+            return {
+                name: "repo-policy.json",
+                status: FAIL,
+                message: `${parse ? "Parse" : "Policy load"} error: ${e.message}`,
+                hint: parse ? "Fix JSON syntax in repo-policy.json" : "Check repo-policy.json and the installed repo-guard package",
+            };
+        }
         if (!runtime.ok) {
             const details = runtime.errors.map((error) => `${error.group}: ${error.message}`).join("; ");
             return { name: "repo-policy.json", status: FAIL, message: `Policy normalization failed: ${details}`, hint: "Fix repo-policy.json using the canonical validation diagnostics" };
