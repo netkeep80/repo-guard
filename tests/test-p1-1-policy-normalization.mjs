@@ -75,6 +75,21 @@ if (typeof validationModule.createPolicyNormalizationContext === "function" && t
   assert.equal(rejected.constraintProgram, null, "schema-invalid shape must not reach semantic program lowering");
   assert.deepEqual([...new Set(rejected.errors.map((error) => error.stage))], ["schema"]);
 
+  const unknownHead = foundationPolicy();
+  unknownHead.unknown_head_key = true;
+  const unknownRejected = validationModule.normalizePolicy(context, unknownHead, { quiet: true });
+  assert.equal(unknownRejected.ok, false, "unknown HEAD keys must fail strict current vocabulary validation");
+  assert.deepEqual([...new Set(unknownRejected.errors.map((error) => error.stage))], ["schema"]);
+
+  const independentlyMalformed = foundationPolicy();
+  independentlyMalformed.unknown_head_key = true;
+  independentlyMalformed.diff_rules = { max_new_docs: "broken", max_new_files: -1 };
+  const errorsFirst = validationModule.normalizePolicy(context, independentlyMalformed, { quiet: true }).errors;
+  const errorsSecond = validationModule.normalizePolicy(context, independentlyMalformed, { quiet: true }).errors;
+  assert.ok(errorsFirst.length >= 3, "independent schema errors must be collected rather than stopped at the first error");
+  assert.deepEqual(errorsFirst, errorsSecond, "schema diagnostics must be deterministic across repeated normalization");
+  assert.deepEqual(errorsFirst.map((error) => error.message), errorsFirst.map((error) => error.message).sort(), "schema diagnostics must use deterministic sorted order");
+
   const withRetiredBaseField = foundationPolicy();
   withRetiredBaseField.integration = { workflows: [{ id: "retired" }] };
   assert.equal(validationModule.normalizePolicy(context, withRetiredBaseField, { quiet: true }).ok, false, "HEAD remains strict current vocabulary");
