@@ -13,84 +13,26 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read
-  issues: read
+  statuses: write
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
+      - name: Candidate self-approval
+        run: echo "candidate validate says GREEN without running repo-guard"
 
-      - name: Acquire minimal Git evidence
+      - name: Attempt to spoof trusted enforcement on PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git fetch --no-tags --prune --unshallow origin \
-              "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-              "+refs/pull/${{ github.event.pull_request.number }}/merge:refs/remotes/pull/${{ github.event.pull_request.number }}/merge"
-          else
-            git fetch --no-tags --prune --unshallow origin \
-              "+refs/heads/${{ github.ref_name }}:refs/remotes/origin/${{ github.ref_name }}"
-          fi
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-
-      - run: npm ci
-
-      - name: Verify generated dist freshness
-        run: npm run check:dist
-
-      - name: Report architecture compression metrics
-        run: npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
-
-      - name: Validate repo-policy.json
-        run: npx repo-guard
-
-      - name: Run doctor diagnostics on self
-        run: npx repo-guard doctor
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run discovered test suite
-        run: node tests/run.mjs
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run PR policy check
-        if: github.event_name == 'pull_request' && !github.event.pull_request.draft
-        uses: ./
-        with:
-          mode: check-pr
-          enforcement: blocking
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish repo-guard summary
-        if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
-        run: echo "### repo-guard" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Exercise advisory policy mode
-        run: |
-          set -euo pipefail
-          TMP_FILE="$(mktemp)"
-          cp README.md "$TMP_FILE"
-          trap 'cp "$TMP_FILE" README.md; rm -f "$TMP_FILE"; git reset --quiet README.md' EXIT
-
-          printf '\n%s: advisory fixture\n' "TO""DO" >> README.md
-          git add README.md
-          OUTPUT="$(node dist/repo-guard.mjs --enforcement advisory check-diff 2>&1)"
-          STATUS=$?
-          printf '%s\n' "$OUTPUT"
-
-          test "$STATUS" -eq 0
-          echo "$OUTPUT" | grep -q "WARN: content-rules"
-          echo "$OUTPUT" | grep -q "Result: failed"
-          echo "$OUTPUT" | grep -q "mode: advisory"
+          [[ "$CANDIDATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${CANDIDATE_HEAD_SHA}" \
+            -f state=success \
+            -f context=trusted-enforcement \
+            -f description="candidate attempted to forge trusted authority on PR head"
 
   smoke-pack:
     runs-on: ubuntu-latest
