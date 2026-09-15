@@ -58,6 +58,7 @@ const canonical = (value: unknown): unknown => Array.isArray(value)
     ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]))
     : value;
 const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+const invocationContexts = new WeakMap<RuntimeRoots, PolicyNormalizationContext>();
 
 export const loadJSON = (path: string): unknown => JSON.parse(readFileSync(path, "utf-8"));
 // Draft-07 разрешает массив типов. Оставляем Ajv strict mode включённым, но явно
@@ -101,6 +102,17 @@ export function createPolicyNormalizationContext(roots: RuntimeRoots, options: P
   return { roots, ajv, schemas, authorities, validatorFor };
 }
 
+function runtimeContext(roots: RuntimeRoots, options: RuntimeValidationOptions): PolicyNormalizationContext {
+  if (options.context) return options.context;
+  if (options.schemas) return createPolicyNormalizationContext(roots, options);
+  let context = invocationContexts.get(roots);
+  if (!context) {
+    context = createPolicyNormalizationContext(roots);
+    invocationContexts.set(roots, context);
+  }
+  return context;
+}
+
 export function validate(ajv: AjvRuntime, schema: AjvSchema, data: unknown, label: string, { quiet = false }: QuietOption = {}) {
   const valid = ajv.validate(schema, data);
   if (!quiet) {
@@ -112,11 +124,6 @@ export function validate(ajv: AjvRuntime, schema: AjvSchema, data: unknown, labe
 
 export function validationCheck(ajv: AjvRuntime, schema: AjvSchema, data: unknown, label: string) {
   return ajv.validate(schema, data) ? { ok: true } : { ok: false, message: `${label} failed schema validation`, errors: ajvErrors(ajv.errors) };
-}
-
-export function validationContextCheck(context: PolicyNormalizationContext, key: Exclude<SchemaKey, "repoPolicy">, data: unknown, label: string) {
-  const validator = context.validatorFor(key), valid = validator(data);
-  return valid ? { ok: true } : { ok: false, message: `${label} failed schema validation`, errors: ajvErrors(validator.errors) };
 }
 
 function packNames(policy: unknown): string[] {
@@ -205,7 +212,7 @@ export function normalizePolicy(context: PolicyNormalizationContext, rawPolicy: 
 }
 
 export function loadPolicyRuntimeFromObject(roots: RuntimeRoots, rawPolicy: unknown, options: RuntimeValidationOptions = {}) {
-  const context = options.context ?? createPolicyNormalizationContext(roots, options), normalized = normalizePolicy(context, rawPolicy, options);
+  const context = runtimeContext(roots, options), normalized = normalizePolicy(context, rawPolicy, options);
   const policy = (normalized.policy ?? normalized.observedPolicy) as RuntimePolicyProjection;
   return {
     ok: normalized.ok,
