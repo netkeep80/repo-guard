@@ -120,25 +120,30 @@ runs:
           CLI_EXIT=$?
         fi
 
-        node --input-type=module - "$REPORT_FILE" "$GITHUB_OUTPUT" <<'NODE'
+        node --input-type=module - "$REPORT_FILE" "$GITHUB_OUTPUT" "$CLI_EXIT" <<'NODE'
         import { readFileSync, appendFileSync } from "node:fs";
-        const [reportPath, outputPath] = process.argv.slice(2);
+        const [reportPath, outputPath, cliExitRaw] = process.argv.slice(2);
+        const cliExit = Number(cliExitRaw);
         let report = null;
         try { report = JSON.parse(readFileSync(reportPath, "utf8")); } catch {}
         const machineResult = report?.result;
-        const result = machineResult === "failed" ? "failed"
+        const validResult = machineResult === "failed" || machineResult === "error"
+          || machineResult === "passed" || machineResult === "passed_with_warnings";
+        const validExit = Number.isInteger(report?.exitCode) && (report.exitCode === 0 || report.exitCode === 1);
+        const invalid = !validResult || !validExit || report.exitCode !== cliExit;
+        const result = invalid ? "error"
+          : machineResult === "failed" ? "failed"
           : machineResult === "error" ? "error"
-          : machineResult === "passed" || machineResult === "passed_with_warnings" ? "passed"
-          : "error";
+          : "passed";
         const number = (value) => Number.isFinite(value) ? value : 0;
         const mode = report?.mode === "advisory" ? "advisory" : report?.mode === "blocking" ? "blocking" : "unknown";
-        const summary = report
-          ? `repo-guard: ${result}; ${number(report.passed)} passed, ${number(report.violationCount)} violation(s), ${number(report.warnings)} warning(s); mode ${mode}`
-          : "repo-guard: error; structured report unavailable";
+        const summary = invalid
+          ? "repo-guard: error; structured report unavailable or inconsistent"
+          : `repo-guard: ${result}; ${number(report.passed)} passed, ${number(report.violationCount)} violation(s), ${number(report.warnings)} warning(s); mode ${mode}`;
         appendFileSync(outputPath, `result=${result}\nsummary=${summary}\n`);
-        if (!report) process.exitCode = 2;
+        if (invalid) process.exitCode = 1;
+        else process.exitCode = report.exitCode;
         NODE
         ADAPTER_EXIT=$?
         rm -f "$REPORT_FILE"
-        if [ $ADAPTER_EXIT -ne 0 ]; then exit 1; fi
-        exit "$CLI_EXIT"
+        exit "$ADAPTER_EXIT"
