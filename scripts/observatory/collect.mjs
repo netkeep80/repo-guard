@@ -10,7 +10,10 @@ import { fileURLToPath } from "node:url";
 
 import { parseDocument } from "yaml";
 
-import { compileConstraintProgram } from "../../dist/checks/constraint-program.mjs";
+import {
+  createPolicyNormalizationContext,
+  normalizePolicy,
+} from "../../dist/runtime/validation.mjs";
 import {
   expectedTagForVersion,
   observeReleaseTruth,
@@ -18,6 +21,7 @@ import {
 
 export const C3_BASELINE_SHA =
   "92432809fcddc290080beb51ba151e13a5761869";
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -169,6 +173,14 @@ export async function collectObservatorySnapshot({
 
   const packageJson = readJson(resolve(repoRoot, "package.json"));
   const policy = readJson(resolve(repoRoot, "repo-policy.json"));
+  const normalizationContext = createPolicyNormalizationContext({ packageRoot, repoRoot });
+  const normalizedPolicy = normalizePolicy(normalizationContext, policy, {
+    quiet: true,
+    label: "repo-policy.json (Observatory)",
+  });
+  if (!normalizedPolicy.ok || !normalizedPolicy.constraintProgram) {
+    throw new Error(`Policy normalization failed for Observatory: ${normalizedPolicy.errors.map((error) => `${error.group}: ${error.message}`).join("; ")}`);
+  }
   const matchingReleaseTag = expectedTagForVersion(String(packageJson.version));
   const release = await observeReleaseTruth({
     repo: repository,
@@ -178,7 +190,7 @@ export async function collectObservatorySnapshot({
   });
   const scenarios = collectScenarios(repoRoot, acceptedSha);
   const architecture = collectCompressionMetrics(repoRoot, run, acceptedSha);
-  const constraintProgram = compileConstraintProgram(policy, null);
+  const constraintProgram = normalizedPolicy.constraintProgram;
 
   return {
     schema_version: 1,
@@ -222,6 +234,7 @@ export async function collectObservatorySnapshot({
       source: "repo-policy.json",
       accepted: policy,
       constraint_program: constraintProgram,
+      normalization: normalizedPolicy.provenance,
       provenance: {
         origin: "accepted_commit",
         source: "repo-policy.json",
@@ -233,7 +246,7 @@ export async function collectObservatorySnapshot({
     scenarios,
     sources: [
       ".github/workflows/ci.yml",
-      "dist/checks/constraint-program.mjs",
+      "dist/runtime/validation.mjs",
       "examples/scenarios/**",
       "package.json",
       "repo-policy.json",

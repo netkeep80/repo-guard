@@ -1,9 +1,7 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import Ajv from "ajv";
-import { compileAnchorPolicy, compileForbidRegex } from "./policy-compiler.mjs";
-import { resolvePolicyPacks } from "./policy-packs.mjs";
+import { loadPolicyRuntime } from "./runtime/validation.mjs";
 const PASS = "PASS";
 const WARN = "WARN";
 const FAIL = "FAIL";
@@ -71,40 +69,34 @@ function checkPolicyDiscovery(repoRoot, packageRoot) {
         if (!existsSync(policyPath)) {
             return { name: "repo-policy.json", status: FAIL, message: `Not found at ${policyPath}`, hint: "Create repo-policy.json or run 'repo-guard init' to scaffold one" };
         }
-        let policy;
-        try {
-            policy = JSON.parse(readFileSync(policyPath, "utf-8"));
-        }
-        catch (e) {
-            return { name: "repo-policy.json", status: FAIL, message: `Parse error: ${e.message}`, hint: "Fix JSON syntax in repo-policy.json" };
-        }
         const schemaPath = resolve(packageRoot, "schemas/repo-policy.schema.json");
         if (!existsSync(schemaPath)) {
             return { name: "repo-policy.json", status: FAIL, message: "Policy schema not found at package root", hint: "Reinstall repo-guard — schema files are missing" };
         }
-        const schema = JSON.parse(readFileSync(schemaPath, "utf-8"));
-        const ajv = new Ajv({ allErrors: true });
-        const valid = ajv.validate(schema, policy);
-        if (!valid) {
-            const errors = ajv.errors.map(e => `${e.instancePath || "/"} ${e.message}`).join("; ");
-            return { name: "repo-policy.json", status: FAIL, message: `Schema validation failed: ${errors}`, hint: "Fix the policy to match the schema — see schemas/repo-policy.schema.json" };
+        let runtime;
+        try {
+            runtime = loadPolicyRuntime({ repoRoot, packageRoot }, { quiet: true });
         }
-        const packResult = resolvePolicyPacks(policy);
-        if (!packResult.ok) {
-            const details = packResult.errors.map(e => e.message).join("; ");
-            return { name: "repo-policy.json", status: FAIL, message: `Invalid policy packs: ${details}`, hint: "Fix packs in repo-policy.json" };
+        catch (e) {
+            const parse = e instanceof SyntaxError;
+            return {
+                name: "repo-policy.json",
+                status: FAIL,
+                message: `${parse ? "Parse" : "Policy load"} error: ${e.message}`,
+                hint: parse ? "Fix JSON syntax in repo-policy.json" : "Check repo-policy.json and the installed repo-guard package",
+            };
         }
-        const effectivePolicy = packResult.policy;
-        const regexErrors = compileForbidRegex(effectivePolicy.content_rules || []);
-        if (regexErrors.length > 0) {
-            const details = regexErrors.map(e => `[${e.rule_id}] /${e.pattern}/: ${e.message}`).join("; ");
-            return { name: "repo-policy.json", status: FAIL, message: `Invalid forbid_regex: ${details}`, hint: "Fix the regular expressions in content_rules" };
+        if (!runtime.ok) {
+            const details = runtime.errors.map((error) => `${error.group}: ${error.message}`).join("; ");
+            const schemaOnly = runtime.errors.length > 0 && runtime.errors.every((error) => error.stage === "schema");
+            return {
+                name: "repo-policy.json",
+                status: FAIL,
+                message: `${schemaOnly ? "Schema validation failed" : "Policy normalization failed"}: ${details}`,
+                hint: "Fix repo-policy.json using the canonical validation diagnostics",
+            };
         }
-        const anchorErrors = compileAnchorPolicy(effectivePolicy);
-        if (anchorErrors.length > 0) {
-            const details = anchorErrors.map(e => e.message).join("; ");
-            return { name: "repo-policy.json", status: FAIL, message: `Invalid anchor policy: ${details}`, hint: "Fix anchors and trace_rules references in repo-policy.json" };
-        }
+        const effectivePolicy = runtime.policy;
         return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind}, format ${effectivePolicy.policy_format_version})` };
     });
 }
