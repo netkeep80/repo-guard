@@ -39,7 +39,10 @@ function contractConformanceConfig() {
       conformance_accepted: "/accepted",
     },
     accepted_state: { status: "accepted", accepted: true },
-    required_paths: [],
+    required_paths: [
+      { document: "current.contract", pointer: "/owners", projection: "object_values" },
+      { document: "current.conformance", pointer: "/requiredGates", projection: "array_items" },
+    ],
     cochange: ["current.contract", "current.conformance"],
     control_paths: ["contracts/**"],
   };
