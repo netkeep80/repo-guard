@@ -122,4 +122,14 @@ describe("P1.2: composite Action остаётся тонким adapter", () => {
     assert.doesNotMatch(script, /\bgrep\b/);
     assert.match(script, /--format json/);
   });
+
+  it("использует AnalysisReport.exitCode как единственный exit authority", () => {
+    const action = source("action.yml");
+    const runStep = action.slice(action.indexOf("- name: Run repo-guard"));
+    const script = runStep.slice(runStep.indexOf("      run: |"));
+    assert.match(script, /report\.exitCode !== cliExit/);
+    assert.match(script, /process\.exitCode = report\.exitCode/);
+    assert.doesNotMatch(script, /exit "\$CLI_EXIT"/);
+    assert.match(script, /exit "\$ADAPTER_EXIT"/);
+  });
 });
