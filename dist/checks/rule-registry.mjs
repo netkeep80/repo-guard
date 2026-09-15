@@ -61,9 +61,9 @@ export function createRuleRegistry() {
             return families.map((family) => family.id);
         },
         evaluate(facts, context = {}) {
-            const executionPhase = requestedExecutionPhase(context);
+            const executionPhase = requestedExecutionPhase(context), excluded = new Set(context.excludeFamilies || []);
             return families.flatMap((family) => {
-                if (!appliesToExecutionPhase(family, executionPhase))
+                if (excluded.has(family.id) || !appliesToExecutionPhase(family, executionPhase))
                     return [];
                 if (family.applies && !family.applies(facts, context))
                     return [];

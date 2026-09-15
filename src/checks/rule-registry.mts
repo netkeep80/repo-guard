@@ -95,9 +95,9 @@ export function createRuleRegistry<Facts = unknown, Context = Record<string, unk
     },
 
     evaluate(facts: Facts, context = {} as Context) {
-      const executionPhase = requestedExecutionPhase(context);
+      const executionPhase = requestedExecutionPhase(context), excluded = new Set((context as { excludeFamilies?: readonly string[] }).excludeFamilies || []);
       return families.flatMap((family) => {
-        if (!appliesToExecutionPhase(family, executionPhase)) return [];
+        if (excluded.has(family.id) || !appliesToExecutionPhase(family, executionPhase)) return [];
         if (family.applies && !family.applies(facts, context)) return [];
         return normalizeRuleEntries(family, family.evaluate(facts, context));
       });
