@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -9,6 +9,23 @@ import { collectObservatorySnapshot } from "../scripts/observatory/collect.mjs";
 
 const validationModule = await import("../dist/runtime/validation.mjs");
 const packageRoot = resolve(".");
+const source = (path) => readFileSync(resolve(packageRoot, path), "utf8");
+
+const doctorSource = source("src/doctor.mts");
+assert.doesNotMatch(doctorSource, /from "ajv"/, "doctor must not own an Ajv policy-validation path");
+assert.doesNotMatch(doctorSource, /resolvePolicyPacks|compileAnchorPolicy|compileForbidRegex/, "doctor must not own semantic policy compilers");
+assert.match(doctorSource, /loadPolicyRuntime/, "doctor policy diagnostics must delegate to canonical runtime normalization");
+
+const observatorySource = source("scripts/observatory/collect.mjs");
+assert.doesNotMatch(observatorySource, /compileConstraintProgram/, "Observatory must not compile raw policy independently");
+assert.match(observatorySource, /normalizePolicy/, "Observatory must consume canonical normalization");
+
+const checkDiffSource = source("src/check-diff.mts");
+assert.match(checkDiffSource, /createPolicyNormalizationContext/, "check-diff must own one invocation normalization context");
+assert.match(checkDiffSource, /validationContextCheck/, "check-diff must reuse context validators");
+const githubPrSource = source("src/github-pr.mts");
+assert.match(githubPrSource, /createPolicyNormalizationContext/, "check-pr must own one invocation normalization context");
+assert.match(githubPrSource, /validationContextCheck/, "check-pr must reuse context validators across policy and metadata validation");
 
 function foundationPolicy() {
   return {
