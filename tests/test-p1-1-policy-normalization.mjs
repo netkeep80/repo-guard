@@ -21,11 +21,11 @@ assert.doesNotMatch(observatorySource, /compileConstraintProgram/, "Observatory 
 assert.match(observatorySource, /normalizePolicy/, "Observatory must consume canonical normalization");
 
 const checkDiffSource = source("src/check-diff.mts");
-assert.match(checkDiffSource, /createPolicyNormalizationContext/, "check-diff must own one invocation normalization context");
-assert.match(checkDiffSource, /validationContextCheck/, "check-diff must reuse context validators");
+assert.match(checkDiffSource, /loadPolicyRuntime/, "check-diff must consume canonical runtime normalization");
+assert.doesNotMatch(checkDiffSource, /resolvePolicyPacks|compileAnchorPolicy|compileConstraintProgram/, "check-diff must not own policy lowering");
 const githubPrSource = source("src/github-pr.mts");
-assert.match(githubPrSource, /createPolicyNormalizationContext/, "check-pr must own one invocation normalization context");
-assert.match(githubPrSource, /validationContextCheck/, "check-pr must reuse context validators across policy and metadata validation");
+assert.match(githubPrSource, /loadPolicyRuntimeFromObject/, "check-pr must consume canonical runtime normalization for HEAD and BASE");
+assert.doesNotMatch(githubPrSource, /resolvePolicyPacks|compileAnchorPolicy|compileConstraintProgram/, "check-pr must not own policy lowering");
 
 function foundationPolicy() {
   return {
@@ -48,7 +48,8 @@ assert.equal(typeof validationModule.createPolicyNormalizationContext, "function
 assert.equal(typeof validationModule.normalizePolicy, "function", "one canonical normalizePolicy operation must exist");
 
 if (typeof validationModule.createPolicyNormalizationContext === "function" && typeof validationModule.normalizePolicy === "function") {
-  const context = validationModule.createPolicyNormalizationContext({ packageRoot, repoRoot: packageRoot });
+  const roots = { packageRoot, repoRoot: packageRoot };
+  const context = validationModule.createPolicyNormalizationContext(roots);
   const rawPolicy = foundationPolicy();
   const normalized = validationModule.normalizePolicy(context, rawPolicy, { quiet: true });
   const resolved = resolvePolicyPacks(rawPolicy);
@@ -59,7 +60,12 @@ if (typeof validationModule.createPolicyNormalizationContext === "function" && t
   assert.deepEqual(normalized.constraintProgram.map((entry) => entry.key), expectedProgram.map((entry) => entry.key));
   assert.deepEqual(normalized.provenance.packs, ["requirements-strict"]);
   assert.match(normalized.provenance.schemaAuthority, /^repo-guard@3\.1\.0\|/);
-  assert.strictEqual(context.validatorFor("repoPolicy"), context.validatorFor("repoPolicy"), "compiled validator must be reused within one invocation");
+  assert.strictEqual(context.validatorFor("repoPolicy"), context.validatorFor("repoPolicy"), "compiled validator must be reused within one context");
+
+  const firstRuntime = validationModule.loadPolicyRuntimeFromObject(roots, rawPolicy, { quiet: true });
+  const secondRuntime = validationModule.loadPolicyRuntimeFromObject(roots, rawPolicy, { quiet: true });
+  assert.strictEqual(firstRuntime.context, secondRuntime.context, "one invocation roots object must reuse one normalization context");
+  assert.strictEqual(firstRuntime.context.validatorFor("repoPolicy"), secondRuntime.context.validatorFor("repoPolicy"), "runtime calls must reuse the compiled repo-policy validator");
 
   const malformed = foundationPolicy();
   malformed.packs = { "requirements-strict": [] };
