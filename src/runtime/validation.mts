@@ -19,7 +19,7 @@ interface AjvRuntime {
 }
 type AjvConstructor = new (options?: { allErrors?: boolean; allowUnionTypes?: boolean }) => AjvRuntime;
 type AjvSchema = unknown;
-type RuntimePolicyProjection = Parameters<typeof compileChangeProfiles>[0] & { content_rules?: unknown };
+type RuntimePolicyProjection = NonNullable<Parameters<typeof compileConstraintProgram>[0]> & NonNullable<Parameters<typeof compileChangeProfiles>[0]> & { content_rules?: unknown };
 type SemanticGroup = readonly [string, readonly unknown[], (error: unknown) => string];
 type SchemaKey = "repoPolicy" | "changeIntent" | "governanceGrant";
 interface RuntimeRoots { packageRoot: string; repoRoot: string; }
