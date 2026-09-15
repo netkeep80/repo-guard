@@ -74,3 +74,5 @@ assert.doesNotMatch(workflow, /github\.event\.pull_request\.(?:title|body|head\.
   "untrusted PR text or branch name must not be interpolated into trusted workflow commands");
 
 console.log("P0.3 App-signed trusted enforcement workflow boundary: ok");
+
+// Post-cutover activation probe for #521: no semantic effect.
