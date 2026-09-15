@@ -11,13 +11,12 @@ import {
 } from "./git.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
-import { createPolicyNormalizationContext, loadPolicyRuntimeFromObject, validationContextCheck } from "./runtime/validation.mjs";
+import { loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
 import { runPolicyPipeline } from "./runtime/pipeline.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 
 type PolicyRuntime = ReturnType<typeof loadPolicyRuntimeFromObject>;
 type RuntimePolicy = PolicyRuntime["policy"];
-type PolicyNormalizationContext = ReturnType<typeof createPolicyNormalizationContext>;
 type CheckPrRoots = Parameters<typeof loadPolicyRuntimeFromObject>[0] & {
   enforcementMode?: Parameters<typeof resolveEnforcementMode>[0]["cliValue"];
 };
@@ -122,11 +121,11 @@ function fetchLinkedIssue({ prBody, repoFullName }: { prBody: unknown; repoFullN
   return { linkedIssues, issueBody, issueContext, fatal: false };
 }
 
-function headPolicyRuntime(roots: CheckPrRoots, observation: RepositoryObservation, context: PolicyNormalizationContext): PolicyRuntime | null {
+function headPolicyRuntime(roots: CheckPrRoots, observation: RepositoryObservation): PolicyRuntime | null {
   return loadRuntime(() => {
     const raw = readFileAtRef(observation.evaluated.commit_sha, "repo-policy.json", roots.repoRoot);
     if (raw == null) throw new Error("repo-policy.json is unavailable at exact PR head");
-    return loadPolicyRuntimeFromObject(roots, JSON.parse(raw), { label: "repo-policy.json (PR head)", context });
+    return loadPolicyRuntimeFromObject(roots, JSON.parse(raw), { label: "repo-policy.json (PR head)" });
   }, "repo-policy.json (PR head)", "Proposed policy compilation failed");
 }
 
@@ -157,8 +156,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   console.log(`PR #${prNumber as string | number}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
   console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
 
-  const normalizationContext = createPolicyNormalizationContext(roots);
-  const headRuntime = headPolicyRuntime(roots, observation, normalizationContext);
+  const headRuntime = headPolicyRuntime(roots, observation);
   if (!headRuntime) return 1;
   const initialChecks: InitialCheck[] = [], baseRead = readBasePolicy(base, roots.repoRoot);
   let runtime = headRuntime, basePolicy: RuntimePolicy | null = null, trustedGovernancePaths: unknown = [];
@@ -167,13 +165,12 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, {
       label: "repo-policy.json (base)",
       historicalBase: true,
-      context: normalizationContext,
     }), "repo-policy.json (base)", "Base policy compilation failed") as PolicyRuntime;
     if (!runtime) return 1;
     basePolicy = runtime.policy; trustedGovernancePaths = (basePolicy as RuntimePolicy & { paths?: { governance_paths?: unknown } }).paths?.governance_paths ?? [];
   }
 
-  const { policy } = runtime;
+  const { ajv, policy, changeIntentSchema, governanceGrantSchema } = runtime;
   const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy } as Parameters<typeof resolveEnforcementMode>[0]);
   if (!enforcement.ok) { console.error(`ERROR: ${enforcement.message}`); return 1; }
   const linked = fetchLinkedIssue({ prBody, repoFullName });
@@ -185,7 +182,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   let changeIntent: unknown = null, changeIntentSource = resolved.changeIntentSource || "none";
   if (!resolved.ok) initialChecks.push({ name: "change-intent", check: { ok: false, message: `[${resolved.error}]: ${resolved.message}` } });
   else {
-    const check = validationContextCheck(normalizationContext, "changeIntent", resolved.changeIntent, "change-intent (from markdown)");
+    const check = validationCheck(ajv, changeIntentSchema, resolved.changeIntent, "change-intent (from markdown)");
     initialChecks.push({ name: "change-intent", check });
     if (check.ok) changeIntent = resolved.changeIntent;
   }
@@ -193,7 +190,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   let governanceGrant: unknown = null;
   if (resolved.grantResult && !resolved.grantResult.ok) initialChecks.push({ name: "governance-grant", check: { ok: false, message: `[${resolved.grantResult.error}]: ${resolved.grantResult.message}` } });
   else if ((resolved.grantResult as { grant?: unknown } | null | undefined)?.grant) {
-    const check = validationContextCheck(normalizationContext, "governanceGrant", (resolved.grantResult as { grant?: unknown }).grant, "governance-grant (linked issue)");
+    const check = validationCheck(ajv, governanceGrantSchema, (resolved.grantResult as { grant?: unknown }).grant, "governance-grant (linked issue)");
     initialChecks.push({ name: "governance-grant", check });
     if (check.ok) governanceGrant = (resolved.grantResult as { grant?: unknown }).grant;
   }
