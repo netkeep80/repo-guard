@@ -36,12 +36,13 @@ assert.match(workflow, /EXPECTED_HEAD_SHA:\s*\$\{\{\s*github\.event\.pull_reques
 assert.match(workflow, /refs\/pull\/\$\{PR_NUMBER\}\/head:refs\/remotes\/pull\/\$\{PR_NUMBER\}\/head/,
   "candidate head must be fetched only as a Git object");
 assert.match(workflow, /refs\/pull\/\$\{PR_NUMBER\}\/merge:refs\/remotes\/pull\/\$\{PR_NUMBER\}\/merge/,
-  "the exact PR test-merge commit must be fetched as the branch-protection status target");
+  "the exact PR test-merge commit must be fetched as trusted evidence");
 assert.match(workflow, /git rev-parse refs\/remotes\/pull\/\$\{PR_NUMBER\}\/head/,
   "fetched candidate object must be checked against event head identity");
 assert.match(workflow, /git rev-parse refs\/remotes\/pull\/\$\{PR_NUMBER\}\/merge/,
   "trusted enforcement must observe the exact test-merge SHA");
-assert.match(workflow, /merge_sha=\$MERGE_SHA/, "test-merge SHA must be passed as structured step output");
+assert.match(workflow, /head_sha=\$OBSERVED_HEAD/, "verified PR head SHA must be passed as structured step output");
+assert.match(workflow, /merge_sha=\$MERGE_SHA/, "test-merge SHA must remain available as structured evidence");
 
 assert.match(workflow, /actions\/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1/,
   "dedicated App token action must be immutable-pinned");
@@ -57,8 +58,12 @@ assert.match(workflow, /continue-on-error:\s*true/, "trusted result must be publ
 assert.match(workflow, /context=trusted-enforcement/, "dedicated App must publish a unique trusted status context");
 assert.match(workflow, /state=pending/, "trusted status must become pending before evaluation");
 assert.match(workflow, /steps\.enforcement\.outcome/, "final trusted status must derive from process outcome, not prose parsing");
-assert.match(workflow, /statuses\/\$\{MERGE_SHA\}/,
-  "dedicated App status must be attached to the exact PR test-merge commit");
+assert.match(workflow, /HEAD_SHA:\s*\$\{\{\s*steps\.evidence\.outputs\.head_sha\s*\}\}/,
+  "status target must come from the verified PR head evidence");
+assert.match(workflow, /statuses\/\$\{HEAD_SHA\}/,
+  "dedicated App status must be attached to the PR head SHA that branch protection evaluates");
+assert.doesNotMatch(workflow, /statuses\/\$\{MERGE_SHA\}/,
+  "trusted required status must not be published only on the synthetic test-merge SHA");
 assert.match(workflow, /steps\.app-token\.outputs\.token/,
   "status publication must authenticate as the dedicated App, not GITHUB_TOKEN");
 assert.match(workflow, /test \"\$ENFORCEMENT_OUTCOME\" = \"success\"/,
