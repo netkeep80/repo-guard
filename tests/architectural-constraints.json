@@ -1,0 +1,42 @@
+{
+  "required_paths": [
+    "docs/architecture-compression-3-baseline.md"
+  ],
+  "forbidden_paths": [
+    "docs/superpowers",
+    "docs/architecture-compression-3-c3.3b.md",
+    "examples/size-rules-policy.json",
+    "src/checks/trace-rules.mts",
+    "dist/checks/trace-rules.mjs"
+  ],
+  "required_text": [],
+  "forbidden_text": [
+    {
+      "path": "tests/validate-schemas.mjs",
+      "tokens": [
+        "examples/size-rules-policy.json"
+      ]
+    },
+    {
+      "path": "src/checks/constraint-program.mts",
+      "tokens": [
+        "buildTraceRuleDiagnostics",
+        "checkTraceRuleResult"
+      ]
+    },
+    {
+      "path": "src/checks/rules/constraints.mts",
+      "tokens": [
+        "buildTraceRuleDiagnostics",
+        "checkTraceRuleResult"
+      ]
+    },
+    {
+      "path": "src/reporting/anchor-diagnostics.mts",
+      "tokens": [
+        "buildTraceRuleDiagnostics",
+        "checkTraceRuleResult"
+      ]
+    }
+  ]
+}
