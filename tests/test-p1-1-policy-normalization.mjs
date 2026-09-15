@@ -7,6 +7,9 @@ import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs"
 import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { collectObservatorySnapshot } from "../scripts/observatory/collect.mjs";
 
+const validationModule = await import("../dist/runtime/validation.mjs");
+const packageRoot = resolve(".");
+
 function foundationPolicy() {
   return {
     policy_format_version: "0.3.0",
@@ -22,6 +25,45 @@ function foundationPolicy() {
     cochange_rules: [],
     packs: { "requirements-strict": {} },
   };
+}
+
+assert.equal(typeof validationModule.createPolicyNormalizationContext, "function", "one canonical normalization context must exist");
+assert.equal(typeof validationModule.normalizePolicy, "function", "one canonical normalizePolicy operation must exist");
+
+if (typeof validationModule.createPolicyNormalizationContext === "function" && typeof validationModule.normalizePolicy === "function") {
+  const context = validationModule.createPolicyNormalizationContext({ packageRoot, repoRoot: packageRoot });
+  const rawPolicy = foundationPolicy();
+  const normalized = validationModule.normalizePolicy(context, rawPolicy, { quiet: true });
+  const resolved = resolvePolicyPacks(rawPolicy);
+  const expectedProgram = compileConstraintProgram(resolved.policy, null);
+
+  assert.equal(normalized.ok, true);
+  assert.equal(normalized.policy?.packs, undefined, "pack syntax must disappear from normalized policy");
+  assert.deepEqual(normalized.constraintProgram.map((entry) => entry.key), expectedProgram.map((entry) => entry.key));
+  assert.deepEqual(normalized.provenance.packs, ["requirements-strict"]);
+  assert.match(normalized.provenance.schemaAuthority, /^repo-guard@3\.1\.0\|/);
+  assert.strictEqual(context.validatorFor("repoPolicy"), context.validatorFor("repoPolicy"), "compiled validator must be reused within one invocation");
+
+  const malformed = foundationPolicy();
+  malformed.packs = { "requirements-strict": [] };
+  const rejected = validationModule.normalizePolicy(context, malformed, { quiet: true });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.policy, null, "schema-invalid shape must not reach pack lowering");
+  assert.equal(rejected.constraintProgram, null, "schema-invalid shape must not reach semantic program lowering");
+  assert.deepEqual([...new Set(rejected.errors.map((error) => error.stage))], ["schema"]);
+
+  const withRetiredBaseField = foundationPolicy();
+  withRetiredBaseField.integration = { workflows: [{ id: "retired" }] };
+  assert.equal(validationModule.normalizePolicy(context, withRetiredBaseField, { quiet: true }).ok, false, "HEAD remains strict current vocabulary");
+  const historical = validationModule.normalizePolicy(context, withRetiredBaseField, { quiet: true, historicalBase: true });
+  assert.equal(historical.ok, true, "retired BASE-only vocabulary is projected at the bounded historical boundary");
+  assert.equal(historical.policy.integration, undefined);
+
+  const malformedCurrentBase = foundationPolicy();
+  malformedCurrentBase.diff_rules = { max_new_docs: "broken", max_new_files: 10 };
+  const malformedHistorical = validationModule.normalizePolicy(context, malformedCurrentBase, { quiet: true, historicalBase: true });
+  assert.equal(malformedHistorical.ok, false, "recognized current BASE constraints remain fail-closed after projection");
+  assert.deepEqual([...new Set(malformedHistorical.errors.map((error) => error.stage))], ["schema"]);
 }
 
 const sandbox = mkdtempSync(join(tmpdir(), "repo-guard-p1-1-"));
