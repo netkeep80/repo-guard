@@ -42,7 +42,7 @@ function parseBatchBlobs(output, requestedOids) {
 
     const [oid, type, sizeText] = header.split(" ");
     const size = Number(sizeText);
-    if (!oid || type !== "blob" || !Number.isSafeInteger(size) || size < 0) {
+    if (oid !== requestedOid || type !== "blob" || !Number.isSafeInteger(size) || size < 0) {
       throw new Error(`Unexpected git cat-file --batch header: ${header}`);
     }
     const end = offset + size;
