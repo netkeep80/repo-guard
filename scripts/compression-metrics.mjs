@@ -139,7 +139,6 @@ function architecture(target) {
   const relationDescriptorKinds = descriptors.map((item) => item.kind).sort();
   const publicRelationDescriptorKinds = descriptors.filter((item) => item.public).map((item) => item.kind).sort();
   const runtimeConstraintKinds = unionMembers(constraintEvaluator, "RuntimeConstraintKind");
-  const historicalRuntimeKinds = ["max_metric", "scope_paths", "require_paths", "forbid_paths", "implies_nonempty", "cochange_group"];
   const relationConsumerSources = {
     policy_compiler: policyCompiler,
     constraint_program: constraintProgram,
@@ -208,10 +207,9 @@ function architecture(target) {
     macro_generated_positional_identity: macroPositionalIdentity,
     high_level_pack_semantic_edit_sites_in_canonical_core: highLevelPackCoreEditSites,
 
-    // C3.3 historical runtime convergence.
+    // Current runtime vocabulary.
     runtime_constraint_kinds: runtimeConstraintKinds.length,
     runtime_constraint_kind_names: runtimeConstraintKinds,
-    c33a_historical_runtime_kinds_remaining: historicalRuntimeKinds.filter((kind) => runtimeConstraintKinds.includes(kind)),
   };
   metric.semantic_edit_sites = metric.rule_families + metric.runtime_ir_compilers + metric.strictness_ir_compilers + metric.bespoke_integration_validator + metric.command_dispatch_branches;
 
