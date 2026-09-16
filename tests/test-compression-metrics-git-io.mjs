@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -29,6 +30,8 @@ const run = (script, args, options = {}) => execFileSync(
   },
 );
 
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
+
 function resolveGitBinary() {
   const names = process.platform === "win32"
     ? ["git.exe", "git.cmd", "git.bat", "git"]
@@ -56,9 +59,12 @@ try {
     ["--ref", c3Baseline],
     ["--ref", acceptedBase, "--compare", c3Baseline],
   ]) {
+    const currentOutput = run(currentScript, args);
+    const legacyOutput = run(legacyScript, args);
+    console.log(`LEGACY_SHA256 ${args.join(" ")} ${sha256(legacyOutput)}`);
     assert.equal(
-      run(currentScript, args),
-      run(legacyScript, args),
+      currentOutput,
+      legacyOutput,
       `metrics output must remain byte-identical for ${args.join(" ")}`,
     );
   }
