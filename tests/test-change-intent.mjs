@@ -66,6 +66,20 @@ describe("linked issue references", () => {
     assert.deepEqual(extractLinkedIssueNumbers("normal text"), []);
   });
 
+  it("supports an explicit non-closing Part of reference without broad issue mentions", () => {
+    assert.deepEqual(extractLinkedIssueNumbers("Part of #530"), [530]);
+    assert.deepEqual(extractLinkedIssueNumbers("part OF owner/repo#7"), [7]);
+    assert.deepEqual(extractLinkedIssueNumbers("Fixes #5\nPart of #5"), [5]);
+    assert.deepEqual(extractLinkedIssueNumbers("see #530"), []);
+    assert.deepEqual(
+      extractLinkedIssueReferences("Part of #530\nPart of owner/repo#7", "netkeep80/repo-guard"),
+      [
+        { repository: "netkeep80/repo-guard", number: 530 },
+        { repository: "owner/repo", number: 7 },
+      ],
+    );
+  });
+
   it("preserves explicit repository identity and assigns local shorthand to the current repository", () => {
     assert.deepEqual(
       extractLinkedIssueReferences("Fixes #5\nCloses netkeep80/repo-guard#6\nResolves owner/repo#7", "netkeep80/repo-guard"),
