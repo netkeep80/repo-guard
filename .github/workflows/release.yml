@@ -54,6 +54,34 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Record exact release target identity
+        env:
+          TARGET_SHA: ${{ steps.proof.outputs.sha }}
+          TAG: ${{ steps.proof.outputs.tag }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -n \
+            --arg target_sha "$TARGET_SHA" \
+            --arg tag "$TAG" \
+            --argjson source_run_id "$SOURCE_RUN_ID" \
+            --argjson source_run_attempt "$SOURCE_RUN_ATTEMPT" \
+            '{schema_version:1,target_sha:$target_sha,tag:$tag,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt}' \
+            > release-target.json
+
+      - name: Upload exact release target identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-target-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-target.json
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     needs: preflight
     runs-on: ubuntu-latest
