@@ -94,7 +94,7 @@ describe("check-pr process boundary", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("fetches a trusted linked-issue GovernanceGrant even when intent is in PR", () => {
+  it("fetches a trusted linked-issue GovernanceGrant through a non-closing Part of link", () => {
     const root = tinyRepo("rg-pr-grant-", ["schemas/**"]);
     mkdirSync(join(root, "schemas"), { recursive: true }); writeFileSync(join(root, "schemas/a.json"), "{}\n"); git(root, "add", "-A"); git(root, "commit", "-m", "governance");
     const fakeDir = mkdtempSync(join(tmpdir(), "rg-gh-")), gh = join(fakeDir, "gh"), issueBody = `${intent(["schemas/**"])}\n${grant()}`;
@@ -106,7 +106,7 @@ else if(q.includes('author_association')) console.log(JSON.stringify({body:${JSO
 else if(q.includes('permission')) console.log(JSON.stringify({permission:'write',role_name:'write'}));
 else console.log(JSON.stringify({labels:[]}));
 `); chmodSync(gh, 0o755);
-    const result = run(root, `${intent(["schemas/**"])}\n\nFixes #77`, { PATH: `${fakeDir}:${process.env.PATH}` });
+    const result = run(root, `${intent(["schemas/**"])}\n\nPart of #77`, { PATH: `${fakeDir}:${process.env.PATH}` });
     const output = `${result.stdout || ""}${result.stderr || ""}`;
     assert.equal(result.status, 0, output); assert.match(output, /PASS: governance-change-authorization/);
     rmSync(root, { recursive: true, force: true }); rmSync(fakeDir, { recursive: true, force: true });
