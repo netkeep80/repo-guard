@@ -12,6 +12,7 @@ const compareRef = arg("--compare");
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 const resolvedRefCache = new Map();
 const snapshotCache = new Map();
+const blobCache = new Map();
 
 const gitText = (argv, options = {}) => execFileSync("git", argv, {
   encoding: "utf-8",
@@ -55,7 +56,7 @@ function parseBatchBlobs(output, requestedOids) {
   return blobs;
 }
 
-function buildSnapshot(sha) {
+function buildTreeSnapshot(sha) {
   const tree = gitText(["ls-tree", "-r", "-z", "--full-tree", sha]);
   const paths = [];
   const oidByPath = new Map();
@@ -75,20 +76,38 @@ function buildSnapshot(sha) {
   }
   paths.sort();
 
-  const requestedOids = [...blobOids].sort();
+  return { sha, paths, oidByPath, blobOids: [...blobOids] };
+}
+
+function loadBlobs(oids) {
+  const requestedOids = [...new Set(oids)].filter((oid) => !blobCache.has(oid)).sort();
+  if (!requestedOids.length) return;
+
   const batchOutput = execFileSync("git", ["cat-file", "--batch"], {
-    input: requestedOids.length ? `${requestedOids.join("\n")}\n` : "",
+    input: `${requestedOids.join("\n")}\n`,
     maxBuffer: GIT_MAX_BUFFER,
     stdio: ["pipe", "pipe", "pipe"],
   });
-  const blobs = parseBatchBlobs(batchOutput, requestedOids);
+  for (const [oid, blob] of parseBatchBlobs(batchOutput, requestedOids)) blobCache.set(oid, blob);
+}
 
-  return { sha, paths, oidByPath, blobs };
+function primeSnapshots(targets) {
+  const snapshots = [];
+  for (const target of targets) {
+    const sha = resolveRef(target);
+    if (!snapshotCache.has(sha)) snapshotCache.set(sha, buildTreeSnapshot(sha));
+    snapshots.push(snapshotCache.get(sha));
+  }
+  loadBlobs(snapshots.flatMap((snapshot) => snapshot.blobOids));
 }
 
 function snapshotAt(target) {
   const sha = resolveRef(target);
-  if (!snapshotCache.has(sha)) snapshotCache.set(sha, buildSnapshot(sha));
+  if (!snapshotCache.has(sha)) {
+    const snapshot = buildTreeSnapshot(sha);
+    snapshotCache.set(sha, snapshot);
+    loadBlobs(snapshot.blobOids);
+  }
   return snapshotCache.get(sha);
 }
 
@@ -100,7 +119,7 @@ const textAt = (target, path) => {
   const snapshot = snapshotAt(target);
   const oid = snapshot.oidByPath.get(path);
   if (!oid) throw new Error(`Path ${path} does not exist at ${snapshot.sha}`);
-  const blob = snapshot.blobs.get(oid);
+  const blob = blobCache.get(oid);
   if (!blob) throw new Error(`Path ${path} at ${snapshot.sha} is not a readable blob`);
   return blob.toString("utf8");
 };
@@ -331,6 +350,7 @@ function subtract(after, before) {
   );
 }
 
+primeSnapshots([ref, compareRef].filter(Boolean));
 const current = architecture(ref);
 if (!compareRef) console.log(JSON.stringify(current, null, 2));
 else {
