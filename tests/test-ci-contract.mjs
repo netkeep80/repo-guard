@@ -164,6 +164,15 @@ assert.match(JSON.stringify(releasePublish.env ?? {}), /needs\.preflight\.output
 assert.match(JSON.stringify(releasePublish.env ?? {}), /needs\.preflight\.outputs\.tag/);
 assert.match(publishSource, /refs\/tags/);
 assert.match(publishSource, /releases/);
-assert.match(publishSource, /commits\/\$\{TAG\}/);
+assert.match(
+  publishSource,
+  /git\/ref\/tags\/\$\{TAG\}/,
+  "publish must observe the exact refs/tags namespace, not an ambiguous commit-ish name",
+);
+assert.doesNotMatch(
+  publishSource,
+  /commits\/\$\{TAG\}/,
+  "publish must not resolve tag identity through an ambiguous branch-or-tag commit endpoint",
+);
 
 console.log("Current CI workflow/runtime contract passed");
