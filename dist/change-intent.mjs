@@ -30,7 +30,7 @@ export function extractGovernanceGrant(markdown) {
         return { ok: false, error: "multiple_governance_grants", message: `Found ${blocks.length} repo-guard-grant blocks; expected at most one` };
     return parseBlock(blocks[0], { "repo-guard-grant": "YAML" }, "grant");
 }
-const ISSUE_LINK_RE = /(?:Fixes|Closes|Resolves)\s+(?:([\w.-]+\/[\w.-]+))?#(\d+)/gi;
+const ISSUE_LINK_RE = /\b(?:Fixes|Closes|Resolves|Part\s+of)\s+(?:([\w.-]+\/[\w.-]+))?#(\d+)/gi;
 export function extractLinkedIssueReferences(text, currentRepository) {
     if (!text || typeof text !== "string")
         return [];
