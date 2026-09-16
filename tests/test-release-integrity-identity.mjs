@@ -97,15 +97,20 @@ describe("atomic release target transport", () => {
 
     const record = preflight.steps[recordIndex];
     assert.equal(typeof record.run, "string");
-    assert.match(record.run, /steps\.proof\.outputs\.sha/);
-    assert.match(record.run, /steps\.proof\.outputs\.tag/);
-    assert.match(record.run, /github\.run_id/);
-    assert.match(record.run, /github\.run_attempt/);
+    const recordEnv = JSON.stringify(record.env ?? {});
+    assert.match(recordEnv, /steps\.proof\.outputs\.sha/);
+    assert.match(recordEnv, /steps\.proof\.outputs\.tag/);
+    assert.match(recordEnv, /github\.run_id/);
+    assert.match(recordEnv, /github\.run_attempt/);
+    for (const variable of ["TARGET_SHA", "TAG", "SOURCE_RUN_ID", "SOURCE_RUN_ATTEMPT"]) {
+      assert.match(record.run, new RegExp(`\\$${variable}\\b`));
+    }
     assert.match(record.run, /schema_version/);
     assert.match(record.run, /target_sha/);
     assert.match(record.run, /source_run_id/);
     assert.match(record.run, /source_run_attempt/);
     assert.match(record.run, /release-target\.json/);
+    assert.doesNotMatch(record.run, /\$\{\{/);
     assert.doesNotMatch(record.run, /client_payload/);
 
     const upload = preflight.steps[uploadIndex];
