@@ -72,8 +72,26 @@ jobs:
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$TAG" = "v${VERSION}"
 
-          if EXISTING_TAG_SHA="$(gh api "repos/${REPOSITORY}/commits/${TAG}" --jq '.sha' 2>/dev/null)"; then
-            [[ "$EXISTING_TAG_SHA" =~ ^[0-9a-f]{40}$ ]]
+          resolve_tag_commit() {
+            local OBJECT OBJECT_TYPE OBJECT_SHA DEPTH=0
+            OBJECT="$(gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}")" || return 1
+            OBJECT_TYPE="$(jq -er '.object.type' <<<"$OBJECT")"
+            OBJECT_SHA="$(jq -er '.object.sha' <<<"$OBJECT")"
+
+            while test "$OBJECT_TYPE" = "tag"; do
+              DEPTH=$((DEPTH + 1))
+              test "$DEPTH" -le 8
+              OBJECT="$(gh api "repos/${REPOSITORY}/git/tags/${OBJECT_SHA}")"
+              OBJECT_TYPE="$(jq -er '.object.type' <<<"$OBJECT")"
+              OBJECT_SHA="$(jq -er '.object.sha' <<<"$OBJECT")"
+            done
+
+            test "$OBJECT_TYPE" = "commit"
+            [[ "$OBJECT_SHA" =~ ^[0-9a-f]{40}$ ]]
+            printf '%s\n' "$OBJECT_SHA"
+          }
+
+          if EXISTING_TAG_SHA="$(resolve_tag_commit 2>/dev/null)"; then
             test "$EXISTING_TAG_SHA" = "$TARGET_SHA"
           else
             gh api --method POST "repos/${REPOSITORY}/git/refs" \
@@ -81,7 +99,7 @@ jobs:
               -f sha="$TARGET_SHA" >/dev/null
           fi
 
-          TAG_SHA="$(gh api "repos/${REPOSITORY}/commits/${TAG}" --jq '.sha')"
+          TAG_SHA="$(resolve_tag_commit)"
           test "$TAG_SHA" = "$TARGET_SHA"
 
           if RELEASE_STATE="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" --jq '[.tag_name, .draft, .prerelease] | @tsv' 2>/dev/null)"; then
@@ -97,7 +115,7 @@ jobs:
               -F prerelease=false >/dev/null
           fi
 
-          FINAL_TAG_SHA="$(gh api "repos/${REPOSITORY}/commits/${TAG}" --jq '.sha')"
+          FINAL_TAG_SHA="$(resolve_tag_commit)"
           test "$FINAL_TAG_SHA" = "$TARGET_SHA"
 
           FINAL_RELEASE_STATE="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" --jq '[.tag_name, .draft, .prerelease] | @tsv')"
