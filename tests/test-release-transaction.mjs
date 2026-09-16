@@ -194,6 +194,18 @@ describe("atomic release preflight", () => {
     assert.equal(calls.length, 0);
   });
 
+  it("rejects a non-stable or output-unsafe package version before GitHub observation", async () => {
+    const calls = [];
+    await assert.rejects(
+      runPreflight({
+        root: makeRoot({ version: "2.3.4\nsha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+        calls,
+      }),
+      /stable semantic version/i,
+    );
+    assert.equal(calls.length, 0);
+  });
+
   it("rejects when checkout HEAD is not the requested immutable SHA", async () => {
     await assert.rejects(
       runPreflight({ run: fakeRun({ head: otherSha }) }),
