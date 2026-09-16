@@ -129,8 +129,13 @@ try {
   const snapshot = await collectObservatorySnapshot({
     repoRoot: sandbox,
     acceptedSha,
+    observedAt: "2026-09-16T18:00:00Z",
     ci: {
       workflow: "CI",
+      workflow_path: ".github/workflows/ci.yml",
+      event: "push",
+      branch: "main",
+      head_sha: acceptedSha,
       run_id: 1,
       run_url: "https://example.invalid/runs/1",
       conclusion: "success",

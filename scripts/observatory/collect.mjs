@@ -22,6 +22,16 @@ import {
 export const C3_BASELINE_SHA =
   "92432809fcddc290080beb51ba151e13a5761869";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const ACCEPTED_CI_WORKFLOW = "CI";
+const ACCEPTED_CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
+const ACCEPTED_CI_EVENT = "push";
+const ACCEPTED_CI_BRANCH = "main";
+const RELEASE_INTEGRITY_CONCLUSIONS = new Set([
+  "success",
+  "failure",
+  "cancelled",
+  "skipped",
+]);
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -138,9 +148,17 @@ function collectCiWiring(repoRoot, acceptedSha) {
   };
 }
 
-function requireAcceptedCi(ci) {
-  if (!ci || ci.workflow !== "CI" || ci.conclusion !== "success") {
-    throw new Error("accepted CI metadata requires successful CI workflow");
+function requireAcceptedCi(ci, acceptedSha) {
+  if (
+    !ci
+    || ci.workflow !== ACCEPTED_CI_WORKFLOW
+    || ci.workflow_path !== ACCEPTED_CI_WORKFLOW_PATH
+    || ci.event !== ACCEPTED_CI_EVENT
+    || ci.branch !== ACCEPTED_CI_BRANCH
+    || ci.head_sha !== acceptedSha
+    || ci.conclusion !== "success"
+  ) {
+    throw new Error("accepted CI metadata requires exact successful CI workflow observation for accepted SHA");
   }
   if (!Number.isInteger(ci.run_id) || ci.run_id <= 0) {
     throw new Error("accepted CI metadata requires positive run_id");
@@ -150,10 +168,55 @@ function requireAcceptedCi(ci) {
   }
 }
 
+function requireObservedAt(observedAt) {
+  if (
+    typeof observedAt !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(observedAt)
+    || !Number.isFinite(Date.parse(observedAt))
+  ) {
+    throw new Error("observed_at must be a UTC ISO-8601 timestamp");
+  }
+  return observedAt;
+}
+
+function normalizeReleaseIntegrity(releaseIntegrity, acceptedSha, expectedTag) {
+  if (releaseIntegrity === null || releaseIntegrity === undefined) return null;
+  if (!releaseIntegrity || typeof releaseIntegrity !== "object" || Array.isArray(releaseIntegrity)) {
+    throw new Error("release integrity evidence must be an object or null");
+  }
+  if (releaseIntegrity.target_sha !== acceptedSha) {
+    throw new Error("release integrity target_sha must equal accepted SHA");
+  }
+  if (releaseIntegrity.tag !== expectedTag) {
+    throw new Error("release integrity tag must equal expected release tag");
+  }
+  for (const field of ["run_id", "run_attempt"]) {
+    if (!Number.isInteger(releaseIntegrity[field]) || releaseIntegrity[field] <= 0) {
+      throw new Error(`release integrity ${field} must be a positive integer`);
+    }
+  }
+  if (typeof releaseIntegrity.run_url !== "string" || !releaseIntegrity.run_url) {
+    throw new Error("release integrity run_url must be a non-empty string");
+  }
+  if (!RELEASE_INTEGRITY_CONCLUSIONS.has(releaseIntegrity.conclusion)) {
+    throw new Error("release integrity conclusion is unsupported");
+  }
+  return {
+    target_sha: releaseIntegrity.target_sha,
+    tag: releaseIntegrity.tag,
+    run_id: releaseIntegrity.run_id,
+    run_attempt: releaseIntegrity.run_attempt,
+    run_url: releaseIntegrity.run_url,
+    conclusion: releaseIntegrity.conclusion,
+  };
+}
+
 export async function collectObservatorySnapshot({
   repoRoot,
   acceptedSha,
+  observedAt,
   ci,
+  releaseIntegrity = null,
   repository,
   token,
   fetchImpl = globalThis.fetch,
@@ -163,7 +226,8 @@ export async function collectObservatorySnapshot({
   if (head !== acceptedSha) {
     throw new Error(`accepted SHA mismatch: expected ${acceptedSha}, got ${head}`);
   }
-  requireAcceptedCi(ci);
+  requireAcceptedCi(ci, acceptedSha);
+  const normalizedObservedAt = requireObservedAt(observedAt);
   if (typeof repository !== "string" || !repository.includes("/")) {
     throw new Error("repository must use owner/name form");
   }
@@ -181,19 +245,25 @@ export async function collectObservatorySnapshot({
   if (!normalizedPolicy.ok || !normalizedPolicy.constraintProgram) {
     throw new Error(`Policy normalization failed for Observatory: ${normalizedPolicy.errors.map((error) => `${error.group}: ${error.message}`).join("; ")}`);
   }
-  const matchingReleaseTag = expectedTagForVersion(String(packageJson.version));
-  const release = await observeReleaseTruth({
+  const expectedReleaseTag = expectedTagForVersion(String(packageJson.version));
+  const releaseTruth = await observeReleaseTruth({
     repo: repository,
-    tag: matchingReleaseTag,
+    tag: expectedReleaseTag,
     token,
     fetchImpl,
   });
+  const normalizedReleaseIntegrity = normalizeReleaseIntegrity(
+    releaseIntegrity,
+    acceptedSha,
+    expectedReleaseTag,
+  );
   const scenarios = collectScenarios(repoRoot, acceptedSha);
   const architecture = collectCompressionMetrics(repoRoot, run, acceptedSha);
   const constraintProgram = normalizedPolicy.constraintProgram;
 
   return {
-    schema_version: 1,
+    schema_version: 2,
+    observed_at: normalizedObservedAt,
     repository: {
       full_name: repository,
       provenance: {
@@ -217,19 +287,21 @@ export async function collectObservatorySnapshot({
     },
     version: {
       package_version: String(packageJson.version),
-      matching_release_tag: matchingReleaseTag,
-      matching_published_release: release.published,
-      release_commit: release.published ? release.tag_commit : null,
-      release_url: release.published ? release.release_url : null,
-      release_truth_status: release.published
-        ? "published"
-        : "package_only",
-      provenance: {
-        origin: "github_observation",
-        source: "scripts/verify-release-ref.mjs",
-        sha: acceptedSha,
-      },
+      expected_release_tag: expectedReleaseTag,
     },
+    release: {
+      tag_exists: releaseTruth.tag_exists,
+      tag_commit: releaseTruth.tag_commit,
+      release_exists: releaseTruth.release_exists,
+      draft: releaseTruth.draft,
+      prerelease: releaseTruth.prerelease,
+      stable_published: releaseTruth.published,
+      release_url: releaseTruth.release_url,
+      tag_matches_accepted_sha: releaseTruth.tag_commit === null
+        ? null
+        : releaseTruth.tag_commit === acceptedSha,
+    },
+    release_integrity: normalizedReleaseIntegrity,
     policy: {
       source: "repo-policy.json",
       accepted: policy,
@@ -257,14 +329,21 @@ export async function collectObservatorySnapshot({
 }
 
 function parseArgs(argv) {
-  const allowed = new Set([
+  const required = new Set([
     "--accepted-sha",
+    "--observed-at",
+    "--ci-workflow-path",
+    "--ci-event",
+    "--ci-branch",
+    "--ci-head-sha",
     "--ci-run-id",
     "--ci-run-url",
     "--ci-conclusion",
     "--repository",
     "--output",
   ]);
+  const optional = new Set(["--release-integrity-file"]);
+  const allowed = new Set([...required, ...optional]);
   const values = {};
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
@@ -274,7 +353,7 @@ function parseArgs(argv) {
     }
     values[key] = value;
   }
-  for (const key of allowed) {
+  for (const key of required) {
     if (!(key in values)) throw new Error(`Missing collector argument: ${key}`);
   }
   return values;
@@ -284,15 +363,24 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const repoRoot = resolve(".");
   const outputPath = resolve(repoRoot, args["--output"]);
+  const releaseIntegrity = args["--release-integrity-file"]
+    ? readJson(resolve(repoRoot, args["--release-integrity-file"]))
+    : null;
   const snapshot = await collectObservatorySnapshot({
     repoRoot,
     acceptedSha: args["--accepted-sha"],
+    observedAt: args["--observed-at"],
     ci: {
       workflow: "CI",
+      workflow_path: args["--ci-workflow-path"],
+      event: args["--ci-event"],
+      branch: args["--ci-branch"],
+      head_sha: args["--ci-head-sha"],
       run_id: Number(args["--ci-run-id"]),
       run_url: args["--ci-run-url"],
       conclusion: args["--ci-conclusion"],
     },
+    releaseIntegrity,
     repository: args["--repository"],
     token: process.env.GITHUB_TOKEN,
   });

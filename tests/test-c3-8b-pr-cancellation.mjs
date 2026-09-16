@@ -32,8 +32,13 @@ const acceptedSha = observeImmutable("git", ["rev-parse", "HEAD"], { cwd: repoRo
 const snapshot = await collectObservatorySnapshot({
   repoRoot,
   acceptedSha,
+  observedAt: "2026-09-16T18:00:00Z",
   ci: {
     workflow: "CI",
+    workflow_path: ".github/workflows/ci.yml",
+    event: "push",
+    branch: "main",
+    head_sha: acceptedSha,
     run_id: 123,
     run_url: "https://example.invalid/runs/123",
     conclusion: "success",
@@ -48,6 +53,7 @@ const snapshot = await collectObservatorySnapshot({
   run: observeImmutable,
 });
 
+assert.equal(snapshot.schema_version, 2);
 assert.deepEqual(snapshot.ci.concurrency, workflow.concurrency);
 const html = renderObservatory(snapshot);
 assert.match(html, /Управление параллельностью/);

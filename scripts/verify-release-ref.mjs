@@ -184,7 +184,23 @@ export async function observeReleaseTruth({
 
   const encodedTag = encodeURIComponent(tag);
   const tagResult = await githubGet(`/git/ref/tags/${encodedTag}`, { repo, token, fetchImpl });
-  if (tagResult.status === 404) return absentReleaseTruth(tag);
+  if (tagResult.status === 404) {
+    const releaseResult = await githubGet(`/releases/tags/${encodedTag}`, { repo, token, fetchImpl });
+    if (releaseResult.status === 404) return absentReleaseTruth(tag);
+    if (!releaseResult.ok) throw githubRequestError("GitHub release request", releaseResult);
+
+    const release = validateReleasePayload(releaseResult.body, tag);
+    return {
+      tag,
+      tag_exists: false,
+      tag_commit: null,
+      release_exists: true,
+      published: !release.draft && !release.prerelease,
+      draft: release.draft,
+      prerelease: release.prerelease,
+      release_url: release.html_url,
+    };
+  }
   if (!tagResult.ok) throw githubRequestError("GitHub tag reference request", tagResult);
 
   const tagObject = requireTagTarget(tagResult.body, "tag reference payload");

@@ -2,97 +2,303 @@ name: Policy Observatory Pages
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI", "Release integrity"]
     types: [completed]
-    branches: [main]
 
 permissions: {}
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
   build:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       pages: read
+    outputs:
+      target_sha: ${{ steps.freshness.outputs.target_sha }}
+      deploy: ${{ steps.freshness.outputs.deploy }}
     steps:
-      - name: Checkout accepted CI head
+      - name: Verify refresh workflow origin
+        id: origin
+        env:
+          SOURCE_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
+          SOURCE_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_REPOSITORY" = "$GITHUB_REPOSITORY"
+          case "$SOURCE_WORKFLOW_PATH" in
+            .github/workflows/ci.yml)
+              case "$SOURCE_EVENT" in
+                push)
+                  echo "kind=ci" >> "$GITHUB_OUTPUT"
+                  ;;
+                pull_request)
+                  echo "kind=ignored" >> "$GITHUB_OUTPUT"
+                  ;;
+                *)
+                  exit 1
+                  ;;
+              esac
+              ;;
+            .github/workflows/release-integrity.yml)
+              case "$SOURCE_EVENT" in
+                workflow_run)
+                  echo "kind=release_integrity" >> "$GITHUB_OUTPUT"
+                  ;;
+                workflow_dispatch)
+                  echo "kind=diagnostic" >> "$GITHUB_OUTPUT"
+                  ;;
+                *)
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+
+      - name: Download exact release integrity evidence
+        if: ${{ steps.origin.outputs.kind == 'release_integrity' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          pattern: release-integrity-*-${{ github.event.workflow_run.run_attempt }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-integrity
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve accepted target before checkout
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          KIND: ${{ steps.origin.outputs.kind }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SOURCE_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RI_FILE: ${{ runner.temp }}/release-integrity/release-integrity.json
+        run: |
+          set -euo pipefail
+
+          if [[ "$KIND" == "diagnostic" || "$KIND" == "ignored" ]]; then
+            echo "candidate=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RELEASE_INTEGRITY_FILE=""
+          if [[ "$KIND" == "ci" ]]; then
+            [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+            [[ "$SOURCE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$SOURCE_HEAD_BRANCH" = "main"
+            if [[ "$SOURCE_CONCLUSION" != "success" ]]; then
+              echo "candidate=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            TARGET_SHA="$SOURCE_HEAD_SHA"
+            CI_RUN_ID="$SOURCE_RUN_ID"
+            CI_RUN_URL="$SOURCE_RUN_URL"
+            CI_CONCLUSION="$SOURCE_CONCLUSION"
+          else
+            if [[ ! -f "$RI_FILE" ]]; then
+              echo "candidate=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            jq -e '
+              type == "object"
+              and .schema_version == 1
+              and .source == "atomic_release"
+              and (keys | sort) == ["conclusion", "run_attempt", "run_id", "run_url", "schema_version", "source", "source_release_run_attempt", "source_release_run_id", "tag", "target_sha"]
+            ' "$RI_FILE" >/dev/null
+            TARGET_SHA="$(jq -er '.target_sha' "$RI_FILE")"
+            TAG="$(jq -er '.tag' "$RI_FILE")"
+            RI_RUN_ID="$(jq -er '.run_id' "$RI_FILE")"
+            RI_RUN_ATTEMPT="$(jq -er '.run_attempt' "$RI_FILE")"
+            RI_CONCLUSION="$(jq -er '.conclusion' "$RI_FILE")"
+            [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            [[ "$RI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$RI_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+            test "$RI_RUN_ID" = "$SOURCE_RUN_ID"
+            test "$RI_RUN_ATTEMPT" = "$SOURCE_RUN_ATTEMPT"
+            case "$RI_CONCLUSION" in
+              success|failure|cancelled|skipped) ;;
+              *) exit 1 ;;
+            esac
+            RELEASE_INTEGRITY_FILE="$RI_FILE"
+
+            CI_RUN="$(
+              gh api -X GET "repos/$REPOSITORY/actions/workflows/ci.yml/runs" \
+                -f head_sha="$TARGET_SHA" \
+                -f branch="main" \
+                -f event="push" \
+                -f status="completed" \
+                -f per_page=100 \
+              | jq -cer --arg sha "$TARGET_SHA" '
+                  [.workflow_runs[]
+                    | select(
+                        .name == "CI"
+                        and .path == ".github/workflows/ci.yml"
+                        and .event == "push"
+                        and .head_branch == "main"
+                        and .head_sha == $sha
+                        and .conclusion == "success"
+                      )]
+                  | sort_by([.run_number, .run_attempt, .id])
+                  | last
+                '
+            )"
+            CI_RUN_ID="$(jq -er '.id' <<<"$CI_RUN")"
+            CI_RUN_URL="$(jq -er '.html_url' <<<"$CI_RUN")"
+            CI_CONCLUSION="$(jq -er '.conclusion' <<<"$CI_RUN")"
+            [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            test "$CI_CONCLUSION" = "success"
+          fi
+
+          REMOTE_MAIN="$(git ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main | cut -f1)"
+          [[ "$REMOTE_MAIN" =~ ^[0-9a-f]{40}$ ]]
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          if [[ "$REMOTE_MAIN" != "$TARGET_SHA" ]]; then
+            echo "candidate=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          OBSERVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "candidate=true" >> "$GITHUB_OUTPUT"
+          echo "observed_at=$OBSERVED_AT" >> "$GITHUB_OUTPUT"
+          echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "ci_run_url=$CI_RUN_URL" >> "$GITHUB_OUTPUT"
+          echo "ci_conclusion=$CI_CONCLUSION" >> "$GITHUB_OUTPUT"
+          echo "release_integrity_file=$RELEASE_INTEGRITY_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact accepted target
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.target.outputs.target_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
 
       - name: Install runtime dependencies
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         run: npm ci --omit=dev
 
       - name: Verify accepted checkout
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         env:
-          ACCEPTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          ACCEPTED_SHA: ${{ steps.target.outputs.target_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$ACCEPTED_SHA"
 
       - name: Collect Observatory snapshot
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ACCEPTED_SHA: ${{ steps.target.outputs.target_sha }}
+          OBSERVED_AT: ${{ steps.target.outputs.observed_at }}
+          CI_RUN_ID: ${{ steps.target.outputs.ci_run_id }}
+          CI_RUN_URL: ${{ steps.target.outputs.ci_run_url }}
+          CI_CONCLUSION: ${{ steps.target.outputs.ci_conclusion }}
+          RELEASE_INTEGRITY_FILE: ${{ steps.target.outputs.release_integrity_file }}
         run: |
+          set -euo pipefail
+          RI_ARGS=()
+          if [[ -n "$RELEASE_INTEGRITY_FILE" ]]; then
+            RI_ARGS=(--release-integrity-file "$RELEASE_INTEGRITY_FILE")
+          fi
           node scripts/observatory/collect.mjs \
-            --accepted-sha "${{ github.event.workflow_run.head_sha }}" \
-            --ci-run-id "${{ github.event.workflow_run.id }}" \
-            --ci-run-url "${{ github.event.workflow_run.html_url }}" \
-            --ci-conclusion "${{ github.event.workflow_run.conclusion }}" \
+            --accepted-sha "$ACCEPTED_SHA" \
+            --observed-at "$OBSERVED_AT" \
+            --ci-workflow-path ".github/workflows/ci.yml" \
+            --ci-event "push" \
+            --ci-branch "main" \
+            --ci-head-sha "$ACCEPTED_SHA" \
+            --ci-run-id "$CI_RUN_ID" \
+            --ci-run-url "$CI_RUN_URL" \
+            --ci-conclusion "$CI_CONCLUSION" \
             --repository "${{ github.repository }}" \
+            "${RI_ARGS[@]}" \
             --output observatory.snapshot.json
 
       - name: Render Observatory site
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         run: |
           node scripts/observatory/render.mjs \
             --snapshot observatory.snapshot.json \
             --output _site
 
       - name: Configure Pages
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         uses: actions/configure-pages@v5
 
       - name: Verify current main before upload
+        id: freshness
+        if: ${{ steps.target.outputs.candidate == 'true' }}
         env:
-          ACCEPTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          ACCEPTED_SHA: ${{ steps.target.outputs.target_sha }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | cut -f1)"
-          test "$REMOTE_MAIN" = "$ACCEPTED_SHA"
+          set -euo pipefail
+          REMOTE_MAIN="$(git ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main | cut -f1)"
+          [[ "$REMOTE_MAIN" =~ ^[0-9a-f]{40}$ ]]
+          echo "target_sha=$ACCEPTED_SHA" >> "$GITHUB_OUTPUT"
+          if [[ "$REMOTE_MAIN" != "$ACCEPTED_SHA" ]]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload Pages artifact
+        if: ${{ steps.freshness.outputs.deploy == 'true' }}
         uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
   deploy:
     needs: build
+    if: ${{ needs.build.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pages: write
       id-token: write
+    concurrency:
+      group: pages-${{ needs.build.outputs.target_sha }}
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Verify current main before deploy
+        id: freshness
         env:
-          ACCEPTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          ACCEPTED_SHA: ${{ needs.build.outputs.target_sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
+          set -euo pipefail
           REMOTE_MAIN="$(git ls-remote "https://github.com/${REPOSITORY}.git" refs/heads/main | cut -f1)"
-          test "$REMOTE_MAIN" = "$ACCEPTED_SHA"
+          [[ "$REMOTE_MAIN" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$REMOTE_MAIN" != "$ACCEPTED_SHA" ]]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Pages
         id: deployment
+        if: ${{ steps.freshness.outputs.deploy == 'true' }}
         uses: actions/deploy-pages@v4

@@ -6,6 +6,13 @@ import {
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const RELEASE_INTEGRITY_CONCLUSIONS = new Set([
+  "success",
+  "failure",
+  "cancelled",
+  "skipped",
+]);
+
 function requireObject(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`invalid snapshot section: ${name}`);
@@ -24,21 +31,105 @@ function requireArray(value, name) {
   }
 }
 
-export function validateObservatorySnapshot(snapshot) {
-  requireObject(snapshot, "root");
-  if (snapshot.schema_version !== 1) {
-    throw new Error("unsupported observatory snapshot schema");
+function requireBoolean(value, name) {
+  if (typeof value !== "boolean") {
+    throw new Error(`invalid snapshot boolean: ${name}`);
+  }
+}
+
+function requirePositiveInteger(value, name) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`invalid positive integer: ${name}`);
+  }
+}
+
+function requireSha(value, name) {
+  if (!/^[0-9a-f]{40}$/.test(value ?? "")) {
+    throw new Error(`invalid SHA: ${name}`);
+  }
+}
+
+function requireObservedAt(value) {
+  if (
+    typeof value !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)
+    || !Number.isFinite(Date.parse(value))
+  ) {
+    throw new Error("invalid observed_at UTC timestamp");
+  }
+}
+
+function validateRelease(snapshot) {
+  requireObject(snapshot.release, "release");
+  const release = snapshot.release;
+  requireBoolean(release.tag_exists, "release.tag_exists");
+  requireBoolean(release.release_exists, "release.release_exists");
+  requireBoolean(release.stable_published, "release.stable_published");
+
+  if (release.tag_exists) {
+    requireSha(release.tag_commit, "release.tag_commit");
+  } else if (release.tag_commit !== null) {
+    throw new Error("release.tag_commit must be null when tag does not exist");
   }
 
-  requireObject(snapshot.accepted, "accepted");
-  if (!/^[0-9a-f]{40}$/.test(snapshot.accepted.sha ?? "")) {
-    throw new Error("invalid accepted SHA");
+  if (release.release_exists) {
+    requireBoolean(release.draft, "release.draft");
+    requireBoolean(release.prerelease, "release.prerelease");
+    requireString(release.release_url, "release.release_url");
+    const expectedStable = !release.draft && !release.prerelease;
+    if (release.stable_published !== expectedStable) {
+      throw new Error("release.stable_published does not match draft/prerelease facts");
+    }
+  } else {
+    if (release.draft !== null || release.prerelease !== null || release.release_url !== null) {
+      throw new Error("absent release requires null draft/prerelease/release_url facts");
+    }
+    if (release.stable_published) {
+      throw new Error("absent release cannot be stable_published");
+    }
   }
+
+  const expectedMatch = release.tag_commit === null
+    ? null
+    : release.tag_commit === snapshot.accepted.sha;
+  if (release.tag_matches_accepted_sha !== expectedMatch) {
+    throw new Error("release.tag_matches_accepted_sha is inconsistent with observed tag commit");
+  }
+}
+
+function validateReleaseIntegrity(snapshot) {
+  const evidence = snapshot.release_integrity;
+  if (evidence === null) return;
+  requireObject(evidence, "release_integrity");
+  if (evidence.target_sha !== snapshot.accepted.sha) {
+    throw new Error("release integrity target_sha must equal accepted SHA");
+  }
+  if (evidence.tag !== snapshot.version.expected_release_tag) {
+    throw new Error("release integrity tag must equal expected release tag");
+  }
+  requirePositiveInteger(evidence.run_id, "release_integrity.run_id");
+  requirePositiveInteger(evidence.run_attempt, "release_integrity.run_attempt");
+  requireString(evidence.run_url, "release_integrity.run_url");
+  if (!RELEASE_INTEGRITY_CONCLUSIONS.has(evidence.conclusion)) {
+    throw new Error("release integrity conclusion is unsupported");
+  }
+}
+
+export function validateObservatorySnapshot(snapshot) {
+  requireObject(snapshot, "root");
+  if (snapshot.schema_version !== 2) {
+    throw new Error("unsupported observatory snapshot schema");
+  }
+  requireObservedAt(snapshot.observed_at);
+
+  requireObject(snapshot.accepted, "accepted");
+  requireSha(snapshot.accepted.sha, "accepted.sha");
   requireObject(snapshot.accepted.ci, "accepted.ci");
   if (snapshot.accepted.ci.conclusion !== "success") {
     throw new Error("snapshot is not backed by successful CI");
   }
   requireString(snapshot.accepted.ci.workflow, "accepted.ci.workflow");
+  requirePositiveInteger(snapshot.accepted.ci.run_id, "accepted.ci.run_id");
   requireString(snapshot.accepted.ci.run_url, "accepted.ci.run_url");
 
   requireObject(snapshot.repository, "repository");
@@ -49,30 +140,9 @@ export function validateObservatorySnapshot(snapshot) {
 
   requireObject(snapshot.version, "version");
   requireString(snapshot.version.package_version, "version.package_version");
-  requireString(snapshot.version.matching_release_tag, "version.matching_release_tag");
-  requireString(snapshot.version.release_truth_status, "version.release_truth_status");
-  if (typeof snapshot.version.matching_published_release !== "boolean") {
-    throw new Error("invalid published release truth");
-  }
-  if (snapshot.version.matching_published_release) {
-    if (!/^[0-9a-f]{40}$/.test(snapshot.version.release_commit ?? "")) {
-      throw new Error("invalid release commit for published release");
-    }
-    requireString(snapshot.version.release_url, "version.release_url");
-    if (snapshot.version.release_truth_status !== "published") {
-      throw new Error("published release requires published truth status");
-    }
-  } else {
-    if (snapshot.version.release_commit !== null) {
-      throw new Error("unpublished release requires absent release commit");
-    }
-    if (snapshot.version.release_url !== null) {
-      throw new Error("unpublished release requires absent release URL");
-    }
-    if (snapshot.version.release_truth_status !== "package_only") {
-      throw new Error("unpublished release requires package_only truth status");
-    }
-  }
+  requireString(snapshot.version.expected_release_tag, "version.expected_release_tag");
+  validateRelease(snapshot);
+  validateReleaseIntegrity(snapshot);
 
   requireObject(snapshot.policy, "policy");
   requireObject(snapshot.policy.accepted, "policy.accepted");
@@ -142,6 +212,11 @@ function list(values, className = "chips") {
     .join("")}</ul>`;
 }
 
+function yesNoUnknown(value) {
+  if (value === null) return "не определено";
+  return value ? "да" : "нет";
+}
+
 function immutableSourceUrl(snapshot, path) {
   const base = `https://github.com/${snapshot.repository.full_name}`;
   const sha = snapshot.accepted.sha;
@@ -209,6 +284,26 @@ function canonicalSources(snapshot) {
   return [...paths].sort((left, right) => left.localeCompare(right));
 }
 
+function renderReleaseIntegrity(snapshot) {
+  const evidence = snapshot.release_integrity;
+  if (evidence === null) {
+    return `
+        <article class="card">
+          <h3>Release integrity</h3>
+          <p>Нет привязанного результата проверки выпуска.</p>
+        </article>`;
+  }
+  const badgeClass = evidence.conclusion === "success" ? "pass" : "fail";
+  return `
+        <article class="card">
+          <h3>Release integrity</h3>
+          <p><a href="${escapeHtml(evidence.run_url)}">Запуск #${escapeHtml(evidence.run_id)}</a>, попытка ${escapeHtml(evidence.run_attempt)}</p>
+          <p>Цель: <code>${escapeHtml(evidence.target_sha)}</code></p>
+          <p>Тег: <code>${escapeHtml(evidence.tag)}</code></p>
+          <p><span class="badge ${badgeClass}">${escapeHtml(evidence.conclusion)}</span></p>
+        </article>`;
+}
+
 export function renderObservatory(snapshot) {
   validateObservatorySnapshot(snapshot);
 
@@ -231,12 +326,16 @@ export function renderObservatory(snapshot) {
     .join("");
 
   const repositoryUrl = `https://github.com/${snapshot.repository.full_name}`;
-  const releaseTruth = snapshot.version.matching_published_release
-    ? `<a href="${escapeHtml(snapshot.version.release_url)}">опубликован</a>`
-    : "не опубликован для совпадающего тега";
-  const releaseCommit = snapshot.version.release_commit
-    ? `<a href="${escapeHtml(`${repositoryUrl}/commit/${snapshot.version.release_commit}`)}"><code>${escapeHtml(snapshot.version.release_commit)}</code></a>`
+  const release = snapshot.release;
+  const releaseCommit = release.tag_commit
+    ? `<a href="${escapeHtml(`${repositoryUrl}/commit/${release.tag_commit}`)}"><code>${escapeHtml(release.tag_commit)}</code></a>`
+    : "не наблюдён";
+  const releaseUrl = release.release_url
+    ? `<a href="${escapeHtml(release.release_url)}">открыть Release</a>`
     : "отсутствует";
+  const mismatchNote = release.tag_matches_accepted_sha === false
+    ? "<p class=\"muted\">Опубликованный тег относится к другому коммиту. Само по себе это не доказывает перемещение тега.</p>"
+    : "";
   const roadmapUrl = `${repositoryUrl}/issues/370`;
 
   return `<!doctype html>
@@ -253,6 +352,7 @@ export function renderObservatory(snapshot) {
     <div class="eyebrow">repo-guard · только чтение</div>
     <h1>Обсерватория политики</h1>
     <p>Детерминированная статическая проекция принятого состояния. Эта страница ничего не вычисляет заново и не является источником семантической истины.</p>
+    <p class="muted">Наблюдение: <code>${escapeHtml(snapshot.observed_at)}</code></p>
   </header>
 
   <main>
@@ -271,11 +371,16 @@ export function renderObservatory(snapshot) {
         <article class="card">
           <h3>Версия и выпуск</h3>
           <p>Пакет: <code>${escapeHtml(snapshot.version.package_version)}</code></p>
-          <p>Совпадающий тег: <code>${escapeHtml(snapshot.version.matching_release_tag)}</code></p>
-          <p>Выпуск: ${releaseTruth}</p>
-          <p>Коммит выпуска: ${releaseCommit}</p>
-          <p>Статус истины: <code>${escapeHtml(snapshot.version.release_truth_status)}</code></p>
+          <p>Ожидаемый тег: <code>${escapeHtml(snapshot.version.expected_release_tag)}</code></p>
+          <p>Тег существует: ${yesNoUnknown(release.tag_exists)}</p>
+          <p>Коммит тега: ${releaseCommit}</p>
+          <p>Release существует: ${yesNoUnknown(release.release_exists)}</p>
+          <p>Стабильный выпуск: ${yesNoUnknown(release.stable_published)}</p>
+          <p>Release: ${releaseUrl}</p>
+          <p>Совпадение тега с принятым SHA: ${yesNoUnknown(release.tag_matches_accepted_sha)}</p>
+          ${mismatchNote}
         </article>
+        ${renderReleaseIntegrity(snapshot)}
       </div>
     </section>
 

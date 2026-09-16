@@ -127,7 +127,7 @@ describe("release truth observation", () => {
     assert.equal(truth.published, true);
   });
 
-  it("returns explicit absence when the tag does not exist", async () => {
+  it("returns explicit independent absence when tag and release do not exist", async () => {
     assert.equal(typeof releaseRef.observeReleaseTruth, "function");
     const calls = [];
     const truth = await releaseRef.observeReleaseTruth({
@@ -135,6 +135,7 @@ describe("release truth observation", () => {
       tag: "v2.3.4",
       fetchImpl: fakeFetch([
         ["/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4", 404],
+        ["/repos/netkeep80/repo-guard/releases/tags/v2.3.4", 404],
       ], calls),
     });
 
@@ -148,7 +149,10 @@ describe("release truth observation", () => {
       prerelease: null,
       release_url: null,
     });
-    assert.equal(calls.length, 1);
+    assert.deepEqual(calls, [
+      "https://api.github.com/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4",
+      "https://api.github.com/repos/netkeep80/repo-guard/releases/tags/v2.3.4",
+    ]);
   });
 
   it("fails closed on an unknown tag object type", async () => {
@@ -312,6 +316,7 @@ describe("release ref verification", () => {
       run: runAt(exactHead),
       fetchImpl: fakeFetch([
         ["/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4", 404],
+        ["/repos/netkeep80/repo-guard/releases/tags/v2.3.4", 404],
       ]),
     });
 
