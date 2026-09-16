@@ -195,10 +195,10 @@ const later = await collectObservatorySnapshot({
   observedAt: laterObservedAt,
 });
 assert.equal(later.observed_at, laterObservedAt);
-assert.deepEqual(
-  { ...first, observed_at: laterObservedAt },
-  later,
-  "same accepted S at another observation time changes only observed_at when observations are fixed",
+assert.equal(
+  stableJson({ ...first, observed_at: laterObservedAt }),
+  stableJson(later),
+  "same accepted S at another observation time changes only observed_at in the persisted snapshot when observations are fixed",
 );
 
 assert.equal(
