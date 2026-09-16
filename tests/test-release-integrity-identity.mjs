@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -74,6 +75,25 @@ describe("release integrity target identity", () => {
       && /40-hex SHA/i.test(check.message)
     )));
   });
+
+  it("exposes expected target identity through the CLI", () => {
+    const result = spawnSync(process.execPath, [
+      resolve("scripts/verify-release-ref.mjs"),
+      "--tag",
+      "v3.1.0",
+      "--expected-sha",
+      "main",
+    ], {
+      cwd: resolve("."),
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_TOKEN: "", GH_TOKEN: "" },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /release-target-sha/);
+    assert.match(result.stdout, /40-hex SHA/i);
+    assert.doesNotMatch(result.stderr, /Unknown option/);
+  });
 });
 
 describe("atomic release target transport", () => {
@@ -128,6 +148,90 @@ describe("atomic release target transport", () => {
     assert.doesNotMatch(text, /\bnpm\b/);
     assert.doesNotMatch(text, /\bnode\b/);
     assert.doesNotMatch(text, /scripts\//);
+  });
+});
+
+describe("automatic release integrity workflow", () => {
+  const source = readFileSync(resolve(".github/workflows/release-integrity.yml"), "utf8");
+  const document = parseDocument(source);
+  assert.deepEqual(document.errors, []);
+  const workflow = document.toJS();
+
+  it("uses Atomic release completion as the automatic transport and keeps manual verification", () => {
+    assert.deepEqual(workflow.on?.workflow_run?.workflows, ["Atomic release"]);
+    assert.deepEqual(workflow.on?.workflow_run?.types, ["completed"]);
+    assert.ok(workflow.on?.workflow_dispatch?.inputs?.tag);
+    assert.equal(workflow.on?.release, undefined);
+    assert.deepEqual(workflow.permissions, {});
+  });
+
+  it("establishes and validates target identity before any target checkout", () => {
+    const resolveTarget = workflow.jobs?.["resolve-automatic-target"];
+    assert.ok(resolveTarget);
+    assert.deepEqual(resolveTarget.permissions, { actions: "read", contents: "read" });
+    const text = JSON.stringify(resolveTarget);
+    assert.doesNotMatch(text, /actions\/checkout/);
+    assert.doesNotMatch(text, /actions\/setup-node/);
+    assert.doesNotMatch(text, /npm\s/);
+    assert.doesNotMatch(text, /scripts\//);
+    assert.match(text, /workflow_run\.path/);
+    assert.match(text, /workflow_run\.event/);
+    assert.match(text, /workflow_run\.id/);
+    assert.match(text, /workflow_run\.run_attempt/);
+    assert.match(text, /\.github\/workflows\/release\.yml/);
+    assert.match(text, /repository_dispatch/);
+    assert.match(text, /actions\/download-artifact@v5/);
+    assert.match(text, /release-target-/);
+    assert.match(text, /release-target\.json/);
+    assert.match(text, /schema_version/);
+    assert.match(text, /target_sha/);
+    assert.match(text, /source_run_id/);
+    assert.match(text, /source_run_attempt/);
+  });
+
+  it("checks out only the established target and binds verifier CLI to target SHA and tag", () => {
+    const verify = workflow.jobs?.["verify-automatic"];
+    assert.ok(verify);
+    assert.equal(verify.needs, "resolve-automatic-target");
+    assert.deepEqual(verify.permissions, { contents: "read" });
+    const text = JSON.stringify(verify);
+    assert.match(text, /needs\.resolve-automatic-target\.outputs\.target_sha/);
+    assert.match(text, /needs\.resolve-automatic-target\.outputs\.tag/);
+    assert.match(text, /actions\/checkout@v6/);
+    assert.match(text, /persist-credentials/);
+    assert.match(text, /--expected-sha/);
+    assert.match(text, /--tag/);
+  });
+
+  it("records identity-bound verifier evidence even when verification fails", () => {
+    const record = workflow.jobs?.["record-automatic-evidence"];
+    assert.ok(record);
+    assert.deepEqual(record.needs, ["resolve-automatic-target", "verify-automatic"]);
+    assert.match(String(record.if), /always\(\)/);
+    assert.match(String(record.if), /resolve-automatic-target.*success/);
+    assert.doesNotMatch(JSON.stringify(record), /actions\/checkout/);
+
+    const text = JSON.stringify(record);
+    assert.match(text, /needs\.verify-automatic\.result/);
+    assert.match(text, /target_sha/);
+    assert.match(text, /source_release_run_id/);
+    assert.match(text, /source_release_run_attempt/);
+    assert.match(text, /github\.run_id/);
+    assert.match(text, /github\.run_attempt/);
+    assert.match(text, /run_url/);
+    assert.match(text, /actions\/upload-artifact@v4/);
+    assert.match(text, /release-integrity-/);
+  });
+
+  it("keeps manual tag verification separate from automatic accepted-target evidence", () => {
+    const manual = workflow.jobs?.["verify-manual"];
+    assert.ok(manual);
+    assert.match(String(manual.if), /workflow_dispatch/);
+    const text = JSON.stringify(manual);
+    assert.match(text, /inputs\.tag/);
+    assert.match(text, /actions\/checkout@v6/);
+    assert.match(text, /--tag/);
+    assert.doesNotMatch(text, /--expected-sha/);
   });
 });
 
