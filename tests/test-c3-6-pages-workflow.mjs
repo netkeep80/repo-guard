@@ -163,6 +163,100 @@ assert.match(String(deployFreshness.run), /deploy=true/);
 assert.match(String(deployAction.if), /steps\.freshness\.outputs\.deploy.*true/);
 assert.match(String(deployAction.uses), /actions\/deploy-pages@v4/);
 
+function readOutputs(path) {
+  const text = readFileSync(path, "utf8").trim();
+  if (!text) return {};
+  return Object.fromEntries(
+    text
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("=", 2)),
+  );
+}
+
+function executeOrigin({ workflowPath, event }) {
+  const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-pages-origin-"));
+  try {
+    const output = join(tempRoot, "output.txt");
+    writeFileSync(output, "", "utf8");
+    execFileSync("bash", ["-c", originRun], {
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: output,
+        GITHUB_REPOSITORY: "netkeep80/repo-guard",
+        SOURCE_REPOSITORY: "netkeep80/repo-guard",
+        SOURCE_WORKFLOW_PATH: workflowPath,
+        SOURCE_EVENT: event,
+      },
+      stdio: "pipe",
+    });
+    return readOutputs(output);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+assert.equal(
+  executeOrigin({ workflowPath: ".github/workflows/ci.yml", event: "push" }).kind,
+  "ci",
+);
+assert.equal(
+  executeOrigin({ workflowPath: ".github/workflows/ci.yml", event: "pull_request" }).kind,
+  "ignored",
+  "PR CI completion must be a normal no-deploy after the shared workflow_run trigger",
+);
+assert.equal(
+  executeOrigin({ workflowPath: ".github/workflows/release-integrity.yml", event: "workflow_run" }).kind,
+  "release_integrity",
+);
+assert.equal(
+  executeOrigin({ workflowPath: ".github/workflows/release-integrity.yml", event: "workflow_dispatch" }).kind,
+  "diagnostic",
+);
+
+function executeCiTarget({ mainSha, targetSha, conclusion }) {
+  const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-pages-target-"));
+  try {
+    const fakeGit = join(tempRoot, "git");
+    const output = join(tempRoot, "output.txt");
+    const missingEvidence = join(tempRoot, "missing-release-integrity.json");
+    writeFileSync(fakeGit, `#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$1" == "ls-remote" ]]; then\n  printf '%s\\trefs/heads/main\\n' "${mainSha}"\n  exit 0\nfi\nexit 99\n`, { mode: 0o755 });
+    writeFileSync(output, "", "utf8");
+    execFileSync("bash", ["-c", targetRun], {
+      env: {
+        ...process.env,
+        PATH: `${tempRoot}:${process.env.PATH}`,
+        GITHUB_OUTPUT: output,
+        GH_TOKEN: "test-token",
+        REPOSITORY: "netkeep80/repo-guard",
+        KIND: "ci",
+        SOURCE_RUN_ID: "123",
+        SOURCE_RUN_ATTEMPT: "1",
+        SOURCE_HEAD_SHA: targetSha,
+        SOURCE_HEAD_BRANCH: "main",
+        SOURCE_CONCLUSION: conclusion,
+        SOURCE_RUN_URL: "https://example.invalid/runs/123",
+        RI_FILE: missingEvidence,
+      },
+      stdio: "pipe",
+    });
+    return readOutputs(output);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+const acceptedSha = "c".repeat(40);
+assert.equal(
+  executeCiTarget({ mainSha: acceptedSha, targetSha: acceptedSha, conclusion: "failure" }).candidate,
+  "false",
+  "failed main CI must be ignored instead of producing a secondary Pages failure",
+);
+assert.equal(
+  executeCiTarget({ mainSha: acceptedSha, targetSha: acceptedSha, conclusion: "success" }).candidate,
+  "true",
+);
+
 function executeFreshness(runScript, { mainSha, targetSha }) {
   const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-pages-freshness-"));
   try {
@@ -180,13 +274,7 @@ function executeFreshness(runScript, { mainSha, targetSha }) {
       },
       stdio: "pipe",
     });
-    return Object.fromEntries(
-      readFileSync(output, "utf8")
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => line.split("=", 2)),
-    );
+    return readOutputs(output);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
