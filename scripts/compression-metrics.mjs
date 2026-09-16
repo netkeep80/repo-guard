@@ -9,9 +9,120 @@ const arg = (name, fallback = null) => {
 };
 const ref = arg("--ref", "HEAD");
 const compareRef = arg("--compare");
-const git = (argv) => execFileSync("git", argv, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
-const pathsAt = (target, roots) => git(["ls-tree", "-r", "--name-only", target, "--", ...roots]).split(/\r?\n/).filter(Boolean).sort();
-const textAt = (target, path) => git(["show", `${target}:${path}`]);
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+const resolvedRefCache = new Map();
+const snapshotCache = new Map();
+const blobCache = new Map();
+
+const gitText = (argv, options = {}) => execFileSync("git", argv, {
+  encoding: "utf-8",
+  maxBuffer: GIT_MAX_BUFFER,
+  stdio: ["ignore", "pipe", "pipe"],
+  ...options,
+});
+
+function resolveRef(target) {
+  if (resolvedRefCache.has(target)) return resolvedRefCache.get(target);
+  const sha = gitText(["rev-parse", "--verify", `${target}^{commit}`]).trim();
+  resolvedRefCache.set(target, sha);
+  return sha;
+}
+
+function parseBatchBlobs(output, requestedOids) {
+  const blobs = new Map();
+  let offset = 0;
+
+  for (const requestedOid of requestedOids) {
+    const lineEnd = output.indexOf(0x0a, offset);
+    if (lineEnd < 0) throw new Error(`git cat-file --batch returned a truncated header for ${requestedOid}`);
+    const header = output.subarray(offset, lineEnd).toString("utf8");
+    offset = lineEnd + 1;
+
+    if (header.endsWith(" missing")) throw new Error(`Git object ${requestedOid} is missing`);
+
+    const [oid, type, sizeText] = header.split(" ");
+    const size = Number(sizeText);
+    if (oid !== requestedOid || type !== "blob" || !Number.isSafeInteger(size) || size < 0) {
+      throw new Error(`Unexpected git cat-file --batch header: ${header}`);
+    }
+    const end = offset + size;
+    if (end >= output.length) throw new Error(`git cat-file --batch returned truncated content for ${oid}`);
+    if (output[end] !== 0x0a) throw new Error(`git cat-file --batch omitted the record terminator for ${oid}`);
+
+    blobs.set(oid, output.subarray(offset, end));
+    offset = end + 1;
+  }
+
+  return blobs;
+}
+
+function buildTreeSnapshot(sha) {
+  const tree = gitText(["ls-tree", "-r", "-z", "--full-tree", sha]);
+  const paths = [];
+  const oidByPath = new Map();
+  const blobOids = new Set();
+
+  for (const record of tree.split("\0")) {
+    if (!record) continue;
+    const tab = record.indexOf("\t");
+    if (tab < 0) throw new Error(`Unexpected git ls-tree record at ${sha}: ${record}`);
+    const [mode, type, oid] = record.slice(0, tab).split(" ");
+    const path = record.slice(tab + 1);
+    if (!mode || !type || !oid || !path) throw new Error(`Unexpected git ls-tree record at ${sha}: ${record}`);
+
+    paths.push(path);
+    oidByPath.set(path, oid);
+    if (type === "blob") blobOids.add(oid);
+  }
+  paths.sort();
+
+  return { sha, paths, oidByPath, blobOids: [...blobOids] };
+}
+
+function loadBlobs(oids) {
+  const requestedOids = [...new Set(oids)].filter((oid) => !blobCache.has(oid)).sort();
+  if (!requestedOids.length) return;
+
+  const batchOutput = execFileSync("git", ["cat-file", "--batch"], {
+    input: `${requestedOids.join("\n")}\n`,
+    maxBuffer: GIT_MAX_BUFFER,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  for (const [oid, blob] of parseBatchBlobs(batchOutput, requestedOids)) blobCache.set(oid, blob);
+}
+
+function primeSnapshots(targets) {
+  const snapshots = [];
+  for (const target of targets) {
+    const sha = resolveRef(target);
+    if (!snapshotCache.has(sha)) snapshotCache.set(sha, buildTreeSnapshot(sha));
+    snapshots.push(snapshotCache.get(sha));
+  }
+  loadBlobs(snapshots.flatMap((snapshot) => snapshot.blobOids));
+}
+
+function snapshotAt(target) {
+  const sha = resolveRef(target);
+  if (!snapshotCache.has(sha)) {
+    const snapshot = buildTreeSnapshot(sha);
+    snapshotCache.set(sha, snapshot);
+    loadBlobs(snapshot.blobOids);
+  }
+  return snapshotCache.get(sha);
+}
+
+const pathsAt = (target, roots) => snapshotAt(target).paths.filter((path) =>
+  roots.some((root) => path === root || path.startsWith(`${root}/`))
+);
+
+const textAt = (target, path) => {
+  const snapshot = snapshotAt(target);
+  const oid = snapshot.oidByPath.get(path);
+  if (!oid) throw new Error(`Path ${path} does not exist at ${snapshot.sha}`);
+  const blob = blobCache.get(oid);
+  if (!blob) throw new Error(`Path ${path} at ${snapshot.sha} is not a readable blob`);
+  return blob.toString("utf8");
+};
 const jsonAt = (target, path) => JSON.parse(textAt(target, path));
 const sourceModulePathsAt = (target, stem) => pathsAt(target, ["src"]).filter((path) => path === `${stem}.mts` || path === `${stem}.mjs` || path === `${stem}.js`);
 const sourceModuleTextAt = (target, stem) => {
@@ -239,6 +350,7 @@ function subtract(after, before) {
   );
 }
 
+primeSnapshots([ref, compareRef].filter(Boolean));
 const current = architecture(ref);
 if (!compareRef) console.log(JSON.stringify(current, null, 2));
 else {
