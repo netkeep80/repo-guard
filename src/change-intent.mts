@@ -36,7 +36,7 @@ export function extractGovernanceGrant(markdown: unknown): GovernanceGrantExtrac
   return parseBlock(blocks[0]!, { "repo-guard-grant": "YAML" }, "grant");
 }
 
-const ISSUE_LINK_RE = /(?:Fixes|Closes|Resolves)\s+(?:([\w.-]+\/[\w.-]+))?#(\d+)/gi;
+const ISSUE_LINK_RE = /\b(?:Fixes|Closes|Resolves|Part\s+of)\s+(?:([\w.-]+\/[\w.-]+))?#(\d+)/gi;
 export function extractLinkedIssueReferences(text: unknown, currentRepository: unknown): LinkedIssueReference[] {
   if (!text || typeof text !== "string") return [];
   const localRepository = typeof currentRepository === "string" ? currentRepository : "";
