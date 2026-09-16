@@ -108,8 +108,8 @@ try {
 
     const calls = readFileSync(tracePath, "utf8").split(/\r?\n/).filter(Boolean);
     assert.ok(
-      calls.length <= 6,
-      `current-vs-baseline metrics must use at most 6 Git subprocesses, got ${calls.length}`,
+      calls.length <= 5,
+      `current-vs-baseline metrics must use at most 5 Git subprocesses, got ${calls.length}`,
     );
     assert.equal(
       new Set(calls).size,
@@ -118,7 +118,7 @@ try {
     );
     assert.equal(calls.filter((call) => call.startsWith("rev-parse ")).length, 2);
     assert.equal(calls.filter((call) => call.startsWith("ls-tree ")).length, 2);
-    assert.equal(calls.filter((call) => call === "cat-file --batch").length, 2);
+    assert.equal(calls.filter((call) => call === "cat-file --batch").length, 1);
   }
 
   console.log("Compression metrics exact-ref Git I/O contract passed.");
