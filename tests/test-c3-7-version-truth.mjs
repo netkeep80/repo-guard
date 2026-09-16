@@ -32,20 +32,41 @@ const releaseWorkflowDocument = parseDocument(releaseWorkflowSource);
 assert.equal(releaseWorkflowDocument.errors.length, 0);
 const releaseWorkflow = releaseWorkflowDocument.toJS();
 assert.deepEqual(releaseWorkflow.permissions, { contents: "read" });
-assert.deepEqual(releaseWorkflow.on?.release?.types, ["published"]);
+assert.deepEqual(releaseWorkflow.on?.workflow_run?.workflows, ["Atomic release"]);
+assert.deepEqual(releaseWorkflow.on?.workflow_run?.types, ["completed"]);
+assert.ok(releaseWorkflow.on?.workflow_dispatch?.inputs?.tag);
+assert.equal(releaseWorkflow.on?.release, undefined);
 
-const releaseJob = releaseWorkflow.jobs?.["verify-release-ref"];
-assert.ok(releaseJob);
-const checkout = releaseJob.steps.find((step) => step.uses === "actions/checkout@v6");
-const expectedReleaseRef = "${{ github.event.release.tag_name || inputs.tag }}";
-assert.equal(checkout?.with?.ref, expectedReleaseRef);
-const verifier = releaseJob.steps.find((step) => (
+const automaticJob = releaseWorkflow.jobs?.["verify-automatic"];
+assert.ok(automaticJob);
+assert.deepEqual(automaticJob.permissions, { contents: "read" });
+const automaticCheckout = automaticJob.steps.find((step) => step.uses === "actions/checkout@v6");
+assert.equal(
+  automaticCheckout?.with?.ref,
+  "${{ needs.resolve-automatic-target.outputs.target_sha }}",
+);
+assert.equal(automaticCheckout?.with?.["persist-credentials"], false);
+const automaticVerifier = automaticJob.steps.find((step) => (
   typeof step.run === "string"
   && step.run.includes("scripts/verify-release-ref.mjs")
 ));
-assert.ok(verifier);
-assert.equal(verifier.env?.RELEASE_TAG, expectedReleaseRef);
-assert.equal(verifier.run, 'node scripts/verify-release-ref.mjs --tag "$RELEASE_TAG"');
+assert.ok(automaticVerifier);
+assert.match(automaticVerifier.run, /--tag/);
+assert.match(automaticVerifier.run, /--expected-sha/);
+
+const manualJob = releaseWorkflow.jobs?.["verify-manual"];
+assert.ok(manualJob);
+assert.deepEqual(manualJob.permissions, { contents: "read" });
+const manualCheckout = manualJob.steps.find((step) => step.uses === "actions/checkout@v6");
+assert.equal(manualCheckout?.with?.ref, "${{ inputs.tag }}");
+const manualVerifier = manualJob.steps.find((step) => (
+  typeof step.run === "string"
+  && step.run.includes("scripts/verify-release-ref.mjs")
+));
+assert.ok(manualVerifier);
+assert.match(manualVerifier.run, /--tag/);
+assert.doesNotMatch(manualVerifier.run, /--expected-sha/);
+
 assert.doesNotMatch(
   releaseWorkflowSource,
   /\b(?:npm\s+publish|gh\s+release\s+create|git\s+tag|git\s+push)\b/,
