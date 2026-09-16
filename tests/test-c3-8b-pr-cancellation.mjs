@@ -29,11 +29,16 @@ assert.equal(
 assert.equal(workflow.concurrency?.["cancel-in-progress"], true);
 
 const acceptedSha = observeImmutable("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
-const snapshot = await collectObservatorySnapshot({
+const collected = await collectObservatorySnapshot({
   repoRoot,
   acceptedSha,
+  observedAt: "2026-09-16T18:00:00Z",
   ci: {
     workflow: "CI",
+    workflow_path: ".github/workflows/ci.yml",
+    event: "push",
+    branch: "main",
+    head_sha: acceptedSha,
     run_id: 123,
     run_url: "https://example.invalid/runs/123",
     conclusion: "success",
@@ -47,6 +52,20 @@ const snapshot = await collectObservatorySnapshot({
   }),
   run: observeImmutable,
 });
+
+// Cycle-B compatibility fixture only: the renderer moves to schema v2 in Cycle C.
+const snapshot = {
+  ...collected,
+  schema_version: 1,
+  version: {
+    package_version: collected.version.package_version,
+    matching_release_tag: collected.version.expected_release_tag,
+    matching_published_release: false,
+    release_commit: null,
+    release_url: null,
+    release_truth_status: "package_only",
+  },
+};
 
 assert.deepEqual(snapshot.ci.concurrency, workflow.concurrency);
 const html = renderObservatory(snapshot);
