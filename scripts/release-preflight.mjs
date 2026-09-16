@@ -10,6 +10,7 @@ import {
 
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[^/\s]+\/[^/\s]+$/;
+const STABLE_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -103,6 +104,9 @@ export async function preflightRelease({
   const packageJson = readJson(resolve(repoRoot, "package.json"));
   const packageLock = readJson(resolve(repoRoot, "package-lock.json"));
   const version = packageJson?.version;
+  if (typeof version !== "string" || !STABLE_SEMVER.test(version)) {
+    throw new Error("Release package version must be a stable semantic version X.Y.Z");
+  }
   const tag = expectedTagForVersion(version);
   requireLockVersion(packageLock, version);
 
