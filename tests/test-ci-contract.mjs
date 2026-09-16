@@ -104,4 +104,66 @@ assert.equal(metrics.ci.effective_check_dist_runs, 1);
 assert.equal(metrics.ci.npm_ci_runs, 1);
 assert.equal(metrics.ci.full_history_checkouts, 0);
 
+const releaseWorkflowSource = readFileSync(
+  resolve(root, ".github/workflows/release.yml"),
+  "utf8",
+);
+const releaseWorkflowDocument = parseDocument(releaseWorkflowSource);
+assert.equal(releaseWorkflowDocument.errors.length, 0);
+const releaseWorkflow = releaseWorkflowDocument.toJS();
+
+assert.deepEqual(releaseWorkflow.permissions ?? {}, {});
+assert.deepEqual(
+  releaseWorkflow.on?.repository_dispatch?.types,
+  ["release"],
+  "release transaction must be dispatched through the default-branch repository_dispatch workflow",
+);
+assert.deepEqual(Object.keys(releaseWorkflow.jobs ?? {}).sort(), ["preflight", "publish"]);
+
+const releasePreflight = releaseWorkflow.jobs.preflight;
+const releasePublish = releaseWorkflow.jobs.publish;
+assert.deepEqual(releasePreflight.permissions, {
+  actions: "read",
+  contents: "read",
+});
+assert.deepEqual(releasePublish.permissions, { contents: "write" });
+assert.equal(releasePublish.needs, "preflight");
+
+const releaseCheckout = releasePreflight.steps.find(
+  (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
+);
+assert.ok(releaseCheckout);
+assert.equal(releaseCheckout.with?.ref, "${{ github.event.client_payload.sha }}");
+assert.equal(releaseCheckout.with?.["fetch-depth"], 1);
+assert.equal(releaseCheckout.with?.["persist-credentials"], false);
+assert.equal(npmCiSteps(releasePreflight).length, 1);
+
+const proofStep = releasePreflight.steps.find((step) => step.id === "proof");
+assert.ok(proofStep);
+assert.match(proofStep.run, /node scripts\/release-preflight\.mjs/);
+assert.match(proofStep.run, /GITHUB_OUTPUT/);
+for (const key of ["sha", "version", "tag"]) {
+  assert.equal(releasePreflight.outputs?.[key], `\${{ steps.proof.outputs.${key} }}`);
+}
+
+for (const step of releasePublish.steps ?? []) {
+  assert.equal(step.uses, undefined, "publish must not execute any repository or third-party Action code");
+}
+const publishSource = (releasePublish.steps ?? [])
+  .map((step) => step.run ?? "")
+  .join("\n");
+assert.match(publishSource, /\bgh\s+api\b/);
+assert.doesNotMatch(publishSource, /\bnpm\b/);
+assert.doesNotMatch(publishSource, /\bnode\b/);
+assert.doesNotMatch(publishSource, /(?:^|[\s;&|])git\s+/m);
+assert.doesNotMatch(publishSource, /scripts\//);
+assert.doesNotMatch(publishSource, /(?:^|[\s;&|])\.\//m);
+assert.doesNotMatch(publishSource, /github\.event\.client_payload/);
+assert.match(JSON.stringify(releasePublish.env ?? {}), /needs\.preflight\.outputs\.sha/);
+assert.match(JSON.stringify(releasePublish.env ?? {}), /needs\.preflight\.outputs\.version/);
+assert.match(JSON.stringify(releasePublish.env ?? {}), /needs\.preflight\.outputs\.tag/);
+assert.match(publishSource, /refs\/tags/);
+assert.match(publishSource, /releases/);
+assert.match(publishSource, /commits\/\$\{TAG\}/);
+
 console.log("Current CI workflow/runtime contract passed");
