@@ -89,5 +89,21 @@ assert.match(
   releasing,
   /Не закрепляйте производственную проверку за изменяемой веткой `main` или псевдонимом `latest`/,
 );
+assert.match(
+  releasing,
+  /`GITHUB_TOKEN`[^\n]*не используется как транспорт события между рабочими процессами/,
+);
+assert.match(
+  releasing,
+  /`Release integrity`[^\n]*`workflow_run`[^\n]*`Atomic release`/,
+);
+assert.match(
+  releasing,
+  /`target_sha`[\s\S]*`tag`[\s\S]*`run_id`[\s\S]*`run_attempt`/,
+);
+assert.match(
+  releasing,
+  /Ручной запуск[\s\S]*не является доказательством того, что исторический accepted `S` был установлен заранее/,
+);
 
 console.log("C3.7 version, release workflow, and documentation truth contract passed");
