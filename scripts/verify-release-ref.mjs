@@ -360,7 +360,7 @@ export async function verifyReleaseRef({
 }
 
 function usage() {
-  return `Usage: node scripts/verify-release-ref.mjs [--repo <owner/repo>] [--tag <vX.Y.Z>] [--package-root <path>]
+  return `Usage: node scripts/verify-release-ref.mjs [--repo <owner/repo>] [--tag <vX.Y.Z>] [--expected-sha <40-hex-S>] [--package-root <path>]
 
 Checks the release invariant used by repo-guard init:
   package.json.version -> exact Git tag commit -> current checkout -> published GitHub release v<version>
@@ -377,6 +377,8 @@ function parseArgs(args) {
       opts.repo = args[++i];
     } else if (arg === "--tag" && args[i + 1]) {
       opts.tag = args[++i];
+    } else if (arg === "--expected-sha" && args[i + 1]) {
+      opts.expectedSha = args[++i];
     } else if (arg === "--package-root" && args[i + 1]) {
       opts.packageRoot = resolve(args[++i]);
     } else {
