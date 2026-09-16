@@ -22,6 +22,10 @@ import {
 import { observeImmutable } from "./support/immutable-observation.mjs";
 
 const repoRoot = resolve(".");
+const packageJson = JSON.parse(
+  readFileSync(resolve(repoRoot, "package.json"), "utf8"),
+);
+const packageVersion = packageJson.version;
 const acceptedSha = observeImmutable("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
 
 const snapshot = await collectObservatorySnapshot({
@@ -43,6 +47,10 @@ const snapshot = await collectObservatorySnapshot({
   run: observeImmutable,
 });
 
+assert.equal(snapshot.version.package_version, packageVersion);
+const packageTag = snapshot.version.matching_release_tag;
+assert.equal(typeof packageTag, "string");
+assert.ok(packageTag.length > 0);
 assert.equal(snapshot.scenarios.length, 5);
 validateObservatorySnapshot(snapshot);
 
@@ -86,13 +94,13 @@ assert.equal((first.match(/data-scenario-id=/g) ?? []).length, 5);
 assert.equal((first.match(/data-case-result="PASS"/g) ?? []).length, 5);
 assert.equal((first.match(/data-case-result="FAIL"/g) ?? []).length, 5);
 
-assert.match(first, /Пакет: <code>3\.1\.0<\/code>/);
-assert.match(first, /Совпадающий тег: <code>v3\.1\.0<\/code>/);
+assert.ok(first.includes(`Пакет: <code>${packageVersion}</code>`));
+assert.ok(first.includes(`Совпадающий тег: <code>${packageTag}</code>`));
 assert.match(first, /Выпуск: не опубликован для совпадающего тега/);
 assert.match(first, /Коммит выпуска: отсутствует/);
 
 const releaseCommit = "d".repeat(40);
-const releaseUrl = "https://example.invalid/releases/v3.1.0";
+const releaseUrl = `https://example.invalid/releases/${packageTag}`;
 const publishedSnapshot = {
   ...snapshot,
   version: {
