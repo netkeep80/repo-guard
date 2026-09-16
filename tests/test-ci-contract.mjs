@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 import { observeImmutable } from "./support/immutable-observation.mjs";
 
@@ -175,4 +182,192 @@ assert.doesNotMatch(
   "publish must not resolve tag identity through an ambiguous branch-or-tag commit endpoint",
 );
 
-console.log("Current CI workflow/runtime contract passed");
+const acceptedSha = "a".repeat(40);
+const rejectedSha = "b".repeat(40);
+const annotatedObjectSha = "c".repeat(40);
+
+function field(args, name) {
+  const prefix = `${name}=`;
+  const entry = args.find((arg) => arg.startsWith(prefix));
+  return entry ? entry.slice(prefix.length) : null;
+}
+
+function runPublish(initialState) {
+  const sandbox = mkdtempSync(join(tmpdir(), "repo-guard-release-publish-"));
+  const statePath = join(sandbox, "state.json");
+  const ghPath = join(sandbox, "gh");
+  writeFileSync(statePath, JSON.stringify({ calls: [], ...initialState }), "utf8");
+  writeFileSync(
+    ghPath,
+    `#!/usr/bin/env node
+import { readFileSync, writeFileSync } from "node:fs";
+const statePath = process.env.GH_FAKE_STATE;
+const state = JSON.parse(readFileSync(statePath, "utf8"));
+const args = process.argv.slice(2);
+if (args[0] !== "api") process.exit(90);
+let method = "GET";
+let endpoint = null;
+for (let i = 1; i < args.length; i += 1) {
+  if (args[i] === "--method") {
+    method = args[i + 1];
+    i += 1;
+  } else if (!args[i].startsWith("-") && endpoint === null) {
+    endpoint = args[i];
+  }
+}
+state.calls.push({ method, endpoint, args });
+const save = () => writeFileSync(statePath, JSON.stringify(state), "utf8");
+const field = (name) => {
+  const prefix = name + "=";
+  const value = args.find((arg) => arg.startsWith(prefix));
+  return value ? value.slice(prefix.length) : null;
+};
+const fail = () => { save(); process.exit(1); };
+
+if (method === "GET" && endpoint?.includes("/git/ref/tags/")) {
+  if (!state.tag) fail();
+  process.stdout.write(JSON.stringify({ object: state.tag }));
+  save();
+  process.exit(0);
+}
+if (method === "GET" && endpoint?.includes("/git/tags/")) {
+  const objectSha = endpoint.split("/").at(-1);
+  const object = state.tagObjects?.[objectSha];
+  if (!object) fail();
+  process.stdout.write(JSON.stringify({ object }));
+  save();
+  process.exit(0);
+}
+if (method === "POST" && endpoint?.endsWith("/git/refs")) {
+  if (state.tag) fail();
+  const sha = field("sha");
+  if (!/^[0-9a-f]{40}$/.test(sha ?? "")) fail();
+  state.tag = { type: "commit", sha };
+  save();
+  process.exit(0);
+}
+if (method === "GET" && endpoint?.includes("/releases/tags/")) {
+  if (!state.release) fail();
+  if (args.includes("--jq")) {
+    process.stdout.write(state.release.tag_name + "\\t" + String(state.release.draft) + "\\t" + String(state.release.prerelease));
+  } else {
+    process.stdout.write(JSON.stringify(state.release));
+  }
+  save();
+  process.exit(0);
+}
+if (method === "POST" && endpoint?.endsWith("/releases")) {
+  if (state.release) fail();
+  state.release = {
+    tag_name: field("tag_name"),
+    draft: false,
+    prerelease: false,
+  };
+  if (state.mutateTagAfterRelease) {
+    state.tag = { type: "commit", sha: state.mutateTagAfterRelease };
+  }
+  save();
+  process.exit(0);
+}
+fail();
+`,
+    "utf8",
+  );
+  chmodSync(ghPath, 0o755);
+
+  const result = spawnSync("bash", ["-c", publishSource], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${sandbox}:${process.env.PATH}`,
+      GH_FAKE_STATE: statePath,
+      GH_TOKEN: "test-token",
+      REPOSITORY: "netkeep80/repo-guard",
+      TARGET_SHA: acceptedSha,
+      VERSION: "2.3.4",
+      TAG: "v2.3.4",
+    },
+  });
+  return {
+    result,
+    state: JSON.parse(readFileSync(statePath, "utf8")),
+  };
+}
+
+function assertSuccess(execution, label) {
+  assert.equal(
+    execution.result.status,
+    0,
+    `${label}: ${execution.result.stderr || execution.result.stdout}`,
+  );
+}
+
+{
+  const execution = runPublish({ tag: null, release: null });
+  assertSuccess(execution, "absent tag/release publication");
+  assert.deepEqual(execution.state.tag, { type: "commit", sha: acceptedSha });
+  assert.deepEqual(execution.state.release, {
+    tag_name: "v2.3.4",
+    draft: false,
+    prerelease: false,
+  });
+  assert.ok(execution.state.calls.some(({ method, endpoint }) => method === "POST" && endpoint.endsWith("/git/refs")));
+  assert.ok(execution.state.calls.some(({ method, endpoint }) => method === "POST" && endpoint.endsWith("/releases")));
+}
+
+{
+  const execution = runPublish({
+    tag: { type: "commit", sha: acceptedSha },
+    release: { tag_name: "v2.3.4", draft: false, prerelease: false },
+  });
+  assertSuccess(execution, "idempotent existing publication");
+  assert.equal(execution.state.calls.some(({ method }) => method === "POST"), false);
+}
+
+{
+  const execution = runPublish({
+    tag: { type: "tag", sha: annotatedObjectSha },
+    tagObjects: {
+      [annotatedObjectSha]: { type: "commit", sha: acceptedSha },
+    },
+    release: { tag_name: "v2.3.4", draft: false, prerelease: false },
+  });
+  assertSuccess(execution, "annotated tag publication");
+  assert.equal(execution.state.calls.some(({ method }) => method === "POST"), false);
+}
+
+{
+  const execution = runPublish({
+    tag: { type: "commit", sha: rejectedSha },
+    release: null,
+  });
+  assert.notEqual(execution.result.status, 0);
+  assert.equal(execution.state.release, null);
+  assert.equal(
+    execution.state.calls.some(({ method, endpoint }) => method === "POST" && endpoint.endsWith("/releases")),
+    false,
+  );
+}
+
+{
+  const execution = runPublish({
+    tag: { type: "commit", sha: acceptedSha },
+    release: { tag_name: "v2.3.4", draft: true, prerelease: false },
+  });
+  assert.notEqual(execution.result.status, 0);
+  assert.equal(execution.state.release.draft, true);
+  assert.equal(execution.state.calls.some(({ method }) => method === "POST"), false);
+}
+
+{
+  const execution = runPublish({
+    tag: null,
+    release: null,
+    mutateTagAfterRelease: rejectedSha,
+  });
+  assert.notEqual(execution.result.status, 0);
+  assert.equal(execution.state.release.tag_name, "v2.3.4");
+  assert.deepEqual(execution.state.tag, { type: "commit", sha: rejectedSha });
+}
+
+console.log("Current CI and atomic release workflow contracts passed");
