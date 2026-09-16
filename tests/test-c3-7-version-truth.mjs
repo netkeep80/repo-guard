@@ -31,7 +31,7 @@ const releaseWorkflowSource = readFileSync(
 const releaseWorkflowDocument = parseDocument(releaseWorkflowSource);
 assert.equal(releaseWorkflowDocument.errors.length, 0);
 const releaseWorkflow = releaseWorkflowDocument.toJS();
-assert.deepEqual(releaseWorkflow.permissions, { contents: "read" });
+assert.deepEqual(releaseWorkflow.permissions, {});
 assert.deepEqual(releaseWorkflow.on?.workflow_run?.workflows, ["Atomic release"]);
 assert.deepEqual(releaseWorkflow.on?.workflow_run?.types, ["completed"]);
 assert.ok(releaseWorkflow.on?.workflow_dispatch?.inputs?.tag);
