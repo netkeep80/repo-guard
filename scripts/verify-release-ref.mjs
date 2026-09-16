@@ -227,6 +227,7 @@ export async function verifyReleaseRef({
   packageRoot = defaultPackageRoot,
   repo = DEFAULT_REPO,
   tag = null,
+  expectedSha = null,
   token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "",
   fetchImpl = globalThis.fetch,
   run = runProcess,
@@ -234,6 +235,7 @@ export async function verifyReleaseRef({
   const checks = [];
   let packageVersion = null;
   let expectedTag = null;
+  let normalizedExpectedSha = null;
 
   if (!fetchImpl) {
     checks.push(fail("github-api-client", missingFetchMessage()));
@@ -260,6 +262,15 @@ export async function verifyReleaseRef({
   }
   checks.push(pass("release-tag-matches-package", `${suppliedTag} matches package.json.version`));
 
+  if (expectedSha !== null && expectedSha !== undefined) {
+    try {
+      normalizedExpectedSha = requireSha(expectedSha, "expected release target");
+    } catch (e) {
+      checks.push(fail("release-target-sha", e.message));
+      return { ok: false, packageVersion, expectedTag, repo, checks };
+    }
+  }
+
   let checkoutSha;
   try {
     checkoutSha = requireSha(
@@ -270,6 +281,20 @@ export async function verifyReleaseRef({
   } catch (e) {
     checks.push(fail("release-checkout", e.message));
     return { ok: false, packageVersion, expectedTag, repo, checks };
+  }
+
+  if (normalizedExpectedSha && checkoutSha !== normalizedExpectedSha) {
+    checks.push(fail(
+      "release-target-sha",
+      `Current checkout ${checkoutSha} does not match expected release target ${normalizedExpectedSha}`,
+    ));
+    return { ok: false, packageVersion, expectedTag, repo, checks };
+  }
+  if (normalizedExpectedSha) {
+    checks.push(pass(
+      "release-target-sha",
+      `Current checkout matches expected release target ${normalizedExpectedSha}`,
+    ));
   }
 
   let truth;
