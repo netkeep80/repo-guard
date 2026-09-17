@@ -63,10 +63,7 @@ jobs:
 
       - name: Run PR policy check
         if: github.event_name == 'pull_request' && !github.event.pull_request.draft
-        uses: ./
-        with:
-          mode: check-pr
-          enforcement: blocking
+        run: node dist/repo-guard.mjs --enforcement blocking check-pr --format json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
