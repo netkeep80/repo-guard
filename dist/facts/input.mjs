@@ -8,7 +8,7 @@ import { readFileAtRef as readGitFileAtRef } from "../git.mjs";
 import { readRepositoryBufferFile } from "../utils/repository-files.mjs";
 export const listTrackedFiles = (repoRoot) => execFileSync("git", ["ls-files", "-z"], { encoding: "utf-8", cwd: repoRoot }).split("\0").filter(Boolean);
 export function buildPolicyFacts(input) {
-    const { mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null, repositoryObservation = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null, trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null, trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null, } = input;
+    const { mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null, repositoryIdentity = null, snapshotDocuments = null, repositoryObservation = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null, trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null, trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null, } = input;
     const allFiles = diffFiles || parseDiff(diffText);
     const checkedFiles = filterOperationalPaths(allFiles, policy.paths.operational_paths, policy.paths.pr_immutable);
     const resolvedTrackedFiles = trackedFiles || listTrackedFiles(repositoryRoot), cache = new Map();
@@ -21,7 +21,7 @@ export function buildPolicyFacts(input) {
     const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
     const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
     return {
-        mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryObservation,
+        mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryIdentity, snapshotDocuments, repositoryObservation,
         changeIntent, changeIntentSource, governanceGrant,
         trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
         enforcementMode: enforcement.mode, enforcement,
