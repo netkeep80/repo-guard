@@ -29,7 +29,6 @@ const pureReadOnlyParallel = [
   "test-c3-9c-readme-convergence.mjs",
   "test-c3-9e-self-hosting-narrative-purge.mjs",
   "test-c3-9f-single-consumer-scaffold-authority.mjs",
-  "test-c3-9h-enforcement-surface-purge.mjs",
   "test-c3-compression-baseline-integrity.mjs",
   "test-canonical-relation-kernel.mjs",
   "test-change-intent.mjs",
@@ -83,6 +82,7 @@ const pureReadOnlyParallel = [
 
 const processLocalParallel = [
   "test-c3-8i-cli-harness-compression.mjs",
+  "test-c3-9h-enforcement-surface-purge.mjs",
   "test-enforcement-mode.mjs",
   "test-repo-root.mjs",
   "test-self-hosting.mjs",
