@@ -20,6 +20,19 @@ const allowedClasses = new Set([
 ]);
 const allowedExecution = new Set(["parallel", "serial"]);
 
+function importsModule(source, specifier) {
+  const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const fromImport = new RegExp(
+    `^\\s*import\\b[^;]*\\bfrom\\s+["']${escaped}["']\\s*;`,
+    "m",
+  );
+  const sideEffectImport = new RegExp(
+    `^\\s*import\\s+["']${escaped}["']\\s*;`,
+    "m",
+  );
+  return fromImport.test(source) || sideEffectImport.test(source);
+}
+
 assert.deepEqual(
   declared,
   [...discovered].sort(),
@@ -36,7 +49,7 @@ for (const file of discovered) {
   assert.ok(entry.reason.trim().length > 0, `${file}: reason не должен быть пустым`);
 
   const source = readFileSync(join(testsDir, file), "utf8");
-  if (source.includes("./support/immutable-observation.mjs")) {
+  if (importsModule(source, "./support/immutable-observation.mjs")) {
     assert.equal(entry.execution, "serial", `${file}: suite observation cache пока не доказан concurrent-safe`);
     assert.ok(
       entry.resources.includes("suite-observation-cache"),
@@ -44,7 +57,7 @@ for (const file of discovered) {
     );
   }
 
-  if (source.includes("./support/run-cli.mjs")) {
+  if (importsModule(source, "./support/run-cli.mjs")) {
     assert.ok(
       entry.resources.includes("process-local-console-env"),
       `${file}: runCliCaptured должен объявлять process-local console/env mutation`,
