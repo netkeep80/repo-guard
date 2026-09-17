@@ -162,7 +162,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   try { diff = getDiffObservation(base, exactHead, roots.repoRoot); trackedFiles = listTrackedFilesAtRef(observation.evaluated.commit_sha, roots.repoRoot); }
   catch (error: unknown) { return fail(roots, format, "check_pr.diff", (error as Error).message); }
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
-  if (basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
+  if (governanceGrant !== null && basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
 
   const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,

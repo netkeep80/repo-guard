@@ -224,7 +224,7 @@ export function runCheckPR(roots, args = []) {
         return fail(roots, format, "check_pr.diff", error.message);
     }
     let trustedAuthorizer = null;
-    if (basePolicy && repoFullName)
+    if (governanceGrant !== null && basePolicy && repoFullName)
         try {
             trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext });
         }
