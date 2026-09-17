@@ -166,11 +166,13 @@ function snapshotFactSource(context, selector) {
     const path = normalizeRepositoryPathFact(selector.path, selector.pointer);
     if (!revision)
         return failDocumentFact("document_read_error", `missing ${label} ref`, selector.pointer);
-    if (!context.readFileAtRef)
+    const useCache = Boolean(context.snapshotDocuments && context.repositoryIdentity);
+    if (!useCache && !context.readFileAtRef)
         return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, selector.pointer);
+    const identity = useCache ? { repository: context.repositoryIdentity, sha: revision } : null;
     let raw;
     try {
-        raw = context.readFileAtRef(revision, path);
+        raw = identity ? context.snapshotDocuments.read(identity, path) : context.readFileAtRef(revision, path);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -185,9 +187,9 @@ function snapshotFactSource(context, selector) {
         return String(raw).trim();
     }
     if (selector.format === "json")
-        return parseJson(String(raw));
+        return identity ? context.snapshotDocuments.parsed(identity, path, "json") : parseJson(String(raw));
     if (selector.format === "yaml")
-        return parseYaml(String(raw));
+        return identity ? context.snapshotDocuments.parsed(identity, path, "yaml") : parseYaml(String(raw));
     const exhaustive = selector.format;
     return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }

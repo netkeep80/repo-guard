@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createDocumentReader } from "../document-facts.mjs";
+import type { ImmutableSnapshotDocumentCache } from "../immutable-snapshot-cache.mjs";
 import { classifyNewFiles, detectTouchedSurfaces } from "../diff/classification.mjs";
 import { filterOperationalPaths } from "../diff/filters.mjs";
 import { parseDiff, type ParsedDiffFile } from "../diff/parser.mjs";
@@ -29,6 +30,8 @@ export interface RepositoryFactsInput {
   headPolicy?: unknown;
   baseRef?: string | null;
   headRef?: string | null;
+  repositoryIdentity?: string | null;
+  snapshotDocuments?: ImmutableSnapshotDocumentCache | null;
   repositoryObservation?: unknown;
   changeIntent?: unknown;
   changeIntentSource?: string;
@@ -49,7 +52,8 @@ export const listTrackedFiles = (repoRoot: string): string[] => execFileSync("gi
 export function buildPolicyFacts(input: RepositoryFactsInput) {
   const {
     mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null,
-    repositoryObservation = null, changeIntent = null, changeIntentSource = "none", governanceGrant = null,
+    repositoryIdentity = null, snapshotDocuments = null, repositoryObservation = null,
+    changeIntent = null, changeIntentSource = "none", governanceGrant = null,
     trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null,
     trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null,
   } = input;
@@ -64,7 +68,7 @@ export function buildPolicyFacts(input: RepositoryFactsInput) {
   const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
   const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
   return {
-    mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryObservation,
+    mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryIdentity, snapshotDocuments, repositoryObservation,
     changeIntent, changeIntentSource, governanceGrant,
     trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
     enforcementMode: enforcement.mode, enforcement,

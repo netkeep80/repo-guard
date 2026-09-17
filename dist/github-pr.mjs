@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
+import { parseJson, parseYaml } from "./document-facts.mjs";
 import { acquirePullRequestObservation, getDiffObservation, listTrackedFilesAtRef, readFileAtRef } from "./git.mjs";
+import { createImmutableSnapshotDocumentCache } from "./immutable-snapshot-cache.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
@@ -164,7 +166,11 @@ export function runCheckPR(roots, args = []) {
         console.log(`PR #${prNumber}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
         console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
     }
-    const readSnapshotFile = memoizeSnapshotReader((ref, path) => readFileAtRef(ref, path, roots.repoRoot));
+    const snapshotDocuments = createImmutableSnapshotDocumentCache({
+        readFileAtRef: (ref, path) => readFileAtRef(ref, path, roots.repoRoot),
+        parsers: { json: parseJson, yaml: parseYaml },
+    });
+    const readSnapshotFile = (ref, path) => snapshotDocuments.read({ repository: observation.repository, sha: ref }, path);
     const readEvaluatedFile = (path) => readSnapshotFile(observation.evaluated.commit_sha, path);
     const headRuntime = headPolicyRuntime(roots, observation, readSnapshotFile, quiet);
     if (!headRuntime)
@@ -225,7 +231,8 @@ export function runCheckPR(roots, args = []) {
         catch { }
     const baseInput = {
         mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
-        repositoryObservation: observation, trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
+        repositoryIdentity: observation.repository, snapshotDocuments, repositoryObservation: observation,
+        trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
         changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks,
     };
     const changed = Boolean(basePolicy && !isDeepStrictEqual(basePolicy, headRuntime.policy)), origin = changed ? "base" : "shared";

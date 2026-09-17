@@ -1,6 +1,7 @@
 import { parseDocument } from "yaml";
 import type { DiffFileStatus, ParsedDiffFile } from "./diff/parser.mjs";
 import { selectPaths } from "./diff/classification.mjs";
+import type { ImmutableSnapshotDocumentCache, ImmutableSnapshotIdentity } from "./immutable-snapshot-cache.mjs";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
 import { matchesAny, normalizePathEntry } from "./utils/path-patterns.mjs";
@@ -156,6 +157,8 @@ export interface FactReadContext {
   documents?: DocumentReader;
   baseRef?: string | null;
   headRef?: string | null;
+  repositoryIdentity?: string | null;
+  snapshotDocuments?: ImmutableSnapshotDocumentCache | null;
   readFileAtRef?: (ref: string, filePath: string) => unknown;
   readFile?: (filePath: string) => unknown;
   trackedFiles?: string[];
@@ -360,10 +363,12 @@ function snapshotFactSource(context: FactReadContext, selector: DocumentSelector
   const revision = selector.snapshot === "base" ? context.baseRef : context.headRef;
   const path = normalizeRepositoryPathFact(selector.path, selector.pointer);
   if (!revision) return failDocumentFact("document_read_error", `missing ${label} ref`, selector.pointer);
-  if (!context.readFileAtRef) return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, selector.pointer);
+  const useCache = Boolean(context.snapshotDocuments && context.repositoryIdentity);
+  if (!useCache && !context.readFileAtRef) return failDocumentFact("document_read_error", `snapshot reader unavailable for ${label}`, selector.pointer);
+  const identity: ImmutableSnapshotIdentity | null = useCache ? { repository: context.repositoryIdentity!, sha: revision } : null;
   let raw: unknown;
   try {
-    raw = context.readFileAtRef(revision, path);
+    raw = identity ? context.snapshotDocuments!.read(identity, path) : context.readFileAtRef!(revision, path);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return failDocumentFact("document_read_error", `${label} read failed: ${collapseMessage(message)}`, selector.pointer);
@@ -375,8 +380,8 @@ function snapshotFactSource(context: FactReadContext, selector: DocumentSelector
     }
     return String(raw).trim();
   }
-  if (selector.format === "json") return parseJson(String(raw));
-  if (selector.format === "yaml") return parseYaml(String(raw));
+  if (selector.format === "json") return identity ? context.snapshotDocuments!.parsed(identity, path, "json") : parseJson(String(raw));
+  if (selector.format === "yaml") return identity ? context.snapshotDocuments!.parsed(identity, path, "yaml") : parseYaml(String(raw));
   const exhaustive: never = selector.format;
   return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
