@@ -94,7 +94,7 @@ if (route.endsWith('/issues/77')) {
       writeFileSync(eventPath, JSON.stringify({
         pull_request: {
           number: 42,
-          base: { sha: baseSha, ref: "main" },
+          base: { sha: baseSha },
           head: { sha: headSha },
           body: `${intent}${linked ? "\n\nFixes #77" : ""}`,
         },
