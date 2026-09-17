@@ -50,6 +50,7 @@ const pureReadOnlyParallel = [
   "test-governance-paths.mjs",
   "test-hardening.mjs",
   "test-init-boundary.mjs",
+  "test-isolation-manifest.mjs",
   "test-p0-2-positive-permission-authority.mjs",
   "test-p0-3-trusted-enforcement-workflow.mjs",
   "test-p0-4-scoped-state-obligation-replacement.mjs",
