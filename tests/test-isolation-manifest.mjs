@@ -99,7 +99,6 @@ const externalIntegrationSerial = [
   "test-atomic-governance-cutover.mjs",
   "test-c3-10a-external-base-cutover.mjs",
   "test-c3-5-scenario-library.mjs",
-  "test-c3-6-observatory-snapshot.mjs",
   "test-c3-6-pages-workflow.mjs",
   "test-c3-7-version-truth.mjs",
   "test-c3-8b-pr-cancellation.mjs",
@@ -128,6 +127,7 @@ const externalIntegrationSerial = [
 const suiteCacheSerial = [
   "test-c3-2-compression-metrics.mjs",
   "test-c3-6-observatory-render.mjs",
+  "test-c3-6-observatory-snapshot.mjs",
 ];
 
 export const testIsolationManifest = Object.fromEntries([
