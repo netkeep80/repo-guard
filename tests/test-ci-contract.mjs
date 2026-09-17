@@ -249,7 +249,7 @@ if (method === "POST" && endpoint?.endsWith("/git/refs")) {
 if (method === "GET" && endpoint?.includes("/releases/tags/")) {
   if (!state.release) fail();
   if (args.includes("--jq")) {
-    process.stdout.write(state.release.tag_name + "\t" + String(state.release.draft) + "\t" + String(state.release.prerelease));
+    process.stdout.write(state.release.tag_name + "\\t" + String(state.release.draft) + "\\t" + String(state.release.prerelease));
   } else {
     process.stdout.write(JSON.stringify(state.release));
   }
