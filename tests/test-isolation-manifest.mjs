@@ -30,7 +30,6 @@ const pureReadOnlyParallel = [
   "test-c3-9e-self-hosting-narrative-purge.mjs",
   "test-c3-9f-single-consumer-scaffold-authority.mjs",
   "test-c3-compression-baseline-integrity.mjs",
-  "test-canonical-relation-kernel.mjs",
   "test-change-intent.mjs",
   "test-check-diff-boundary.mjs",
   "test-ci-contract.mjs",
@@ -128,6 +127,7 @@ const suiteCacheSerial = [
   "test-c3-6-observatory-render.mjs",
   "test-c3-6-observatory-snapshot.mjs",
   "test-c3-8b-pr-cancellation.mjs",
+  "test-canonical-relation-kernel.mjs",
 ];
 
 export const testIsolationManifest = Object.fromEntries([
