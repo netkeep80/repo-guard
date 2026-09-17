@@ -66,9 +66,9 @@ const prPolicyStep = validate.steps.find(
   (step) => step.name === "Run PR policy check",
 );
 assert.ok(prPolicyStep);
-assert.equal(prPolicyStep.uses, "./");
-assert.equal(prPolicyStep.with?.mode, "check-pr");
-assert.equal(prPolicyStep.with?.enforcement, "blocking");
+assert.equal(prPolicyStep.uses, undefined);
+assert.equal(prPolicyStep.run, "node dist/repo-guard.mjs --enforcement blocking check-pr --format json");
+assert.equal(prPolicyStep.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
 
 const checkoutStep = validate.steps.find(
   (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
@@ -249,7 +249,7 @@ if (method === "POST" && endpoint?.endsWith("/git/refs")) {
 if (method === "GET" && endpoint?.includes("/releases/tags/")) {
   if (!state.release) fail();
   if (args.includes("--jq")) {
-    process.stdout.write(state.release.tag_name + "\\t" + String(state.release.draft) + "\\t" + String(state.release.prerelease));
+    process.stdout.write(state.release.tag_name + "\t" + String(state.release.draft) + "\t" + String(state.release.prerelease));
   } else {
     process.stdout.write(JSON.stringify(state.release));
   }
