@@ -101,7 +101,6 @@ const externalIntegrationSerial = [
   "test-c3-5-scenario-library.mjs",
   "test-c3-6-pages-workflow.mjs",
   "test-c3-7-version-truth.mjs",
-  "test-c3-8b-pr-cancellation.mjs",
   "test-c3-8g-suite-observation-cache.mjs",
   "test-c3.8c-linked-issue-observation.mjs",
   "test-cli-runtime.mjs",
@@ -128,6 +127,7 @@ const suiteCacheSerial = [
   "test-c3-2-compression-metrics.mjs",
   "test-c3-6-observatory-render.mjs",
   "test-c3-6-observatory-snapshot.mjs",
+  "test-c3-8b-pr-cancellation.mjs",
 ];
 
 export const testIsolationManifest = Object.fromEntries([
