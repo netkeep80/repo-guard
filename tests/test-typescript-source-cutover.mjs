@@ -33,13 +33,12 @@ function selfFacts() {
 }
 
 describe("repo-guard self-hosting security boundary", () => {
-  it("checks ready PRs through the local Action in blocking mode", () => {
+  it("checks ready PRs through the exact local candidate CLI in blocking mode", () => {
     const step = workflow.jobs.validate.steps.find((item) => item.name === "Run PR policy check");
     assert.ok(step);
-    assert.equal(step.uses, "./");
-    assert.equal(step.with.mode, "check-pr");
-    assert.equal(step.with.enforcement, "blocking");
-    assert.match(step.if, /pull_request/);
+    assert.equal(step.uses, undefined);
+    assert.equal(step.run, "node dist/repo-guard.mjs --enforcement blocking check-pr --format json");
+    assert.equal(step.if, "github.event_name == 'pull_request' && !github.event.pull_request.draft");
     assert.equal(step.env.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
   });
 

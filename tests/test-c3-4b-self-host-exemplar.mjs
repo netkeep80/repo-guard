@@ -21,7 +21,11 @@ const validateSteps = workflow.jobs.validate.steps;
 const smokeSteps = workflow.jobs["smoke-pack"].steps;
 const validateRuns = validateSteps.map((step) => step.run || "").join("\n");
 const smokeRuns = smokeSteps.map((step) => step.run || "").join("\n");
-const localActionStep = validateSteps.find((step) => step.uses === "./");
+const expectedSelfCheckCommand = "node dist/repo-guard.mjs --enforcement blocking check-pr --format json";
+const selfCheckStep = validateSteps.find((step) => step.name === "Run PR policy check");
+const action = parseYaml(read("action.yml"));
+const actionSteps = action.runs?.steps || [];
+const actionRuns = actionSteps.map((step) => step.run || "").join("\n");
 
 const exceptions = json("docs/self-hosting-coverage.json").exceptions;
 const exceptionKeys = Object.keys(exceptions);
@@ -30,7 +34,7 @@ const observedCommands = new Set([
   ...(validateRuns.includes("npx repo-guard\n") || validateRuns.includes("run: npx repo-guard") ? ["validate"] : []),
   ...(validateRuns.includes("repo-guard doctor") ? ["doctor"] : []),
   ...(validateRuns.includes("check-diff") ? ["check-diff"] : []),
-  ...(localActionStep?.with?.mode === "check-pr" ? ["check-pr"] : []),
+  ...(selfCheckStep?.run === expectedSelfCheckCommand ? ["check-pr"] : []),
 ]);
 
 const expectedGovernanceAdditions = [
@@ -102,9 +106,12 @@ describe("C3.4b canonical self-host exemplar", () => {
     assert.match(validateRuns, /npx repo-guard(?:\n|$)/);
     assert.match(validateRuns, /npx repo-guard doctor/);
     assert.match(validateRuns, /node tests\/run\.mjs/);
-    assert.ok(localActionStep);
-    assert.equal(localActionStep.with?.mode, "check-pr");
-    assert.equal(localActionStep.with?.enforcement, "blocking");
+    assert.ok(selfCheckStep);
+    assert.equal(selfCheckStep.uses, undefined);
+    assert.equal(selfCheckStep.run, expectedSelfCheckCommand);
+    assert.equal(selfCheckStep.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+    assert.ok(actionSteps.some((step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-node@")));
+    assert.match(actionRuns, /npm install --omit=dev --silent/);
     assert.match(validateRuns, /--enforcement advisory check-diff/);
     assert.match(smokeRuns, /npm pack/);
     assert.match(smokeRuns, /npm install --prefix/);

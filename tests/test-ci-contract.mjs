@@ -66,9 +66,9 @@ const prPolicyStep = validate.steps.find(
   (step) => step.name === "Run PR policy check",
 );
 assert.ok(prPolicyStep);
-assert.equal(prPolicyStep.uses, "./");
-assert.equal(prPolicyStep.with?.mode, "check-pr");
-assert.equal(prPolicyStep.with?.enforcement, "blocking");
+assert.equal(prPolicyStep.uses, undefined);
+assert.equal(prPolicyStep.run, "node dist/repo-guard.mjs --enforcement blocking check-pr --format json");
+assert.equal(prPolicyStep.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
 
 const checkoutStep = validate.steps.find(
   (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
