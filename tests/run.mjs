@@ -15,7 +15,7 @@ const files = [
   "validate-schemas.mjs",
   ...readdirSync(testsDir).filter((name) => /^test-.*\.mjs$/.test(name)).sort(),
 ];
-const workerCount = resolveWorkerCount(process.env.REPO_GUARD_TEST_WORKERS, 1);
+const workerCount = resolveWorkerCount(process.env.REPO_GUARD_TEST_WORKERS, 2);
 const batches = buildExecutionBatches(files, testIsolationManifest);
 const observationCacheDir = mkdtempSync(join(tmpdir(), "repo-guard-test-observations-"));
 
