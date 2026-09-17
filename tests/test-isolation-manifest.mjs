@@ -25,7 +25,6 @@ const pureReadOnlyParallel = [
   "test-c3-3e1-compatibility-surface-deletion.mjs",
   "test-c3-3e2-provider-surface-deletion.mjs",
   "test-c3-3e3-integration-runtime-deletion.mjs",
-  "test-c3-6-observatory-render.mjs",
   "test-c3-9a-public-policy-surface-purge.mjs",
   "test-c3-9c-readme-convergence.mjs",
   "test-c3-9e-self-hosting-narrative-purge.mjs",
@@ -128,6 +127,7 @@ const externalIntegrationSerial = [
 
 const suiteCacheSerial = [
   "test-c3-2-compression-metrics.mjs",
+  "test-c3-6-observatory-render.mjs",
 ];
 
 export const testIsolationManifest = Object.fromEntries([
