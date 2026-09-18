@@ -1,12 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCheckDiff } from "../dist/check-diff.mjs";
-import { runCliCaptured } from "./support/run-cli.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -68,14 +67,22 @@ function makeRepo(changeIntent, initialFiles = {}) {
   return dir;
 }
 
-async function runIntent(repoRoot) {
-  const result = await runCliCaptured([
+function runIntent(repoRoot) {
+  const executed = spawnSync(process.execPath, [
+    resolve(root, "dist/repo-guard.mjs"),
     "--repo-root", repoRoot,
     "--enforcement", "blocking",
     "check-diff",
     "--change-intent", "change-intent.json",
     "--format", "json",
-  ]);
+  ], { cwd: repoRoot, encoding: "utf-8" });
+  if (executed.error) throw executed.error;
+  const result = {
+    code: executed.status ?? 1,
+    stdout: executed.stdout,
+    stderr: executed.stderr,
+    output: `${executed.stdout}${executed.stderr}`,
+  };
   return { result, report: JSON.parse(result.stdout) };
 }
 
