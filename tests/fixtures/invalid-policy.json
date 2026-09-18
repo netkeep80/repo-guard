@@ -1,7 +1,0 @@
-{
-  "policy_format_version": "not-a-semver",
-  "repository_kind": "unknown_kind",
-  "paths": {
-    "forbidden": "should-be-array"
-  }
-}
