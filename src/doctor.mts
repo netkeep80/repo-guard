@@ -16,7 +16,21 @@ interface PullRequestProjection {
   head?: { sha?: unknown } | null;
 }
 interface GitHubEventProjection { pull_request?: PullRequestProjection | null; }
-interface EffectivePolicyProjection { repository_kind?: unknown; policy_format_version?: unknown; }
+interface EffectivePolicyProjection {
+  repository_kind?: unknown;
+  policy_format_version?: unknown;
+  enforcement?: { mode?: unknown } | null;
+}
+interface RequiredStatusCheckProjection { context?: unknown; app_id?: unknown; }
+interface GitHubBranchProjection {
+  protected?: unknown;
+  protection?: {
+    required_status_checks?: {
+      contexts?: unknown;
+      checks?: unknown;
+    } | null;
+  } | null;
+}
 
 function check(name: string, fn: () => DoctorCheck): DoctorCheck {
   try {
@@ -110,7 +124,96 @@ function checkPolicyDiscovery(repoRoot: string, packageRoot: string) {
     }
 
     const effectivePolicy = runtime.policy as EffectivePolicyProjection;
-    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind as string}, format ${effectivePolicy.policy_format_version as string})` };
+    return { name: "repo-policy.json", status: PASS, message: `Valid (${effectivePolicy.repository_kind as string}, format ${effectivePolicy.policy_format_version as string}; enforcement ${String(effectivePolicy.enforcement?.mode || "blocking")})` };
+  });
+}
+
+function githubRepositorySlug(repoRoot: string): string | null {
+  const workspace = process.env.GITHUB_WORKSPACE;
+  const repository = process.env.GITHUB_REPOSITORY;
+  if (workspace && resolve(workspace) === resolve(repoRoot) && repository && /^[^/]+\/[^/]+$/.test(repository)) return repository;
+  try {
+    const remote = execFileSync("git", ["remote", "get-url", "origin"], { cwd: repoRoot, encoding: "utf-8", stdio: "pipe" }).trim().replace(/\.git$/, "");
+    const match = remote.match(/^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+)$/i);
+    return match?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+function coverageBranch(repoRoot: string): string | null {
+  const workspace = process.env.GITHUB_WORKSPACE;
+  if (workspace && resolve(workspace) === resolve(repoRoot)) {
+    if (process.env.GITHUB_BASE_REF) return process.env.GITHUB_BASE_REF;
+    if (process.env.GITHUB_REF_NAME && !process.env.GITHUB_REF_NAME.endsWith("/merge")) return process.env.GITHUB_REF_NAME;
+  }
+  try {
+    return execFileSync("git", ["branch", "--show-current"], { cwd: repoRoot, encoding: "utf-8", stdio: "pipe" }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function requiredStatusChecks(branch: GitHubBranchProjection): string[] {
+  const required = branch.protection?.required_status_checks;
+  const values: string[] = [];
+  if (Array.isArray(required?.checks)) for (const item of required.checks as RequiredStatusCheckProjection[]) {
+    if (typeof item?.context !== "string" || !item.context) continue;
+    values.push(typeof item.app_id === "number" ? `${item.context}@app:${item.app_id}` : item.context);
+  }
+  if (Array.isArray(required?.contexts)) for (const context of required.contexts) {
+    if (typeof context === "string" && context && !values.some((value) => value === context || value.startsWith(`${context}@app:`))) values.push(context);
+  }
+  return [...new Set(values)].sort();
+}
+
+function checkMergeBarrierCoverage(repoRoot: string) {
+  return check("merge-barrier-coverage", () => {
+    if (!existsSync(resolve(repoRoot, ".git"))) {
+      return { name: "merge-barrier-coverage", status: WARN, message: "GitHub merge barrier not verified outside a Git repository" };
+    }
+    const repository = githubRepositorySlug(repoRoot);
+    if (!repository) {
+      return { name: "merge-barrier-coverage", status: WARN, message: "GitHub repository identity unavailable; merge barrier not verified", hint: "Configure an origin on github.com or run in the repository's GitHub Actions workspace" };
+    }
+    const branchName = coverageBranch(repoRoot);
+    if (!branchName) {
+      return { name: "merge-barrier-coverage", status: WARN, message: `${repository}: target branch unavailable; merge barrier not verified` };
+    }
+
+    let observed: GitHubBranchProjection;
+    try {
+      const raw = execFileSync("gh", ["api", `repos/${repository}/branches/${encodeURIComponent(branchName)}`], { encoding: "utf-8", stdio: "pipe" });
+      observed = JSON.parse(raw) as GitHubBranchProjection;
+    } catch {
+      return {
+        name: "merge-barrier-coverage",
+        status: WARN,
+        message: `${repository}@${branchName}: branch protection could not be observed read-only; merge barrier not verified`,
+        hint: "Authenticate gh with read access to the repository; doctor never changes branch settings",
+      };
+    }
+
+    if (observed.protected !== true) {
+      return {
+        name: "merge-barrier-coverage",
+        status: WARN,
+        message: `${repository}@${branchName} is not protected; workflow execution is not an enforced merge barrier`,
+      };
+    }
+    const required = requiredStatusChecks(observed);
+    if (required.length === 0) {
+      return {
+        name: "merge-barrier-coverage",
+        status: WARN,
+        message: `${repository}@${branchName} is protected, but no required status checks were observed; repo-guard is not proven to gate merges`,
+      };
+    }
+    return {
+      name: "merge-barrier-coverage",
+      status: PASS,
+      message: `${repository}@${branchName} is protected; required status checks: ${required.join(", ")}. This observes configured merge barriers, not successful execution on a specific HEAD`,
+    };
   });
 }
 
@@ -181,6 +284,7 @@ export function runDoctor(roots: DoctorRoots) {
   results.push(checkGit(roots.repoRoot));
   results.push(checkGitEvidence(roots.repoRoot));
   results.push(checkPolicyDiscovery(roots.repoRoot, roots.packageRoot));
+  results.push(checkMergeBarrierCoverage(roots.repoRoot));
   results.push(checkEventContext());
   results.push(checkAuth());
   results.push(checkGhCli());
