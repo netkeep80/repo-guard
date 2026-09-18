@@ -40,7 +40,7 @@ assert.equal(releaseWorkflow.on?.release, undefined);
 const automaticJob = releaseWorkflow.jobs?.["verify-automatic"];
 assert.ok(automaticJob);
 assert.deepEqual(automaticJob.permissions, { contents: "read" });
-const automaticCheckout = automaticJob.steps.find((step) => step.uses === "actions/checkout@v6");
+const automaticCheckout = automaticJob.steps.find((step) => step.uses === "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803");
 assert.equal(
   automaticCheckout?.with?.ref,
   "${{ needs.resolve-automatic-target.outputs.target_sha }}",
@@ -57,7 +57,7 @@ assert.match(automaticVerifier.run, /--expected-sha/);
 const manualJob = releaseWorkflow.jobs?.["verify-manual"];
 assert.ok(manualJob);
 assert.deepEqual(manualJob.permissions, { contents: "read" });
-const manualCheckout = manualJob.steps.find((step) => step.uses === "actions/checkout@v6");
+const manualCheckout = manualJob.steps.find((step) => step.uses === "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803");
 assert.equal(manualCheckout?.with?.ref, "${{ inputs.tag }}");
 const manualVerifier = manualJob.steps.find((step) => (
   typeof step.run === "string"
