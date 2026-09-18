@@ -7,6 +7,7 @@ import { COMMANDS } from "../dist/repo-guard.mjs";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { listBuiltInPacks } from "../dist/policy-packs.mjs";
 import { renderInitScaffold } from "../dist/init.mjs";
+import { checkGovernanceChangeAuthorization } from "../dist/checks/rules/governance-paths.mjs";
 
 const ACCEPTED_BASE = "25560cf62e3336cdd089a779a9032db01b0c71f1";
 const read = (path) => readFileSync(path, "utf8");
@@ -38,6 +39,7 @@ const observedCommands = new Set([
 ]);
 
 const expectedGovernanceAdditions = [
+  "docs/product-requirements.md",
   "package.json",
   "package-lock.json",
   "tsconfig.json",
@@ -98,6 +100,22 @@ describe("C3.4b canonical self-host exemplar", () => {
     assert.deepEqual(policy.document_relations?.documents, expectedDocuments);
     assert.equal(relationById.size, expectedRelations.length);
     for (const expected of expectedRelations) assert.deepEqual(relationById.get(expected.id), expected);
+  });
+
+  it("requires independent authority to edit, delete or rename the product requirements", () => {
+    const path = "docs/product-requirements.md";
+    const changes = [
+      { path, status: "modified" },
+      { path, status: "deleted" },
+      { path: "docs/ordinary-note.md", previousPath: path, status: "modified" },
+    ];
+    for (const change of changes) {
+      const input = { files: [{ ...change, addedLines: [], deletedLines: [] }], governancePaths: policy.paths.governance_paths };
+      assert.equal(checkGovernanceChangeAuthorization(input).ok, false, JSON.stringify(change));
+      const granted = { ...input, governanceGrant: { authorized_governance_paths: [path] } };
+      assert.equal(checkGovernanceChangeAuthorization({ ...granted, trustedAuthorizer: { trusted: false, source: "repository_permission", reason: "permission_insufficient" } }).ok, false);
+      assert.equal(checkGovernanceChangeAuthorization({ ...granted, trustedAuthorizer: { trusted: true, source: "repository_permission", reason: "trusted_permission" } }).ok, true);
+    }
   });
 
   it("derives the real self-host execution topology from the live CI and repository forms", () => {
