@@ -61,7 +61,6 @@ export function compareSets<T>(left: readonly T[] = [], right: readonly T[] = []
 }
 
 export const implies = (trigger: unknown, evidence: unknown): boolean => !trigger || Boolean(evidence);
-export const maxBound = (actual: number, max: number | undefined): boolean => max === undefined || actual <= max;
 
 function factRef(relation: PrimitiveRelation, role: string): FactRef {
   const operand = relation.operands[role];

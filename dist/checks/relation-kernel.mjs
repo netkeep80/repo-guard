@@ -10,7 +10,6 @@ export function compareSets(left = [], right = [], relation = "equal") {
     return { ok, missing, extra };
 }
 export const implies = (trigger, evidence) => !trigger || Boolean(evidence);
-export const maxBound = (actual, max) => max === undefined || actual <= max;
 function factRef(relation, role) {
     const operand = relation.operands[role];
     if (!operand || !("source" in operand))

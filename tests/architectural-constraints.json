@@ -37,7 +37,9 @@
       "path": "src/checks/rules/constraints.mts",
       "tokens": [
         "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult"
+        "checkTraceRuleResult",
+        "interface ConstraintIR { files:",
+        "files: facts.diff.files.checked"
       ]
     },
     {
@@ -63,6 +65,26 @@
       "path": "tests/test-c3-6-observatory-snapshot.mjs",
       "tokens": [
         "3.1.0"
+      ]
+    },
+    {
+      "path": "src/github-pr.mts",
+      "tokens": [
+        "fetchIssueBody"
+      ]
+    },
+    {
+      "path": "src/git.mts",
+      "tokens": [
+        "BasePolicyProjection",
+        "BaseGovernancePathsResult",
+        "readBaseGovernancePaths"
+      ]
+    },
+    {
+      "path": "src/checks/relation-kernel.mts",
+      "tokens": [
+        "maxBound"
       ]
     }
   ]

@@ -7,10 +7,6 @@ interface ChildProcessFailure {
   message?: string;
 }
 
-interface BasePolicyProjection {
-  paths?: { governance_paths?: unknown } | null;
-}
-
 export interface RunGitOptions {
   cwd?: string;
   stdio?: ExecFileSyncOptionsWithStringEncoding["stdio"];
@@ -18,11 +14,6 @@ export interface RunGitOptions {
 
 export interface BasePolicyReadResult {
   policy: unknown | null;
-  error: string | null;
-}
-
-export interface BaseGovernancePathsResult {
-  governancePaths: unknown[] | null;
   error: string | null;
 }
 
@@ -250,10 +241,3 @@ export function readBasePolicy(base: string | null | undefined, cwd: string, pol
   return { policy: parsed, error: null };
 }
 
-export function readBaseGovernancePaths(base: string | null | undefined, cwd: string, policyPath = "repo-policy.json"): BaseGovernancePathsResult {
-  const result = readBasePolicy(base, cwd, policyPath);
-  if (result.error) return { governancePaths: null, error: result.error };
-  const list = (result.policy as BasePolicyProjection | null)?.paths?.governance_paths;
-  if (!Array.isArray(list)) return { governancePaths: [], error: null };
-  return { governancePaths: list, error: null };
-}
