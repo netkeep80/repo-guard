@@ -336,7 +336,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
         const scope = strings(changeIntent.scope), mustTouch = strings(changeIntent.must_touch), mustNotTouch = strings(changeIntent.must_not_touch);
         if (scope.length)
             add("change-intent:scope", primitiveRuntime("change-intent-scope", "change-intent:scope", "numeric_bound", {
-                source: diffFact("repository_path_set", { kind: "changed_paths", patterns: scope, mode: "outside" }),
+                source: diffFact("repository_path_set", { kind: "changed_paths", patterns: scope, mode: "outside", include_previous_paths: true }),
             }, { max: 0 }));
         if (mustTouch.length)
             add("change-intent:must-touch", primitiveRuntime("must-touch", "change-intent:must-touch", "numeric_bound", {
@@ -344,7 +344,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
             }, { min: 1 }));
         if (mustNotTouch.length)
             add("change-intent:must-not-touch", primitiveRuntime("must-not-touch", "change-intent:must-not-touch", "numeric_bound", {
-                source: diffFact("repository_path_set", { kind: "changed_paths", patterns: mustNotTouch }),
+                source: diffFact("repository_path_set", { kind: "changed_paths", patterns: mustNotTouch, include_previous_paths: true }),
             }, { max: 0 }));
     }
     return program;
