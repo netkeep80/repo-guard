@@ -22,14 +22,14 @@ jobs:
       tag: ${{ steps.proof.outputs.tag }}
     steps:
       - name: Checkout exact release target
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.event.client_payload.sha }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 24
           cache: npm
@@ -75,7 +75,7 @@ jobs:
             > release-target.json
 
       - name: Upload exact release target identity
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-target-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-target.json

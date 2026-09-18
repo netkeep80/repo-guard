@@ -134,7 +134,7 @@ describe("atomic release target transport", () => {
     assert.doesNotMatch(record.run, /client_payload/);
 
     const upload = preflight.steps[uploadIndex];
-    assert.equal(upload.uses, "actions/upload-artifact@v4");
+    assert.equal(upload.uses, "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
     assert.equal(upload.with?.name, "release-target-${{ github.run_id }}-${{ github.run_attempt }}");
     assert.equal(upload.with?.path, "release-target.json");
     assert.equal(upload.with?.["if-no-files-found"], "error");
@@ -180,7 +180,7 @@ describe("automatic release integrity workflow", () => {
     assert.match(text, /workflow_run\.run_attempt/);
     assert.match(text, /\.github\/workflows\/release\.yml/);
     assert.match(text, /repository_dispatch/);
-    assert.match(text, /actions\/download-artifact@v5/);
+    assert.match(text, /actions\/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0/);
     assert.match(text, /release-target-/);
     assert.match(text, /release-target\.json/);
     assert.match(text, /schema_version/);
@@ -197,7 +197,7 @@ describe("automatic release integrity workflow", () => {
     const text = JSON.stringify(verify);
     assert.match(text, /needs\.resolve-automatic-target\.outputs\.target_sha/);
     assert.match(text, /needs\.resolve-automatic-target\.outputs\.tag/);
-    assert.match(text, /actions\/checkout@v6/);
+    assert.match(text, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/);
     assert.match(text, /persist-credentials/);
     assert.match(text, /--expected-sha/);
     assert.match(text, /--tag/);
@@ -219,7 +219,7 @@ describe("automatic release integrity workflow", () => {
     assert.match(text, /github\.run_id/);
     assert.match(text, /github\.run_attempt/);
     assert.match(text, /run_url/);
-    assert.match(text, /actions\/upload-artifact@v4/);
+    assert.match(text, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
     assert.match(text, /release-integrity-/);
   });
 
@@ -229,7 +229,7 @@ describe("automatic release integrity workflow", () => {
     assert.match(String(manual.if), /workflow_dispatch/);
     const text = JSON.stringify(manual);
     assert.match(text, /inputs\.tag/);
-    assert.match(text, /actions\/checkout@v6/);
+    assert.match(text, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/);
     assert.match(text, /--tag/);
     assert.doesNotMatch(text, /--expected-sha/);
   });
