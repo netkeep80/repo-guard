@@ -66,6 +66,7 @@ const pureReadOnlyParallel = [
   "test-pr-immutable-paths.mjs",
   "test-release-observer-independence.mjs",
   "test-report-renderers-boundary.mjs",
+  "test-rg05-runtime-action-authority.mjs",
   "test-rule-registry.mjs",
   "test-runtime-validation-boundary.mjs",
   "test-security-brace-expansion.mjs",
