@@ -23,7 +23,7 @@ assert.match(workflow, /^permissions:\s*\n\s{2}contents: read\s*\n\s{2}pull-requ
 assert.doesNotMatch(workflow, /^\s{2}[\w-]+:\s*write\s*$/m,
   "base workflow GITHUB_TOKEN must never request write permission");
 
-assert.match(workflow, /uses: actions\\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/, "trusted enforcement must checkout accepted base source");
+assert.match(workflow, /uses: actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/, "trusted enforcement must checkout accepted base source");
 assert.match(workflow, /fetch-depth:\s*0/, "trusted enforcement needs complete history for exact B\/M\/H observation");
 assert.doesNotMatch(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head/,
   "trusted checkout must never switch to candidate head");
