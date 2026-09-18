@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import Ajv from "ajv";
 
 const root = resolve(new URL("..", import.meta.url).pathname), cli = resolve(root, "dist/repo-guard.mjs");
@@ -14,6 +14,7 @@ const validate = new Ajv({ allErrors: true }).compile(schema);
 const temp = () => mkdtempSync(join(tmpdir(), "repo-guard-init-"));
 const run = (args, cwd = root) => spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf-8" });
 const runInit = (dir, args = [], ref = immutableSha) => run(["--repo-root", dir, "init", "--action-ref", ref, ...args]);
+const git = (dir, ...args) => execFileSync("git", args, { cwd: dir, encoding: "utf-8", stdio: "pipe" }).trim();
 const scaffoldPaths = [
   "repo-policy.json",
   ".github/workflows/repo-guard.yml",
@@ -113,5 +114,43 @@ describe("repo-guard init", () => {
     const result = run(["--repo-root", dir]);
     assert.equal(result.status, 0);
     assert.match(result.stdout, /OK: repo-policy.json/);
+  });
+
+
+  it("advisory onboarding is useful but doctor must classify merge-barrier coverage", () => {
+    const dir = temp();
+    try {
+      git(dir, "init", "-b", "main");
+      git(dir, "config", "user.email", "repo-guard@example.invalid");
+      git(dir, "config", "user.name", "repo-guard onboarding test");
+      writeFileSync(join(dir, "README.md"), "# Fixture\n");
+
+      const initialized = runInit(dir, ["--mode", "advisory"]);
+      assert.equal(initialized.status, 0);
+      const policy = JSON.parse(readFileSync(join(dir, "repo-policy.json"), "utf-8"));
+      assert.equal(policy.enforcement.mode, "advisory");
+
+      git(dir, "add", "-A");
+      git(dir, "commit", "-m", "advisory scaffold");
+
+      const positive = run(["--repo-root", dir]);
+      assert.equal(positive.status, 0);
+      assert.match(positive.stdout, /OK: repo-policy.json/);
+
+      writeFileSync(join(dir, "debug.log"), "fixture\n");
+      git(dir, "add", "debug.log");
+      const negative = run(["--repo-root", dir, "--enforcement", "advisory", "check-diff"]);
+      assert.equal(negative.status, 0);
+      assert.match(`${negative.stdout}\n${negative.stderr}`, /WARN: forbidden-paths/);
+
+      const doctor = run(["--repo-root", dir, "doctor"]);
+      assert.equal(doctor.status, 0);
+      assert.match(doctor.stdout, /repo-policy\.json/);
+      assert.match(doctor.stdout, /enforcement advisory/);
+      assert.match(doctor.stdout, /merge-barrier-coverage/);
+      assert.match(doctor.stdout, /not verified|not protected/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
