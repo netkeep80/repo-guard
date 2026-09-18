@@ -1,0 +1,78 @@
+{
+  "policy_format_version": "0.1.0",
+  "repository_kind": "library",
+  "enforcement": {
+    "mode": "blocking"
+  },
+  "paths": {
+    "forbidden": ["*.bak"],
+    "canonical_docs": ["README.md"],
+    "governance_paths": ["repo-policy.json"],
+    "operational_paths": [".bot/**"]
+  },
+  "diff_rules": {
+    "max_new_docs": 3,
+    "max_new_files": 20,
+    "max_net_added_lines": 500
+  },
+  "surfaces": {
+    "kernel": ["include/**", "src/**"],
+    "tests": ["tests/**"],
+    "docs": ["docs/**", "README.md"],
+    "generated": ["single_include/**"]
+  },
+  "new_file_classes": {
+    "test": ["tests/**"],
+    "canonical_doc": ["README.md", "docs/**"],
+    "generated": ["single_include/**"],
+    "changelog_fragment": ["changelog.d/*.md"]
+  },
+  "change_profiles": {
+    "feature": {
+      "allow_surfaces": ["kernel", "tests"],
+      "forbid_surfaces": ["generated"],
+      "new_files": {
+        "allow_classes": ["test", "changelog_fragment"],
+        "max_per_class": {
+          "test": 2,
+          "changelog_fragment": 1
+        }
+      }
+    },
+    "docs": {
+      "allow_surfaces": ["docs"],
+      "forbid_surfaces": ["kernel", "tests", "generated"],
+      "new_files": {
+        "allow_classes": ["canonical_doc"],
+        "max_per_class": {
+          "canonical_doc": 1
+        }
+      }
+    },
+    "refactor": {
+      "allow_surfaces": ["generated"],
+      "forbid_surfaces": ["kernel", "docs", "tests"],
+      "new_files": {
+        "allow_classes": ["generated", "changelog_fragment"],
+        "max_per_class": {
+          "generated": 10,
+          "changelog_fragment": 1
+        }
+      }
+    }
+  },
+  "content_rules": [
+    {
+      "id": "forbid_doxygen_tags_in_headers",
+      "glob": "include/**/*.h",
+      "mode": "added_lines",
+      "forbid_regex": ["@brief", "@param", "@return"]
+    }
+  ],
+  "cochange_rules": [
+    {
+      "if_changed": ["include/**/*.h"],
+      "must_change_any": ["tests/**"]
+    }
+  ]
+}

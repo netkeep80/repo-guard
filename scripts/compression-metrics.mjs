@@ -1,0 +1,359 @@
+#!/usr/bin/env node
+
+import { execFileSync } from "node:child_process";
+
+const args = process.argv.slice(2);
+const arg = (name, fallback = null) => {
+  const i = args.indexOf(name);
+  return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
+};
+const ref = arg("--ref", "HEAD");
+const compareRef = arg("--compare");
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+const resolvedRefCache = new Map();
+const snapshotCache = new Map();
+const blobCache = new Map();
+
+const gitText = (argv, options = {}) => execFileSync("git", argv, {
+  encoding: "utf-8",
+  maxBuffer: GIT_MAX_BUFFER,
+  stdio: ["ignore", "pipe", "pipe"],
+  ...options,
+});
+
+function resolveRef(target) {
+  if (resolvedRefCache.has(target)) return resolvedRefCache.get(target);
+  const sha = gitText(["rev-parse", "--verify", `${target}^{commit}`]).trim();
+  resolvedRefCache.set(target, sha);
+  return sha;
+}
+
+function parseBatchBlobs(output, requestedOids) {
+  const blobs = new Map();
+  let offset = 0;
+
+  for (const requestedOid of requestedOids) {
+    const lineEnd = output.indexOf(0x0a, offset);
+    if (lineEnd < 0) throw new Error(`git cat-file --batch returned a truncated header for ${requestedOid}`);
+    const header = output.subarray(offset, lineEnd).toString("utf8");
+    offset = lineEnd + 1;
+
+    if (header.endsWith(" missing")) throw new Error(`Git object ${requestedOid} is missing`);
+
+    const [oid, type, sizeText] = header.split(" ");
+    const size = Number(sizeText);
+    if (oid !== requestedOid || type !== "blob" || !Number.isSafeInteger(size) || size < 0) {
+      throw new Error(`Unexpected git cat-file --batch header: ${header}`);
+    }
+    const end = offset + size;
+    if (end >= output.length) throw new Error(`git cat-file --batch returned truncated content for ${oid}`);
+    if (output[end] !== 0x0a) throw new Error(`git cat-file --batch omitted the record terminator for ${oid}`);
+
+    blobs.set(oid, output.subarray(offset, end));
+    offset = end + 1;
+  }
+
+  return blobs;
+}
+
+function buildTreeSnapshot(sha) {
+  const tree = gitText(["ls-tree", "-r", "-z", "--full-tree", sha]);
+  const paths = [];
+  const oidByPath = new Map();
+  const blobOids = new Set();
+
+  for (const record of tree.split("\0")) {
+    if (!record) continue;
+    const tab = record.indexOf("\t");
+    if (tab < 0) throw new Error(`Unexpected git ls-tree record at ${sha}: ${record}`);
+    const [mode, type, oid] = record.slice(0, tab).split(" ");
+    const path = record.slice(tab + 1);
+    if (!mode || !type || !oid || !path) throw new Error(`Unexpected git ls-tree record at ${sha}: ${record}`);
+
+    paths.push(path);
+    oidByPath.set(path, oid);
+    if (type === "blob") blobOids.add(oid);
+  }
+  paths.sort();
+
+  return { sha, paths, oidByPath, blobOids: [...blobOids] };
+}
+
+function loadBlobs(oids) {
+  const requestedOids = [...new Set(oids)].filter((oid) => !blobCache.has(oid)).sort();
+  if (!requestedOids.length) return;
+
+  const batchOutput = execFileSync("git", ["cat-file", "--batch"], {
+    input: `${requestedOids.join("\n")}\n`,
+    maxBuffer: GIT_MAX_BUFFER,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  for (const [oid, blob] of parseBatchBlobs(batchOutput, requestedOids)) blobCache.set(oid, blob);
+}
+
+function primeSnapshots(targets) {
+  const snapshots = [];
+  for (const target of targets) {
+    const sha = resolveRef(target);
+    if (!snapshotCache.has(sha)) snapshotCache.set(sha, buildTreeSnapshot(sha));
+    snapshots.push(snapshotCache.get(sha));
+  }
+  loadBlobs(snapshots.flatMap((snapshot) => snapshot.blobOids));
+}
+
+function snapshotAt(target) {
+  const sha = resolveRef(target);
+  if (!snapshotCache.has(sha)) {
+    const snapshot = buildTreeSnapshot(sha);
+    snapshotCache.set(sha, snapshot);
+    loadBlobs(snapshot.blobOids);
+  }
+  return snapshotCache.get(sha);
+}
+
+const pathsAt = (target, roots) => snapshotAt(target).paths.filter((path) =>
+  roots.some((root) => path === root || path.startsWith(`${root}/`))
+);
+
+const textAt = (target, path) => {
+  const snapshot = snapshotAt(target);
+  const oid = snapshot.oidByPath.get(path);
+  if (!oid) throw new Error(`Path ${path} does not exist at ${snapshot.sha}`);
+  const blob = blobCache.get(oid);
+  if (!blob) throw new Error(`Path ${path} at ${snapshot.sha} is not a readable blob`);
+  return blob.toString("utf8");
+};
+const jsonAt = (target, path) => JSON.parse(textAt(target, path));
+const sourceModulePathsAt = (target, stem) => pathsAt(target, ["src"]).filter((path) => path === `${stem}.mts` || path === `${stem}.mjs` || path === `${stem}.js`);
+const sourceModuleTextAt = (target, stem) => {
+  const paths = sourceModulePathsAt(target, stem);
+  if (paths.length !== 1) throw new Error(`expected exactly one source module for ${stem} at ${target}, found ${paths.length}`);
+  return textAt(target, paths[0]);
+};
+const optionalSourceModuleTextAt = (target, stem) => {
+  const paths = sourceModulePathsAt(target, stem);
+  if (!paths.length) return "";
+  if (paths.length !== 1) throw new Error(`expected at most one source module for ${stem} at ${target}, found ${paths.length}`);
+  return textAt(target, paths[0]);
+};
+const lines = (text) => text ? (text.match(/\n/g) || []).length + (text.endsWith("\n") ? 0 : 1) : 0;
+const count = (text, pattern) => (text.match(pattern) || []).length;
+
+function physical(target, roots) {
+  const files = pathsAt(target, roots);
+  return files.reduce((out, path) => {
+    const content = textAt(target, path);
+    out.lines += lines(content);
+    out.bytes += Buffer.byteLength(content);
+    return out;
+  }, { files: files.length, lines: 0, bytes: 0 });
+}
+
+function sourceCorpus(target) {
+  return pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path)).map((path) => textAt(target, path)).join("\n");
+}
+
+function unionMembers(source, typeName) {
+  const match = source.match(new RegExp(`type\\s+${typeName}\\s*=\\s*([^;]+);`));
+  return match ? [...match[1].matchAll(/"([^"]+)"/g)].map((item) => item[1]).sort() : [];
+}
+
+function schemaConstKinds(schema, definitionName) {
+  const definition = schema.definitions?.[definitionName];
+  return (definition?.oneOf || [])
+    .map((entry) => entry?.properties?.kind?.const)
+    .filter((value) => typeof value === "string")
+    .sort();
+}
+
+function descriptorEntries(source) {
+  const table = source.match(/const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\];/);
+  if (!table) return [];
+  return [...table[1].matchAll(/\{\s*kind:\s*"([^"]+)",([\s\S]*?)(?=\n\s*\{\s*kind:|$)/g)]
+    .map((match) => ({ kind: match[1], public: /\bpublic:\s*true\b/.test(match[2]) }));
+}
+
+function integrationCounts(policy) {
+  const integration = policy.integration || {};
+  return {
+    workflows: (integration.workflows || []).length,
+    templates: (integration.templates || []).length,
+    docs: (integration.docs || []).length,
+    profiles: (integration.profiles || []).length,
+  };
+}
+
+function ciMetrics(target, pkg) {
+  const workflow = textAt(target, ".github/workflows/ci.yml");
+  const action = textAt(target, "action.yml");
+  const jobsBlock = workflow.split(/\njobs:\s*\n/)[1] || "";
+  const jobs = count(jobsBlock, /^  [A-Za-z0-9_-]+:\s*$/gm);
+  const npmCiRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm ci\s*$/gm);
+  const explicitCheckDistRuns = count(workflow, /^\s*(?:-\s*)?run:\s*npm run check:dist\s*$/gm);
+  const runCommands = [...workflow.matchAll(/^\s*(?:-\s*)?run:\s*([^\n]+?)\s*$/gm)]
+    .map((match) => match[1].trim());
+  const npmLifecycleTestRuns = runCommands.filter((command) => command === "npm test").length;
+  const packageTestCommand = (pkg.scripts?.test || "").trim();
+  const directTestRuns = packageTestCommand && packageTestCommand !== "npm test"
+    ? runCommands.filter((command) => command === packageTestCommand).length
+    : 0;
+  const testRuns = npmLifecycleTestRuns + directTestRuns;
+  const pretestCallsCheckDist = /check:dist/.test(pkg.scripts?.pretest || "") ? 1 : 0;
+  return {
+    jobs,
+    npm_ci_runs: npmCiRuns,
+    explicit_check_dist_runs: explicitCheckDistRuns,
+    effective_check_dist_runs: explicitCheckDistRuns + (npmLifecycleTestRuns * pretestCallsCheckDist),
+    test_runs: testRuns,
+    full_history_checkouts: count(workflow, /fetch-depth:\s*0/g),
+    self_action_runtime_installs: count(action, /npm install --omit=dev/g),
+    setup_node_mentions: count(workflow, /actions\/setup-node@/g) + count(action, /actions\/setup-node@/g),
+  };
+}
+
+function policyMetrics(target, policy) {
+  const text = textAt(target, "repo-policy.json");
+  return {
+    bytes: Buffer.byteLength(text),
+    top_level_concepts: Object.keys(policy).length,
+    surfaces: Object.keys(policy.surfaces || {}).length,
+    new_file_classes: Object.keys(policy.new_file_classes || {}).length,
+    change_profiles: Object.keys(policy.change_profiles || {}).length,
+    size_rules: (policy.size_rules || []).length,
+    content_rules: (policy.content_rules || []).length,
+    cochange_rules: (policy.cochange_rules || []).length,
+    integration: integrationCounts(policy),
+  };
+}
+
+function architecture(target) {
+  const policy = jsonAt(target, "repo-policy.json");
+  const pkg = jsonAt(target, "package.json");
+  const policySchema = jsonAt(target, "schemas/repo-policy.schema.json");
+  const coverage = jsonAt(target, "docs/self-hosting-coverage.json");
+  const defaults = sourceModuleTextAt(target, "src/checks/default-rule-families");
+  const documentFacts = optionalSourceModuleTextAt(target, "src/document-facts");
+  const constraintProgram = optionalSourceModuleTextAt(target, "src/checks/constraint-program");
+  const relationKernel = optionalSourceModuleTextAt(target, "src/checks/relation-kernel");
+  const policyCompiler = optionalSourceModuleTextAt(target, "src/policy-compiler");
+  const constraintEvaluator = optionalSourceModuleTextAt(target, "src/checks/rules/constraints");
+  const policyPacks = optionalSourceModuleTextAt(target, "src/policy-packs");
+  const corpus = sourceCorpus(target);
+  const parserFiles = pathsAt(target, ["src"]).filter((path) => /\.(?:mts|mjs|js)$/.test(path) && /function parseMarkdown\(|const FENCE_RE|function extractMarkdownSection\(|let inFence = false/.test(textAt(target, path)));
+  const relationKinds = schemaConstKinds(policySchema, "document_relation_rule");
+  const selectorDefinitions = Object.keys(policySchema.definitions || {}).filter((name) => /^document_.*_selector$/.test(name)).sort();
+  const factTypes = unionMembers(documentFacts, "DocumentFactType");
+  const factSources = unionMembers(documentFacts, "FactSource");
+  const evidenceBindingKinds = schemaConstKinds(policySchema, "evidence_binding");
+  const relationKernelOperations = [...relationKernel.matchAll(/export\s+(?:function|const)\s+([A-Za-z0-9_]+)/g)].map((item) => item[1]).sort();
+  const descriptors = descriptorEntries(relationKernel);
+  const relationDescriptorKinds = descriptors.map((item) => item.kind).sort();
+  const publicRelationDescriptorKinds = descriptors.filter((item) => item.public).map((item) => item.kind).sort();
+  const runtimeConstraintKinds = unionMembers(constraintEvaluator, "RuntimeConstraintKind");
+  const relationConsumerSources = {
+    policy_compiler: policyCompiler,
+    constraint_program: constraintProgram,
+    evaluator: constraintEvaluator,
+  };
+  const independentRelationSwitchFiles = Object.entries(relationConsumerSources)
+    .filter(([, source]) => relationKinds.some((kind) => source.includes(`"${kind}"`)))
+    .map(([name]) => name)
+    .sort();
+  const descriptorRegistryCount = count(relationKernel, /const\s+DESCRIPTORS(?:\s*:[^=]+)?\s*=/g);
+  const canonicalCore = [constraintProgram, relationKernel, policyCompiler, constraintEvaluator].join("\n");
+  const contractRoleVocabulary = count(canonicalCore, /ContractConformanceRole|CONTRACT_CONFORMANCE_DOCUMENT_ROLES|contractConformanceRolesByPath|current\.contract|current\.conformance|previous\.contract|previous\.conformance/g);
+  const generatedEdgeHelpers = count(canonicalCore, /CochangeRoleEdge|cochangeRoleEdge|generatedContractConformanceCochange/g);
+  const macroCochangeConstraints = count(policyPacks, /cochangeGroups\.push\(\{\s*id:\s*"contract-conformance"/g);
+  const macroPositionalIdentity = count(canonicalCore, /contract-conformance/g);
+  const highLevelPackCoreEditSites = count(canonicalCore, /contract_conformance|contract-conformance|current\.contract|current\.conformance|previous\.contract|previous\.conformance/g);
+
+  const metric = {
+    // Historical Compression 2 metrics are retained so --compare remains useful.
+    rule_families: count(defaults, /\b[A-Za-z][A-Za-z0-9]*RuleFamily\b/g),
+    declared_surfaces: Object.keys(policy.surfaces || {}).length,
+    declared_new_file_classes: Object.keys(policy.new_file_classes || {}).length,
+    markdown_parser_files: parserFiles.length,
+    manual_test_script_entries: count(pkg.scripts?.test || "", /node\s+tests\/(?:test-|validate-schemas)/g),
+    self_hosting_status_entries: count(JSON.stringify(coverage), /"status":/g),
+    self_hosting_exceptions: Object.keys(coverage.exceptions || {}).length,
+    runtime_ir_compilers: count(corpus, /function compileConstraintIR\b/g),
+    strictness_ir_compilers: count(corpus, /function compilePolicyStrictnessIR\b/g),
+    command_dispatch_branches: count(corpus, /command ===/g),
+    bespoke_integration_validator: sourceModulePathsAt(target, "src/integration-validator").length,
+    privileged_field_workarounds: count(corpus, /stripPrivilegedSchemaUnknownFields|SCHEMA_UNKNOWN_PRIVILEGED_FIELDS/g),
+
+    // Compression 3 inventory: absent historical modules produce an empty inventory.
+    registered_rule_families: count(defaults, /^\s*withPhase\(/gm),
+    document_relation_kinds: relationKinds,
+    document_selector_kinds: selectorDefinitions.length,
+    document_selector_definitions: selectorDefinitions,
+    document_fact_types: factTypes.length,
+    document_fact_type_names: factTypes,
+    canonical_fact_sources: factSources,
+    evidence_binding_kinds: evidenceBindingKinds,
+    relation_kernel_operations: relationKernelOperations.length,
+    relation_kernel_operation_names: relationKernelOperations,
+    execution_phases: ["both", "state", "transaction"],
+    constraint_program_knows_contract_conformance_roles: /type ContractConformanceRole\b/.test(constraintProgram),
+    policy_packs_has_contract_conformance_macro: /compileContractConformancePolicy\b/.test(policyPacks),
+    policy_packs_has_requirements_strict_pack: /"requirements-strict"/.test(policyPacks),
+
+    // C3.1 targeted amplification metrics. Schema and tests are deliberate structural edit-sites
+    // and are therefore excluded from the semantic kernel edit-site count.
+    canonical_factref_model_count: count(documentFacts, /export\s+(?:interface|type)\s+FactRef\b/g),
+    primitive_descriptor_registry_count: descriptorRegistryCount,
+    primitive_descriptor_kinds: relationDescriptorKinds,
+    public_primitive_descriptor_kinds: publicRelationDescriptorKinds,
+    schema_relation_kinds_match_descriptors: JSON.stringify(relationKinds) === JSON.stringify(publicRelationDescriptorKinds),
+    primitive_runtime_shape_count: count(constraintProgram, /kind:\s*"primitive_relation"/g),
+    independent_document_relation_switches: independentRelationSwitchFiles.length,
+    independent_document_relation_switch_files: independentRelationSwitchFiles,
+    semantic_edit_sites_per_new_primitive: descriptorRegistryCount + independentRelationSwitchFiles.length,
+
+    // C3.2 structural-compression proof. The high-level pack may exist in policy-packs,
+    // but canonical compilation/evaluation/strictness must not know its domain vocabulary.
+    contract_conformance_role_vocabulary_in_canonical_core: contractRoleVocabulary,
+    generated_edge_recognition_helpers: generatedEdgeHelpers,
+    contract_conformance_cochange_constraints: macroCochangeConstraints,
+    macro_generated_positional_identity: macroPositionalIdentity,
+    high_level_pack_semantic_edit_sites_in_canonical_core: highLevelPackCoreEditSites,
+
+    // Current runtime vocabulary.
+    runtime_constraint_kinds: runtimeConstraintKinds.length,
+    runtime_constraint_kind_names: runtimeConstraintKinds,
+  };
+  metric.semantic_edit_sites = metric.rule_families + metric.runtime_ir_compilers + metric.strictness_ir_compilers + metric.bespoke_integration_validator + metric.command_dispatch_branches;
+
+  return {
+    ref: target,
+    physical: {
+      src: physical(target, ["src"]),
+      schemas: physical(target, ["schemas"]),
+      tests: physical(target, ["tests"]),
+      docs: physical(target, ["docs"]),
+      examples: physical(target, ["examples"]),
+    },
+    architecture: metric,
+    policy: policyMetrics(target, policy),
+    ci: ciMetrics(target, pkg),
+  };
+}
+
+function subtract(after, before) {
+  if (typeof after === "number" && typeof before === "number") return after - before;
+  if (!after || !before || typeof after !== "object" || typeof before !== "object" || Array.isArray(after) || Array.isArray(before)) return undefined;
+  return Object.fromEntries(
+    Object.keys(after)
+      .filter((key) => Object.hasOwn(before, key))
+      .map((key) => [key, subtract(after[key], before[key])])
+      .filter(([, value]) => value !== undefined),
+  );
+}
+
+primeSnapshots([ref, compareRef].filter(Boolean));
+const current = architecture(ref);
+if (!compareRef) console.log(JSON.stringify(current, null, 2));
+else {
+  const baseline = architecture(compareRef);
+  console.log(JSON.stringify({ baseline, current, delta: subtract(current, baseline) }, null, 2));
+}

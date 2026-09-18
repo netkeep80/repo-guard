@@ -1,0 +1,20 @@
+{
+  "id": "minimal-diff-policy",
+  "title_ru": "Минимальная политика изменения",
+  "summary_ru": "Показывает глобальный запрет пути и простой предел изменения.",
+  "command": "check-diff",
+  "cases": [
+    {
+      "id": "pass",
+      "title_ru": "Обычное изменение разрешено",
+      "expected_exit_code": 0,
+      "expected_diagnostics": []
+    },
+    {
+      "id": "fail-forbidden",
+      "title_ru": "Запрещённый путь блокируется",
+      "expected_exit_code": 1,
+      "expected_diagnostics": ["forbidden-paths"]
+    }
+  ]
+}

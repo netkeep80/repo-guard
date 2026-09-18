@@ -1,0 +1,153 @@
+name: Atomic release
+
+on:
+  repository_dispatch:
+    types: [release]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.proof.outputs.sha }}
+      version: ${{ steps.proof.outputs.version }}
+      tag: ${{ steps.proof.outputs.tag }}
+    steps:
+      - name: Checkout exact release target
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.client_payload.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install read-only preflight dependencies
+        run: npm ci
+
+      - name: Prove exact accepted release target
+        id: proof
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -euo pipefail
+          RESULT="$(node scripts/release-preflight.mjs --sha "$TARGET_SHA" --repo "$GITHUB_REPOSITORY")"
+          SHA="$(jq -er '.sha' <<<"$RESULT")"
+          VERSION="$(jq -er '.version' <<<"$RESULT")"
+          TAG="$(jq -er '.tag' <<<"$RESULT")"
+          test "$SHA" = "$TARGET_SHA"
+          test "$TAG" = "v${VERSION}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Record exact release target identity
+        env:
+          TARGET_SHA: ${{ steps.proof.outputs.sha }}
+          TAG: ${{ steps.proof.outputs.tag }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -n \
+            --arg target_sha "$TARGET_SHA" \
+            --arg tag "$TAG" \
+            --argjson source_run_id "$SOURCE_RUN_ID" \
+            --argjson source_run_attempt "$SOURCE_RUN_ATTEMPT" \
+            '{schema_version:1,target_sha:$target_sha,tag:$tag,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt}' \
+            > release-target.json
+
+      - name: Upload exact release target identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-target-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-target.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      TARGET_SHA: ${{ needs.preflight.outputs.sha }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+    steps:
+      - name: Publish exact tag and Release
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$TAG" = "v${VERSION}"
+
+          resolve_tag_commit() {
+            local OBJECT OBJECT_TYPE OBJECT_SHA DEPTH=0
+            OBJECT="$(gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}")" || return 1
+            OBJECT_TYPE="$(jq -er '.object.type' <<<"$OBJECT")"
+            OBJECT_SHA="$(jq -er '.object.sha' <<<"$OBJECT")"
+
+            while test "$OBJECT_TYPE" = "tag"; do
+              DEPTH=$((DEPTH + 1))
+              test "$DEPTH" -le 8
+              OBJECT="$(gh api "repos/${REPOSITORY}/git/tags/${OBJECT_SHA}")"
+              OBJECT_TYPE="$(jq -er '.object.type' <<<"$OBJECT")"
+              OBJECT_SHA="$(jq -er '.object.sha' <<<"$OBJECT")"
+            done
+
+            test "$OBJECT_TYPE" = "commit"
+            [[ "$OBJECT_SHA" =~ ^[0-9a-f]{40}$ ]]
+            printf '%s\n' "$OBJECT_SHA"
+          }
+
+          if EXISTING_TAG_SHA="$(resolve_tag_commit 2>/dev/null)"; then
+            test "$EXISTING_TAG_SHA" = "$TARGET_SHA"
+          else
+            gh api --method POST "repos/${REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" \
+              -f sha="$TARGET_SHA" >/dev/null
+          fi
+
+          TAG_SHA="$(resolve_tag_commit)"
+          test "$TAG_SHA" = "$TARGET_SHA"
+
+          if RELEASE_STATE="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" --jq '[.tag_name, .draft, .prerelease] | @tsv' 2>/dev/null)"; then
+            IFS=$'\t' read -r RELEASE_TAG RELEASE_DRAFT RELEASE_PRERELEASE <<<"$RELEASE_STATE"
+            test "$RELEASE_TAG" = "$TAG"
+            test "$RELEASE_DRAFT" = "false"
+            test "$RELEASE_PRERELEASE" = "false"
+          else
+            gh api --method POST "repos/${REPOSITORY}/releases" \
+              -f tag_name="$TAG" \
+              -f name="$TAG" \
+              -F draft=false \
+              -F prerelease=false >/dev/null
+          fi
+
+          FINAL_TAG_SHA="$(resolve_tag_commit)"
+          test "$FINAL_TAG_SHA" = "$TARGET_SHA"
+
+          FINAL_RELEASE_STATE="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" --jq '[.tag_name, .draft, .prerelease] | @tsv')"
+          IFS=$'\t' read -r FINAL_RELEASE_TAG FINAL_DRAFT FINAL_PRERELEASE <<<"$FINAL_RELEASE_STATE"
+          test "$FINAL_RELEASE_TAG" = "$TAG"
+          test "$FINAL_DRAFT" = "false"
+          test "$FINAL_PRERELEASE" = "false"

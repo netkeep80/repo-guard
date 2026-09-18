@@ -1,0 +1,155 @@
+{
+  "policy_format_version": "0.3.0",
+  "repository_kind": "tooling",
+  "enforcement": {
+    "mode": "blocking"
+  },
+  "paths": {
+    "forbidden": [
+      "docs/phase-*",
+      "docs/history-*",
+      "*.bak"
+    ],
+    "canonical_docs": [
+      "README.md"
+    ],
+    "governance_paths": [
+      "repo-policy.json",
+      "docs/product-requirements.md",
+      "schemas/",
+      ".github/workflows/",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE/",
+      "templates/",
+      "action.yml",
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+      "scripts/build.mjs",
+      "scripts/check-dist.mjs",
+      "scripts/verify-release-ref.mjs"
+    ],
+    "operational_paths": [
+      ".claude/**",
+      ".gitkeep"
+    ]
+  },
+  "size_rules": [
+    {
+      "id": "max-source-file-lines",
+      "scope": "file",
+      "metric": "lines",
+      "glob": "src/**/*.{mjs,mts}",
+      "max": 900,
+      "count": "all_tracked",
+      "level": "advisory"
+    },
+    {
+      "id": "refactor-source-no-growth",
+      "scope": "directory",
+      "metric": "lines",
+      "glob": "src/**",
+      "max": 50000,
+      "max_growth": 0,
+      "count": "all_tracked",
+      "level": "blocking",
+      "applies_to_change_types": ["refactor"]
+    },
+    {
+      "id": "refactor-schema-no-growth",
+      "scope": "directory",
+      "metric": "lines",
+      "glob": "schemas/**",
+      "max": 20000,
+      "max_growth": 0,
+      "count": "all_tracked",
+      "level": "blocking",
+      "applies_to_change_types": ["refactor"]
+    }
+  ],
+  "diff_rules": {
+    "max_new_docs": 2,
+    "max_new_files": 15,
+    "max_net_added_lines": 2000
+  },
+  "content_rules": [
+    {
+      "id": "no-todo-without-issue",
+      "glob": "**",
+      "mode": "added_lines",
+      "forbid_regex": ["TODO(?!\\(#\\d+\\))"]
+    },
+    {
+      "id": "russian-markdown-prose",
+      "glob": "{README.md,RELEASING.md,PORTFOLIO.md,docs/**/*.md,templates/**/*.md,examples/**/*.md,.github/**/*.md}",
+      "mode": "markdown_language",
+      "language": "ru",
+      "allow_words": ["repo-guard"],
+      "max_unapproved_latin_words_per_line": 1
+    }
+  ],
+  "cochange_rules": [
+    {
+      "if_changed": ["src/**"],
+      "must_change_any": ["tests/**"]
+    }
+  ],
+  "document_relations": {
+    "documents": {
+      "package": {
+        "path": "package.json",
+        "format": "json"
+      },
+      "action": {
+        "path": "action.yml",
+        "format": "yaml"
+      }
+    },
+    "rules": [
+      {
+        "id": "package-main-matches-bin",
+        "kind": "scalar_equal",
+        "left": {
+          "document": "package",
+          "pointer": "/main",
+          "type": "string"
+        },
+        "right": {
+          "document": "package",
+          "pointer": "/bin/repo-guard",
+          "type": "string"
+        }
+      },
+      {
+        "id": "package-main-entrypoint",
+        "kind": "scalar_equals_literal",
+        "source": {
+          "document": "package",
+          "pointer": "/main",
+          "type": "string"
+        },
+        "value": "dist/repo-guard.mjs"
+      },
+      {
+        "id": "action-default-mode",
+        "kind": "scalar_equals_literal",
+        "source": {
+          "document": "action",
+          "pointer": "/inputs/mode/default",
+          "type": "string"
+        },
+        "value": "check-pr"
+      },
+      {
+        "id": "action-default-enforcement",
+        "kind": "scalar_equals_literal",
+        "source": {
+          "document": "action",
+          "pointer": "/inputs/enforcement/default",
+          "type": "string"
+        },
+        "value": "blocking"
+      }
+    ]
+  }
+}

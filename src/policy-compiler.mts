@@ -1,0 +1,180 @@
+import { normalizeDocumentFact } from "./document-facts.mjs";
+import { relationDescriptor } from "./checks/relation-kernel.mjs";
+
+type LooseObject = Record<string, unknown>;
+type SemanticDiagnostic = { message: string } & LooseObject;
+
+interface ContentRuleProjection { id?: unknown; forbid_regex?: unknown; }
+interface AnchorSourceProjection { kind?: unknown; pattern: string; }
+interface AnchorTypeProjection { sources?: unknown; }
+interface TraceRuleProjection extends LooseObject { id?: unknown; kind?: unknown; change_intent_field?: unknown; }
+interface PolicyProjection {
+  change_profiles?: unknown;
+  surfaces?: unknown;
+  new_file_classes?: unknown;
+  anchors?: { types?: unknown };
+  trace_rules?: unknown;
+  paths?: LooseObject;
+  content_rules?: unknown;
+  cochange_groups?: unknown;
+  document_relations?: unknown;
+  evidence_bindings?: unknown;
+}
+
+const list = <T = unknown,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+const object = (value: unknown): LooseObject => value && typeof value === "object" && !Array.isArray(value) ? value as LooseObject : {};
+const STATIC_PROFILE_VALIDATION = Symbol("static-profile-validation");
+
+export function compileForbidRegex(contentRules: unknown = []): SemanticDiagnostic[] {
+  const errors: SemanticDiagnostic[] = [];
+  for (const rule of list<ContentRuleProjection>(contentRules)) for (const pattern of list<string>(rule?.forbid_regex)) {
+    try { new RegExp(pattern); }
+    catch (error) { errors.push({ rule_id: rule?.id, pattern, message: (error as Error).message }); }
+  }
+  return errors;
+}
+
+export function compileChangeProfiles(policy: PolicyProjection = {}, selectedChangeType: unknown = STATIC_PROFILE_VALIDATION): SemanticDiagnostic[] {
+  const errors: SemanticDiagnostic[] = [], profiles = object(policy.change_profiles);
+  const surfaces = new Set<unknown>(Object.keys(object(policy.surfaces)));
+  const classes = new Set<unknown>(Object.keys(object(policy.new_file_classes)));
+  for (const [changeType, profile] of Object.entries(profiles)) {
+    const p = object(profile), allowed = new Set<unknown>(list(p.allow_surfaces));
+    for (const field of ["allow_surfaces", "forbid_surfaces", "require_surfaces"] as const) for (const surface of list(p[field])) {
+      if (!surfaces.has(surface)) errors.push({ change_type: changeType, surface, message: `change_profiles["${changeType}"].${field} references unknown surface "${surface}"` });
+    }
+    for (const surface of list(p.forbid_surfaces)) if (allowed.has(surface)) errors.push({ change_type: changeType, surface, message: `change_profiles["${changeType}"] lists surface "${surface}" in both allow_surfaces and forbid_surfaces` });
+    const newFiles = object(p.new_files);
+    for (const fileClass of [...list(newFiles.allow_classes), ...Object.keys(object(newFiles.max_per_class))]) if (!classes.has(fileClass)) {
+      errors.push({ change_type: changeType, class: fileClass, message: `change_profiles["${changeType}"].new_files references unknown class "${fileClass}"` });
+    }
+  }
+  if (selectedChangeType !== STATIC_PROFILE_VALIDATION && Object.keys(profiles).length) {
+    if (selectedChangeType === "governance") return errors;
+    if (typeof selectedChangeType !== "string" || !selectedChangeType) {
+      errors.push({ change_type: selectedChangeType, message: "change_profiles require a declared change_type" });
+    } else if (!Object.hasOwn(profiles, selectedChangeType)) {
+      errors.push({ change_type: selectedChangeType, message: `change_type "${selectedChangeType}" is not defined in change_profiles` });
+    }
+  }
+  return errors;
+}
+
+export function compileAnchorPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
+  const errors: SemanticDiagnostic[] = [], types = object(policy.anchors?.types), typeNames = new Set<unknown>(Object.keys(types)), ids = new Set<unknown>();
+  for (const [anchorType, config] of Object.entries(types)) for (const [sourceIndex, source] of list<AnchorSourceProjection>((config as AnchorTypeProjection | null | undefined)?.sources).entries()) {
+    if (source?.kind !== "regex") continue;
+    try { new RegExp(source.pattern); }
+    catch (error) { errors.push({ anchor_type: anchorType, source_index: sourceIndex, pattern: source.pattern, message: `anchors.types["${anchorType}"].sources[${sourceIndex}].pattern is invalid: ${(error as Error).message}` }); }
+  }
+  for (const [index, rule] of list<TraceRuleProjection>(policy.trace_rules).entries()) {
+    if (ids.has(rule?.id)) errors.push({ trace_rule: rule?.id, message: `trace_rules[${index}].id duplicates trace rule "${rule?.id}"` });
+    ids.add(rule?.id);
+    if (rule?.kind === "must_resolve") for (const field of ["from_anchor_type", "to_anchor_type"] as const) {
+      if (!typeNames.has(rule[field])) errors.push({ trace_rule: rule.id, anchor_type: rule[field], message: `trace_rules[${index}].${field} references unknown anchor type "${rule[field]}"` });
+    }
+    if (rule?.kind === "declared_anchors_require_evidence" && !["anchors.affects", "anchors.implements", "anchors.verifies"].includes(rule.change_intent_field as string)) {
+      errors.push({ trace_rule: rule.id, change_intent_field: rule.change_intent_field, message: `trace_rules[${index}].change_intent_field references unsupported ChangeIntent anchor field` });
+    }
+  }
+  return errors;
+}
+
+export function compileCochangeGroupsPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
+  const errors: SemanticDiagnostic[] = [], ids = new Set<unknown>();
+  for (const rawGroup of list<LooseObject>(policy.cochange_groups)) {
+    const group = object(rawGroup), id = group.id;
+    if (ids.has(id)) errors.push({ field: "cochange_groups", message: `cochange group id "${id}" is duplicated` });
+    ids.add(id);
+    for (const member of list(group.members)) {
+      try { normalizeDocumentFact(member, "repository_path"); }
+      catch (error) { errors.push({ field: "cochange_groups", member, message: `cochange group "${id}" has invalid repository path "${member}": ${(error as Error).message}` }); }
+    }
+  }
+  return errors;
+}
+
+function scalarLiteralMatches(type: unknown, value: unknown): boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "boolean") return typeof value === "boolean";
+  return type === "scalar" && (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)));
+}
+function normalizeDeclaredDocumentPath(name: string, definition: LooseObject, errors: SemanticDiagnostic[]): string | null {
+  try {
+    const path = normalizeDocumentFact(definition.path, "repository_path") as string;
+    const format = definition.format;
+    const matchesFormat = format === "plain_text" ? true : format === "json" ? /\.json$/i.test(path) : format === "yaml" ? /\.ya?ml$/i.test(path) : false;
+    if (!matchesFormat) errors.push({ document: name, path, format, message: `document_relations.documents["${name}"] format "${format}" does not match path "${path}"` });
+    return path;
+  } catch (error) {
+    errors.push({ document: name, path: definition.path, message: `document_relations.documents["${name}"].path is invalid: ${(error as Error).message}` });
+    return null;
+  }
+}
+
+export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
+  if (!policy.document_relations) return [];
+  const section = object(policy.document_relations), documents = object(section.documents), rules = list<LooseObject>(section.rules);
+  const errors: SemanticDiagnostic[] = [], seenRuleIds = new Set<unknown>(), usedDocuments = new Set<string>();
+  for (const [name, rawDefinition] of Object.entries(documents)) normalizeDeclaredDocumentPath(name, object(rawDefinition), errors);
+  const useDocument = (ruleId: unknown, field: string, document: unknown) => {
+    if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
+      errors.push({ rule_id: ruleId, field, document, message: `document_relations rule "${ruleId}" ${field} references unknown document "${document}"` });
+      return;
+    }
+    usedDocuments.add(document);
+  };
+  const useSelector = (ruleId: unknown, field: string, rawSelector: unknown) => {
+    useDocument(ruleId, field, object(rawSelector).document);
+  };
+  for (const [index, rule] of rules.entries()) {
+    const id = rule.id;
+    if (seenRuleIds.has(id)) errors.push({ rule_id: id, index, message: `document_relations.rules[${index}].id duplicates rule "${id}"` });
+    seenRuleIds.add(id);
+    let descriptor;
+    try {
+      descriptor = relationDescriptor(String(rule.kind ?? ""));
+    } catch (error) {
+      errors.push({ rule_id: id, kind: rule.kind, message: (error as Error).message });
+      continue;
+    }
+    const documentOperands = new Set(descriptor.documentOperands || []);
+    for (const role of descriptor.operands) {
+      if (documentOperands.has(role)) useDocument(id, role, rule[role]);
+      else useSelector(id, role, rule[role]);
+    }
+    if (descriptor.literal) {
+      const selector = object(rule[descriptor.literal.source]);
+      const value = rule[descriptor.literal.value];
+      if (!scalarLiteralMatches(selector.type, value)) errors.push({ rule_id: id, type: selector.type, value, message: `document_relations rule "${id}" literal is incompatible with source type "${selector.type}"` });
+    }
+  }
+  for (const binding of list<LooseObject>(policy.evidence_bindings)) {
+    const document = object(binding.source).document;
+    if (typeof document === "string" && Object.hasOwn(documents, document)) usedDocuments.add(document);
+  }
+  for (const name of Object.keys(documents)) if (!usedDocuments.has(name)) errors.push({ document: name, message: `document_relations.documents["${name}"] is declared but unused` });
+  return errors;
+}
+
+export function compileEvidenceBindingsPolicy(policy: PolicyProjection = {}): SemanticDiagnostic[] {
+  const bindings = list<LooseObject>(policy.evidence_bindings);
+  if (!bindings.length) return [];
+  const errors: SemanticDiagnostic[] = [], seenIds = new Set<unknown>();
+  const relationSection = object(policy.document_relations), documents = object(relationSection.documents);
+  const anchorTypes = new Set(Object.keys(object(policy.anchors?.types)));
+
+  for (const [index, binding] of bindings.entries()) {
+    const id = binding.id;
+    if (seenIds.has(id)) errors.push({ evidence_binding: id, index, message: `evidence_bindings[${index}].id duplicates binding "${id}"` });
+    seenIds.add(id);
+    const source = object(binding.source), document = source.document;
+    if (typeof document !== "string" || !Object.hasOwn(documents, document)) errors.push({ evidence_binding: id, document, message: `evidence binding "${id}" source references unknown document "${document}"` });
+
+    if (binding.kind === "anchor_value_coverage") {
+      const target = binding.target_anchor_type;
+      if (typeof target !== "string" || !anchorTypes.has(target)) errors.push({ evidence_binding: id, target_anchor_type: target, message: `evidence binding "${id}" references unknown anchor type "${target}"` });
+    }
+  }
+  return errors;
+}

@@ -1,0 +1,9 @@
+{
+  "change_type": "feature",
+  "scope": ["src/**", "docs/**"],
+  "budgets": { "max_new_files": 3, "max_net_added_lines": 20 },
+  "anchors": { "affects": [], "implements": [], "verifies": [] },
+  "must_touch": ["src/**"],
+  "must_not_touch": ["docs/**"],
+  "expected_effects": ["Точное изменение исходного файла"]
+}

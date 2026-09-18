@@ -1,0 +1,22 @@
+{
+  "id": "surgical-change",
+  "title_ru": "Точное ограничение транзакции",
+  "summary_ru": "Показывает область изменения, обязательный и запрещённый пути и бюджет ChangeIntent.",
+  "command": "check-diff",
+  "cases": [
+    {
+      "id": "pass",
+      "title_ru": "Заявленная транзакция соблюдена",
+      "expected_exit_code": 0,
+      "expected_diagnostics": [],
+      "change_intent": "change-intent.json"
+    },
+    {
+      "id": "fail-must-not-touch",
+      "title_ru": "Запрещённый транзакцией документ изменён",
+      "expected_exit_code": 1,
+      "expected_diagnostics": ["must-not-touch"],
+      "change_intent": "change-intent.json"
+    }
+  ]
+}

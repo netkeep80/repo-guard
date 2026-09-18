@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/netkeep80/repo-guard/schemas/change-intent.schema.json",
+  "title": "Change Intent",
+  "type": "object",
+  "required": ["change_type", "scope", "budgets", "must_touch", "must_not_touch", "expected_effects"],
+  "additionalProperties": false,
+  "properties": {
+    "change_type": { "type": "string", "minLength": 1 },
+    "scope": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "budgets": {
+      "type": "object",
+      "description": "Optional PR-authored tightening requests. When repo-policy.json defines the corresponding diff_rules ceiling, the effective limit is min(policy, ChangeIntent); ChangeIntent cannot widen the trusted repository ceiling.",
+      "additionalProperties": false,
+      "properties": {
+        "max_new_files": { "type": "integer", "minimum": 0, "description": "Additional maximum for new files; may tighten but never widen diff_rules.max_new_files." },
+        "max_new_docs": { "type": "integer", "minimum": 0, "description": "Additional maximum for new documents; may tighten but never widen diff_rules.max_new_docs." },
+        "max_net_added_lines": { "type": "integer", "minimum": 0, "description": "Additional maximum for net added lines; may tighten but never widen diff_rules.max_net_added_lines." }
+      }
+    },
+    "anchors": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "affects": { "$ref": "#/definitions/string_set" },
+        "implements": { "$ref": "#/definitions/string_set" },
+        "verifies": { "$ref": "#/definitions/string_set" }
+      }
+    },
+    "must_touch": { "type": "array", "items": { "type": "string" } },
+    "must_not_touch": { "type": "array", "items": { "type": "string" } },
+    "expected_effects": { "type": "array", "items": { "type": "string" } }
+  },
+  "definitions": {
+    "string_set": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+  }
+}

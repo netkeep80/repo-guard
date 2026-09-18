@@ -1,0 +1,82 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import Ajv from "ajv";
+
+const root = resolve(new URL("..", import.meta.url).pathname);
+const json = (path) => JSON.parse(readFileSync(resolve(root, path), "utf-8"));
+const ajv = new Ajv({ allErrors: true });
+const policy = ajv.compile(json("schemas/repo-policy.schema.json"));
+const intent = ajv.compile(json("schemas/change-intent.schema.json"));
+const grant = ajv.compile(json("schemas/governance-grant.schema.json"));
+let failures = 0;
+function expect(label, actual, expected = true) {
+  const ok = actual === expected;
+  console.log(`${ok ? "PASS" : "FAIL"}: ${label}`);
+  if (!ok) failures++;
+}
+
+const validPolicy = json("tests/fixtures/valid-policy.json");
+expect("valid policy fixture", policy(validPolicy));
+expect("invalid policy fixture", policy(json("tests/fixtures/invalid-policy.json")), false);
+expect("repo-policy self", policy(json("repo-policy.json")));
+expect("old top-level integration rejected", policy({ ...validPolicy, integration: {} }), false);
+expect("requirements-strict pack", policy({ ...validPolicy, packs: { "requirements-strict": { evidence_surfaces: ["src/**"] } } }));
+expect("removed top-level profile rejected", policy({ ...validPolicy, profile: "requirements-strict" }), false);
+expect("removed top-level profile_overrides rejected", policy({ ...validPolicy, profile_overrides: { evidence_surfaces: ["src/**"] } }), false);
+expect("anchors + trace", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", field: "id" }] } } }, trace_rules: [{ id: "resolve", kind: "must_resolve", from_anchor_type: "id", to_anchor_type: "id" }] }));
+expect("invalid anchor source", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", pattern: "id" }] } } } }), false);
+expect("evidence trace", policy({ ...validPolicy, trace_rules: [{ id: "evidence", kind: "changed_files_require_evidence", if_changed: ["requirements/**"], must_touch_any: ["tests/**"] }] }));
+expect("removed workflow_path_coverage rejected", policy({
+  ...validPolicy,
+  document_relations: {
+    documents: { contract: { path: "contracts/contract.json", format: "json" } },
+    rules: [{
+      id: "owners-exist",
+      kind: "referenced_paths_exist",
+      source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+    }],
+  },
+  evidence_bindings: [{
+    id: "owners-covered",
+    kind: "workflow_path_coverage",
+    source: { document: "contract", pointer: "/owners", projection: "object_values", type: "repository_path_set" },
+    workflow: "gate",
+    covers: ["tests/**"],
+  }],
+}), false);
+expect("legacy trace field contract_field rejected", policy({
+  ...validPolicy,
+  trace_rules: [{ id: "legacy", kind: "declared_anchors_require_evidence", contract_field: "anchors.affects", must_touch_any: ["tests/**"] }],
+}), false);
+expect("valid size rule", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }));
+expect("invalid size metric", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "tokens", glob: "src/**", max: 1 }] }), false);
+expect("directory changed_only size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "lines", glob: "src/**", max: 100, count: "changed_only" }] }), false);
+expect("file growth size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "lines", glob: "src/**", max: 100, max_growth: 0 }] }), false);
+expect("file files metric size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "file", metric: "files", glob: "src/**", max: 1 }] }), false);
+expect("directory bytes growth size rule rejected", policy({ ...validPolicy, size_rules: [{ id: "src", scope: "directory", metric: "bytes", glob: "src/**", max: 100, max_growth: 0 }] }), false);
+expect("old content-rule shape rejected", policy(json("tests/fixtures/invalid-content-rule-old-form.json")), false);
+expect("invalid operational paths rejected", policy(json("tests/fixtures/invalid-operational-paths.json")), false);
+expect("new_files requires allow_classes", policy({ ...validPolicy, change_profiles: { feature: { new_files: { max_per_class: { test: 1 } } } } }), false);
+for (const field of ["change_classes", "surface_matrix", "new_file_rules", "change_type_rules", "allow_unclassified_files"]) {
+  expect(`removed policy field ${field}`, policy({ ...validPolicy, [field]: field === "allow_unclassified_files" ? true : {} }), false);
+}
+
+const validIntent = json("tests/fixtures/valid-change-intent.json");
+expect("valid ChangeIntent", intent(validIntent));
+expect("repository-specific change_type", intent({ ...validIntent, change_type: "governance" }));
+expect("anchor intent", intent({ ...validIntent, anchors: { affects: ["FR-014"], implements: ["FR-014"], verifies: ["FR-014"] } }));
+expect("invalid ChangeIntent fixture", intent(json("tests/fixtures/invalid-change-intent.json")), false);
+expect("duplicate anchor intent", intent({ ...validIntent, anchors: { affects: ["FR-014", "FR-014"] } }), false);
+expect("unknown anchor field", intent({ ...validIntent, anchors: { affects: ["FR-014"], notes: [] } }), false);
+for (const field of ["change_class", "authorized_governance_paths", "overrides", "allow_policy_relaxation"]) {
+  expect(`privileged/removed ChangeIntent field ${field}`, intent({ ...validIntent, [field]: [] }), false);
+}
+
+expect("valid GovernanceGrant", grant({ authorized_governance_paths: ["schemas/**"], allow_policy_relaxation: ["/size_rules/source/max"] }));
+expect("path-only GovernanceGrant", grant({ authorized_governance_paths: ["repo-policy.json"] }));
+expect("empty GovernanceGrant rejected", grant({}), false);
+expect("unknown GovernanceGrant field rejected", grant({ authorized_governance_paths: ["x"], reason: "no" }), false);
+expect("relaxation pointer must be absolute", grant({ allow_policy_relaxation: ["size_rules/x"] }), false);
+
+console.log(`\n${failures ? `${failures} test(s) failed` : "All schema tests passed"}`);
+if (failures) process.exitCode = 1;

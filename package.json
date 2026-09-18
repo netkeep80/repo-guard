@@ -1,0 +1,48 @@
+{
+  "name": "repo-guard",
+  "version": "3.1.0",
+  "description": "Исполняемая политика репозитория с проверкой JSON Schema и правил по git diff",
+  "type": "module",
+  "main": "dist/repo-guard.mjs",
+  "bin": {
+    "repo-guard": "dist/repo-guard.mjs"
+  },
+  "files": [
+    "dist/",
+    "schemas/",
+    "docs/",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check:dist": "node scripts/check-dist.mjs",
+    "validate": "node dist/repo-guard.mjs",
+    "pretest": "npm run check:dist",
+    "test": "node tests/run.mjs",
+    "compression:metrics": "node scripts/compression-metrics.mjs",
+    "verify:release-ref": "node scripts/verify-release-ref.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check:dist && npm run verify:release-ref"
+  },
+  "keywords": [
+    "repo-policy",
+    "json-schema",
+    "validation",
+    "ci"
+  ],
+  "license": "Unlicense",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "minimatch": "^10.2.5",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "policy_format_version": "0.3.0",
+  "repository_kind": "application",
+  "enforcement": { "mode": "blocking" },
+  "paths": {
+    "forbidden": [],
+    "canonical_docs": [],
+    "governance_paths": ["repo-policy.json"]
+  },
+  "diff_rules": {
+    "max_new_docs": 0,
+    "max_new_files": 0,
+    "max_net_added_lines": 50
+  },
+  "content_rules": [],
+  "cochange_rules": []
+}
