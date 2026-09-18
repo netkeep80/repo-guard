@@ -35,11 +35,7 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 ### Runtime и транзитивная authority
 
-Пакет поддерживает `Node.js >=20`: минимальная версия проверяется существующим `smoke-pack` на Node 20, а основной self-CI остаётся на Node 24. Это не широкая матрица совместимости: гарантируется минимальный package install/CLI smoke и основная рабочая версия.
-
-Точный `repo-guard@<SHA>` сам по себе недостаточен, если вложенное действие указывает на изменяемый major tag. Поэтому public composite Action закрепляет `actions/setup-node` exact commit; independent trusted-enforcement и release/release-integrity закрепляют exact commits тех Actions, которые участвуют в trusted/release authority и переносе exact evidence. Обычный CI и Policy Observatory Pages остаются отдельными validation/delivery surfaces: их major refs не считаются независимым источником trusted authority или правом публикации Release/tag.
-
-Обновление таких pin выполняется как обычное governance-изменение: сначала проверяется upstream major tag → конкретный commit, затем новый SHA проходит собственные exact-head и post-merge проверки repo-guard.
+`Node.js >=20` проверяется package-smoke на Node 20; основной CI — Node 24. Exact `repo-guard@<SHA>` pin-ит вложенный `setup-node`; trusted/release paths pin-ят authority Actions. CI и Pages — validation/delivery, не independent authority.
 
 Для внешнего действия используйте точную принятую ссылку:
 
