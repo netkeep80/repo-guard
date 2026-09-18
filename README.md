@@ -33,6 +33,14 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 `init` создаёт четыре файла без перезаписи существующих: `repo-policy.json`, рабочий процесс проверки, шаблон PR и шаблон задачи. Просмотрите предложенные бюджеты и пути. `doctor` показывает фактический режим из политики и, когда может определить репозиторий и ветку `GitHub` и выполнить только чтение через `gh api`, отдельно сообщает `merge-barrier-coverage`: защищена ли ветка и какие обязательные статусы с привязкой к приложению наблюдаются. Он не меняет настройки `GitHub` и не подменяет свидетельство успешного выполнения конкретного статуса на конкретном `HEAD`; если репозиторий, ветка или `API` недоступны, покрытие остаётся явно непроверенным.
 
+### Runtime и транзитивная authority
+
+Пакет поддерживает `Node.js >=20`: минимальная версия проверяется существующим `smoke-pack` на Node 20, а основной self-CI остаётся на Node 24. Это не широкая матрица совместимости: гарантируется минимальный package install/CLI smoke и основная рабочая версия.
+
+Точный `repo-guard@<SHA>` сам по себе недостаточен, если вложенное действие указывает на изменяемый major tag. Поэтому public composite Action закрепляет `actions/setup-node` exact commit; independent trusted-enforcement и release/release-integrity закрепляют exact commits тех Actions, которые участвуют в trusted/release authority и переносе exact evidence. Обычный CI и Policy Observatory Pages остаются отдельными validation/delivery surfaces: их major refs не считаются независимым источником trusted authority или правом публикации Release/tag.
+
+Обновление таких pin выполняется как обычное governance-изменение: сначала проверяется upstream major tag → конкретный commit, затем новый SHA проходит собственные exact-head и post-merge проверки repo-guard.
+
 Для внешнего действия используйте точную принятую ссылку:
 
 ```yaml
