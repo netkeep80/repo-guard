@@ -27,16 +27,6 @@ export function loadGitHubEvent() {
         return { ok: false, error: "event_read_error", message: `Cannot read event file: ${error.message}` };
     }
 }
-export function fetchIssueBody(repo, number) {
-    if (!REPO.test(repo) || !ISSUE.test(String(number)))
-        return null;
-    try {
-        return execFileSync("gh", ["api", `repos/${repo}/issues/${number}`, "--jq", ".body"], { encoding: "utf-8", timeout: 30000 }).trim() || null;
-    }
-    catch {
-        return null;
-    }
-}
 function cliAvailable(command) { try {
     execFileSync(command, ["--version"], { encoding: "utf-8", stdio: "pipe" });
     return true;

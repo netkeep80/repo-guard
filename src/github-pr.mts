@@ -41,10 +41,6 @@ export function loadGitHubEvent(): GitHubEventResult {
     return { ok: true, base: pr.base?.sha, baseRef: pr.base?.ref, head: pr.head?.sha, prBody: pr.body || "", prNumber: pr.number, repoFullName: (event as GitHubEventProjection).repository?.full_name || process.env.GITHUB_REPOSITORY || "" };
   } catch (error: unknown) { return { ok: false, error: "event_read_error", message: `Cannot read event file: ${(error as Error).message}` }; }
 }
-export function fetchIssueBody(repo: unknown, number: unknown): string | null {
-  if (!REPO.test(repo as string) || !ISSUE.test(String(number))) return null;
-  try { return execFileSync("gh", ["api", `repos/${repo as string}/issues/${number as string | number | bigint}`, "--jq", ".body"], { encoding: "utf-8", timeout: 30000 }).trim() || null; } catch { return null; }
-}
 function cliAvailable(command: string): boolean { try { execFileSync(command, ["--version"], { encoding: "utf-8", stdio: "pipe" }); return true; } catch { return false; } }
 export function checkPrerequisites(): string[] { return [!process.env.GITHUB_EVENT_PATH && "GITHUB_EVENT_PATH env var (set automatically by GitHub Actions)", !cliAvailable("git") && "git CLI (required for diff analysis)"].filter(Boolean) as string[]; }
 export const checkIssueFallbackPrerequisites = (): string[] => cliAvailable("gh") ? [] : ["gh CLI (required for linked issue fallback)"];

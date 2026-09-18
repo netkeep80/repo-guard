@@ -18,7 +18,7 @@ function constraintAppliesToPhase(constraint, requested) {
     return requested === "both" || phase === "both" || phase === requested;
 }
 export function compileConstraintIR(facts) {
-    return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) };
+    return { constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent)) };
 }
 function primitiveRelation(constraint) {
     if (!constraint.relation_id || !constraint.primitive || !constraint.operands || !constraint.parameters) {

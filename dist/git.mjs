@@ -190,12 +190,3 @@ export function readBasePolicy(base, cwd, policyPath = "repo-policy.json") {
     }
     return { policy: parsed, error: null };
 }
-export function readBaseGovernancePaths(base, cwd, policyPath = "repo-policy.json") {
-    const result = readBasePolicy(base, cwd, policyPath);
-    if (result.error)
-        return { governancePaths: null, error: result.error };
-    const list = result.policy?.paths?.governance_paths;
-    if (!Array.isArray(list))
-        return { governancePaths: [], error: null };
-    return { governancePaths: list, error: null };
-}

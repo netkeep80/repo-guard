@@ -40,7 +40,7 @@ interface ConstraintContext {
   executionPhase?: ExecutionPhase;
   replacedStateConstraintKeys?: readonly string[];
 }
-interface ConstraintIR { files: ParsedDiffFile[]; constraints: RuntimeConstraint[]; }
+interface ConstraintIR { constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
 
 const BUDGET_EVIDENCE_FIELDS = ["policy_limit", "intent_limit", "effective_limit"] as const;
@@ -64,7 +64,7 @@ function constraintAppliesToPhase(constraint: RuntimeConstraint, requested: Exec
 }
 
 export function compileConstraintIR(facts: ConstraintFacts): ConstraintIR {
-  return { files: facts.diff.files.checked, constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
+  return { constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
 }
 
 function primitiveRelation(constraint: RuntimeConstraint): PrimitiveRelation {
