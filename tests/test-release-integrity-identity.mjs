@@ -180,7 +180,7 @@ describe("automatic release integrity workflow", () => {
     assert.match(text, /workflow_run\.run_attempt/);
     assert.match(text, /\.github\/workflows\/release\.yml/);
     assert.match(text, /repository_dispatch/);
-    assert.match(text, /actions\/download-artifact@v5/);
+    assert.match(text, /actions\/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0/);
     assert.match(text, /release-target-/);
     assert.match(text, /release-target\.json/);
     assert.match(text, /schema_version/);
@@ -219,7 +219,7 @@ describe("automatic release integrity workflow", () => {
     assert.match(text, /github\.run_id/);
     assert.match(text, /github\.run_attempt/);
     assert.match(text, /run_url/);
-    assert.match(text, /actions\/upload-artifact@v4/);
+    assert.match(text, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
     assert.match(text, /release-integrity-/);
   });
 
