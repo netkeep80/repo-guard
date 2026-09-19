@@ -106,3 +106,5 @@ jobs:
           TMPDIR=$(mktemp -d)
           npm install --prefix "$TMPDIR" "$REPODIR/$TARBALL"
           "$TMPDIR/node_modules/.bin/repo-guard" --repo-root "$REPODIR"
+
+# P3 linked-issue GovernanceGrant freshness probe. Experiment only; never merge.
