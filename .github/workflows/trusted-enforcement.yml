@@ -4,9 +4,11 @@ on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, ready_for_review]
     branches: [main]
+  issues:
+    types: [edited]
 
 concurrency:
-  group: trusted-enforcement-${{ github.event.pull_request.number }}
+  group: trusted-enforcement-${{ github.event.pull_request.number || format('issue-{0}', github.event.issue.number) }}
   cancel-in-progress: true
 
 permissions:
@@ -17,7 +19,7 @@ permissions:
 jobs:
   trusted-enforcement:
     name: trusted-enforcement-producer
-    if: ${{ !github.event.pull_request.draft && vars.TRUSTED_ENFORCEMENT_APP_CLIENT_ID != '' }}
+    if: ${{ github.event_name == 'pull_request_target' && !github.event.pull_request.draft && vars.TRUSTED_ENFORCEMENT_APP_CLIENT_ID != '' }}
     environment: trusted-enforcement
     runs-on: ubuntu-latest
     steps:
@@ -109,3 +111,75 @@ jobs:
         run: |
           set -euo pipefail
           test "$ENFORCEMENT_OUTCOME" = "success"
+
+
+  linked-issue-authority-invalidation:
+    name: linked-issue-authority-invalidation
+    if: ${{ github.event_name == 'issues' && github.event.changes.body != null && vars.TRUSTED_ENFORCEMENT_APP_CLIENT_ID != '' }}
+    environment: trusted-enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve affected Ready PR heads
+        id: affected
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          AFFECTED_PATH="${RUNNER_TEMP}/linked-issue-affected-pr-heads.tsv"
+          : > "$AFFECTED_PATH"
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/timeline?per_page=100" \
+            --jq '.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null and .source.issue.state == "open") | .source.issue.number' \
+            | sort -nu \
+            | while read -r PR_NUMBER; do
+                [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || continue
+                PR_META="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '[.draft, .base.ref, .head.sha] | @tsv')"
+                IFS=$'\t' read -r DRAFT BASE_REF HEAD_SHA <<< "$PR_META"
+                if [[ "$DRAFT" != "false" || "$BASE_REF" != "main" || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+                  continue
+                fi
+
+                PR_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""')"
+                if printf '%s' "$PR_BODY" \
+                  | ISSUE_NUMBER="$ISSUE_NUMBER" REPOSITORY="$GITHUB_REPOSITORY" perl -0 -ne '
+                      my $issue = quotemeta($ENV{"ISSUE_NUMBER"});
+                      my $repo = quotemeta($ENV{"REPOSITORY"});
+                      $found = 1 if /\b(?:Fixes|Closes|Resolves|Part\s+of)\s+(?:$repo)?#${issue}\b/i;
+                      END { exit($found ? 0 : 1) }
+                    '; then
+                  printf '%s\t%s\n' "$PR_NUMBER" "$HEAD_SHA" >> "$AFFECTED_PATH"
+                fi
+              done
+
+          COUNT="$(wc -l < "$AFFECTED_PATH" | tr -d ' ')"
+          echo "path=$AFFECTED_PATH" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Mint dedicated trusted-enforcement App token
+        if: ${{ steps.affected.outputs.count != '0' }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.TRUSTED_ENFORCEMENT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRUSTED_ENFORCEMENT_APP_PRIVATE_KEY }}
+          permission-statuses: write
+
+      - name: Invalidate stale trusted enforcement
+        if: ${{ steps.affected.outputs.count != '0' && steps.app-token.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          AFFECTED_PATH: ${{ steps.affected.outputs.path }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r PR_NUMBER HEAD_SHA; do
+            [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+            [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
+              -f state=pending \
+              -f context=trusted-enforcement \
+              -f description="linked issue #${ISSUE_NUMBER} changed; trusted reevaluation required" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          done < "$AFFECTED_PATH"

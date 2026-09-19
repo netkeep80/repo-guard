@@ -58,6 +58,7 @@ const pureReadOnlyParallel = [
   "test-p2-1-immutable-snapshot-cache.mjs",
   "test-p2-3-self-enforcement-topology.mjs",
   "test-p2-4-test-isolation.mjs",
+  "test-p3-linked-issue-authority-freshness.mjs",
   "test-pack-vocabulary-convergence.mjs",
   "test-pipeline.mjs",
   "test-policy-compiler-boundary.mjs",
