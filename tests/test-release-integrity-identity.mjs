@@ -10,6 +10,7 @@ import { verifyReleaseRef } from "../scripts/verify-release-ref.mjs";
 
 const exactSha = "a".repeat(40);
 const otherSha = "b".repeat(40);
+const currentVersion = JSON.parse(readFileSync(resolve("package.json"), "utf8")).version;
 
 function makePackageRoot(version = "2.3.4") {
   const root = mkdtempSync(join(tmpdir(), "repo-guard-release-integrity-identity-"));
@@ -80,7 +81,7 @@ describe("release integrity target identity", () => {
     const result = spawnSync(process.execPath, [
       resolve("scripts/verify-release-ref.mjs"),
       "--tag",
-      "v3.1.0",
+      `v${currentVersion}`,
       "--expected-sha",
       "main",
     ], {
