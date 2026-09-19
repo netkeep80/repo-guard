@@ -490,21 +490,21 @@
       }
     },
     "document_relation_document": {
-      "type": "object",
-      "required": ["path", "format"],
+      "type": "object", "required": ["path", "format"],
       "additionalProperties": false,
       "properties": {
         "path": { "$ref": "#/definitions/non_empty_string" },
         "format": { "type": "string", "enum": ["json", "yaml", "plain_text"] }
       }
     },
+    "document_snapshot": { "type": "string", "enum": ["state", "base", "head"] },
     "document_scalar_selector": {
       "type": "object",
       "required": ["document", "pointer", "type"],
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
-        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
+        "snapshot": { "$ref": "#/definitions/document_snapshot" },
         "pointer": { "type": "string" },
         "type": { "type": "string", "enum": ["scalar", "string", "boolean"] }
       }
@@ -515,7 +515,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
-        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
+        "snapshot": { "$ref": "#/definitions/document_snapshot" },
         "pointer": { "type": "string" },
         "type": { "const": "string" }
       }
@@ -526,7 +526,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
-        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
+        "snapshot": { "$ref": "#/definitions/document_snapshot" },
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values"] },
         "type": { "const": "repository_path_set" }
@@ -538,7 +538,7 @@
       "additionalProperties": false,
       "properties": {
         "document": { "$ref": "#/definitions/non_empty_string" },
-        "snapshot": { "type": "string", "enum": ["state", "base", "head"] },
+        "snapshot": { "$ref": "#/definitions/document_snapshot" },
         "pointer": { "type": "string" },
         "projection": { "type": "string", "enum": ["array_items", "object_values", "object_keys"] },
         "type": { "const": "string_set" }

@@ -9,6 +9,25 @@ const schema = JSON.parse(readFileSync(new URL("../schemas/repo-policy.schema.js
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validate = ajv.compile(schema);
 
+const snapshotSelectorDefinitions = [
+  "document_scalar_selector",
+  "document_string_selector",
+  "document_repository_path_set_selector",
+  "document_string_set_selector",
+];
+assert.deepEqual(
+  schema.definitions?.document_snapshot,
+  { type: "string", enum: ["state", "base", "head"] },
+  "document snapshot vocabulary must have one canonical private schema definition",
+);
+for (const definition of snapshotSelectorDefinitions) {
+  assert.deepEqual(
+    schema.definitions?.[definition]?.properties?.snapshot,
+    { $ref: "#/definitions/document_snapshot" },
+    `${definition} must reference the canonical document_snapshot definition`,
+  );
+}
+
 const basePolicy = {
   policy_format_version: "0.3.0",
   repository_kind: "application",
