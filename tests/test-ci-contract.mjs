@@ -21,6 +21,11 @@ assert.equal(workflowDocument.errors.length, 0);
 const workflow = workflowDocument.toJS();
 
 assert.deepEqual(Object.keys(workflow.jobs ?? {}).sort(), ["smoke-pack", "validate"]);
+assert.deepEqual(
+  workflow.on?.pull_request?.types,
+  ["opened", "synchronize", "reopened", "ready_for_review", "edited"],
+  "ordinary PR CI must refresh authority-bearing PR metadata edits",
+);
 const validate = workflow.jobs?.validate;
 const smokePack = workflow.jobs?.["smoke-pack"];
 assert.ok(validate);
