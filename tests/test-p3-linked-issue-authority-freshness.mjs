@@ -43,31 +43,23 @@ const invalidator = workflow.jobs?.["linked-issue-authority-invalidation"];
 assert.ok(invalidator, "issue edits need one bounded stale-authority invalidation job");
 assert.equal(invalidator.environment, "trusted-enforcement");
 assert.match(invalidator.if ?? "", /github\.event_name\s*==\s*'issues'/);
+assert.match(invalidator.if ?? "", /github\.event\.changes\.body\s*!=\s*null/);
 
 const step = (name) => invalidator.steps?.find((candidate) => candidate.name === name);
 
-const checkout = invalidator.steps?.find(
-  (candidate) => typeof candidate.uses === "string" && candidate.uses.startsWith("actions/checkout@"),
-);
-assert.equal(
-  checkout?.uses,
-  "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
-  "issue invalidation must execute only accepted workflow source",
-);
-assert.equal(checkout?.with?.["persist-credentials"], false);
-
-const detect = step("Detect GovernanceGrant change");
-assert.ok(detect);
-assert.match(detect.run ?? "", /GITHUB_EVENT_PATH/);
-assert.match(detect.run ?? "", /extractGovernanceGrant/);
-
 const resolveAffected = step("Resolve affected Ready PR heads");
 assert.ok(resolveAffected);
+assert.equal(resolveAffected.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+assert.equal(resolveAffected.env?.ISSUE_NUMBER, "${{ github.event.issue.number }}");
 assert.match(resolveAffected.run ?? "", /issues\/\$\{ISSUE_NUMBER\}\/timeline/);
 assert.match(resolveAffected.run ?? "", /cross-referenced/);
-assert.match(resolveAffected.run ?? "", /pull_request/);
-assert.match(resolveAffected.run ?? "", /draft/);
-assert.match(resolveAffected.run ?? "", /base\.ref/);
+assert.match(resolveAffected.run ?? "", /source\.issue\.pull_request/);
+assert.match(resolveAffected.run ?? "", /source\.issue\.state == "open"/);
+assert.match(resolveAffected.run ?? "", /\.draft/);
+assert.match(resolveAffected.run ?? "", /\.base\.ref/);
+assert.match(resolveAffected.run ?? "", /\.head\.sha/);
+assert.match(resolveAffected.run ?? "", /BASE_REF" == "main"/);
+assert.match(resolveAffected.run ?? "", /DRAFT" == "false"/);
 
 const appToken = step("Mint dedicated trusted-enforcement App token");
 assert.ok(appToken);
@@ -90,5 +82,8 @@ assert.match(
 
 assert.doesNotMatch(source, /^\s{2}actions:\s*write\s*$/m);
 assert.doesNotMatch(source, /workflow_dispatch:/);
+assert.doesNotMatch(source, /npm\s+(?:ci|install|test|run)\b/);
+assert.doesNotMatch(source, /uses:\s*\.\//,
+  "issue invalidation must not execute candidate or repository code");
 
 console.log("P3 linked-issue authority freshness contract passed");
