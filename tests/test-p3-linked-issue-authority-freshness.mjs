@@ -58,8 +58,11 @@ assert.match(resolveAffected.run ?? "", /source\.issue\.state == "open"/);
 assert.match(resolveAffected.run ?? "", /\.draft/);
 assert.match(resolveAffected.run ?? "", /\.base\.ref/);
 assert.match(resolveAffected.run ?? "", /\.head\.sha/);
-assert.match(resolveAffected.run ?? "", /BASE_REF" == "main"/);
-assert.match(resolveAffected.run ?? "", /DRAFT" == "false"/);
+assert.match(resolveAffected.run ?? "", /PR_BODY/);
+assert.match(resolveAffected.run ?? "", /Fixes\|Closes\|Resolves\|Part\\s\+of/);
+assert.match(resolveAffected.run ?? "", /REPOSITORY/);
+assert.match(resolveAffected.run ?? "", /BASE_REF" != "main"/);
+assert.match(resolveAffected.run ?? "", /DRAFT" != "false"/);
 
 const appToken = step("Mint dedicated trusted-enforcement App token");
 assert.ok(appToken);
