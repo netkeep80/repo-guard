@@ -59,7 +59,7 @@ if (typeof validationModule.createPolicyNormalizationContext === "function" && t
   assert.equal(normalized.policy?.packs, undefined, "pack syntax must disappear from normalized policy");
   assert.deepEqual(normalized.constraintProgram.map((entry) => entry.key), expectedProgram.map((entry) => entry.key));
   assert.deepEqual(normalized.provenance.packs, ["requirements-strict"]);
-  assert.match(normalized.provenance.schemaAuthority, /^repo-guard@3\.1\.0\|/);
+  assert.match(normalized.provenance.schemaAuthority, /^repo-guard@3\.1\.1\|/);
   assert.strictEqual(context.validatorFor("repoPolicy"), context.validatorFor("repoPolicy"), "compiled validator must be reused within one context");
 
   const firstRuntime = validationModule.loadPolicyRuntimeFromObject(roots, rawPolicy, { quiet: true });
