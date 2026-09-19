@@ -20,6 +20,32 @@ const workflowDocument = parseDocument(workflowSource);
 assert.equal(workflowDocument.errors.length, 0);
 const workflow = workflowDocument.toJS();
 
+const authoritySensitivePrEvents = [
+  "edited",
+  "opened",
+  "ready_for_review",
+  "reopened",
+  "synchronize",
+];
+assert.deepEqual(
+  [...(workflow.on?.pull_request?.types ?? [])].sort(),
+  authoritySensitivePrEvents,
+  "CI must re-evaluate authority-bearing PR metadata edits",
+);
+
+const trustedWorkflowSource = readFileSync(
+  resolve(root, ".github/workflows/trusted-enforcement.yml"),
+  "utf8",
+);
+const trustedWorkflowDocument = parseDocument(trustedWorkflowSource);
+assert.equal(trustedWorkflowDocument.errors.length, 0);
+const trustedWorkflow = trustedWorkflowDocument.toJS();
+assert.deepEqual(
+  [...(trustedWorkflow.on?.pull_request_target?.types ?? [])].sort(),
+  authoritySensitivePrEvents,
+  "trusted enforcement must re-evaluate authority-bearing PR metadata edits",
+);
+
 assert.deepEqual(Object.keys(workflow.jobs ?? {}).sort(), ["smoke-pack", "validate"]);
 const validate = workflow.jobs?.validate;
 const smokePack = workflow.jobs?.["smoke-pack"];

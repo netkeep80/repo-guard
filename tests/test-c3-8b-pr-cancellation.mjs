@@ -19,7 +19,7 @@ assert.deepEqual(workflow.on?.push?.branches, ["main"]);
 assert.deepEqual(workflow.on?.pull_request?.branches, ["main"]);
 assert.deepEqual(
   [...(workflow.on?.pull_request?.types ?? [])].sort(),
-  ["opened", "ready_for_review", "reopened", "synchronize"],
+  ["edited", "opened", "ready_for_review", "reopened", "synchronize"],
 );
 assert.deepEqual(Object.keys(workflow.concurrency ?? {}).sort(), ["cancel-in-progress", "group"]);
 assert.equal(
