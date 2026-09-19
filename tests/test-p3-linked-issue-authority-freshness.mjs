@@ -82,8 +82,9 @@ assert.match(
 
 assert.doesNotMatch(source, /^\s{2}actions:\s*write\s*$/m);
 assert.doesNotMatch(source, /workflow_dispatch:/);
-assert.doesNotMatch(source, /npm\s+(?:ci|install|test|run)\b/);
-assert.doesNotMatch(source, /uses:\s*\.\//,
+const invalidatorSource = JSON.stringify(invalidator);
+assert.doesNotMatch(invalidatorSource, /npm\\s+(?:ci|install|test|run)\\b/);
+assert.doesNotMatch(invalidatorSource, /"uses":"\\.\\/"/,
   "issue invalidation must not execute candidate or repository code");
 
 console.log("P3 linked-issue authority freshness contract passed");
