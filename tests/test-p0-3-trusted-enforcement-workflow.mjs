@@ -10,6 +10,11 @@ assert.equal(existsSync(workflowPath), true, "trusted enforcement workflow must 
 const workflow = readFileSync(workflowPath, "utf8");
 
 assert.match(workflow, /pull_request_target:\s*\n/, "trusted enforcement must run from base-owned pull_request_target");
+assert.match(
+  workflow,
+  /types:\s*\[opened, synchronize, reopened, ready_for_review, edited\]/,
+  "trusted enforcement must refresh authority-bearing PR metadata edits",
+);
 assert.doesNotMatch(workflow, /^\s*pull_request:\s*$/m, "trusted enforcement must not be sourced from pull_request candidate workflow");
 assert.match(workflow, /^\s{2}trusted-enforcement:\s*$/m, "trusted workflow must have a distinct producer job");
 assert.doesNotMatch(workflow, /^\s{2}validate:\s*$/m, "ordinary GitHub Actions validate must not be mistaken for the trusted branch gate");
