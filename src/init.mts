@@ -39,7 +39,7 @@ export function validateExplicitActionRef(ref: unknown, version: unknown) {
 const workflow = (mode: string, ref: string) => `name: Проверка политики repo-guard
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
     branches: [main]
 permissions:
   contents: read
