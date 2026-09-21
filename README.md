@@ -128,4 +128,6 @@ npm test
 npm run compression:metrics
 ```
 
+Самоприменение: [`tests/test-c3-4b-self-host-exemplar.mjs`](tests/test-c3-4b-self-host-exemplar.mjs); исключения: [`docs/self-hosting-coverage.json`](docs/self-hosting-coverage.json).
+
 Новая блокирующая возможность должна начинаться с реального контрпримера и требования продукта. Удаление лишней проверки — такое же улучшение, как добавление нужной. Единый план развития — [#518](https://github.com/netkeep80/repo-guard/issues/518).
