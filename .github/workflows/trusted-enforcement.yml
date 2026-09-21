@@ -185,26 +185,26 @@ jobs:
           done < "$AFFECTED_PATH"
 
       - name: Checkout accepted enforcement source for unambiguous refresh
-        if: \${{ steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' }}
+        if: ${{ steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' }}
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Acquire exact single-PR refresh evidence
-        if: \${{ steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' }}
+        if: ${{ steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' }}
         id: refresh-evidence
         env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          AFFECTED_PATH: \${{ steps.affected.outputs.path }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AFFECTED_PATH: ${{ steps.affected.outputs.path }}
         run: |
           set -euo pipefail
           IFS="$(printf '\t')" read -r PR_NUMBER EXPECTED_HEAD_SHA < "$AFFECTED_PATH"
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
           [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
 
-          PR_JSON="\${RUNNER_TEMP}/linked-issue-refresh-pr.json"
-          gh api "repos/\${GITHUB_REPOSITORY}/pulls/\${PR_NUMBER}" > "$PR_JSON"
+          PR_JSON="${RUNNER_TEMP}/linked-issue-refresh-pr.json"
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > "$PR_JSON"
           DRAFT="$(jq -r '.draft' "$PR_JSON")"
           BASE_REF="$(jq -r '.base.ref' "$PR_JSON")"
           CURRENT_HEAD="$(jq -r '.head.sha' "$PR_JSON")"
@@ -214,18 +214,18 @@ jobs:
 
           git fetch --no-tags --prune origin \
             "+refs/heads/main:refs/remotes/origin/main" \
-            "+refs/pull/\${PR_NUMBER}/head:refs/remotes/pull/\${PR_NUMBER}/head" \
-            "+refs/pull/\${PR_NUMBER}/merge:refs/remotes/pull/\${PR_NUMBER}/merge"
-          OBSERVED_HEAD="$(git rev-parse refs/remotes/pull/\${PR_NUMBER}/head)"
-          MERGE_SHA="$(git rev-parse refs/remotes/pull/\${PR_NUMBER}/merge)"
-          MERGE_BASE="$(git rev-parse "\${MERGE_SHA}^1")"
-          MERGE_HEAD="$(git rev-parse "\${MERGE_SHA}^2")"
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head" \
+            "+refs/pull/${PR_NUMBER}/merge:refs/remotes/pull/${PR_NUMBER}/merge"
+          OBSERVED_HEAD="$(git rev-parse refs/remotes/pull/${PR_NUMBER}/head)"
+          MERGE_SHA="$(git rev-parse refs/remotes/pull/${PR_NUMBER}/merge)"
+          MERGE_BASE="$(git rev-parse "${MERGE_SHA}^1")"
+          MERGE_HEAD="$(git rev-parse "${MERGE_SHA}^2")"
           CURRENT_BASE="$(git rev-parse refs/remotes/origin/main)"
           test "$OBSERVED_HEAD" = "$EXPECTED_HEAD_SHA"
           test "$MERGE_HEAD" = "$EXPECTED_HEAD_SHA"
           test "$MERGE_BASE" = "$CURRENT_BASE"
 
-          EVENT_PATH="\${RUNNER_TEMP}/linked-issue-refresh-pull-request.json"
+          EVENT_PATH="${RUNNER_TEMP}/linked-issue-refresh-pull-request.json"
           jq -n \
             --argjson number "$PR_NUMBER" \
             --arg baseSha "$CURRENT_BASE" \
@@ -248,7 +248,7 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Re-evaluate accepted repo-guard on unchanged PR head
-        if: \${{ steps.affected.outputs.count == '1' && steps.refresh-evidence.outcome == 'success' }}
+        if: ${{ steps.affected.outputs.count == '1' && steps.refresh-evidence.outcome == 'success' }}
         id: refresh-enforcement
         continue-on-error: true
         uses: ./
@@ -256,15 +256,15 @@ jobs:
           mode: check-pr
           enforcement: blocking
         env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          GITHUB_EVENT_PATH: \${{ steps.refresh-evidence.outputs.event_path }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_PATH: ${{ steps.refresh-evidence.outputs.event_path }}
 
       - name: Publish refreshed trusted enforcement result
-        if: \${{ always() && steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' && steps.refresh-evidence.outcome == 'success' }}
+        if: ${{ always() && steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' && steps.refresh-evidence.outcome == 'success' }}
         env:
-          GH_TOKEN: \${{ steps.app-token.outputs.token }}
-          HEAD_SHA: \${{ steps.refresh-evidence.outputs.head_sha }}
-          ENFORCEMENT_OUTCOME: \${{ steps.refresh-enforcement.outcome }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD_SHA: ${{ steps.refresh-evidence.outputs.head_sha }}
+          ENFORCEMENT_OUTCOME: ${{ steps.refresh-enforcement.outcome }}
         run: |
           set -euo pipefail
           if [[ "$ENFORCEMENT_OUTCOME" == "success" ]]; then
@@ -274,16 +274,16 @@ jobs:
             STATE=failure
             DESCRIPTION="linked issue changed; accepted repo-guard rejected unchanged PR head"
           fi
-          gh api --method POST "repos/\${GITHUB_REPOSITORY}/statuses/\${HEAD_SHA}" \
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${HEAD_SHA}" \
             -f state="$STATE" \
             -f context=trusted-enforcement \
             -f description="$DESCRIPTION" \
-            -f target_url="\${GITHUB_SERVER_URL}/\${GITHUB_REPOSITORY}/actions/runs/\${GITHUB_RUN_ID}"
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
       - name: Enforce refreshed trusted result
-        if: \${{ always() && steps.affected.outputs.count == '1' && steps.refresh-evidence.outcome == 'success' }}
+        if: ${{ always() && steps.affected.outputs.count == '1' && steps.refresh-evidence.outcome == 'success' }}
         env:
-          ENFORCEMENT_OUTCOME: \${{ steps.refresh-enforcement.outcome }}
+          ENFORCEMENT_OUTCOME: ${{ steps.refresh-enforcement.outcome }}
         run: |
           set -euo pipefail
           test "$ENFORCEMENT_OUTCOME" = "success"
