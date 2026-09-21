@@ -49,7 +49,11 @@ describe("repo-guard init", () => {
     assert.doesNotMatch(workflow, /netkeep80\/repo-guard@main/);
     assert.match(workflow, /fetch-depth: 0/);
     assert.match(workflow, /mode: check-pr/);
+    assert.ok(workflow.includes("types: [opened, edited, synchronize, reopened, ready_for_review]"));
     assert.match(workflow, /GH_TOKEN/);
+    assert.ok(workflow.includes("permissions:\n  contents: read\n  pull-requests: read\n  issues: read"));
+    assert.doesNotMatch(workflow, /(?:actions|checks|statuses): write/);
+    assert.doesNotMatch(workflow, /pull-requests: write/);
     const pr = readFileSync(join(dir, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8");
     assert.match(pr, /Намерение изменения/);
     assert.match(pr, /repo-guard-yaml/);
