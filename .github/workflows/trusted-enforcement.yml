@@ -259,6 +259,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_EVENT_PATH: ${{ steps.refresh-evidence.outputs.event_path }}
 
+      - name: Report linked-issue refresh machine result
+        if: ${{ always() && steps.affected.outputs.count == '1' && steps.refresh-evidence.outcome == 'success' }}
+        env:
+          REFRESH_RESULT: ${{ steps.refresh-enforcement.outputs.result }}
+          REFRESH_SUMMARY: ${{ steps.refresh-enforcement.outputs.summary }}
+          REFRESH_OUTCOME: ${{ steps.refresh-enforcement.outcome }}
+        run: |
+          printf 'refresh result=%s\n' "$REFRESH_RESULT"
+          printf 'refresh outcome=%s\n' "$REFRESH_OUTCOME"
+          printf 'refresh summary=%s\n' "$REFRESH_SUMMARY"
+
       - name: Publish refreshed trusted enforcement result
         if: ${{ always() && steps.affected.outputs.count == '1' && steps.app-token.outcome == 'success' && steps.refresh-evidence.outcome == 'success' }}
         env:
