@@ -13,8 +13,9 @@ import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/r
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"];
+function githubEventPath() { return process.env.RG_EVENT_PATH || process.env.GITHUB_EVENT_PATH; }
 export function loadGitHubEvent() {
-    const eventPath = process.env.GITHUB_EVENT_PATH;
+    const eventPath = githubEventPath();
     if (!eventPath)
         return { ok: false, error: "no_event", message: "GITHUB_EVENT_PATH not set; not running in GitHub Actions" };
     try {
@@ -34,7 +35,7 @@ function cliAvailable(command) { try {
 catch {
     return false;
 } }
-export function checkPrerequisites() { return [!process.env.GITHUB_EVENT_PATH && "GITHUB_EVENT_PATH env var (set automatically by GitHub Actions)", !cliAvailable("git") && "git CLI (required for diff analysis)"].filter(Boolean); }
+export function checkPrerequisites() { return [!githubEventPath() && "RG_EVENT_PATH/GITHUB_EVENT_PATH event file", !cliAvailable("git") && "git CLI (required for diff analysis)"].filter(Boolean); }
 export const checkIssueFallbackPrerequisites = () => cliAvailable("gh") ? [] : ["gh CLI (required for linked issue fallback)"];
 export function resolvePRChangeIntentFacts({ prBody, issueBody = null, linkedIssueCount = null }) {
     const linkedIssues = extractLinkedIssueNumbers(prBody), grantResult = extractGovernanceGrant(issueBody), prResult = extractChangeIntent(prBody), common = { linkedIssues, grantResult };
