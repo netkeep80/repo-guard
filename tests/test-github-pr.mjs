@@ -49,9 +49,13 @@ function run(root, body, extraEnv = {}) {
 
 describe("GitHub event and ChangeIntent resolution", () => {
   it("fails cleanly outside GitHub Actions", () => {
-    const saved = process.env.GITHUB_EVENT_PATH; delete process.env.GITHUB_EVENT_PATH;
+    const saved = process.env.GITHUB_EVENT_PATH, savedOverride = process.env.RG_EVENT_PATH;
+    delete process.env.GITHUB_EVENT_PATH; delete process.env.RG_EVENT_PATH;
     try { assert.equal(loadGitHubEvent().error, "no_event"); }
-    finally { if (saved === undefined) delete process.env.GITHUB_EVENT_PATH; else process.env.GITHUB_EVENT_PATH = saved; }
+    finally {
+      if (saved === undefined) delete process.env.GITHUB_EVENT_PATH; else process.env.GITHUB_EVENT_PATH = saved;
+      if (savedOverride === undefined) delete process.env.RG_EVENT_PATH; else process.env.RG_EVENT_PATH = savedOverride;
+    }
   });
 
   it("reads pull_request event data", () => {
@@ -60,6 +64,27 @@ describe("GitHub event and ChangeIntent resolution", () => {
     process.env.GITHUB_EVENT_PATH = path;
     try { const event = loadGitHubEvent(); assert.equal(event.ok, true); assert.equal(event.prNumber, 7); assert.equal(event.baseRef, "main"); assert.equal(event.repoFullName, "owner/repo"); }
     finally { if (saved === undefined) delete process.env.GITHUB_EVENT_PATH; else process.env.GITHUB_EVENT_PATH = saved; rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("prefers explicit RG_EVENT_PATH over ambient GitHub event context", () => {
+    const root = mkdtempSync(join(tmpdir(), "rg-event-override-"));
+    const ambient = join(root, "issue-event.json"), override = join(root, "pr-event.json");
+    const savedGitHub = process.env.GITHUB_EVENT_PATH, savedOverride = process.env.RG_EVENT_PATH;
+    writeFileSync(ambient, JSON.stringify({ issue: { number: 9 } }));
+    writeFileSync(override, JSON.stringify({ pull_request: { number: 11, base: { sha: "base", ref: "main" }, head: { sha: "head" }, body: "Part of #9" }, repository: { full_name: "owner/repo" } }));
+    process.env.GITHUB_EVENT_PATH = ambient;
+    process.env.RG_EVENT_PATH = override;
+    try {
+      const event = loadGitHubEvent();
+      assert.equal(event.ok, true);
+      assert.equal(event.prNumber, 11);
+      assert.equal(event.head, "head");
+      assert.equal(event.repoFullName, "owner/repo");
+    } finally {
+      if (savedGitHub === undefined) delete process.env.GITHUB_EVENT_PATH; else process.env.GITHUB_EVENT_PATH = savedGitHub;
+      if (savedOverride === undefined) delete process.env.RG_EVENT_PATH; else process.env.RG_EVENT_PATH = savedOverride;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("uses PR ChangeIntent and linked-issue GovernanceGrant independently", () => {
