@@ -34,6 +34,12 @@ assert.equal(String(smokeNode?.with?.["node-version"]), "20", "package minimum m
 const action = yaml("action.yml");
 const actionNode = action.runs?.steps?.find((step) => step.name === "Set up Node.js");
 assert.equal(actionNode?.uses, PIN.setupNode, "public composite Action must not hide mutable transitive setup-node authority");
+const actionRun = action.runs?.steps?.find((step) => step.name === "Run repo-guard")?.run ?? "";
+assert.match(actionRun, /machineResult === "error"/, "valid machine errors need a dedicated summary branch");
+assert.match(actionRun, /report\?\.reasonCode/, "Action summary must preserve structured error reasonCode");
+assert.match(actionRun, /report\?\.message/, "Action summary must preserve structured error message");
+assert.match(actionRun, /replace\(\/\\\\s\+\/g, " "\)/, "Action summary diagnostics must remain single-line");
+assert.match(actionRun, /structured report unavailable or inconsistent/, "invalid reports must keep the generic fail-closed adapter error");
 
 const trusted = yaml(".github/workflows/trusted-enforcement.yml");
 const trustedUses = (trusted.jobs?.["trusted-enforcement"]?.steps ?? []).map((step) => step.uses).filter(Boolean);
