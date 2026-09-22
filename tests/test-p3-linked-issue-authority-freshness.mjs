@@ -125,7 +125,8 @@ assert.equal(refreshEvaluator["continue-on-error"], true);
 assert.equal(refreshEvaluator.with?.mode, "check-pr");
 assert.equal(refreshEvaluator.with?.enforcement, "blocking");
 assert.equal(refreshEvaluator.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
-assert.equal(refreshEvaluator.env?.GITHUB_EVENT_PATH, "${{ steps.refresh-evidence.outputs.event_path }}");
+assert.equal(refreshEvaluator.env?.RG_EVENT_PATH, "${{ steps.refresh-evidence.outputs.event_path }}");
+assert.equal(refreshEvaluator.env?.GITHUB_EVENT_PATH, undefined, "workflow must not attempt to override reserved GitHub event context");
 assert.match(refreshEvaluator.if ?? "", /steps\.affected\.outputs\.count == '1'/);
 assert.match(refreshEvaluator.if ?? "", /steps\.refresh-evidence\.outcome == 'success'/);
 

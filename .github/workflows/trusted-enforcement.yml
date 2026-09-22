@@ -257,7 +257,7 @@ jobs:
           enforcement: blocking
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_EVENT_PATH: ${{ steps.refresh-evidence.outputs.event_path }}
+          RG_EVENT_PATH: ${{ steps.refresh-evidence.outputs.event_path }}
 
       - name: Report linked-issue refresh machine result
         if: ${{ always() && steps.affected.outputs.count == '1' && steps.refresh-evidence.outcome == 'success' }}

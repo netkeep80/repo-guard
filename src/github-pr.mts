@@ -32,8 +32,9 @@ interface InitialCheck { name: string; check: unknown; }
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
 
+function githubEventPath(): string | undefined { return process.env.RG_EVENT_PATH || process.env.GITHUB_EVENT_PATH; }
 export function loadGitHubEvent(): GitHubEventResult {
-  const eventPath = process.env.GITHUB_EVENT_PATH;
+  const eventPath = githubEventPath();
   if (!eventPath) return { ok: false, error: "no_event", message: "GITHUB_EVENT_PATH not set; not running in GitHub Actions" };
   try {
     const event: unknown = JSON.parse(readFileSync(eventPath, "utf-8")), pr = (event as GitHubEventProjection).pull_request;
@@ -42,7 +43,7 @@ export function loadGitHubEvent(): GitHubEventResult {
   } catch (error: unknown) { return { ok: false, error: "event_read_error", message: `Cannot read event file: ${(error as Error).message}` }; }
 }
 function cliAvailable(command: string): boolean { try { execFileSync(command, ["--version"], { encoding: "utf-8", stdio: "pipe" }); return true; } catch { return false; } }
-export function checkPrerequisites(): string[] { return [!process.env.GITHUB_EVENT_PATH && "GITHUB_EVENT_PATH env var (set automatically by GitHub Actions)", !cliAvailable("git") && "git CLI (required for diff analysis)"].filter(Boolean) as string[]; }
+export function checkPrerequisites(): string[] { return [!githubEventPath() && "RG_EVENT_PATH/GITHUB_EVENT_PATH event file", !cliAvailable("git") && "git CLI (required for diff analysis)"].filter(Boolean) as string[]; }
 export const checkIssueFallbackPrerequisites = (): string[] => cliAvailable("gh") ? [] : ["gh CLI (required for linked issue fallback)"];
 
 export function resolvePRChangeIntentFacts({ prBody, issueBody = null, linkedIssueCount = null }: ResolvePRChangeIntentInput): PRChangeIntentFacts {
