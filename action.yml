@@ -137,9 +137,14 @@ runs:
           : "passed";
         const number = (value) => Number.isFinite(value) ? value : 0;
         const mode = report?.mode === "advisory" ? "advisory" : report?.mode === "blocking" ? "blocking" : "unknown";
+        const oneLine = (value, fallback) => typeof value === "string" && value.trim()
+          ? value.replace(/\\s+/g, " ").trim()
+          : fallback;
         const summary = invalid
           ? "repo-guard: error; structured report unavailable or inconsistent"
-          : `repo-guard: ${result}; ${number(report.passed)} passed, ${number(report.violationCount)} violation(s), ${number(report.warnings)} warning(s); mode ${mode}`;
+          : machineResult === "error"
+            ? `repo-guard: error; ${oneLine(report?.reasonCode, "unknown_reason")}; ${oneLine(report?.message, "no diagnostic message")}; mode ${mode}`
+            : `repo-guard: ${result}; ${number(report.passed)} passed, ${number(report.violationCount)} violation(s), ${number(report.warnings)} warning(s); mode ${mode}`;
         appendFileSync(outputPath, `result=${result}\nsummary=${summary}\n`);
         if (invalid) process.exitCode = 1;
         else process.exitCode = report.exitCode;
