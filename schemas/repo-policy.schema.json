@@ -287,6 +287,21 @@
                 "default": 1
               }
             }
+          },
+          {
+            "type": "object",
+            "required": ["id", "glob", "mode", "require_regex"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "glob": { "type": "string" },
+              "mode": { "const": "required_regex" },
+              "require_regex": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              }
+            }
           }
         ]
       }
