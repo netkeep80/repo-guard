@@ -83,6 +83,35 @@ const readFile = (path) => ({
   "src/a.mjs": "one\ntwo\n", "docs/new.md": "# Same\nalpha beta gamma delta\n", "README.md": "# Same\nalpha beta gamma delta\n",
 }[path]);
 
+const requiredContentRule = [{
+  id: "readme-required",
+  glob: "README.md",
+  mode: "required_regex",
+  require_regex: ["Contract Observatory", "Roman"],
+}];
+const requiredRead = (path) => ({
+  "README.md": "# README\nContract Observatory\nRoman\n",
+}[path]);
+assert.equal(checkContentRules(
+  [{ path: "src/a.mjs", status: "modified", addedLines: ["x"], deletedLines: [] }],
+  requiredContentRule,
+  { trackedFiles: ["README.md", "src/a.mjs"], readFile: requiredRead },
+).length, 0, "required_regex checks repository state even when target is unchanged");
+const missingRequired = checkContentRules(
+  [{ path: "src/a.mjs", status: "modified", addedLines: ["x"], deletedLines: [] }],
+  [{ ...requiredContentRule[0], require_regex: ["Missing"] }],
+  { trackedFiles: ["README.md", "src/a.mjs"], readFile: requiredRead },
+);
+assert.equal(missingRequired.length, 1);
+assert.equal(missingRequired[0].reason, "missing_pattern");
+const deletedRequired = checkContentRules(
+  [{ path: "README.md", status: "deleted", addedLines: [], deletedLines: ["old"] }],
+  requiredContentRule,
+  { trackedFiles: ["README.md"], readFile: requiredRead },
+);
+assert.equal(deletedRequired.length, 1);
+assert.equal(deletedRequired[0].reason, "missing_target");
+
 const advisory = checkAdvisoryTextRules([{ path: "docs/new.md", status: "added", addedLines: [] }], { canonical_files: ["README.md"], warn_on_similarity_above: 0.5 }, { allFiles: ["README.md", "docs/new.md"], readFile });
 assert.equal(advisory.advisory, true);
 assert.equal(advisory.matches.length, 1);
