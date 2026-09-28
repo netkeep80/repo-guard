@@ -17,13 +17,14 @@ const acceptedBuildRecord = {
 };
 
 const contentIdentity = (path) => ({
-  source: "content_identity",
+  source: "repository",
   selector: {
+    kind: "content_identity",
     path,
     snapshot: "state",
     algorithm: "sha256",
   },
-  type: "string",
+  type: "scalar",
 });
 
 function context(files) {
@@ -40,7 +41,7 @@ function classify(files, record = acceptedBuildRecord) {
   assert.equal(
     source.ok,
     true,
-    "P4 RED: repo-guard lacks a generic content_identity FactRef for projection freshness",
+    "P4 RED: repo-guard lacks a generic repository content_identity selector for projection freshness",
   );
 
   const target = readFact(context(files), contentIdentity("derived/output.md"));
