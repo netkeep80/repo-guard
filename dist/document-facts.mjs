@@ -1,4 +1,4 @@
-import { parseDocument } from "yaml";
+import { createHash } from "node:crypto";\nimport { parseDocument } from "yaml";
 import { selectPaths } from "./diff/classification.mjs";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
@@ -193,6 +193,55 @@ function snapshotFactSource(context, selector) {
     const exhaustive = selector.format;
     return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
+function contentIdentityFactSource(context, ref) {
+    const selector = ref.selector;
+    const path = normalizeRepositoryPathFact(selector.path);
+    if (selector.algorithm !== "sha256") {
+        failDocumentFact("fact_type_mismatch", 'content identity requires algorithm "sha256"');
+    }
+    let raw;
+    if (selector.snapshot === "state") {
+        try {
+            if (context.readFile)
+                raw = context.readFile(path);
+            else if (context.documents)
+                raw = context.documents.text(path);
+            else
+                return failDocumentFact("document_read_error", `content identity reader unavailable for "${path}"`);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return failDocumentFact("document_read_error", `content identity read failed for "${path}": ${collapseMessage(message)}`);
+        }
+    }
+    else {
+        const label = selector.snapshot === "base" ? "BASE" : "HEAD";
+        const revision = selector.snapshot === "base" ? context.baseRef : context.headRef;
+        if (!revision)
+            return failDocumentFact("document_read_error", `missing ${label} ref`);
+        const useCache = Boolean(context.snapshotDocuments && context.repositoryIdentity);
+        if (!useCache && !context.readFileAtRef) {
+            return failDocumentFact("document_read_error", `snapshot identity reader unavailable for ${label}`);
+        }
+        const identity = useCache
+            ? { repository: context.repositoryIdentity, sha: revision }
+            : null;
+        try {
+            raw = identity
+                ? context.snapshotDocuments.read(identity, path)
+                : context.readFileAtRef(revision, path);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return failDocumentFact("document_read_error", `${label} identity read failed: ${collapseMessage(message)}`);
+        }
+    }
+    if (raw === null || raw === undefined) {
+        return failDocumentFact("document_read_error", `content identity source "${path}" is unavailable`);
+    }
+    const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf8");
+    return createHash("sha256").update(bytes).digest("hex");
+}
 function matchesPathScope(path, patterns, excludePaths) {
     return (!patterns?.length || matchesAny(path, patterns)) && !(excludePaths?.length && matchesAny(path, excludePaths));
 }
@@ -317,6 +366,9 @@ export function readFact(context, ref) {
         }
         if (ref.source === "repository")
             return repositoryFact(context, ref);
+        if (ref.source === "content_identity") {
+            return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref), "string", pointer) };
+        }
         if (ref.source === "change_intent") {
             return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
         }
