@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";\nimport { parseDocument } from "yaml";
+import { createHash } from "node:crypto";
+import { parseDocument } from "yaml";
 import type { DiffFileStatus, ParsedDiffFile } from "./diff/parser.mjs";
 import { selectPaths } from "./diff/classification.mjs";
 import type { ImmutableSnapshotDocumentCache, ImmutableSnapshotIdentity } from "./immutable-snapshot-cache.mjs";
