@@ -194,8 +194,7 @@ function snapshotFactSource(context, selector) {
     const exhaustive = selector.format;
     return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
-function contentIdentityFactSource(context, ref) {
-    const selector = ref.selector;
+function contentIdentityFactSource(context, selector) {
     const path = normalizeRepositoryPathFact(selector.path);
     if (selector.algorithm !== "sha256") {
         failDocumentFact("fact_type_mismatch", 'content identity requires algorithm "sha256"');
@@ -338,6 +337,9 @@ function repositoryPathMetric(context, selector) {
 function repositoryFact(context, ref) {
     if (ref.selector.kind === "path_metric")
         return repositoryPathMetric(context, ref.selector);
+    if (ref.selector.kind === "content_identity") {
+        return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref.selector), "scalar") };
+    }
     const byType = context.anchors?.byType;
     if (!byType)
         return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
@@ -367,9 +369,6 @@ export function readFact(context, ref) {
         }
         if (ref.source === "repository")
             return repositoryFact(context, ref);
-        if (ref.source === "content_identity") {
-            return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref), "string", pointer) };
-        }
         if (ref.source === "change_intent") {
             return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
         }
