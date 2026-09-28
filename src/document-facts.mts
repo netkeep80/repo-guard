@@ -70,7 +70,7 @@ export type DocumentScalar = string | number | boolean | null;
 export type NormalizedDocumentFact = DocumentScalar | string[];
 export type FactSnapshot = "state" | "base" | "head";
 export type FactFormat = "json" | "yaml" | "plain_text";
-export type FactSource = "document" | "diff" | "repository" | "change_intent" | "content_identity";
+export type FactSource = "document" | "diff" | "repository" | "change_intent";
 export type DiffFactSelector =
   | {
       kind: "changed_paths";
@@ -97,15 +97,16 @@ export type RepositoryFactSelector =
       population: "tracked" | "changed";
       metric: "lines" | "bytes" | "files";
       aggregate: "max" | "sum";
+    }
+  | {
+      kind: "content_identity";
+      path: string;
+      snapshot: FactSnapshot;
+      algorithm: "sha256";
     };
 export type ChangeIntentFactSelector = {
   pointer: string;
   projection?: DocumentProjection;
-};
-export type ContentIdentityFactSelector = {
-  path: string;
-  snapshot: FactSnapshot;
-  algorithm: "sha256";
 };
 export type DocumentFactErrorCode =
   | "malformed_pointer"
@@ -124,7 +125,6 @@ export type FactRef =
     }
   | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType }
   | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "scalar" }
-  | { source: "content_identity"; selector: ContentIdentityFactSelector; type: "string" }
   | { source: "change_intent"; selector: ChangeIntentFactSelector; type: DocumentFactType };
 
 type DocumentRef = Extract<FactRef, { source: "document" }>;
@@ -395,9 +395,8 @@ function snapshotFactSource(context: FactReadContext, selector: DocumentSelector
 
 function contentIdentityFactSource(
   context: FactReadContext,
-  ref: Extract<FactRef, { source: "content_identity" }>,
+  selector: Extract<RepositoryFactSelector, { kind: "content_identity" }>,
 ): string {
-  const selector = ref.selector;
   const path = normalizeRepositoryPathFact(selector.path);
   if (selector.algorithm !== "sha256") {
     failDocumentFact("fact_type_mismatch", 'content identity requires algorithm "sha256"');
@@ -535,6 +534,9 @@ function repositoryPathMetric(context: FactReadContext, selector: Extract<Reposi
 
 function repositoryFact(context: FactReadContext, ref: Extract<FactRef, { source: "repository" }>): DocumentFactResult {
   if (ref.selector.kind === "path_metric") return repositoryPathMetric(context, ref.selector);
+  if (ref.selector.kind === "content_identity") {
+    return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref.selector), "scalar") };
+  }
   const byType = context.anchors?.byType;
   if (!byType) return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
   const instances = (byType[ref.selector.anchor_type] || []).map(anchorFactInstance).sort(compareAnchorFactInstances);
@@ -562,9 +564,6 @@ export function readFact(context: FactReadContext, ref: FactRef): DocumentFactRe
       return { ok: true, value: normalizeDocumentFact(diffFactSource(context, ref.selector), ref.type, pointer) };
     }
     if (ref.source === "repository") return repositoryFact(context, ref);
-    if (ref.source === "content_identity") {
-      return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref), "string", pointer) };
-    }
     if (ref.source === "change_intent") {
       return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
     }
