@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import * as documentFacts from "../dist/document-facts.mjs";
+import * as documentFacts from "../dist/markdown-structure.mjs";
 
 const requiredApi = [
   "resolveMarkdownAnchor",
