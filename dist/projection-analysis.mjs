@@ -1,7 +1,7 @@
 import { readFact } from "./document-facts.mjs";
 import { evaluatePrimitiveRelation } from "./checks/relation-kernel.mjs";
 import { lowerProjectionVerification } from "./projection-lowering.mjs";
-import { normalizeProjectionModel } from "./projection-model.mjs";
+import { normalizeProjectionModel, } from "./projection-model.mjs";
 function changedSourceFact(path) {
     return {
         source: "diff",
