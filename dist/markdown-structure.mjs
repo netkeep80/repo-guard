@@ -1,0 +1,262 @@
+import { parseMarkdown } from "./document-facts.mjs";
+function failMarkdownStructure(message) {
+    throw new Error(`markdown structural model: ${message}`);
+}
+function assertSafeMarkdownId(value, name) {
+    if (!/^[A-Za-z][A-Za-z0-9._-]*$/.test(value)) {
+        failMarkdownStructure(`${name} must be a stable ASCII identifier: ${value}`);
+    }
+}
+function indexedMarkdownLines(source, markdown) {
+    const result = [];
+    let offset = 0;
+    for (let index = 0; index < markdown.lines.length; index++) {
+        const newline = source.indexOf("\n", offset);
+        const rawEnd = newline < 0 ? source.length : newline;
+        const contentEnd = rawEnd > offset && source[rawEnd - 1] === "\r" ? rawEnd - 1 : rawEnd;
+        const end = newline < 0 ? source.length : newline + 1;
+        result.push({ line: index + 1, start: offset, end, text: source.slice(offset, contentEnd) });
+        offset = end;
+    }
+    return result;
+}
+function markdownStructure(source) {
+    const markdown = parseMarkdown(source);
+    if (markdown.errors.length) {
+        failMarkdownStructure(markdown.errors.map((error) => error.message).join("; "));
+    }
+    const lines = indexedMarkdownLines(source, markdown);
+    const visibleLines = new Set(markdown.proseLines.map((line) => line.line));
+    const anchors = [];
+    const seen = new Set();
+    const anchorPattern = /<a\s+id=["']([^"']+)["']\s*><\/a>/gi;
+    for (const line of lines) {
+        if (!visibleLines.has(line.line))
+            continue;
+        for (const match of line.text.matchAll(anchorPattern)) {
+            const anchorId = match[1];
+            assertSafeMarkdownId(anchorId, "anchorId");
+            if (seen.has(anchorId))
+                failMarkdownStructure(`anchor is duplicated: ${anchorId}`);
+            seen.add(anchorId);
+            anchors.push({ anchorId, line: line.line, start: line.start });
+        }
+    }
+    return { source, markdown, lines, visibleLines, anchors };
+}
+function headingPathAt(markdown, targetLine) {
+    const stack = [];
+    for (const heading of markdown.headings) {
+        if (heading.line > targetLine)
+            break;
+        while (stack.length && stack[stack.length - 1].level >= heading.level)
+            stack.pop();
+        stack.push(heading);
+    }
+    return [...stack];
+}
+function anchorIn(context, anchorId) {
+    assertSafeMarkdownId(anchorId, "anchorId");
+    const anchor = context.anchors.find((candidate) => candidate.anchorId === anchorId);
+    if (!anchor)
+        failMarkdownStructure(`anchor not found: ${anchorId}`);
+    return {
+        anchorId,
+        line: anchor.line,
+        offset: anchor.start,
+        headingPath: headingPathAt(context.markdown, anchor.line),
+    };
+}
+function headingAfterAnchor(context, anchorLine) {
+    const headings = new Map(context.markdown.headings.map((heading) => [heading.line, heading]));
+    for (const prose of context.markdown.proseLines) {
+        if (prose.line <= anchorLine)
+            continue;
+        const trimmed = prose.text.trim();
+        if (!trimmed || /^<!--.*-->$/.test(trimmed))
+            continue;
+        return headings.get(prose.line) ?? null;
+    }
+    return null;
+}
+function lineAt(context, line) {
+    const indexed = context.lines[line - 1];
+    if (!indexed)
+        failMarkdownStructure(`line ${line} is unavailable`);
+    return indexed;
+}
+function nodeIn(context, anchorId) {
+    const anchor = anchorIn(context, anchorId);
+    const heading = headingAfterAnchor(context, anchor.line);
+    if (!heading)
+        return null;
+    const nextHeading = context.markdown.headings.find((candidate) => candidate.line > heading.line && candidate.level <= heading.level);
+    let end = context.source.length;
+    if (nextHeading) {
+        const owningAnchors = context.anchors.filter((candidate) => {
+            if (candidate.line >= nextHeading.line)
+                return false;
+            return headingAfterAnchor(context, candidate.line)?.line === nextHeading.line;
+        });
+        if (owningAnchors.length > 1) {
+            failMarkdownStructure(`heading at line ${nextHeading.line} has multiple node anchors`);
+        }
+        end = owningAnchors[0]?.start ?? lineAt(context, nextHeading.line).start;
+    }
+    return {
+        anchorId,
+        anchorLine: anchor.line,
+        headingLine: heading.line,
+        heading,
+        headingPath: headingPathAt(context.markdown, heading.line),
+        start: anchor.offset,
+        end,
+        subtree: context.source.slice(anchor.offset, end),
+    };
+}
+export function resolveMarkdownAnchor(source, anchorId) {
+    return anchorIn(markdownStructure(source), anchorId);
+}
+export function listMarkdownAnchorIds(source) {
+    return markdownStructure(source).anchors.map((anchor) => anchor.anchorId);
+}
+export function readMarkdownNode(source, anchorId) {
+    const node = nodeIn(markdownStructure(source), anchorId);
+    if (!node)
+        failMarkdownStructure(`${anchorId}: anchor is not a canonical tree node`);
+    return node;
+}
+export function listMarkdownChildren(source, parentAnchorId) {
+    const context = markdownStructure(source);
+    const parent = nodeIn(context, parentAnchorId);
+    if (!parent)
+        failMarkdownStructure(`${parentAnchorId}: anchor is not a canonical tree node`);
+    return context.anchors
+        .map((anchor) => nodeIn(context, anchor.anchorId))
+        .filter((node) => node !== null
+        && node.anchorId !== parent.anchorId
+        && node.start > parent.start
+        && node.start < parent.end
+        && node.heading.level === parent.heading.level + 1)
+        .sort((left, right) => left.start - right.start);
+}
+function validateMarkdownChild(child) {
+    assertSafeMarkdownId(child.anchorId, "child.anchorId");
+    if (!child.title.trim() || /[\r\n]/.test(child.title)) {
+        failMarkdownStructure("child title must be one non-empty line");
+    }
+    const payload = child.payload ?? "";
+    if (/^[ \t]{0,3}#{1,6}(?:[ \t]+|$)/m.test(payload) || /<a\s+id=["']/i.test(payload)) {
+        failMarkdownStructure("child payload cannot contain headings or stable anchors");
+    }
+}
+function markdownNewline(source) {
+    return source.includes("\r\n") ? "\r\n" : "\n";
+}
+export function insertMarkdownChild(args) {
+    const { source, mode, parentAnchorId, child } = args;
+    if (mode === "source")
+        failMarkdownStructure(`${parentAnchorId}: SOURCE document is read-only`);
+    if (mode === "generated")
+        failMarkdownStructure(`${parentAnchorId}: whole-file GENERATED mode is not supported`);
+    validateMarkdownChild(child);
+    const context = markdownStructure(source);
+    if (context.anchors.some((anchor) => anchor.anchorId === child.anchorId)) {
+        failMarkdownStructure(`anchor is duplicated: ${child.anchorId}`);
+    }
+    const parent = nodeIn(context, parentAnchorId);
+    if (!parent)
+        failMarkdownStructure(`${parentAnchorId}: anchor is not a canonical tree node`);
+    if (parent.heading.level >= 6) {
+        failMarkdownStructure(`${parentAnchorId}: heading level 6 cannot have a Markdown child`);
+    }
+    const newline = markdownNewline(source);
+    const payload = child.payload?.trimEnd();
+    const block = [
+        `<a id="${child.anchorId}"></a>`,
+        `${"#".repeat(parent.heading.level + 1)} ${child.title.trim()}`,
+        ...(payload ? [payload] : []),
+    ].join(newline);
+    const prefix = parent.end > 0 && !source.slice(0, parent.end).endsWith("\n") ? newline : "";
+    const inserted = `${prefix}${block}${newline}${newline}`;
+    const updated = source.slice(0, parent.end) + inserted + source.slice(parent.end);
+    if (updated.slice(0, parent.end) !== source.slice(0, parent.end)
+        || updated.slice(parent.end + inserted.length) !== source.slice(parent.end)) {
+        failMarkdownStructure("insert child modified bytes outside insertion point");
+    }
+    const updatedContext = markdownStructure(updated);
+    for (const anchor of context.anchors)
+        anchorIn(updatedContext, anchor.anchorId);
+    const created = nodeIn(updatedContext, child.anchorId);
+    if (!created || created.heading.level !== parent.heading.level + 1) {
+        failMarkdownStructure("inserted child has invalid heading level");
+    }
+    return updated;
+}
+function validateOwnedBlockSpec(block) {
+    assertSafeMarkdownId(block.blockId, "blockId");
+    if (!block.beginMarker || !block.endMarker || block.beginMarker === block.endMarker) {
+        failMarkdownStructure(`${block.blockId}: owned block markers must be distinct non-empty tokens`);
+    }
+    if (/[\r\n]/.test(block.beginMarker) || /[\r\n]/.test(block.endMarker)) {
+        failMarkdownStructure(`${block.blockId}: owned block markers must be single-line tokens`);
+    }
+}
+export function readOwnedMarkdownBlock(source, block) {
+    validateOwnedBlockSpec(block);
+    const context = markdownStructure(source);
+    const begin = block.beginMarker.trim();
+    const end = block.endMarker.trim();
+    const starts = context.lines.filter((line) => context.visibleLines.has(line.line) && line.text.trim() === begin);
+    const ends = context.lines.filter((line) => context.visibleLines.has(line.line) && line.text.trim() === end);
+    if (!starts.length && !ends.length)
+        return null;
+    if (starts.length !== 1 || ends.length !== 1) {
+        failMarkdownStructure(`${block.blockId}: malformed owned block start=${starts.length} end=${ends.length}`);
+    }
+    if (ends[0].line <= starts[0].line) {
+        failMarkdownStructure(`${block.blockId}: owned block end must follow begin marker`);
+    }
+    return {
+        blockId: block.blockId,
+        start: starts[0].start,
+        end: ends[0].end,
+        content: source.slice(starts[0].start, ends[0].end),
+    };
+}
+export function replaceOwnedMarkdownBlock(args) {
+    const { source, mode, anchorId, block, generatedContent } = args;
+    if (mode === "source")
+        failMarkdownStructure(`${anchorId}: SOURCE document is read-only`);
+    if (mode === "generated")
+        failMarkdownStructure(`${anchorId}: whole-file GENERATED mode is not supported`);
+    validateOwnedBlockSpec(block);
+    const context = markdownStructure(source);
+    const anchor = anchorIn(context, anchorId);
+    const newline = markdownNewline(source);
+    const generated = generatedContent.trimEnd();
+    const wrapped = [block.beginMarker, generated, block.endMarker].join(newline);
+    const existing = readOwnedMarkdownBlock(source, block);
+    if (!existing) {
+        const anchorLine = lineAt(context, anchor.line);
+        const needsLeadingNewline = anchorLine.end === source.length && !source.endsWith("\n");
+        const inserted = `${needsLeadingNewline ? newline : ""}${wrapped}${newline}`;
+        const insertAt = anchorLine.end;
+        const updated = source.slice(0, insertAt) + inserted + source.slice(insertAt);
+        const created = readOwnedMarkdownBlock(updated, block);
+        if (!created)
+            failMarkdownStructure(`${block.blockId}: inserted owned block cannot be resolved`);
+        return updated;
+    }
+    if (existing.start < anchor.offset) {
+        failMarkdownStructure(`${block.blockId}: owned block precedes its anchor ${anchorId}`);
+    }
+    const replacement = wrapped + (existing.content.endsWith("\n") ? newline : "");
+    const updated = source.slice(0, existing.start) + replacement + source.slice(existing.end);
+    const beforeOutside = source.slice(0, existing.start) + source.slice(existing.end);
+    const afterOutside = updated.slice(0, existing.start) + updated.slice(existing.start + replacement.length);
+    if (beforeOutside !== afterOutside) {
+        failMarkdownStructure(`${block.blockId}: bytes outside owned block changed`);
+    }
+    return updated;
+}
