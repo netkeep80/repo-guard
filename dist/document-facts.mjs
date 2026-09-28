@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";\nimport { parseDocument } from "yaml";
+import { createHash } from "node:crypto";
+import { parseDocument } from "yaml";
 import { selectPaths } from "./diff/classification.mjs";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
