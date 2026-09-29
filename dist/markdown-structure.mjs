@@ -154,6 +154,36 @@ export function listMarkdownChildren(source, parentAnchorId, options = {}) {
         && node.heading.level === parent.heading.level + 1)
         .sort((left, right) => left.start - right.start);
 }
+export function listMarkdownSections(source, options = {}) {
+    const context = markdownStructure(source);
+    const nodesByHeadingLine = new Map();
+    for (const anchor of context.anchors) {
+        const node = nodeIn(context, anchor.anchorId, options);
+        if (!node)
+            continue;
+        if (nodesByHeadingLine.has(node.headingLine)) {
+            failMarkdownStructure(`heading at line ${node.headingLine} has multiple canonical node anchors`);
+        }
+        nodesByHeadingLine.set(node.headingLine, node);
+    }
+    return context.markdown.headings.map((heading, index) => {
+        const node = nodesByHeadingLine.get(heading.line);
+        const next = context.markdown.headings.slice(index + 1).find((candidate) => candidate.level <= heading.level);
+        const start = node?.start ?? lineAt(context, heading.line).start;
+        const end = next
+            ? (nodesByHeadingLine.get(next.line)?.start ?? lineAt(context, next.line).start)
+            : source.length;
+        return {
+            diagnosticLine: heading.line,
+            heading,
+            headingPath: headingPathAt(context.markdown, heading.line),
+            anchorId: node?.anchorId ?? null,
+            start,
+            end,
+            content: source.slice(start, end),
+        };
+    });
+}
 function validateMarkdownChild(child) {
     assertSafeMarkdownId(child.anchorId, "child.anchorId");
     if (!child.title.trim() || /[\r\n]/.test(child.title)) {
