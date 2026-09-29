@@ -89,6 +89,18 @@ assert.equal(
   "without explicit transparency the heading still exists as a section but the separated anchor must not silently own it",
 );
 
+const sequentialAddresses = [
+  '<a id="address-only"></a>',
+  '<a id="owner"></a>',
+  "## Owned heading",
+].join("\n");
+const sequentialSections = listMarkdownSections(sequentialAddresses);
+assert.equal(
+  sequentialSections[0]?.anchorId,
+  "owner",
+  "an intervening standalone anchor keeps the earlier anchor address-only rather than making ownership ambiguous",
+);
+
 const ambiguous = [
   '<a id="first"></a><a id="second"></a>',
   "## Shared heading",
