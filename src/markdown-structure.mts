@@ -20,6 +20,16 @@ export interface MarkdownNode {
   subtree: string;
 }
 
+export interface MarkdownSection {
+  diagnosticLine: number;
+  heading: MarkdownHeading;
+  headingPath: MarkdownHeading[];
+  anchorId: string | null;
+  start: number;
+  end: number;
+  content: string;
+}
+
 export interface MarkdownChildSpec {
   anchorId: string;
   title: string;
@@ -183,6 +193,15 @@ function nodeIn(
   const heading = headingAfterAnchor(context, anchor.line, options);
   if (!heading) return null;
 
+  const owningAnchors = context.anchors.filter(
+    (candidate) =>
+      candidate.line < heading.line
+      && headingAfterAnchor(context, candidate.line, options)?.line === heading.line,
+  );
+  if (owningAnchors.length > 1) {
+    failMarkdownStructure(`heading at line ${heading.line} has multiple node anchors`);
+  }
+
   const nextHeading = context.markdown.headings.find(
     (candidate) => candidate.line > heading.line && candidate.level <= heading.level,
   );
@@ -245,6 +264,46 @@ export function listMarkdownChildren(
       && node.start < parent.end
       && node.heading.level === parent.heading.level + 1)
     .sort((left, right) => left.start - right.start);
+}
+
+export function listMarkdownSections(
+  source: string,
+  options: MarkdownStructureOptions = {},
+): MarkdownSection[] {
+  const context = markdownStructure(source);
+  const nodesByHeadingLine = new Map<number, MarkdownNode>();
+
+  for (const anchor of context.anchors) {
+    const node = nodeIn(context, anchor.anchorId, options);
+    if (!node) continue;
+    if (nodesByHeadingLine.has(node.headingLine)) {
+      failMarkdownStructure(
+        `heading at line ${node.headingLine} has multiple canonical node anchors`,
+      );
+    }
+    nodesByHeadingLine.set(node.headingLine, node);
+  }
+
+  return context.markdown.headings.map((heading, index) => {
+    const node = nodesByHeadingLine.get(heading.line);
+    const next = context.markdown.headings.slice(index + 1).find(
+      (candidate) => candidate.level <= heading.level,
+    );
+    const start = node?.start ?? lineAt(context, heading.line).start;
+    const end = next
+      ? (nodesByHeadingLine.get(next.line)?.start ?? lineAt(context, next.line).start)
+      : source.length;
+
+    return {
+      diagnosticLine: heading.line,
+      heading,
+      headingPath: headingPathAt(context.markdown, heading.line),
+      anchorId: node?.anchorId ?? null,
+      start,
+      end,
+      content: source.slice(start, end),
+    };
+  });
 }
 
 function validateMarkdownChild(child: MarkdownChildSpec): void {
