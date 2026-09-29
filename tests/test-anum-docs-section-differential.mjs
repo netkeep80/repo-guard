@@ -89,5 +89,15 @@ assert.equal(
   "without explicit transparency the heading still exists as a section but the separated anchor must not silently own it",
 );
 
+const ambiguous = [
+  '<a id="first"></a>',
+  '<a id="second"></a>',
+  "## Shared heading",
+].join("\n");
+assert.throws(
+  () => listMarkdownSections(ambiguous),
+  /multiple canonical node anchors|multiple.*anchors/i,
+  "multiple canonical anchors for one heading must fail closed",
+);
 
 console.log("anum_docs Markdown section differential fixture passed.");
