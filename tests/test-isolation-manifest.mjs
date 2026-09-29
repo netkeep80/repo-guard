@@ -72,6 +72,7 @@ const pureReadOnlyParallel = [
   "test-projection-analysis.mjs",
   "test-hybrid-owned-block-identity.mjs",
   "test-projection-self-host.mjs",
+  "test-projection-runtime-api.mjs",
   "test-anum-docs-mddb-differential.mjs",
   "test-anum-docs-section-differential.mjs",
   "test-release-observer-independence.mjs",
