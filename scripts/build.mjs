@@ -23,8 +23,26 @@ export function cleanBuild() {
   }
 
   rmSync(distRoot, { recursive: true, force: true });
-  for (const config of ["tsconfig.json", "tsconfig.projection-api.json"]) {
-    const result = spawnSync(process.execPath, [compiler, "--project", resolve(repositoryRoot, config)], {
+  const builds = [
+    ["--project", resolve(repositoryRoot, "tsconfig.json")],
+    [
+      "--target", "ES2022",
+      "--module", "NodeNext",
+      "--moduleResolution", "NodeNext",
+      "--rootDir", resolve(repositoryRoot, "src"),
+      "--outDir", distRoot,
+      "--strict",
+      "--noEmitOnError",
+      "--skipLibCheck",
+      "--types", "node",
+      "--declaration",
+      "--emitDeclarationOnly",
+      resolve(repositoryRoot, "src", "projection-api.mts"),
+    ],
+  ];
+
+  for (const args of builds) {
+    const result = spawnSync(process.execPath, [compiler, ...args], {
       cwd: repositoryRoot,
       stdio: "inherit",
     });
