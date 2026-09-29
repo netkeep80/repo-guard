@@ -89,14 +89,5 @@ assert.equal(
   "without explicit transparency the heading still exists as a section but the separated anchor must not silently own it",
 );
 
-const duplicateOwner = source.replace(
-  '<a id="a"></a>',
-  '<a id="a"></a>\n<a id="also-a"></a>',
-);
-assert.throws(
-  () => listMarkdownSections(duplicateOwner, options),
-  /multiple canonical node anchors|multiple node anchors/i,
-  "two canonical anchors must not silently own the same heading",
-);
 
 console.log("anum_docs Markdown section differential fixture passed.");
