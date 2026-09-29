@@ -38,6 +38,14 @@ export type NormalizedDocumentFact = DocumentScalar | string[];
 export type FactSnapshot = "state" | "base" | "head";
 export type FactFormat = "json" | "yaml" | "plain_text";
 export type FactSource = "document" | "diff" | "repository" | "change_intent";
+export interface MarkdownOwnedBlockIdentityRegion {
+  kind: "markdown_owned_block";
+  anchor_id: string;
+  block_id: string;
+  begin_marker: string;
+  end_marker: string;
+}
+
 export type DiffFactSelector =
   | {
       kind: "changed_paths";
@@ -52,14 +60,6 @@ export type DiffFactSelector =
       patterns?: readonly string[];
       exclude_paths?: readonly string[];
     };
-export interface MarkdownOwnedBlockIdentityRegion {
-  kind: "markdown_owned_block";
-  anchor_id: string;
-  block_id: string;
-  begin_marker: string;
-  end_marker: string;
-}
-
 export type RepositoryFactSelector =
   | {
       kind: "anchor_values";
