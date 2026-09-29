@@ -82,10 +82,11 @@ assert.deepEqual(
   [[1, "Root"], [2, "A"], [3, "A child without anchor"]],
 );
 
-assert.throws(
-  () => listMarkdownSections(source),
-  /a.*not a canonical|multiple canonical|anchor/i,
-  "without the explicit transparent block declaration section/node association must not silently change",
+const strictSections = listMarkdownSections(source);
+assert.equal(
+  strictSections.find((section) => section.heading.text === "A")?.anchorId,
+  null,
+  "without explicit transparency the heading still exists as a section but the separated anchor must not silently own it",
 );
 
 const duplicateOwner = source.replace(
