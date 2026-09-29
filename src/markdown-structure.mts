@@ -1,4 +1,4 @@
-import { parseMarkdown, type MarkdownDocument, type MarkdownHeading } from "./document-facts.mjs";
+import { parseMarkdown, type MarkdownDocument, type MarkdownHeading } from "./markdown-parser.mjs";
 
 export type MarkdownDocumentMode = "source" | "hybrid" | "generated";
 
