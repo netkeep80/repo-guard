@@ -80,11 +80,19 @@ function transparentLines(context, options) {
     }
     return result;
 }
+function isStandaloneAnchorLine(context, line) {
+    const indexed = context.lines[line - 1];
+    if (!indexed)
+        return false;
+    return /^<a\s+id=["'][^"']+["']\s*><\/a>$/.test(indexed.text.trim());
+}
 function headingAfterAnchor(context, anchorLine, options = {}) {
     const headings = new Map(context.markdown.headings.map((heading) => [heading.line, heading]));
     const transparent = transparentLines(context, options);
     for (const prose of context.markdown.proseLines) {
-        if (prose.line <= anchorLine || transparent.has(prose.line))
+        if (prose.line <= anchorLine
+            || transparent.has(prose.line)
+            || isStandaloneAnchorLine(context, prose.line))
             continue;
         const trimmed = prose.text.trim();
         if (!trimmed || /^<!--.*-->$/.test(trimmed))
@@ -104,6 +112,11 @@ function nodeIn(context, anchorId, options = {}) {
     const heading = headingAfterAnchor(context, anchor.line, options);
     if (!heading)
         return null;
+    const owningAnchors = context.anchors.filter((candidate) => candidate.line < heading.line
+        && headingAfterAnchor(context, candidate.line, options)?.line === heading.line);
+    if (owningAnchors.length > 1) {
+        failMarkdownStructure(`heading at line ${heading.line} has multiple node anchors`);
+    }
     const nextHeading = context.markdown.headings.find((candidate) => candidate.line > heading.line && candidate.level <= heading.level);
     let end = context.source.length;
     if (nextHeading) {
