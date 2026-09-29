@@ -90,8 +90,7 @@ assert.equal(
 );
 
 const ambiguous = [
-  '<a id="first"></a>',
-  '<a id="second"></a>',
+  '<a id="first"></a><a id="second"></a>',
   "## Shared heading",
 ].join("\n");
 assert.throws(
