@@ -99,6 +99,11 @@ function lineAt(context, line) {
         failMarkdownStructure(`line ${line} is unavailable`);
     return indexed;
 }
+function lineContentEnd(context, line) {
+    if (line.end <= line.start || context.source[line.end - 1] !== "\n")
+        return line.end;
+    return context.source[line.end - 2] === "\r" ? line.end - 2 : line.end - 1;
+}
 function nodeIn(context, anchorId, options = {}) {
     const anchor = anchorIn(context, anchorId);
     const heading = headingAfterAnchor(context, anchor.line, options);
@@ -265,11 +270,12 @@ function ownedBlockIn(context, block) {
     if (ends[0].line <= starts[0].line) {
         failMarkdownStructure(`${block.blockId}: owned block end must follow begin marker`);
     }
+    const endOffset = lineContentEnd(context, ends[0]);
     return {
         blockId: block.blockId,
         start: starts[0].start,
-        end: ends[0].end,
-        content: context.source.slice(starts[0].start, ends[0].end),
+        end: endOffset,
+        content: context.source.slice(starts[0].start, endOffset),
     };
 }
 export function readOwnedMarkdownBlock(source, block) {
