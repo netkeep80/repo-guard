@@ -26,6 +26,7 @@ export function cleanBuild() {
   const builds = [
     ["--project", resolve(repositoryRoot, "tsconfig.json")],
     [
+      "--ignoreConfig",
       "--target", "ES2022",
       "--module", "NodeNext",
       "--moduleResolution", "NodeNext",
