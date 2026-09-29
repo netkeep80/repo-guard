@@ -23,12 +23,14 @@ export function cleanBuild() {
   }
 
   rmSync(distRoot, { recursive: true, force: true });
-  const result = spawnSync(process.execPath, [compiler, "--project", resolve(repositoryRoot, "tsconfig.json")], {
-    cwd: repositoryRoot,
-    stdio: "inherit",
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  for (const config of ["tsconfig.json", "tsconfig.projection-api.json"]) {
+    const result = spawnSync(process.execPath, [compiler, "--project", resolve(repositoryRoot, config)], {
+      cwd: repositoryRoot,
+      stdio: "inherit",
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  }
 }
 
 if (resolve(process.argv[1] || "") === scriptPath) cleanBuild();
