@@ -117,9 +117,7 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 Снимок в [Обсерватории политики](https://netkeep80.github.io/repo-guard/) — производная проекция с временем наблюдения, не `authority` принятия. Правила выпуска находятся в [`RELEASING.md`](RELEASING.md).
 
-## Библиотека проекций
-
-Типизированная библиотечная поверхность для структурного Markdown и проверяемых проекций доступна через `repo-guard/dist/projection-api.mjs`; подробный контракт описан в [методике](docs/contract-development.md#библиотечная-поверхность-проекций).
+Типизированный API проекций доступен через `repo-guard/dist/projection-api.mjs`; контракт — в [методике](docs/contract-development.md#библиотечная-поверхность-проекций).
 
 ## Разработка самого repo-guard
 
