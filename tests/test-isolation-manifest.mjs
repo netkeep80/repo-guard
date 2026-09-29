@@ -130,6 +130,7 @@ const externalIntegrationSerial = [
   "test-release-integrity-identity.mjs",
   "test-release-ref.mjs",
   "test-release-transaction.mjs",
+  "test-projection-package-consumer.mjs",
   "test-typescript-source-cutover.mjs",
 ];
 
