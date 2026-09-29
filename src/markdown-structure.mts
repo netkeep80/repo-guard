@@ -43,6 +43,10 @@ export interface MarkdownOwnedBlock {
   content: string;
 }
 
+export interface MarkdownStructureOptions {
+  transparentOwnedBlocks?: readonly MarkdownOwnedBlockSpec[];
+}
+
 interface MarkdownIndexedLine {
   line: number;
   start: number;
