@@ -15,14 +15,23 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 const parserSourcePath = "src/markdown-parser.mts";
 const tsconfigPath = "tsconfig.json";
+const buildScriptPath = "scripts/build.mjs";
 const packagePath = "package.json";
+const packageLockPath = "package-lock.json";
 const parserTargetPath = "dist/markdown-parser.mjs";
 
 const parserSource = read(parserSourcePath);
 const tsconfig = read(tsconfigPath);
+const buildScript = read(buildScriptPath);
 const packageText = read(packagePath);
+const packageLockText = read(packageLockPath);
 const parserTarget = read(parserTargetPath);
 const packageJson = JSON.parse(packageText);
+const packageLock = JSON.parse(packageLockText);
+
+assert.equal(packageJson.scripts.build, "node scripts/build.mjs");
+assert.equal(packageJson.scripts["check:dist"], "node scripts/check-dist.mjs");
+assert.equal(packageLock.packages["node_modules/typescript"].version, packageJson.devDependencies.typescript);
 
 const model = normalizeProjectionModel({
   schema: "repo-guard/projection-model/v0",
@@ -35,9 +44,21 @@ const model = normalizeProjectionModel({
       algorithm: "sha256",
     },
     {
+      id: "build-script",
+      kind: "repository_content",
+      path: buildScriptPath,
+      algorithm: "sha256",
+    },
+    {
       id: "tsconfig",
       kind: "repository_content",
       path: tsconfigPath,
+      algorithm: "sha256",
+    },
+    {
+      id: "typescript-lock",
+      kind: "repository_content",
+      path: packageLockPath,
       algorithm: "sha256",
     },
     {
@@ -70,7 +91,7 @@ const build = {
     contract_id: model.generator.contract_id,
     tool_identity: `typescript@${packageJson.devDependencies.typescript}`,
   },
-  configuration_digest: sha256(tsconfig),
+  configuration_digest: sha256([tsconfig, buildScript, packageLockText].join("\n---\n")),
   output_identity: {
     algorithm: "sha256",
     digest: sha256(parserTarget),
