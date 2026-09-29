@@ -67,10 +67,24 @@ function anchorIn(context, anchorId) {
         headingPath: headingPathAt(context.markdown, anchor.line),
     };
 }
-function headingAfterAnchor(context, anchorLine) {
+function transparentLines(context, options) {
+    const result = new Set();
+    for (const block of options.transparentOwnedBlocks ?? []) {
+        const owned = ownedBlockIn(context, block);
+        if (!owned)
+            continue;
+        for (const line of context.lines) {
+            if (line.start >= owned.start && line.start < owned.end)
+                result.add(line.line);
+        }
+    }
+    return result;
+}
+function headingAfterAnchor(context, anchorLine, options = {}) {
     const headings = new Map(context.markdown.headings.map((heading) => [heading.line, heading]));
+    const transparent = transparentLines(context, options);
     for (const prose of context.markdown.proseLines) {
-        if (prose.line <= anchorLine)
+        if (prose.line <= anchorLine || transparent.has(prose.line))
             continue;
         const trimmed = prose.text.trim();
         if (!trimmed || /^<!--.*-->$/.test(trimmed))
@@ -85,9 +99,9 @@ function lineAt(context, line) {
         failMarkdownStructure(`line ${line} is unavailable`);
     return indexed;
 }
-function nodeIn(context, anchorId) {
+function nodeIn(context, anchorId, options = {}) {
     const anchor = anchorIn(context, anchorId);
-    const heading = headingAfterAnchor(context, anchor.line);
+    const heading = headingAfterAnchor(context, anchor.line, options);
     if (!heading)
         return null;
     const nextHeading = context.markdown.headings.find((candidate) => candidate.line > heading.line && candidate.level <= heading.level);
@@ -96,7 +110,7 @@ function nodeIn(context, anchorId) {
         const owningAnchors = context.anchors.filter((candidate) => {
             if (candidate.line >= nextHeading.line)
                 return false;
-            return headingAfterAnchor(context, candidate.line)?.line === nextHeading.line;
+            return headingAfterAnchor(context, candidate.line, options)?.line === nextHeading.line;
         });
         if (owningAnchors.length > 1) {
             failMarkdownStructure(`heading at line ${nextHeading.line} has multiple node anchors`);
@@ -120,19 +134,19 @@ export function resolveMarkdownAnchor(source, anchorId) {
 export function listMarkdownAnchorIds(source) {
     return markdownStructure(source).anchors.map((anchor) => anchor.anchorId);
 }
-export function readMarkdownNode(source, anchorId) {
-    const node = nodeIn(markdownStructure(source), anchorId);
+export function readMarkdownNode(source, anchorId, options = {}) {
+    const node = nodeIn(markdownStructure(source), anchorId, options);
     if (!node)
         failMarkdownStructure(`${anchorId}: anchor is not a canonical tree node`);
     return node;
 }
-export function listMarkdownChildren(source, parentAnchorId) {
+export function listMarkdownChildren(source, parentAnchorId, options = {}) {
     const context = markdownStructure(source);
-    const parent = nodeIn(context, parentAnchorId);
+    const parent = nodeIn(context, parentAnchorId, options);
     if (!parent)
         failMarkdownStructure(`${parentAnchorId}: anchor is not a canonical tree node`);
     return context.anchors
-        .map((anchor) => nodeIn(context, anchor.anchorId))
+        .map((anchor) => nodeIn(context, anchor.anchorId, options))
         .filter((node) => node !== null
         && node.anchorId !== parent.anchorId
         && node.start > parent.start
@@ -202,9 +216,8 @@ function validateOwnedBlockSpec(block) {
         failMarkdownStructure(`${block.blockId}: owned block markers must be single-line tokens`);
     }
 }
-export function readOwnedMarkdownBlock(source, block) {
+function ownedBlockIn(context, block) {
     validateOwnedBlockSpec(block);
-    const context = markdownStructure(source);
     const begin = block.beginMarker.trim();
     const end = block.endMarker.trim();
     const starts = context.lines.filter((line) => context.visibleLines.has(line.line) && line.text.trim() === begin);
@@ -221,8 +234,11 @@ export function readOwnedMarkdownBlock(source, block) {
         blockId: block.blockId,
         start: starts[0].start,
         end: ends[0].end,
-        content: source.slice(starts[0].start, ends[0].end),
+        content: context.source.slice(starts[0].start, ends[0].end),
     };
+}
+export function readOwnedMarkdownBlock(source, block) {
+    return ownedBlockIn(markdownStructure(source), block);
 }
 export function replaceOwnedMarkdownBlock(args) {
     const { source, mode, anchorId, block, generatedContent } = args;
