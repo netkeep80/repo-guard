@@ -44,6 +44,16 @@ const markdown = [
 
 const owned = readOwnedMarkdownBlock(markdown, blockSpec);
 assert.ok(owned, "existing generic MDDB must resolve the owned block fixture");
+assert.equal(
+  owned.content,
+  [begin, "> generated v1", end].join("\n"),
+  "owned-region bytes must stop at the end marker and exclude its following line terminator",
+);
+assert.equal(
+  owned.end,
+  markdown.indexOf(end) + end.length,
+  "owned-region end offset must point immediately after the end marker",
+);
 const ownedDigest = sha256(owned.content);
 assert.notEqual(
   ownedDigest,
