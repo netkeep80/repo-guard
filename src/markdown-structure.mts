@@ -162,12 +162,6 @@ function transparentLines(
   return result;
 }
 
-function isStandaloneAnchorLine(context: MarkdownStructureContext, line: number): boolean {
-  const indexed = context.lines[line - 1];
-  if (!indexed) return false;
-  return /^<a\s+id=["'][^"']+["']\s*><\/a>$/.test(indexed.text.trim());
-}
-
 function headingAfterAnchor(
   context: MarkdownStructureContext,
   anchorLine: number,
@@ -176,11 +170,7 @@ function headingAfterAnchor(
   const headings = new Map(context.markdown.headings.map((heading) => [heading.line, heading]));
   const transparent = transparentLines(context, options);
   for (const prose of context.markdown.proseLines) {
-    if (
-      prose.line <= anchorLine
-      || transparent.has(prose.line)
-      || isStandaloneAnchorLine(context, prose.line)
-    ) continue;
+    if (prose.line <= anchorLine || transparent.has(prose.line)) continue;
     const trimmed = prose.text.trim();
     if (!trimmed || /^<!--.*-->$/.test(trimmed)) continue;
     return headings.get(prose.line) ?? null;
