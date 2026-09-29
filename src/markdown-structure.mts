@@ -184,6 +184,11 @@ function lineAt(context: MarkdownStructureContext, line: number): MarkdownIndexe
   return indexed;
 }
 
+function lineContentEnd(context: MarkdownStructureContext, line: MarkdownIndexedLine): number {
+  if (line.end <= line.start || context.source[line.end - 1] !== "\n") return line.end;
+  return context.source[line.end - 2] === "\r" ? line.end - 2 : line.end - 1;
+}
+
 function nodeIn(
   context: MarkdownStructureContext,
   anchorId: string,
@@ -403,11 +408,12 @@ function ownedBlockIn(
     failMarkdownStructure(`${block.blockId}: owned block end must follow begin marker`);
   }
 
+  const endOffset = lineContentEnd(context, ends[0]!);
   return {
     blockId: block.blockId,
     start: starts[0]!.start,
-    end: ends[0]!.end,
-    content: context.source.slice(starts[0]!.start, ends[0]!.end),
+    end: endOffset,
+    content: context.source.slice(starts[0]!.start, endOffset),
   };
 }
 
