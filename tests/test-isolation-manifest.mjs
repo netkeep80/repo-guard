@@ -70,6 +70,7 @@ const pureReadOnlyParallel = [
   "test-projection-model-contract.mjs",
   "test-projection-lowering.mjs",
   "test-projection-analysis.mjs",
+  "test-projection-self-host-witness.mjs",
   "test-hybrid-owned-block-identity.mjs",
   "test-release-observer-independence.mjs",
   "test-report-renderers-boundary.mjs",
