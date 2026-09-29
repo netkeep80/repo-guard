@@ -89,16 +89,39 @@ function normalizeTarget(value) {
     if (input.locator === undefined)
         fail(label, "hybrid target requires a locator");
     const locator = object(input.locator, `${label}.locator`);
-    fields(locator, ["kind", "anchor_id"], `${label}.locator`);
-    if (locator.kind !== "markdown_anchor") {
-        fail(`${label}.locator.kind`, 'must be "markdown_anchor"');
+    if (locator.kind === "markdown_anchor") {
+        fields(locator, ["kind", "anchor_id"], `${label}.locator`);
+        return {
+            path,
+            ownership: "hybrid",
+            locator: {
+                kind: "markdown_anchor",
+                anchor_id: anchorIdentifier(locator.anchor_id, `${label}.locator.anchor_id`),
+            },
+        };
+    }
+    if (locator.kind !== "markdown_owned_block") {
+        fail(`${label}.locator.kind`, 'must be "markdown_anchor" or "markdown_owned_block"');
+    }
+    fields(locator, ["kind", "anchor_id", "block_id", "begin_marker", "end_marker"], `${label}.locator`);
+    const blockId = anchorIdentifier(locator.block_id, `${label}.locator.block_id`);
+    const beginMarker = stringValue(locator.begin_marker, `${label}.locator.begin_marker`);
+    const endMarker = stringValue(locator.end_marker, `${label}.locator.end_marker`);
+    if (/[\r\n]/.test(beginMarker) || /[\r\n]/.test(endMarker)) {
+        fail(`${label}.locator`, "owned block markers must be single-line tokens");
+    }
+    if (beginMarker === endMarker) {
+        fail(`${label}.locator`, "owned block markers must be distinct");
     }
     return {
         path,
         ownership: "hybrid",
         locator: {
-            kind: "markdown_anchor",
+            kind: "markdown_owned_block",
             anchor_id: anchorIdentifier(locator.anchor_id, `${label}.locator.anchor_id`),
+            block_id: blockId,
+            begin_marker: beginMarker,
+            end_marker: endMarker,
         },
     };
 }

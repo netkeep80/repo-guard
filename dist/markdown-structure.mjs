@@ -1,4 +1,4 @@
-import { parseMarkdown } from "./document-facts.mjs";
+import { parseMarkdown } from "./markdown-parser.mjs";
 function failMarkdownStructure(message) {
     throw new Error(`markdown structural model: ${message}`);
 }
