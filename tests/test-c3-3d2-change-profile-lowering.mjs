@@ -241,7 +241,17 @@ console.log("\n--- selection is fail-closed frontend compilation, governance rem
     profile: { allow_surfaces: ["code"] },
   });
   expect("missing change_type fails frontend compilation", compileChangeProfiles(selectionPolicy, null).some((item) => /declared change_type/.test(item.message)), true);
-  expect("unknown non-governance change_type fails frontend compilation", compileChangeProfiles(selectionPolicy, "unknown").some((item) => /not defined in change_profiles/.test(item.message)), true);
+  expect("ordinary unprofiled change_type is accepted by frontend compilation", compileChangeProfiles(selectionPolicy, "test").length, 0);
+  const unprofiledPolicy = policy({
+    surfaces: { code: ["src/**"] },
+    profile: { allow_surfaces: ["code"] },
+    diffRules: { max_new_files: 0 },
+  });
+  const unprofiledRuntime = runtimeConstraints(compileConstraintProgram(unprofiledPolicy, { change_type: "test" }));
+  expect("ordinary unprofiled change_type keeps global budget runtime", unprofiledRuntime
+    .some((item) => item.relation_id === "diff:max_new_files" && item.parameters?.max === 0), true);
+  expect("ordinary unprofiled change_type emits no specialized profile runtime", unprofiledRuntime
+    .some((item) => String(item.relation_id || "").startsWith("change-profile:")), false);
   expect("governance change_type is accepted by frontend compilation", compileChangeProfiles(selectionPolicy, "governance").length, 0);
   expect("governance change_type emits no ordinary profile runtime", runtimeConstraints(compileConstraintProgram(selectionPolicy, { change_type: "governance" }))
     .some((item) => item.kind === "change_profile" || String(item.relation_id || "").startsWith("change-profile:")), false);
