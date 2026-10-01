@@ -53,14 +53,25 @@ describe("trusted diff budget ceilings", () => {
     });
   }
 
-  it("keeps profile budgets as independent additional vetoes", () => {
-    const program = runtimeConstraints(compileConstraintProgram({
+  it("uses selected profile budgets as per-type overrides while intent can only tighten", () => {
+    const policy = {
       diff_rules: { max_new_files: 5 },
       paths: { forbidden: [], canonical_docs: [] },
       change_profiles: { bugfix: { budgets: { max_new_files: 2 } } },
-    }, { change_type: "bugfix", budgets: { max_new_files: 9 } }));
-    assert.equal(program.find((item) => item.key === "diff:max_new_files")?.parameters?.max, 5);
+    };
+    const program = runtimeConstraints(compileConstraintProgram(
+      policy,
+      { change_type: "bugfix", budgets: { max_new_files: 9 } },
+    ));
+    assert.equal(program.find((item) => item.key === "diff:max_new_files"), undefined);
     assert.equal(program.find((item) => item.key === "change-profile:bugfix:budget:max-new-files")?.parameters?.max, 2);
+
+    const tightened = runtimeConstraints(compileConstraintProgram(
+      policy,
+      { change_type: "bugfix", budgets: { max_new_files: 1 } },
+    ));
+    assert.equal(tightened.find((item) => item.key === "diff:max_new_files"), undefined);
+    assert.equal(tightened.find((item) => item.key === "change-profile:bugfix:budget:max-new-files")?.parameters?.max, 1);
   });
 
   it("reports policy, intent and effective limits through canonical rule results", () => {
