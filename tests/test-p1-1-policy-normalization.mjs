@@ -10,6 +10,7 @@ import { collectObservatorySnapshot } from "../scripts/observatory/collect.mjs";
 const validationModule = await import("../dist/runtime/validation.mjs");
 const packageRoot = resolve(".");
 const source = (path) => readFileSync(resolve(packageRoot, path), "utf8");
+const packageVersion = JSON.parse(source("package.json")).version;
 
 const doctorSource = source("src/doctor.mts");
 assert.doesNotMatch(doctorSource, /from "ajv"/, "doctor must not own an Ajv policy-validation path");
@@ -59,7 +60,7 @@ if (typeof validationModule.createPolicyNormalizationContext === "function" && t
   assert.equal(normalized.policy?.packs, undefined, "pack syntax must disappear from normalized policy");
   assert.deepEqual(normalized.constraintProgram.map((entry) => entry.key), expectedProgram.map((entry) => entry.key));
   assert.deepEqual(normalized.provenance.packs, ["requirements-strict"]);
-  assert.match(normalized.provenance.schemaAuthority, /^repo-guard@3\.2\.0\|/);
+  assert.equal(normalized.provenance.schemaAuthority.split("|", 1)[0], `repo-guard@${packageVersion}`);
   assert.strictEqual(context.validatorFor("repoPolicy"), context.validatorFor("repoPolicy"), "compiled validator must be reused within one context");
 
   const firstRuntime = validationModule.loadPolicyRuntimeFromObject(roots, rawPolicy, { quiet: true });
