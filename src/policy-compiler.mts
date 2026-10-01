@@ -53,8 +53,6 @@ export function compileChangeProfiles(policy: PolicyProjection = {}, selectedCha
     if (selectedChangeType === "governance") return errors;
     if (typeof selectedChangeType !== "string" || !selectedChangeType) {
       errors.push({ change_type: selectedChangeType, message: "change_profiles require a declared change_type" });
-    } else if (!Object.hasOwn(profiles, selectedChangeType)) {
-      errors.push({ change_type: selectedChangeType, message: `change_type "${selectedChangeType}" is not defined in change_profiles` });
     }
   }
   return errors;
