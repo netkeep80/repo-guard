@@ -30,24 +30,25 @@ function file(path, status = "modified", added = 1, deleted = 0) {
   };
 }
 
-function policy({ surfaces = {}, classes = {}, profile = {}, canonicalDocs = ["README.md"] } = {}) {
+function policy({ surfaces = {}, classes = {}, profile = {}, canonicalDocs = ["README.md"], diffRules = {} } = {}) {
   return {
     paths: {
       forbidden: [],
       canonical_docs: canonicalDocs,
       operational_paths: [],
     },
+    diff_rules: diffRules,
     surfaces,
     new_file_classes: classes,
     change_profiles: { feature: profile },
   };
 }
 
-function profileOutcome(policyValue, changeType, files) {
+function profileOutcome(policyValue, changeType, files, intent = {}) {
   try {
     const results = evaluateConstraintIR({
       policy: policyValue,
-      changeIntent: changeType === null ? null : { change_type: changeType },
+      changeIntent: changeType === null ? null : { change_type: changeType, ...intent },
       diff: { files: { checked: files } },
     }, { executionPhase: "transaction" });
     const profileChecks = results.filter((item) => item.name !== "forbidden-paths");
@@ -175,6 +176,62 @@ console.log("\n--- profile budgets reuse canonical diff metrics ---");
     profile: { budgets: { max_net_added_lines: 2 } },
   });
   expect("profile max_net_added_lines is enforced", profileOutcome(lineBudgetPolicy, "feature", [file("src/a.mjs", "modified", 3, 0)]).ok, false);
+}
+
+console.log("\n--- selected profile budgets override global defaults and intent can only tighten ---");
+{
+  const docsOverridePolicy = policy({
+    surfaces: { docs: ["docs/**"] },
+    profile: { budgets: { max_new_docs: 1 } },
+    diffRules: { max_new_docs: 0 },
+  });
+  expect("selected profile max_new_docs overrides global zero default", profileOutcome(
+    docsOverridePolicy,
+    "feature",
+    [file("docs/a.md", "added")],
+  ).ok, true);
+  expect("global max_new_docs still applies without selected profile", profileOutcome(
+    docsOverridePolicy,
+    null,
+    [file("docs/a.md", "added")],
+  ).ok, false);
+  expect("ChangeIntent can tighten selected max_new_docs override", profileOutcome(
+    docsOverridePolicy,
+    "feature",
+    [file("docs/a.md", "added")],
+    { budgets: { max_new_docs: 0 } },
+  ).ok, false);
+
+  const lineOverridePolicy = policy({
+    surfaces: { code: ["src/**"] },
+    profile: { budgets: { max_net_added_lines: 2300 } },
+    diffRules: { max_net_added_lines: 800 },
+  });
+  expect("selected profile max_net_added_lines overrides global default", profileOutcome(
+    lineOverridePolicy,
+    "feature",
+    [file("src/a.mjs", "modified", 2053, 0)],
+  ).ok, true);
+  expect("ChangeIntent can tighten selected line budget override", profileOutcome(
+    lineOverridePolicy,
+    "feature",
+    [file("src/a.mjs", "modified", 2053, 0)],
+    { budgets: { max_net_added_lines: 1500 } },
+  ).ok, false);
+
+  const inheritedFieldPolicy = policy({
+    surfaces: { code: ["src/**"] },
+    profile: { budgets: { max_net_added_lines: 10 } },
+    diffRules: { max_new_files: 0, max_net_added_lines: 800 },
+  });
+  expect("profile fields not overridden continue to inherit global defaults", profileOutcome(
+    inheritedFieldPolicy,
+    "feature",
+    [file("src/a.mjs", "added")],
+  ).ok, false);
+
+  const docsResults = profileOutcome(docsOverridePolicy, "feature", [file("docs/a.md", "added")]);
+  expect("overridden field has no duplicate top-level runtime constraint", docsResults.names.includes("canonical-docs-budget"), false);
 }
 
 console.log("\n--- selection is fail-closed frontend compilation, governance remains delegated ---");

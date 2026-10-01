@@ -123,6 +123,11 @@ function addSizeRuleRuntime(add, policy, rule, changeIntent) {
 export function compileConstraintProgram(policy = {}, changeIntent = null, options = {}) {
     const emitRuntime = options.emitRuntime !== false;
     const program = [], diff = policy.diff_rules || {}, budgets = changeIntent?.budgets || {};
+    const changeType = changeIntent?.change_type, profiles = object(policy.change_profiles);
+    const selectedProfile = changeType && changeType !== "governance" && Object.hasOwn(profiles, changeType)
+        ? object(profiles[changeType])
+        : null;
+    const profileBudgetOverrides = object(selectedProfile?.budgets);
     const add = (key, runtime = null, strictness = null) => program.push({ key, runtime: emitRuntime ? runtime : null, strictness });
     const forbidden = strings(policy.paths?.forbidden);
     add("paths:forbidden", primitiveRuntime("forbidden-paths", "paths:forbidden", "numeric_bound", {
@@ -142,6 +147,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
         ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
     ]) {
         const value = diff[field], intentLimit = budgets[field];
+        const profileOverridesField = typeof profileBudgetOverrides[field] === "number";
         const effective = typeof value === "number" && typeof intentLimit === "number"
             ? Math.min(value, intentLimit)
             : typeof value === "number"
@@ -149,7 +155,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
                 : typeof intentLimit === "number"
                     ? intentLimit
                     : undefined;
-        const runtime = effective === undefined ? null : primitiveRuntime(name, `diff:${field}`, "numeric_bound", {
+        const runtime = profileOverridesField || effective === undefined ? null : primitiveRuntime(name, `diff:${field}`, "numeric_bound", {
             source: diffFact("scalar", {
                 kind: "metric",
                 metric,
@@ -254,9 +260,8 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
             }));
         }
     }
-    const changeType = changeIntent?.change_type, profiles = object(policy.change_profiles);
-    if (changeType && changeType !== "governance" && Object.hasOwn(profiles, changeType)) {
-        const profile = object(profiles[changeType]);
+    if (changeType && selectedProfile) {
+        const profile = selectedProfile;
         const surfaceEntries = Object.entries(object(policy.surfaces)).map(([name, patterns]) => [name, strings(patterns)]);
         const classEntries = Object.entries(object(policy.new_file_classes)).map(([name, patterns]) => [name, strings(patterns)]);
         const addPathBound = (suffix, patterns, parameters, options = {}) => {
@@ -304,13 +309,22 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
             if (typeof newFiles.max_new_files === "number")
                 addMetricBound("new-files-max", "new_files", newFiles.max_new_files);
         }
-        const profileBudgets = object(profile.budgets);
-        if (typeof profileBudgets.max_new_docs === "number")
-            addMetricBound("budget:max-new-docs", "new_docs", profileBudgets.max_new_docs, strings(policy.paths?.canonical_docs));
-        if (typeof profileBudgets.max_new_files === "number")
-            addMetricBound("budget:max-new-files", "new_files", profileBudgets.max_new_files);
-        if (typeof profileBudgets.max_net_added_lines === "number")
-            addMetricBound("budget:max-net-added-lines", "net_added_lines", profileBudgets.max_net_added_lines);
+        const profileBudgets = profileBudgetOverrides;
+        const effectiveProfileBudget = (field) => {
+            const profileLimit = profileBudgets[field], intentLimit = budgets[field];
+            if (typeof profileLimit !== "number")
+                return undefined;
+            return typeof intentLimit === "number" ? Math.min(profileLimit, intentLimit) : profileLimit;
+        };
+        const maxNewDocs = effectiveProfileBudget("max_new_docs");
+        const maxNewFiles = effectiveProfileBudget("max_new_files");
+        const maxNetAddedLines = effectiveProfileBudget("max_net_added_lines");
+        if (maxNewDocs !== undefined)
+            addMetricBound("budget:max-new-docs", "new_docs", maxNewDocs, strings(policy.paths?.canonical_docs));
+        if (maxNewFiles !== undefined)
+            addMetricBound("budget:max-new-files", "new_files", maxNewFiles);
+        if (maxNetAddedLines !== undefined)
+            addMetricBound("budget:max-net-added-lines", "net_added_lines", maxNetAddedLines);
     }
     for (const group of array(policy.cochange_groups)) {
         const id = String(group.id ?? ""), owner = `cochange-group:${id}`, pointer = `/cochange_groups/${id}`;
