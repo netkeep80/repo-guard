@@ -16,6 +16,22 @@ function pointerOf(entry) {
     const pointer = entry?.strictness?.pointer;
     return typeof pointer === "string" && pointer ? pointer : null;
 }
+function policyPointersByConstraintKey(program) {
+    const pointers = new Map(), ambiguous = new Set();
+    for (const entry of program) {
+        const pointer = pointerOf(entry);
+        if (!pointer || ambiguous.has(entry.key))
+            continue;
+        const previous = pointers.get(entry.key);
+        if (previous && previous !== pointer) {
+            pointers.delete(entry.key);
+            ambiguous.add(entry.key);
+            continue;
+        }
+        pointers.set(entry.key, pointer);
+    }
+    return pointers;
+}
 function changedOnlyByParameters(base, head) {
     return base.kind === "primitive_relation"
         && head.kind === "primitive_relation"
@@ -58,7 +74,10 @@ export function buildStateObligationPlan(rawFacts) {
     if (policyDeltaAuthorized && !exactPolicyDeltaAuthorized)
         authorizationReasons.push("state_replacement_requires_exact_policy_delta_pointers");
     const baseProgram = compileConstraintProgram(basePolicy, null);
-    const headProgram = new Map(compileConstraintProgram(headPolicy, null).map((entry) => [entry.key, entry]));
+    const headProgramEntries = compileConstraintProgram(headPolicy, null);
+    const basePointers = policyPointersByConstraintKey(baseProgram);
+    const headPointers = policyPointersByConstraintKey(headProgramEntries);
+    const headProgram = new Map(headProgramEntries.filter((entry) => entry.runtime).map((entry) => [entry.key, entry]));
     const exactPointerSet = new Set(exactAuthorizedPointers), replaced = [];
     let baseStateCount = 0, baseTransactionCount = 0;
     for (const entry of baseProgram) {
@@ -69,10 +88,10 @@ export function buildStateObligationPlan(rawFacts) {
             baseTransactionCount++;
         if (phase !== "state" || !entry.runtime)
             continue;
-        const pointer = pointerOf(entry), headEntry = headProgram.get(entry.key), headRuntime = headEntry?.runtime || null;
+        const pointer = basePointers.get(entry.key) || null, headEntry = headProgram.get(entry.key), headRuntime = headEntry?.runtime || null;
         if (!pointer || !exactPointerSet.has(pointer) || !headRuntime || runtimePhase(headRuntime) !== "state")
             continue;
-        if (pointerOf(headEntry) !== pointer || !changedOnlyByParameters(entry.runtime, headRuntime))
+        if (headPointers.get(entry.key) !== pointer || !changedOnlyByParameters(entry.runtime, headRuntime))
             continue;
         replaced.push({
             key: entry.key,
