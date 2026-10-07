@@ -5,6 +5,7 @@ import { compileConstraintProgram } from "../dist/checks/constraint-program.mjs"
 const PIN_POINTER = "/document_relations/rules/pin";
 const PERMISSION_POINTER = "/document_relations/rules/permission";
 const TRANSITION_POINTER = "/document_relations/rules/transition";
+const SIZE_MAX_POINTER = "/size_rules/contracts/max";
 const trusted = { trusted: true, source: "repository_permission" };
 const untrusted = { trusted: false, source: "repository_permission", reason: "permission_insufficient" };
 
@@ -29,6 +30,7 @@ function policy({
   includePin = true,
   permission = "read",
   transitionPointer = "/version",
+  sizeMax = 8,
 } = {}) {
   return {
     paths: {
@@ -38,6 +40,16 @@ function policy({
       canonical_docs: [],
       pr_immutable: ["protected.lock"],
     },
+    size_rules: [{
+      id: "contracts",
+      scope: "directory",
+      metric: "files",
+      glob: "contracts/**",
+      max: sizeMax,
+      max_growth: 2,
+      count: "all_tracked",
+      level: "blocking",
+    }],
     document_relations: {
       documents: {
         workflow: { path: ".github/workflows/repo-guard.yml", format: "yaml" },
@@ -133,6 +145,16 @@ function replacedKeys(result) {
   assert.deepEqual(result.policy_delta_pointers, [PERMISSION_POINTER, PIN_POINTER].sort());
   assert.equal(result.policy_delta_authorized, false, "one covered state replacement cannot waive another policy delta");
   assert.deepEqual(replacedKeys(result), []);
+}
+
+{
+  const base = policy({ sizeMax: 8 }), head = policy({ sizeMax: 10 });
+  const result = plan(base, head, [SIZE_MAX_POINTER]);
+  assert.equal(result.policy_delta_authorized, true);
+  assert.equal(result.exact_policy_delta_authorized, true);
+  assert.deepEqual(result.policy_delta_pointers, [SIZE_MAX_POINTER]);
+  assert.deepEqual(replacedKeys(result), ["size:contracts:max"]);
+  assert.deepEqual(result.unreplaced_authorized_state_pointers, []);
 }
 
 {
