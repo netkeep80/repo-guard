@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseMarkdown, type MarkdownDocument, type MarkdownHeading, type MarkdownLink } from "./markdown-parser.mjs";
 import { readMarkdownNode, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
-import { parseDocument } from "yaml";
+import { isAlias, isNode, isPair, isScalar, parseDocument, visit } from "yaml";
 import type { DiffFileStatus, ParsedDiffFile } from "./diff/parser.mjs";
 import { selectPaths } from "./diff/classification.mjs";
 import type { ImmutableSnapshotDocumentCache, ImmutableSnapshotIdentity } from "./immutable-snapshot-cache.mjs";
@@ -79,6 +79,9 @@ export type RepositoryFactSelector =
       snapshot: FactSnapshot;
       algorithm: "sha256";
       region?: MarkdownOwnedBlockIdentityRegion;
+    }
+  | {
+      kind: "tracked_paths";
     };
 export type ChangeIntentFactSelector = {
   pointer: string;
@@ -100,7 +103,7 @@ export type FactRef =
       type: DocumentFactType;
     }
   | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType }
-  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "scalar" }
+  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "repository_path_set" | "scalar" }
   | { source: "change_intent"; selector: ChangeIntentFactSelector; type: DocumentFactType };
 
 type DocumentRef = Extract<FactRef, { source: "document" }>;
@@ -194,8 +197,26 @@ function documentFactError(error: unknown, pointer: string): DocumentFactError {
 }
 
 export function parseYaml(content: string): unknown {
-  const doc = parseDocument(content, { prettyErrors: false });
-  if (doc.errors.length) throw new Error(`invalid YAML: ${doc.errors.map((e) => collapseMessage(e.message)).join("; ")}`);
+  const doc = parseDocument(content, {
+    prettyErrors: false,
+    uniqueKeys: true,
+    merge: false,
+    schema: "core",
+  });
+  const diagnostics = [...doc.errors, ...doc.warnings];
+  if (diagnostics.length) {
+    throw new Error(`invalid YAML: ${diagnostics.map((e) => collapseMessage(e.message)).join("; ")}`);
+  }
+
+  const forbidden: string[] = [];
+  visit(doc, (_key, node) => {
+    if (isAlias(node)) forbidden.push("aliases are not allowed");
+    if (isPair(node) && isScalar(node.key) && node.key.value === "<<") forbidden.push("merge keys are not allowed");
+    if (isNode(node) && typeof node.tag === "string" && node.tag) {
+      forbidden.push(`explicit tag "${node.tag}" is not allowed`);
+    }
+  });
+  if (forbidden.length) throw new Error(`invalid YAML: ${uniqueSorted(forbidden).join("; ")}`);
   return doc.toJSON();
 }
 
@@ -525,6 +546,12 @@ function repositoryFact(context: FactReadContext, ref: Extract<FactRef, { source
   if (ref.selector.kind === "path_metric") return repositoryPathMetric(context, ref.selector);
   if (ref.selector.kind === "content_identity") {
     return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref.selector), "scalar") };
+  }
+  if (ref.selector.kind === "tracked_paths") {
+    if (!Array.isArray(context.trackedFiles)) {
+      return failDocumentFact("document_read_error", "tracked repository facts are unavailable");
+    }
+    return { ok: true, value: normalizeDocumentFact(context.trackedFiles, "repository_path_set") };
   }
   const byType = context.anchors?.byType;
   if (!byType) return failDocumentFact("document_read_error", "repository anchor facts are unavailable");

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseMarkdown } from "./markdown-parser.mjs";
 import { readMarkdownNode, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
-import { parseDocument } from "yaml";
+import { isAlias, isNode, isPair, isScalar, parseDocument, visit } from "yaml";
 import { selectPaths } from "./diff/classification.mjs";
 import { readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
@@ -33,9 +33,28 @@ function documentFactError(error, pointer) {
     return { code: "document_read_error", pointer, message: collapseMessage(message) || "document read failed" };
 }
 export function parseYaml(content) {
-    const doc = parseDocument(content, { prettyErrors: false });
-    if (doc.errors.length)
-        throw new Error(`invalid YAML: ${doc.errors.map((e) => collapseMessage(e.message)).join("; ")}`);
+    const doc = parseDocument(content, {
+        prettyErrors: false,
+        uniqueKeys: true,
+        merge: false,
+        schema: "core",
+    });
+    const diagnostics = [...doc.errors, ...doc.warnings];
+    if (diagnostics.length) {
+        throw new Error(`invalid YAML: ${diagnostics.map((e) => collapseMessage(e.message)).join("; ")}`);
+    }
+    const forbidden = [];
+    visit(doc, (_key, node) => {
+        if (isAlias(node))
+            forbidden.push("aliases are not allowed");
+        if (isPair(node) && isScalar(node.key) && node.key.value === "<<")
+            forbidden.push("merge keys are not allowed");
+        if (isNode(node) && typeof node.tag === "string" && node.tag) {
+            forbidden.push(`explicit tag "${node.tag}" is not allowed`);
+        }
+    });
+    if (forbidden.length)
+        throw new Error(`invalid YAML: ${uniqueSorted(forbidden).join("; ")}`);
     return doc.toJSON();
 }
 export function parseJson(content) {
@@ -358,6 +377,12 @@ function repositoryFact(context, ref) {
         return repositoryPathMetric(context, ref.selector);
     if (ref.selector.kind === "content_identity") {
         return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref.selector), "scalar") };
+    }
+    if (ref.selector.kind === "tracked_paths") {
+        if (!Array.isArray(context.trackedFiles)) {
+            return failDocumentFact("document_read_error", "tracked repository facts are unavailable");
+        }
+        return { ok: true, value: normalizeDocumentFact(context.trackedFiles, "repository_path_set") };
     }
     const byType = context.anchors?.byType;
     if (!byType)

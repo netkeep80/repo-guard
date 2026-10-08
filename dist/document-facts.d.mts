@@ -61,6 +61,8 @@ export type RepositoryFactSelector = {
     snapshot: FactSnapshot;
     algorithm: "sha256";
     region?: MarkdownOwnedBlockIdentityRegion;
+} | {
+    kind: "tracked_paths";
 };
 export type ChangeIntentFactSelector = {
     pointer: string;
@@ -84,7 +86,7 @@ export type FactRef = {
 } | {
     source: "repository";
     selector: RepositoryFactSelector;
-    type: "string_set" | "scalar";
+    type: "string_set" | "repository_path_set" | "scalar";
 } | {
     source: "change_intent";
     selector: ChangeIntentFactSelector;

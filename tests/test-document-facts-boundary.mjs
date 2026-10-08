@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createDocumentReader,
   normalizeDocumentFact,
+  parseYaml,
   projectDocumentValue,
   readFact,
   resolveJsonPointer,
@@ -112,6 +113,20 @@ describe("typed document fact normalization", () => {
   });
 });
 
+describe("strict YAML authority boundary", () => {
+  it("accepts ordinary YAML while rejecting duplicate keys and hidden YAML semantics", () => {
+    assert.deepEqual(parseYaml("id: V15-FOUNDATION\nartifacts:\n  - path: docs/foundation.md\n"), {
+      id: "V15-FOUNDATION",
+      artifacts: [{ path: "docs/foundation.md" }],
+    });
+    assert.throws(() => parseYaml("id: A\nid: B\n"), /invalid YAML/);
+    assert.throws(() => parseYaml("base: &base\n  path: docs/a.md\ncopy: *base\n"), /aliases are not allowed/);
+    assert.throws(() => parseYaml("base:\n  path: docs/a.md\ncopy:\n  <<:\n    path: docs/a.md\n"), /merge keys are not allowed/);
+    assert.throws(() => parseYaml("id: !consumer V15-FOUNDATION\n"), /invalid YAML/);
+    assert.throws(() => parseYaml("id: !!str V15-FOUNDATION\n"), /explicit tag .* is not allowed/);
+  });
+});
+
 describe("canonical FactRef read boundary", () => {
   const files = {
     "facts.json": JSON.stringify({
@@ -208,6 +223,18 @@ describe("canonical FactRef read boundary", () => {
       selector: { kind: "metric", metric: "net_added_lines" },
       type: "scalar",
     }), { ok: true, value: 1 });
+  });
+
+  it("exposes the exact tracked Git tree as a typed repository path set", () => {
+    const ref = { source: "repository", selector: { kind: "tracked_paths" }, type: "repository_path_set" };
+    assert.deepEqual(readFact({ trackedFiles: ["./src/b.mts", "src/a.mts", "src/a.mts"] }, ref), {
+      ok: true,
+      value: ["src/a.mts", "src/b.mts"],
+    });
+    const unavailable = readFact({}, ref);
+    assert.equal(unavailable.ok, false);
+    assert.equal(unavailable.error.code, "document_read_error");
+    assert.match(unavailable.error.message, /tracked repository facts are unavailable/);
   });
 
   it("fails closed when a diff source is unavailable", () => {
