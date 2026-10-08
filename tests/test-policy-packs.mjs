@@ -179,6 +179,96 @@ console.log("\n--- requirements-strict pack refinements ---");
   );
 }
 
+console.log("\n--- requirements-strict YAML closed-repository lowering ---");
+{
+  const source = requirementsPolicy({
+    requirement_yaml_globs: ["requirements/*.yaml"],
+    requirement_id_pattern: "V15-[A-Z0-9-]+",
+    closed_repository: true,
+  });
+  const resolved = resolvePolicyPacks(source);
+  expect("YAML closure pack resolves through ordinary policy", resolved.ok, true);
+  const requirementSources = resolved.policy.anchors.types.requirement_id.sources;
+  expect("legacy JSON requirement source remains present",
+    requirementSources.some((item) => item.kind === "json_field"), true);
+  expect("YAML requirement ids use structured parser source",
+    requirementSources.some((item) => item.kind === "structured_pointer" && item.format === "yaml" && item.pointer === "/id"), true);
+  expect("custom requirement grammar reaches doc reference regex",
+    resolved.policy.anchors.types.doc_req_ref.sources.every((item) => item.pattern.includes("V15-[A-Z0-9-]+")), true);
+  const closureRule = resolved.policy.document_relations.rules.find((rule) => rule.id === "requirements-strict:closed-repository");
+  expect("closed repository lowers to canonical set_equal", closureRule, {
+    id: "requirements-strict:closed-repository",
+    kind: "set_equal",
+    left: { repository: "tracked_paths", type: "repository_path_set" },
+    right: { anchor_type: "requirement_artifact_path", type: "repository_path_set" },
+  });
+
+  const yaml = [
+    "id: V15-FOUNDATION",
+    "artifacts:",
+    "  - path: requirements/foundation.yaml",
+    "    role: requirement",
+    "  - path: docs/foundation.md",
+    "    role: publication",
+    "  - path: src/runtime.cpp",
+    "    role: implementation",
+    "",
+  ].join("\n");
+  const files = {
+    "requirements/foundation.yaml": yaml,
+    "docs/foundation.md": "# Foundation [V15-FOUNDATION]\n",
+    "src/runtime.cpp": "// @req V15-FOUNDATION\n",
+  };
+  const run = (trackedFiles, overrides = {}) => runPolicyPipeline({
+    mode: "check-diff",
+    repositoryRoot: "/tmp/requirements-closure",
+    policy: resolved.policy,
+    changeIntent: null,
+    changeIntentSource: "none",
+    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+    diffText: "",
+    trackedFiles,
+    readFile: (file) => {
+      if (Object.hasOwn(overrides, file)) return overrides[file];
+      if (!Object.hasOwn(files, file)) throw new Error(`missing fixture ${file}`);
+      return files[file];
+    },
+    initialChecks: [],
+  }, { quiet: true });
+
+  const green = run(Object.keys(files));
+  expect("fully justified tracked tree passes closure", green.violations.filter((item) => item.rule === "document-relation:requirements-strict:closed-repository").length, 0);
+
+  const orphan = run([...Object.keys(files), "orphan.txt"]);
+  const orphanViolation = orphan.violations.find((item) => item.rule === "document-relation:requirements-strict:closed-repository");
+  expect("orphan tracked path blocks closure", orphanViolation?.data?.extra_values, ["orphan.txt"]);
+
+  const missing = run(Object.keys(files).filter((item) => item !== "docs/foundation.md"));
+  const missingViolation = missing.violations.find((item) => item.rule === "document-relation:requirements-strict:closed-repository");
+  expect("missing requirement-declared artifact blocks closure", missingViolation?.data?.missing_values, ["docs/foundation.md"]);
+
+  const unresolved = run(Object.keys(files), {
+    "docs/foundation.md": "# Foundation [V15-UNKNOWN]\n",
+  });
+  expect("unknown custom requirement reference remains blocking",
+    unresolved.violations.some((item) => item.rule === "trace-rule: doc-req-refs-must-resolve"), true);
+
+  const malformed = run(Object.keys(files), {
+    "requirements/foundation.yaml": "id: V15-FOUNDATION\nid: V15-DUPLICATE\nartifacts: []\n",
+  });
+  expect("malformed/duplicate YAML authority fails closed",
+    malformed.violations.some((item) => item.rule === "anchor-extraction"), true);
+
+  expect("invalid requirement regex is rejected before lowering",
+    contractErrors(requirementsPolicy({ requirement_id_pattern: "(" })).some((item) => /valid regular expression/.test(item.message)), true);
+  expect("empty-matching requirement regex is rejected",
+    contractErrors(requirementsPolicy({ requirement_id_pattern: ".*" })).some((item) => /must not match the empty string/.test(item.message)), true);
+
+  const legacy = resolvePolicyPacks(requirementsPolicy());
+  expect("legacy requirements-strict does not opt into repository closure",
+    legacy.policy.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository") ?? false, false);
+}
+
 console.log("\n--- requirements-strict pack enforces changed requirement evidence ---");
 {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-pack-"));
