@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseMarkdown, type MarkdownDocument, type MarkdownHeading, type MarkdownLink } from "./markdown-parser.mjs";
 import { readMarkdownNode, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
-import { isAlias, isPair, isScalar, parseDocument, visit } from "yaml";
+import { isAlias, isNode, isPair, isScalar, parseDocument, visit } from "yaml";
 import type { DiffFileStatus, ParsedDiffFile } from "./diff/parser.mjs";
 import { selectPaths } from "./diff/classification.mjs";
 import type { ImmutableSnapshotDocumentCache, ImmutableSnapshotIdentity } from "./immutable-snapshot-cache.mjs";
@@ -212,7 +212,7 @@ export function parseYaml(content: string): unknown {
   visit(doc, (_key, node) => {
     if (isAlias(node)) forbidden.push("aliases are not allowed");
     if (isPair(node) && isScalar(node.key) && node.key.value === "<<") forbidden.push("merge keys are not allowed");
-    if (!isPair(node) && "tag" in node && typeof node.tag === "string" && node.tag) {
+    if (isNode(node) && typeof node.tag === "string" && node.tag) {
       forbidden.push(`explicit tag "${node.tag}" is not allowed`);
     }
   });
