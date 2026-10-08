@@ -7,6 +7,7 @@ const entry = (testClass, execution, resources, reason) => ({
 
 const pureReadOnlyParallel = [
   "test-analysis-report-boundary.mjs",
+  "test-641-closure-falsifier.mjs",
   "test-anchor-diagnostics-boundary.mjs",
   "test-anchor-extractors.mjs",
   "test-architectural-constraints.mjs",
