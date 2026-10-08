@@ -199,8 +199,8 @@ console.log("\n--- requirements-strict YAML closed-repository lowering ---");
   expect("closed repository lowers to canonical set_equal", closureRule, {
     id: "requirements-strict:closed-repository",
     kind: "set_equal",
-    left: { repository: "tracked_paths", type: "repository_path_set" },
-    right: { anchor_type: "requirement_artifact_path", type: "repository_path_set" },
+    left: { anchor_type: "requirement_artifact_path", type: "repository_path_set" },
+    right: { repository: "tracked_paths", type: "repository_path_set" },
   });
 
   const yaml = [
