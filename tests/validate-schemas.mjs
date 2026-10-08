@@ -21,6 +21,41 @@ expect("invalid policy fixture", policy(json("tests/fixtures/invalid-policy.json
 expect("repo-policy self", policy(json("repo-policy.json")));
 expect("old top-level integration rejected", policy({ ...validPolicy, integration: {} }), false);
 expect("requirements-strict pack", policy({ ...validPolicy, packs: { "requirements-strict": { evidence_surfaces: ["src/**"] } } }));
+expect("requirements-strict YAML closure pack", policy({
+  ...validPolicy,
+  packs: { "requirements-strict": {
+    requirement_yaml_globs: ["requirements/*.yaml"],
+    requirement_id_pattern: "V15-[A-Z0-9-]+",
+    closed_repository: true,
+  } },
+}));
+expect("structured YAML anchor source", policy({
+  ...validPolicy,
+  anchors: { types: { requirement_id: { sources: [{
+    kind: "structured_pointer", glob: "requirements/*.yaml", format: "yaml", pointer: "/id",
+  }] } } },
+}));
+expect("structured anchor rejects unsupported format", policy({
+  ...validPolicy,
+  anchors: { types: { requirement_id: { sources: [{
+    kind: "structured_pointer", glob: "requirements/*.toml", format: "toml", pointer: "/id",
+  }] } } },
+}), false);
+expect("closed_repository must be boolean", policy({
+  ...validPolicy,
+  packs: { "requirements-strict": { closed_repository: "yes" } },
+}), false);
+expect("internal repository FactRefs are not public document relation selectors", policy({
+  ...validPolicy,
+  document_relations: {
+    rules: [{
+      id: "internal-only",
+      kind: "set_equal",
+      left: { anchor_type: "requirement_artifact_path", type: "repository_path_set" },
+      right: { repository: "tracked_paths", type: "repository_path_set" },
+    }],
+  },
+}), false);
 expect("removed top-level profile rejected", policy({ ...validPolicy, profile: "requirements-strict" }), false);
 expect("removed top-level profile_overrides rejected", policy({ ...validPolicy, profile_overrides: { evidence_surfaces: ["src/**"] } }), false);
 expect("anchors + trace", policy({ ...validPolicy, anchors: { types: { id: { sources: [{ kind: "json_field", glob: "requirements/**", field: "id" }] } } }, trace_rules: [{ id: "resolve", kind: "must_resolve", from_anchor_type: "id", to_anchor_type: "id" }] }));
