@@ -35,7 +35,7 @@ assert.deepEqual(trackedFact.value, tracked);
 const verdict = evaluatePrimitiveRelation(facts, {
   relation_id: "closed-repository",
   primitive: "set_equal",
-  operands: { left: repositoryOperand, right: authorityOperand },
+  operands: { left: authorityOperand, right: repositoryOperand },
   parameters: {},
 });
 assert.equal(verdict.ok, false, "orphan.txt must trigger RED");
