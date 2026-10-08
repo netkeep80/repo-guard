@@ -1,4 +1,4 @@
-import { parseJson } from "../document-facts.mjs";
+import { parseJson, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
 import { uniqueSorted } from "../utils/collections.mjs";
 import { matchesAny } from "../utils/path-patterns.mjs";
 import { readRepositoryTextFile } from "../utils/repository-files.mjs";
@@ -71,6 +71,43 @@ function extractJsonFieldAnchor(anchorType, source, file, content) {
         throw new Error(`field "${source.field}" must be a string, number, or boolean`);
     return [{ anchorType, value: String(value), file, sourceKind: "json_field", raw: String(value) }];
 }
+function scalarAnchorValue(value, label) {
+    if (value === null || typeof value === "object")
+        throw new Error(`${label} must be a string, number, or boolean`);
+    return String(value);
+}
+function extractStructuredPointerAnchors(anchorType, source, file, content) {
+    const format = source.format ?? (file.toLowerCase().endsWith(".json") ? "json" : /\.ya?ml$/i.test(file) ? "yaml" : null);
+    if (!format)
+        throw new Error("structured_pointer extractor requires json or yaml format");
+    const data = format === "json" ? parseJson(content) : parseYaml(content);
+    const pointer = source.pointer ?? "";
+    const selected = resolveJsonPointer(data, pointer);
+    const values = [];
+    if (source.item_field !== undefined) {
+        if (!Array.isArray(selected))
+            throw new Error(`structured_pointer "${pointer}" requires an array when item_field is set`);
+        for (const [index, item] of selected.entries()) {
+            if (item === null || Array.isArray(item) || typeof item !== "object") {
+                throw new Error(`structured_pointer "${pointer}" item ${index} must be an object`);
+            }
+            if (!Object.hasOwn(item, source.item_field)) {
+                throw new Error(`structured_pointer "${pointer}" item ${index} is missing field "${source.item_field}"`);
+            }
+            values.push(item[source.item_field]);
+        }
+    }
+    else if (Array.isArray(selected)) {
+        values.push(...selected);
+    }
+    else {
+        values.push(selected);
+    }
+    return values.map((value) => {
+        const rendered = scalarAnchorValue(value, `structured_pointer "${pointer}" value`);
+        return { anchorType, value: rendered, file, sourceKind: "structured_pointer", raw: rendered };
+    });
+}
 function compareInstances(a, b) {
     return a.file.localeCompare(b.file) || (a.line || 0) - (b.line || 0) || (a.column || 0) - (b.column || 0) ||
         a.anchorType.localeCompare(b.anchorType) || a.value.localeCompare(b.value);
@@ -90,6 +127,8 @@ export function extractAnchors(policy, options = {}) {
                         instances.push(...extractRegexAnchors(anchorType, source, file, content));
                     else if (source.kind === "json_field")
                         instances.push(...extractJsonFieldAnchor(anchorType, source, file, content));
+                    else if (source.kind === "structured_pointer")
+                        instances.push(...extractStructuredPointerAnchors(anchorType, source, file, content));
                     else
                         throw new Error(`unsupported anchor source kind "${source.kind}"`);
                 }
