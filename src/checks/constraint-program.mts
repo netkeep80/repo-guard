@@ -139,7 +139,18 @@ function canonicalDocumentPath(value: unknown): string {
   catch { return typeof value === "string" ? value : String(value ?? ""); }
 }
 function compileFactRef(selectorValue: unknown, documents: Record<string, DocumentDefinitionProjection>): FactRef {
-  const selector = object(selectorValue), name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
+  const selector = object(selectorValue);
+  if (selector.repository === "tracked_paths") {
+    return { source: "repository", selector: { kind: "tracked_paths" }, type: "repository_path_set" };
+  }
+  if (typeof selector.anchor_type === "string") {
+    return {
+      source: "repository",
+      selector: { kind: "anchor_values", anchor_type: selector.anchor_type },
+      type: selector.type as "string_set" | "repository_path_set",
+    };
+  }
+  const name = typeof selector.document === "string" ? selector.document : "", definition = documents[name] || {};
   const snapshot = selector.snapshot === "base" || selector.snapshot === "head" ? selector.snapshot : "state";
   const documentSelector: Extract<FactRef, { source: "document" }>["selector"] = {
     path: canonicalDocumentPath(definition.path),
