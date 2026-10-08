@@ -186,6 +186,20 @@ console.log("\n--- requirements-strict YAML closed-repository lowering ---");
     requirement_id_pattern: "V15-[A-Z0-9-]+",
     closed_repository: true,
   });
+  const schema = loadJSON(resolve(root, "schemas/repo-policy.schema.json"));
+  const validatePolicy = new Ajv({ allErrors: true }).compile(schema);
+  expect("YAML closure source policy passes public schema", validatePolicy(source), true);
+
+  const normalizedDir = mkdtempSync(join(tmpdir(), "repo-guard-closure-normalization-"));
+  writeFileSync(join(normalizedDir, "repo-policy.json"), JSON.stringify(source, null, 2), "utf-8");
+  const normalizedRuntime = loadPolicyRuntime({ packageRoot: root, repoRoot: normalizedDir }, { quiet: true });
+  expect("YAML closure source survives schema, pack and semantic normalization", normalizedRuntime.ok, true);
+  expect("normalized closure reaches canonical constraint program",
+    normalizedRuntime.constraintProgram.some((entry) =>
+      entry.runtime?.primitive === "set_equal"
+      && entry.runtime?.relation_id === "requirements-strict:closed-repository"
+    ), true);
+
   const resolved = resolvePolicyPacks(source);
   expect("YAML closure pack resolves through ordinary policy", resolved.ok, true);
   const requirementSources = resolved.policy.anchors.types.requirement_id.sources;
