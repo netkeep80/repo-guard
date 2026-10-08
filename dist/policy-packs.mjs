@@ -42,6 +42,7 @@ const PACKS = {
 const OVERRIDE_FIELDS = new Set([
     ...Object.keys(PACKS["requirements-strict"].defaults),
     "changed_requirement_evidence_surfaces", "affected_evidence_surfaces",
+    "requirement_yaml_globs", "requirement_id_pattern", "closed_repository",
 ]);
 const GENERATED_DOCUMENTS = {
     "current.contract": "contract-conformance.current.contract",
@@ -74,15 +75,67 @@ function configFor(spec, overrides = {}) {
     config.affected_evidence_surfaces ||= clone(config.evidence_surfaces);
     return config;
 }
+function configuredRequirementIdPattern(overrides) {
+    return typeof overrides.requirement_id_pattern === "string"
+        ? `(?:${overrides.requirement_id_pattern})`
+        : REQUIREMENT_ID;
+}
 function materializePack(spec, overrides) {
     const config = configFor(spec, overrides), types = {};
+    const requirementPattern = configuredRequirementIdPattern(overrides);
     for (const [name, source] of Object.entries(spec.anchors)) {
         const globs = ref(source.globs, config);
+        const pattern = source.pattern?.replaceAll(REQUIREMENT_ID, requirementPattern);
         types[name] = { sources: globs.map((glob) => source.kind === "json_field"
                 ? { kind: source.kind, glob, field: source.field }
-                : { kind: source.kind, glob, pattern: source.pattern }) };
+                : { kind: source.kind, glob, pattern }) };
     }
     const trace_rules = spec.trace_rules.map((rule) => Object.fromEntries(Object.entries(rule).map(([key, value]) => [key, ref(value, config)])));
+    if (spec === PACKS["requirements-strict"]) {
+        const jsonGlobs = stringList(config.requirement_json_globs);
+        const yamlGlobs = stringList(config.requirement_yaml_globs);
+        if (yamlGlobs.length) {
+            types.requirement_id.sources.push(...yamlGlobs.map((glob) => ({
+                kind: "structured_pointer", glob, format: "yaml", pointer: "/id",
+            })));
+            types.requirement_yaml_req_ref = { sources: yamlGlobs.map((glob) => ({
+                    kind: "regex", glob, pattern: `(${requirementPattern})`,
+                })) };
+            trace_rules.push({
+                id: "requirement-yaml-req-refs-must-resolve",
+                kind: "must_resolve",
+                from_anchor_type: "requirement_yaml_req_ref",
+                to_anchor_type: "requirement_id",
+            });
+            const changed = trace_rules.find((rule) => rule.id === "changed-requirements-need-evidence");
+            if (changed)
+                changed.if_changed = [...jsonGlobs, ...yamlGlobs];
+        }
+        if (config.closed_repository === true) {
+            types.requirement_artifact_path = {
+                sources: [
+                    ...jsonGlobs.map((glob) => ({
+                        kind: "structured_pointer", glob, format: "json", pointer: "/artifacts", item_field: "path",
+                    })),
+                    ...yamlGlobs.map((glob) => ({
+                        kind: "structured_pointer", glob, format: "yaml", pointer: "/artifacts", item_field: "path",
+                    })),
+                ],
+            };
+            return {
+                anchors: { types },
+                trace_rules,
+                document_relations: {
+                    rules: [{
+                            id: "requirements-strict:closed-repository",
+                            kind: "set_equal",
+                            left: { repository: "tracked_paths", type: "repository_path_set" },
+                            right: { anchor_type: "requirement_artifact_path", type: "repository_path_set" },
+                        }],
+                },
+            };
+        }
+    }
     return { anchors: { types }, trace_rules };
 }
 function pairDocuments(value, prefix) {
@@ -129,9 +182,31 @@ function validateRequirementsConfig(fieldPrefix, value, errors) {
     }
     for (const [field, fieldValue] of Object.entries(value)) {
         const qualified = `${fieldPrefix}.${field}`;
-        if (!OVERRIDE_FIELDS.has(field))
+        if (!OVERRIDE_FIELDS.has(field)) {
             errors.push({ field: qualified, message: `${qualified} is not supported` });
-        else if (!Array.isArray(fieldValue) || !fieldValue.length || fieldValue.some((item) => typeof item !== "string" || !item.trim())) {
+            continue;
+        }
+        if (field === "requirement_id_pattern") {
+            if (typeof fieldValue !== "string" || !fieldValue.trim()) {
+                errors.push({ field: qualified, message: `${qualified} must be a non-empty regular expression` });
+                continue;
+            }
+            try {
+                const compiled = new RegExp(fieldValue);
+                if (compiled.test(""))
+                    errors.push({ field: qualified, message: `${qualified} must not match the empty string` });
+            }
+            catch {
+                errors.push({ field: qualified, message: `${qualified} must be a valid regular expression` });
+            }
+            continue;
+        }
+        if (field === "closed_repository") {
+            if (typeof fieldValue !== "boolean")
+                errors.push({ field: qualified, message: `${qualified} must be a boolean` });
+            continue;
+        }
+        if (!Array.isArray(fieldValue) || !fieldValue.length || fieldValue.some((item) => typeof item !== "string" || !item.trim())) {
             errors.push({ field: qualified, message: `${qualified} must be a non-empty array of non-empty strings` });
         }
     }
@@ -440,6 +515,12 @@ export function expandPolicyPacks(policy) {
             if (name === "requirements-strict") {
                 base.anchors = patch.anchors;
                 base.trace_rules = patch.trace_rules;
+                if ("document_relations" in patch && patch.document_relations) {
+                    const relations = isObject(base.document_relations) ? clone(base.document_relations) : {};
+                    const rules = Array.isArray(relations.rules) ? clone(relations.rules) : [];
+                    rules.push(...patch.document_relations.rules);
+                    base.document_relations = { ...relations, rules };
+                }
             }
         }
         return base;
