@@ -359,6 +359,12 @@ function repositoryFact(context, ref) {
     if (ref.selector.kind === "content_identity") {
         return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref.selector), "scalar") };
     }
+    if (ref.selector.kind === "tracked_paths") {
+        if (!Array.isArray(context.trackedFiles)) {
+            return failDocumentFact("document_read_error", "tracked repository facts are unavailable");
+        }
+        return { ok: true, value: normalizeDocumentFact(context.trackedFiles, "repository_path_set") };
+    }
     const byType = context.anchors?.byType;
     if (!byType)
         return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
