@@ -79,6 +79,9 @@ export type RepositoryFactSelector =
       snapshot: FactSnapshot;
       algorithm: "sha256";
       region?: MarkdownOwnedBlockIdentityRegion;
+    }
+  | {
+      kind: "tracked_paths";
     };
 export type ChangeIntentFactSelector = {
   pointer: string;
@@ -100,7 +103,7 @@ export type FactRef =
       type: DocumentFactType;
     }
   | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType }
-  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "scalar" }
+  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "repository_path_set" | "scalar" }
   | { source: "change_intent"; selector: ChangeIntentFactSelector; type: DocumentFactType };
 
 type DocumentRef = Extract<FactRef, { source: "document" }>;
@@ -525,6 +528,12 @@ function repositoryFact(context: FactReadContext, ref: Extract<FactRef, { source
   if (ref.selector.kind === "path_metric") return repositoryPathMetric(context, ref.selector);
   if (ref.selector.kind === "content_identity") {
     return { ok: true, value: normalizeDocumentFact(contentIdentityFactSource(context, ref.selector), "scalar") };
+  }
+  if (ref.selector.kind === "tracked_paths") {
+    if (!Array.isArray(context.trackedFiles)) {
+      return failDocumentFact("document_read_error", "tracked repository facts are unavailable");
+    }
+    return { ok: true, value: normalizeDocumentFact(context.trackedFiles, "repository_path_set") };
   }
   const byType = context.anchors?.byType;
   if (!byType) return failDocumentFact("document_read_error", "repository anchor facts are unavailable");
