@@ -112,6 +112,47 @@ console.log("\n--- normalized facts share repository content cache ---");
   expect("facts cache content shared by multiple extractors", reads["tests/new.test.mjs"], 1);
 }
 
+console.log("\n--- structured JSON/YAML anchors use the shared fail-closed parser ---");
+{
+  const policy = makePolicy({
+    requirement_id: {
+      sources: [{ kind: "structured_pointer", glob: "requirements/**/*.yaml", format: "yaml", pointer: "/id" }],
+    },
+    requirement_artifact_path: {
+      sources: [{ kind: "structured_pointer", glob: "requirements/**/*.yaml", format: "yaml", pointer: "/artifacts", item_field: "path" }],
+    },
+  });
+  const files = {
+    "requirements/foundation.yaml": [
+      "id: V15-FOUNDATION",
+      "artifacts:",
+      "  - path: requirements/foundation.yaml",
+      "    role: requirement",
+      "  - path: docs/foundation.md",
+      "    role: publication",
+      "",
+    ].join("\n"),
+  };
+  const extraction = extractAnchors(policy, { trackedFiles: Object.keys(files), readFile: makeReadFile(files) });
+  expect("structured YAML anchors have no extraction errors", extraction.errors, []);
+  expect("structured YAML id is extracted", extraction.byType.requirement_id.map((item) => item.value), ["V15-FOUNDATION"]);
+  expect("structured YAML array-object fields become path anchors",
+    extraction.byType.requirement_artifact_path.map((item) => item.value),
+    ["requirements/foundation.yaml", "docs/foundation.md"]);
+
+  const bad = {
+    "requirements/duplicate.yaml": "id: V15-A\nid: V15-B\nartifacts: []\n",
+    "requirements/alias.yaml": "id: V15-A\nbase: &base docs/a.md\ncopy: *base\nartifacts: []\n",
+    "requirements/missing-path.yaml": "id: V15-C\nartifacts:\n  - role: publication\n",
+  };
+  const failed = extractAnchors(policy, { trackedFiles: Object.keys(bad), readFile: makeReadFile(bad) });
+  expect("strict YAML and incomplete artifact declarations fail closed", failed.errors.map((item) => item.file), [
+    "requirements/alias.yaml",
+    "requirements/duplicate.yaml",
+    "requirements/missing-path.yaml",
+  ]);
+}
+
 console.log("\n--- anchor extraction errors are predictable and reported by pipeline ---");
 {
   const policy = makePolicy({
