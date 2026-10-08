@@ -114,6 +114,7 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
   if (!policy.document_relations) return [];
   const section = object(policy.document_relations), documents = object(section.documents), rules = list<LooseObject>(section.rules);
   const errors: SemanticDiagnostic[] = [], seenRuleIds = new Set<unknown>(), usedDocuments = new Set<string>();
+  const anchorTypes = new Set(Object.keys(object(policy.anchors?.types)));
   for (const [name, rawDefinition] of Object.entries(documents)) normalizeDeclaredDocumentPath(name, object(rawDefinition), errors);
   const useDocument = (ruleId: unknown, field: string, document: unknown) => {
     if (typeof document !== "string" || !Object.hasOwn(documents, document)) {
@@ -123,7 +124,23 @@ export function compileDocumentRelationsPolicy(policy: PolicyProjection = {}): S
     usedDocuments.add(document);
   };
   const useSelector = (ruleId: unknown, field: string, rawSelector: unknown) => {
-    useDocument(ruleId, field, object(rawSelector).document);
+    const selector = object(rawSelector);
+    if (selector.repository === "tracked_paths") {
+      if (selector.type !== "repository_path_set") {
+        errors.push({ rule_id: ruleId, field, type: selector.type, message: `document_relations rule "${ruleId}" ${field} tracked_paths selector requires type "repository_path_set"` });
+      }
+      return;
+    }
+    if (typeof selector.anchor_type === "string") {
+      if (!anchorTypes.has(selector.anchor_type)) {
+        errors.push({ rule_id: ruleId, field, anchor_type: selector.anchor_type, message: `document_relations rule "${ruleId}" ${field} references unknown anchor type "${selector.anchor_type}"` });
+      }
+      if (selector.type !== "string_set" && selector.type !== "repository_path_set") {
+        errors.push({ rule_id: ruleId, field, type: selector.type, message: `document_relations rule "${ruleId}" ${field} anchor selector requires a set type` });
+      }
+      return;
+    }
+    useDocument(ruleId, field, selector.document);
   };
   for (const [index, rule] of rules.entries()) {
     const id = rule.id;
