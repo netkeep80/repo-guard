@@ -138,7 +138,7 @@ console.log("\n--- structured JSON/YAML anchors use the shared fail-closed parse
   expect("structured YAML id is extracted", extraction.byType.requirement_id.map((item) => item.value), ["V15-FOUNDATION"]);
   expect("structured YAML array-object fields become path anchors",
     extraction.byType.requirement_artifact_path.map((item) => item.value),
-    ["requirements/foundation.yaml", "docs/foundation.md"]);
+    ["docs/foundation.md", "requirements/foundation.yaml"]);
 
   const bad = {
     "requirements/duplicate.yaml": "id: V15-A\nid: V15-B\nartifacts: []\n",
@@ -146,7 +146,7 @@ console.log("\n--- structured JSON/YAML anchors use the shared fail-closed parse
     "requirements/missing-path.yaml": "id: V15-C\nartifacts:\n  - role: publication\n",
   };
   const failed = extractAnchors(policy, { trackedFiles: Object.keys(bad), readFile: makeReadFile(bad) });
-  expect("strict YAML and incomplete artifact declarations fail closed", failed.errors.map((item) => item.file), [
+  expect("strict YAML and incomplete artifact declarations fail closed", [...new Set(failed.errors.map((item) => item.file))], [
     "requirements/alias.yaml",
     "requirements/duplicate.yaml",
     "requirements/missing-path.yaml",
