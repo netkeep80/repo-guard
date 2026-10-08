@@ -668,6 +668,19 @@
           "$ref": "#/definitions/non_empty_string_array",
           "description": "Requirement JSON files that define canonical requirement ids and may contain requirement references."
         },
+        "requirement_yaml_globs": {
+          "$ref": "#/definitions/non_empty_string_array",
+          "description": "Optional canonical YAML requirement files parsed through the strict structured-document boundary."
+        },
+        "requirement_id_pattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Consumer-defined JavaScript regular expression for requirement ids. Semantic validation rejects invalid or empty-matching patterns."
+        },
+        "closed_repository": {
+          "type": "boolean",
+          "description": "When true, require exact equality between requirement-declared artifact paths and the Git-tracked repository path set."
+        },
         "code_reference_globs": {
           "$ref": "#/definitions/non_empty_string_array",
           "description": "Code, test, script, and example files scanned for @req-style requirement references."
@@ -836,6 +849,18 @@
             "kind": { "const": "regex" },
             "glob": { "type": "string", "minLength": 1 },
             "pattern": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "glob", "format", "pointer"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "structured_pointer" },
+            "glob": { "type": "string", "minLength": 1 },
+            "format": { "type": "string", "enum": ["json", "yaml"] },
+            "pointer": { "type": "string" },
+            "item_field": { "$ref": "#/definitions/non_empty_string" }
           }
         }
       ]
