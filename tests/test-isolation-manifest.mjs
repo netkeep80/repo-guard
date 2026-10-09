@@ -68,7 +68,7 @@ const pureReadOnlyParallel = [
   "test-policy-delta-rules.mjs",
   "test-policy-packs.mjs",
   "test-pr-immutable-paths.mjs",
-  "test-requirement-relations.mjs",
+  "test-644-a-requirement-relation-core.mjs",
   "test-projection-freshness-red.mjs",
   "test-projection-model-contract.mjs",
   "test-projection-lowering.mjs",
