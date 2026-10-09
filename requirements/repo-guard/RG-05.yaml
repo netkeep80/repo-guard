@@ -16,6 +16,10 @@ artifacts:
     relations: [requires, implements]
   - path: "requirements/repo-guard/RG-05.yaml"
     relations: [requires]
+  - path: "scripts/build.mjs"
+    relations: [requires, implements]
+  - path: "scripts/check-dist.mjs"
+    relations: [requires, implements]
   - path: "scripts/observatory/collect.mjs"
     relations: [requires, implements]
   - path: "scripts/observatory/render.mjs"
@@ -40,9 +44,13 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-647-merged-residue-planner.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-build-boundary.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-c3-6-observatory-render.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-6-observatory-snapshot.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-c3-6-pages-workflow.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-8b-pr-cancellation.mjs"
     relations: [requires, verifies]
@@ -75,4 +83,6 @@ artifacts:
   - path: "tests/test-projection-freshness-red.mjs"
     relations: [requires, verifies]
   - path: "tests/test-rg05-runtime-action-authority.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-typescript-source-cutover.mjs"
     relations: [requires, verifies]

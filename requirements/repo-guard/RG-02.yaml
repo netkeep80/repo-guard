@@ -22,6 +22,8 @@ artifacts:
     relations: [requires, implements]
   - path: "scripts/verify-release-ref.mjs"
     relations: [requires, implements]
+  - path: "tests/test-c3-3b-phase-override.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-c3-7-version-truth.mjs"
     relations: [requires, verifies]
   - path: "tests/test-contract-conformance-current-promotion.mjs"

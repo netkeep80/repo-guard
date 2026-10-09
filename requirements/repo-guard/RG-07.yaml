@@ -50,8 +50,6 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-c3-10a-external-base-cutover.mjs"
     relations: [requires, verifies]
-  - path: "tests/test-current-policy-vocabulary-projection.mjs"
-    relations: [requires, verifies]
   - path: "tests/test-document-facts-boundary.mjs"
     relations: [requires, verifies]
   - path: "tests/test-hybrid-owned-block-identity.mjs"

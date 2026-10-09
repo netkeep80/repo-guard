@@ -4,15 +4,23 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/checks/constraint-program.mjs"
     relations: [requires, implements]
+  - path: "dist/checks/default-rule-families.mjs"
+    relations: [requires, implements]
+  - path: "dist/checks/orchestrator.mjs"
+    relations: [requires, implements]
   - path: "dist/checks/relation-kernel.d.mts"
     relations: [requires, implements]
   - path: "dist/checks/relation-kernel.mjs"
     relations: [requires, implements]
   - path: "dist/checks/rule-registry.mjs"
     relations: [requires, implements]
+  - path: "dist/checks/rules/advisory-text-rules.mjs"
+    relations: [requires, implements]
   - path: "dist/checks/rules/anchor-rules.mjs"
     relations: [requires, implements]
   - path: "dist/checks/rules/constraints.mjs"
+    relations: [requires, implements]
+  - path: "dist/checks/rules/content-rules.mjs"
     relations: [requires, implements]
   - path: "dist/extractors/anchors.mjs"
     relations: [requires, implements]
@@ -20,13 +28,19 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/policy-compiler.mjs"
     relations: [requires, implements]
+  - path: "dist/policy-vocabulary.mjs"
+    relations: [requires, implements]
   - path: "dist/reporting/anchor-diagnostics.mjs"
     relations: [requires, implements]
   - path: "dist/requirement-relations.mjs"
     relations: [requires, implements]
+  - path: "dist/runtime/analysis-report.mjs"
+    relations: [requires, implements]
   - path: "dist/runtime/pipeline.mjs"
     relations: [requires, implements]
   - path: "dist/runtime/validation.mjs"
+    relations: [requires, implements]
+  - path: "dist/validate.mjs"
     relations: [requires, implements]
   - path: "examples/scenarios/contract-evidence/base/contracts/checks.yaml"
     relations: [requires, documents]
@@ -58,13 +72,21 @@ artifacts:
     relations: [requires]
   - path: "src/checks/constraint-program.mts"
     relations: [requires, implements]
+  - path: "src/checks/default-rule-families.mts"
+    relations: [requires, implements]
+  - path: "src/checks/orchestrator.mts"
+    relations: [requires, implements]
   - path: "src/checks/relation-kernel.mts"
     relations: [requires, implements]
   - path: "src/checks/rule-registry.mts"
     relations: [requires, implements]
+  - path: "src/checks/rules/advisory-text-rules.mts"
+    relations: [requires, implements]
   - path: "src/checks/rules/anchor-rules.mts"
     relations: [requires, implements]
   - path: "src/checks/rules/constraints.mts"
+    relations: [requires, implements]
+  - path: "src/checks/rules/content-rules.mts"
     relations: [requires, implements]
   - path: "src/extractors/anchors.mts"
     relations: [requires, implements]
@@ -72,25 +94,47 @@ artifacts:
     relations: [requires, implements]
   - path: "src/policy-compiler.mts"
     relations: [requires, implements]
+  - path: "src/policy-vocabulary.mts"
+    relations: [requires, implements]
   - path: "src/reporting/anchor-diagnostics.mts"
     relations: [requires, implements]
   - path: "src/requirement-relations.mts"
+    relations: [requires, implements]
+  - path: "src/runtime/analysis-report.mts"
     relations: [requires, implements]
   - path: "src/runtime/pipeline.mts"
     relations: [requires, implements]
   - path: "src/runtime/validation.mts"
     relations: [requires, implements]
+  - path: "src/validate.mts"
+    relations: [requires, implements]
   - path: "tests/architectural-constraints.json"
+    relations: [requires, verifies]
+  - path: "tests/fixtures/broken-policy.json"
+    relations: [requires, verifies]
+  - path: "tests/fixtures/invalid-content-rule-old-form.json"
+    relations: [requires, verifies]
+  - path: "tests/fixtures/invalid-operational-paths.json"
+    relations: [requires, verifies]
+  - path: "tests/fixtures/invalid-policy.json"
+    relations: [requires, verifies]
+  - path: "tests/fixtures/policy-bad-regex.json"
+    relations: [requires, verifies]
+  - path: "tests/fixtures/valid-policy.json"
     relations: [requires, verifies]
   - path: "tests/test-641-closure-falsifier.mjs"
     relations: [requires, verifies]
   - path: "tests/test-645-self-host-relation-inventory.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-analysis-report-boundary.mjs"
     relations: [requires, verifies]
   - path: "tests/test-anchor-diagnostics-boundary.mjs"
     relations: [requires, verifies]
   - path: "tests/test-anchor-extractors.mjs"
     relations: [requires, verifies]
   - path: "tests/test-architectural-constraints.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-c3-10b-contract-surface-cutover.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-3-diagnostic-evidence.mjs"
     relations: [requires, verifies]
@@ -107,6 +151,8 @@ artifacts:
   - path: "tests/test-cochange-group.mjs"
     relations: [requires, verifies]
   - path: "tests/test-cross-document-traceability.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-current-policy-vocabulary-projection.mjs"
     relations: [requires, verifies]
   - path: "tests/test-generated-cochange-identity.mjs"
     relations: [requires, verifies]

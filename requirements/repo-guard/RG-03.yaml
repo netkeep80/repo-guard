@@ -24,6 +24,10 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/diff/parser.mjs"
     relations: [requires, implements]
+  - path: "dist/utils/path-patterns.d.mts"
+    relations: [requires, implements]
+  - path: "dist/utils/path-patterns.mjs"
+    relations: [requires, implements]
   - path: "examples/scenarios/minimal-diff-policy/base/repo-policy.json"
     relations: [requires, documents]
   - path: "examples/scenarios/minimal-diff-policy/base/src/app.txt"
@@ -70,11 +74,15 @@ artifacts:
     relations: [requires, implements]
   - path: "src/diff/parser.mts"
     relations: [requires, implements]
+  - path: "src/utils/path-patterns.mts"
+    relations: [requires, implements]
   - path: "tests/fixtures/diff-change-intent.json"
     relations: [requires, verifies]
   - path: "tests/fixtures/invalid-change-intent.json"
     relations: [requires, verifies]
   - path: "tests/fixtures/valid-change-intent.json"
+    relations: [requires, verifies]
+  - path: "tests/test-c3-10b-profile-surface-cutover.mjs"
     relations: [requires, verifies]
   - path: "tests/test-change-intent.mjs"
     relations: [requires, verifies]

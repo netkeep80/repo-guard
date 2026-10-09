@@ -4,6 +4,8 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/checks/rules/governance-paths.mjs"
     relations: [requires, implements]
+  - path: "dist/enforcement.mjs"
+    relations: [requires, implements]
   - path: "dist/trusted-authorizer.mjs"
     relations: [requires, implements]
   - path: "docs/product-requirements.md"
@@ -16,6 +18,8 @@ artifacts:
     relations: [requires, implements]
   - path: "src/checks/rules/governance-paths.mts"
     relations: [requires, implements]
+  - path: "src/enforcement.mts"
+    relations: [requires, implements]
   - path: "src/trusted-authorizer.mts"
     relations: [requires, implements]
   - path: "tests/test-644-a-requirement-relation-core.mjs"
@@ -26,7 +30,13 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-atomic-governance-cutover.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-c3-9h-enforcement-surface-purge.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-enforcement-mode.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-governance-paths.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-hardening.mjs"
     relations: [requires, verifies]
   - path: "tests/test-p0-2-positive-permission-authority.mjs"
     relations: [requires, verifies]

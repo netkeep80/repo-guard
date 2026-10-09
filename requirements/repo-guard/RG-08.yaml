@@ -2,113 +2,35 @@ id: RG-08
 artifacts:
   - path: ".gitignore"
     relations: [requires, implements]
-  - path: "dist/checks/default-rule-families.mjs"
-    relations: [requires, implements]
-  - path: "dist/checks/orchestrator.mjs"
-    relations: [requires, implements]
-  - path: "dist/checks/rules/advisory-text-rules.mjs"
-    relations: [requires, implements]
-  - path: "dist/checks/rules/content-rules.mjs"
-    relations: [requires, implements]
-  - path: "dist/enforcement.mjs"
-    relations: [requires, implements]
-  - path: "dist/policy-vocabulary.mjs"
-    relations: [requires, implements]
-  - path: "dist/repo-guard.mjs"
-    relations: [requires, implements]
-  - path: "dist/reporting/renderers.mjs"
-    relations: [requires, implements]
-  - path: "dist/runtime/analysis-report.mjs"
-    relations: [requires, implements]
   - path: "dist/utils/collections.d.mts"
     relations: [requires, implements]
   - path: "dist/utils/collections.mjs"
-    relations: [requires, implements]
-  - path: "dist/utils/path-patterns.d.mts"
-    relations: [requires, implements]
-  - path: "dist/utils/path-patterns.mjs"
     relations: [requires, implements]
   - path: "dist/utils/repository-files.d.mts"
     relations: [requires, implements]
   - path: "dist/utils/repository-files.mjs"
     relations: [requires, implements]
-  - path: "dist/validate.mjs"
-    relations: [requires, implements]
   - path: "docs/architecture-compression-3-baseline.md"
     relations: [requires, documents]
   - path: "docs/self-hosting-coverage.json"
     relations: [requires, documents]
-  - path: "package-lock.json"
-    relations: [requires, implements]
-  - path: "package.json"
-    relations: [requires, implements]
   - path: "requirements/repo-guard/RG-08.yaml"
     relations: [requires]
-  - path: "scripts/build.mjs"
-    relations: [requires, implements]
-  - path: "scripts/check-dist.mjs"
-    relations: [requires, implements]
   - path: "scripts/compression-metrics.mjs"
-    relations: [requires, implements]
-  - path: "src/checks/default-rule-families.mts"
-    relations: [requires, implements]
-  - path: "src/checks/orchestrator.mts"
-    relations: [requires, implements]
-  - path: "src/checks/rules/advisory-text-rules.mts"
-    relations: [requires, implements]
-  - path: "src/checks/rules/content-rules.mts"
-    relations: [requires, implements]
-  - path: "src/enforcement.mts"
-    relations: [requires, implements]
-  - path: "src/policy-vocabulary.mts"
-    relations: [requires, implements]
-  - path: "src/repo-guard.mts"
-    relations: [requires, implements]
-  - path: "src/reporting/renderers.mts"
-    relations: [requires, implements]
-  - path: "src/runtime/analysis-report.mts"
     relations: [requires, implements]
   - path: "src/utils/collections.mts"
     relations: [requires, implements]
-  - path: "src/utils/path-patterns.mts"
-    relations: [requires, implements]
   - path: "src/utils/repository-files.mts"
     relations: [requires, implements]
-  - path: "src/validate.mts"
-    relations: [requires, implements]
-  - path: "tests/fixtures/broken-policy.json"
-    relations: [requires, verifies]
-  - path: "tests/fixtures/invalid-content-rule-old-form.json"
-    relations: [requires, verifies]
-  - path: "tests/fixtures/invalid-operational-paths.json"
-    relations: [requires, verifies]
-  - path: "tests/fixtures/invalid-policy.json"
-    relations: [requires, verifies]
-  - path: "tests/fixtures/policy-bad-regex.json"
-    relations: [requires, verifies]
-  - path: "tests/fixtures/valid-policy.json"
-    relations: [requires, verifies]
   - path: "tests/run.mjs"
     relations: [requires, verifies]
   - path: "tests/support/run-cli.mjs"
     relations: [requires, verifies]
   - path: "tests/support/test-runner.mjs"
     relations: [requires, verifies]
-  - path: "tests/test-analysis-report-boundary.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-build-boundary.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-c3-10b-contract-surface-cutover.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-c3-10b-profile-surface-cutover.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-c3-10b-repo-guard-workflow-pack.mjs"
-    relations: [requires, verifies]
   - path: "tests/test-c3-2-compression-metrics.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-3-historical-lowering.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-c3-3b-phase-override.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-3c-workflow-path-coverage-deletion.mjs"
     relations: [requires, verifies]
@@ -126,19 +48,11 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-c3-4b-self-host-exemplar.mjs"
     relations: [requires, verifies]
-  - path: "tests/test-c3-6-pages-workflow.mjs"
-    relations: [requires, verifies]
   - path: "tests/test-c3-8i-cli-harness-compression.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-9a-public-policy-surface-purge.mjs"
     relations: [requires, verifies]
-  - path: "tests/test-c3-9c-readme-convergence.mjs"
-    relations: [requires, verifies]
   - path: "tests/test-c3-9e-self-hosting-narrative-purge.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-c3-9f-single-consumer-scaffold-authority.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-c3-9h-enforcement-surface-purge.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-compression-baseline-integrity.mjs"
     relations: [requires, verifies]
@@ -148,27 +62,13 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-compression-rules.mjs"
     relations: [requires, verifies]
-  - path: "tests/test-enforcement-mode.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-hardening.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-init-boundary.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-init.mjs"
-    relations: [requires, verifies]
   - path: "tests/test-isolation-manifest.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-p1-1-built-in-pack-equivalence.mjs"
     relations: [requires, verifies]
   - path: "tests/test-p1-1-policy-normalization.mjs"
     relations: [requires, verifies]
   - path: "tests/test-p2-4-test-isolation.mjs"
     relations: [requires, verifies]
-  - path: "tests/test-pack-vocabulary-convergence.mjs"
-    relations: [requires, verifies]
   - path: "tests/test-self-hosting.mjs"
-    relations: [requires, verifies]
-  - path: "tests/test-typescript-source-cutover.mjs"
     relations: [requires, verifies]
   - path: "tsconfig.json"
     relations: [requires, implements]
