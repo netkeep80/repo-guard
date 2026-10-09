@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
+import { matchesAny } from "./utils/path-patterns.mjs";
 
 export const REQUIREMENT_RELATION_KINDS = [
   "requires",
@@ -19,9 +20,15 @@ export interface RequirementAuthoritySource {
   content: string;
 }
 
+export interface RequirementAuthorityScopeEntry {
+  glob: string;
+  format: RequirementAuthorityFormat;
+}
+
 export interface RequirementAuthorityInput {
   snapshot: RequirementAuthoritySnapshot;
   revision: string;
+  scope?: readonly RequirementAuthorityScopeEntry[];
   sources: readonly RequirementAuthoritySource[];
 }
 
@@ -30,6 +37,7 @@ export interface RequirementRelationProvenance {
   subject_pointer: "/id";
   artifact_pointer: string;
   relation_pointer: string;
+  relation_origin: "explicit" | "legacy_artifact_presence";
   snapshot: RequirementAuthoritySnapshot;
   revision: string;
 }
@@ -50,6 +58,8 @@ export interface RequirementAuthorityManifestEntry {
 export interface RequirementRelationGraph {
   snapshot: RequirementAuthoritySnapshot;
   revision: string;
+  authority_scope: RequirementAuthorityScopeEntry[];
+  authority_scope_sha256: string;
   authority_manifest: RequirementAuthorityManifestEntry[];
   authority_sha256: string;
   graph_sha256: string;
@@ -87,6 +97,7 @@ export interface RequirementTransitionCheck {
   actual_delta: RequirementRelationDelta;
   base_authority_sha256: string;
   head_authority_sha256: string;
+  authority_scope_changed: boolean;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -164,6 +175,19 @@ function canonicalIdentities(values: readonly RequirementRelationIdentity[]): Re
   return [...values].map((value) => ({ ...value })).sort(compareIdentities);
 }
 
+function normalizeAuthorityScope(values: readonly RequirementAuthorityScopeEntry[] | undefined): RequirementAuthorityScopeEntry[] {
+  const byGlob = new Map<string, RequirementAuthorityFormat>();
+  for (const [index, value] of (values || []).entries()) {
+    const glob = nonEmptyString(value?.glob, `RequirementAuthority.scope[${index}].glob`);
+    const format = value?.format;
+    if (format !== "json" && format !== "yaml") fail(`RequirementAuthority.scope[${index}].format`, "must be json or yaml");
+    const previous = byGlob.get(glob);
+    if (previous && previous !== format) fail(`RequirementAuthority.scope[${index}]`, `glob "${glob}" has conflicting formats`);
+    byGlob.set(glob, format);
+  }
+  return [...byGlob.entries()].map(([glob, format]) => ({ glob, format })).sort((left, right) => left.glob.localeCompare(right.glob) || left.format.localeCompare(right.format));
+}
+
 function parseSource(source: RequirementAuthoritySource): unknown {
   if (source.format === "json") return parseJson(source.content);
   if (source.format === "yaml") return parseYaml(source.content);
@@ -181,10 +205,27 @@ function normalizeSourceRelations(source: RequirementAuthoritySource, snapshot: 
   for (const [artifactIndex, artifactValue] of artifacts.entries()) {
     const artifactPointer = `/artifacts/${artifactIndex}`;
     const artifact = object(artifactValue, `${source.path}#${artifactPointer}`);
-    exactFields(artifact, ["path", "relations"], `${source.path}#${artifactPointer}`);
+    exactFields(artifact, ["path", "relations", "role"], `${source.path}#${artifactPointer}`);
     const path = repositoryPath(artifact.path, `${source.path}#${artifactPointer}/path`);
     if (seenPaths.has(path)) fail(`${source.path}#${artifactPointer}/path`, `duplicate artifact path "${path}"`);
     seenPaths.add(path);
+    if (artifact.relations === undefined) {
+      relations.push({
+        subject,
+        relation: "requires",
+        object: path,
+        provenance: {
+          source_path: source.path,
+          subject_pointer: "/id",
+          artifact_pointer: `${artifactPointer}/path`,
+          relation_pointer: `${artifactPointer}/path`,
+          relation_origin: "legacy_artifact_presence",
+          snapshot,
+          revision,
+        },
+      });
+      continue;
+    }
     const rawRelations = array(artifact.relations, `${source.path}#${artifactPointer}/relations`);
     if (!rawRelations.length) fail(`${source.path}#${artifactPointer}/relations`, "must contain at least one relation");
     const seenRelations = new Set<RequirementRelationKind>();
@@ -202,6 +243,7 @@ function normalizeSourceRelations(source: RequirementAuthoritySource, snapshot: 
           subject_pointer: "/id",
           artifact_pointer: `${artifactPointer}/path`,
           relation_pointer: relationPointer,
+          relation_origin: "explicit",
           snapshot,
           revision,
         },
@@ -218,6 +260,7 @@ export function normalizeRequirementAuthority(input: RequirementAuthorityInput):
   const snapshot = input?.snapshot;
   if (snapshot !== "base" && snapshot !== "head") fail("RequirementAuthority.snapshot", "must be base or head");
   const revision = exactRevision(input?.revision, "RequirementAuthority.revision");
+  const scope = normalizeAuthorityScope(input?.scope);
   if (!Array.isArray(input?.sources)) fail("RequirementAuthority.sources", "must be an array");
 
   const sources = input.sources.map((value, index) => {
@@ -246,14 +289,56 @@ export function normalizeRequirementAuthority(input: RequirementAuthorityInput):
 
   relations.sort((left, right) => compareIdentities(relationIdentity(left), relationIdentity(right)));
   const identities = relations.map(relationIdentity);
+  const authorityScopeSha256 = sha256(JSON.stringify(scope));
   return {
     snapshot,
     revision,
+    authority_scope: scope,
+    authority_scope_sha256: authorityScopeSha256,
     authority_manifest: manifest,
-    authority_sha256: sha256(JSON.stringify(manifest)),
+    authority_sha256: sha256(JSON.stringify({ scope, manifest })),
     graph_sha256: sha256(JSON.stringify(identities)),
     relations,
   };
+}
+
+interface RequirementAuthorityPolicyProjection {
+  anchors?: { types?: { requirement_artifact_path?: { sources?: Array<Record<string, unknown>> } } };
+  document_relations?: { rules?: Array<Record<string, unknown>> };
+}
+
+export function requirementAuthorityScopeFromPolicy(policy: RequirementAuthorityPolicyProjection | null | undefined): RequirementAuthorityScopeEntry[] {
+  const closed = policy?.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository" && rule.kind === "set_equal") === true;
+  if (!closed) return [];
+  const sources = policy?.anchors?.types?.requirement_artifact_path?.sources || [];
+  return normalizeAuthorityScope(sources.flatMap((source) => {
+    if (source.kind !== "structured_pointer" || source.pointer !== "/artifacts" || source.item_field !== "path") return [];
+    if ((source.format !== "json" && source.format !== "yaml") || typeof source.glob !== "string") return [];
+    return [{ glob: source.glob, format: source.format }];
+  }));
+}
+
+export function buildRequirementAuthorityFromSnapshot(input: {
+  policy: RequirementAuthorityPolicyProjection | null | undefined;
+  snapshot: RequirementAuthoritySnapshot;
+  revision: string;
+  trackedFiles: readonly string[];
+  readFileAtRef: (revision: string, path: string) => unknown;
+}): RequirementRelationGraph | null {
+  const scope = requirementAuthorityScopeFromPolicy(input.policy);
+  if (!scope.length) return null;
+  const sources: RequirementAuthoritySource[] = [];
+  for (const pathValue of [...new Set(input.trackedFiles)].sort()) {
+    const path = repositoryPath(pathValue, "RequirementAuthority.trackedFiles");
+    const matching = scope.filter((entry) => matchesAny(path, [entry.glob]));
+    if (!matching.length) continue;
+    const formats = [...new Set(matching.map((entry) => entry.format))];
+    if (formats.length !== 1) fail(path, "matches requirement authority globs with conflicting formats");
+    const raw = input.readFileAtRef(input.revision, path);
+    if (raw === null || raw === undefined) fail(path, `${input.snapshot.toUpperCase()} requirement authority source is unavailable`);
+    sources.push({ path, format: formats[0]!, content: String(raw) });
+  }
+  return normalizeRequirementAuthority({ snapshot: input.snapshot, revision: input.revision, scope, sources });
 }
 
 export function compareRequirementRelationGraphs(base: RequirementRelationGraph, head: RequirementRelationGraph): RequirementRelationDelta {
@@ -290,14 +375,12 @@ function normalizeGrantIdentities(value: unknown, label: string): RequirementRel
 export function normalizeRequirementTransitionGrant(value: unknown): RequirementTransitionGrant {
   const input = object(value, "RequirementTransitionGrant");
   exactFields(input, ["base_authority_sha256", "expected_head_authority_sha256", "add", "remove"], "RequirementTransitionGrant");
-  const grant = {
+  return {
     base_authority_sha256: sha256Value(input.base_authority_sha256, "RequirementTransitionGrant.base_authority_sha256"),
     expected_head_authority_sha256: sha256Value(input.expected_head_authority_sha256, "RequirementTransitionGrant.expected_head_authority_sha256"),
     add: normalizeGrantIdentities(input.add, "RequirementTransitionGrant.add"),
     remove: normalizeGrantIdentities(input.remove, "RequirementTransitionGrant.remove"),
   };
-  if (!grant.add.length && !grant.remove.length) fail("RequirementTransitionGrant", "must authorize at least one added or removed relation");
-  return grant;
 }
 
 function sameIdentities(left: readonly RequirementRelationIdentity[], right: readonly RequirementRelationIdentity[]): boolean {
@@ -311,7 +394,8 @@ export function checkRequirementTransition(input: {
   trustedAuthorizer?: RequirementTransitionAuthorizer | null;
 }): RequirementTransitionCheck {
   const actual = compareRequirementRelationGraphs(input.base, input.head);
-  const required = actual.add.length > 0 || actual.remove.length > 0;
+  const authorityScopeChanged = input.base.authority_scope_sha256 !== input.head.authority_scope_sha256;
+  const required = authorityScopeChanged || actual.add.length > 0 || actual.remove.length > 0;
   const reasons: string[] = [];
 
   if (!required) {
@@ -324,6 +408,7 @@ export function checkRequirementTransition(input: {
       actual_delta: actual,
       base_authority_sha256: input.base.authority_sha256,
       head_authority_sha256: input.head.authority_sha256,
+      authority_scope_changed: authorityScopeChanged,
     };
   }
 
@@ -352,5 +437,6 @@ export function checkRequirementTransition(input: {
     actual_delta: actual,
     base_authority_sha256: input.base.authority_sha256,
     head_authority_sha256: input.head.authority_sha256,
+    authority_scope_changed: authorityScopeChanged,
   };
 }

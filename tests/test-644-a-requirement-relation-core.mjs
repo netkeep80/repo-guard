@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildRequirementAuthorityFromSnapshot,
   checkRequirementTransition,
   compareRequirementRelationGraphs,
   normalizeRequirementAuthority,
@@ -71,6 +72,7 @@ console.log("\n--- requirement relation normalizer ---");
     subject_pointer: "/id",
     artifact_pointer: "/artifacts/0/path",
     relation_pointer: "/artifacts/0/relations/1",
+    relation_origin: "explicit",
     snapshot: "head",
     revision: HEAD,
   });
@@ -79,7 +81,10 @@ console.log("\n--- requirement relation normalizer ---");
     revision: HEAD,
     sources: [{ path: "requirements/bad.yaml", format: "yaml", content: "id: A\nid: B\n" }],
   }), /invalid YAML|duplicate/i);
-  assert.throws(() => graph("head", HEAD, [["requirements/legacy.json", { id: "R1", artifacts: [{ path: "src/a.mts", role: "implementation", relations: ["requires"] }] }]]), /unknown field "role"/);
+  const legacy = graph("head", HEAD, [["requirements/legacy.json", { id: "R1", artifacts: [{ path: "src/a.mts", role: "implementation" }] }]]);
+  assert.deepEqual(legacy.relations.map(({ subject, relation, object, provenance }) => ({
+    subject, relation, object, relation_origin: provenance.relation_origin,
+  })), [{ subject: "R1", relation: "requires", object: "src/a.mts", relation_origin: "legacy_artifact_presence" }]);
   assert.throws(() => graph("head", HEAD, [["requirements/no-requires.json", req("R1", [{ path: "src/a.mts", relations: ["implements"] }])]]), /must explicitly include "requires"/);
 }
 
@@ -174,6 +179,45 @@ assertAuthorized("12 infrastructure ownership transfer", graph("base", BASE, [
 }
 
 console.log("\n--- transition identity boundaries ---");
+{
+  const legacyPolicy = {
+    document_relations: { rules: [{ id: "requirements-strict:closed-repository", kind: "set_equal" }] },
+    anchors: { types: { requirement_artifact_path: { sources: [{
+      kind: "structured_pointer", glob: "requirements/*.json", format: "json", pointer: "/artifacts", item_field: "path",
+    }] } } },
+  };
+  const legacyContent = JSON.stringify({ id: "LEGACY", artifacts: [{ path: "requirements/legacy.json", role: "requirement" }] });
+  const projected = buildRequirementAuthorityFromSnapshot({
+    policy: legacyPolicy,
+    snapshot: "head",
+    revision: HEAD,
+    trackedFiles: ["requirements/legacy.json", "README.md"],
+    readFileAtRef: (_revision, path) => path === "requirements/legacy.json" ? legacyContent : null,
+  });
+  assert.ok(projected);
+  assert.deepEqual(projected.authority_scope, [{ glob: "requirements/*.json", format: "json" }]);
+  assert.equal(projected.relations[0].provenance.relation_origin, "legacy_artifact_presence");
+}
+{
+  const content = JSON.stringify(req("R1", [artifact("requirements/r1.json")]));
+  const base = normalizeRequirementAuthority({
+    snapshot: "base", revision: BASE,
+    scope: [{ glob: "requirements/*.json", format: "json" }],
+    sources: [{ path: "requirements/r1.json", format: "json", content }],
+  });
+  const head = normalizeRequirementAuthority({
+    snapshot: "head", revision: HEAD,
+    scope: [{ glob: "requirements/**/*.json", format: "json" }],
+    sources: [{ path: "requirements/r1.json", format: "json", content }],
+  });
+  assert.deepEqual(compareRequirementRelationGraphs(base, head), { add: [], remove: [] });
+  assert.notEqual(base.authority_scope_sha256, head.authority_scope_sha256);
+  const noGrant = checkRequirementTransition({ base, head, trustedAuthorizer: trusted });
+  assert.equal(noGrant.ok, false, "authority source selector changes require exact trust even with unchanged relation tuples");
+  assert.equal(noGrant.authority_scope_changed, true);
+  const exact = checkRequirementTransition({ base, head, grant: grant(base, head), trustedAuthorizer: trusted });
+  assert.equal(exact.ok, true, "scope-only authority transition accepts an exact empty relation delta grant");
+}
 {
   const base = graph("base", BASE, [["requirements/r1.json", req("R1", [artifact("requirements/r1.json")], { title: "old" })]]);
   const head = graph("head", HEAD, [["requirements/r1.json", req("R1", [artifact("requirements/r1.json")], { title: "new" })]]);
