@@ -127,6 +127,7 @@ const externalIntegrationSerial = [
   "test-cross-document-traceability.mjs",
   "test-current-base-ref.mjs",
   "test-doctor.mjs",
+  "test-git-output-buffer.mjs",
   "test-github-pr.mjs",
   "test-init.mjs",
   "test-p0-1-machine-safe-git-transaction-coverage.mjs",

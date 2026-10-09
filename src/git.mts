@@ -5,11 +5,13 @@ interface ChildProcessFailure {
   stderr?: { toString?: () => string } | null;
   stdout?: { toString?: () => string } | null;
   message?: string;
+  code?: string | number | null;
 }
 
 export interface RunGitOptions {
   cwd?: string;
   stdio?: ExecFileSyncOptionsWithStringEncoding["stdio"];
+  maxBuffer?: number;
 }
 
 export interface ExactRemoteBranchDeletionInput {
@@ -62,12 +64,22 @@ export interface RepositoryObservation {
   cache_key: string;
 }
 
+const DEFAULT_GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const MAX_GIT_DIAGNOSTIC_CHARS = 4096;
+
+function boundedDiagnostic(value: unknown): string {
+  const text = value == null ? "" : String(value).replace(/\s+/g, " ").trim();
+  if (text.length <= MAX_GIT_DIAGNOSTIC_CHARS) return text;
+  return text.slice(0, MAX_GIT_DIAGNOSTIC_CHARS - 3) + "...";
+}
+
 function childProcessMessage(error: unknown): string {
-  const stderr = (error as ChildProcessFailure | null | undefined)?.stderr?.toString?.().trim();
+  const failure = error as ChildProcessFailure | null | undefined;
+  const stderr = boundedDiagnostic(failure?.stderr?.toString?.());
   if (stderr) return stderr;
-  const stdout = (error as ChildProcessFailure | null | undefined)?.stdout?.toString?.().trim();
+  const stdout = boundedDiagnostic(failure?.stdout?.toString?.());
   if (stdout) return stdout;
-  return (error as ChildProcessFailure | null | undefined)?.message || "command failed";
+  return boundedDiagnostic(failure?.message) || "command failed";
 }
 
 function gitSubcommand(args: readonly string[]): string {
@@ -82,15 +94,23 @@ function gitSubcommand(args: readonly string[]): string {
 }
 
 export function runGit(args: string[], options: RunGitOptions = {}): string {
+  const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES;
+  if (!Number.isSafeInteger(maxBuffer) || maxBuffer <= 0) {
+    throw new Error("git maxBuffer must be a positive safe integer");
+  }
   try {
     return execFileSync("git", args, {
       encoding: "utf-8",
       cwd: options.cwd,
       stdio: options.stdio || "pipe",
+      maxBuffer,
     });
   } catch (error) {
     const command = gitSubcommand(args);
     const subcommand = command ? ` ${command}` : "";
+    if ((error as ChildProcessFailure | null | undefined)?.code === "ENOBUFS") {
+      throw new Error(`git${subcommand} failed: output exceeded configured maxBuffer=${maxBuffer} bytes`);
+    }
     throw new Error(`git${subcommand} failed: ${childProcessMessage(error)}`);
   }
 }

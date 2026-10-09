@@ -1,13 +1,22 @@
 import { execFileSync } from "node:child_process";
 import { parseMachineDiff } from "./diff/parser.mjs";
+const DEFAULT_GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const MAX_GIT_DIAGNOSTIC_CHARS = 4096;
+function boundedDiagnostic(value) {
+    const text = value == null ? "" : String(value).replace(/\s+/g, " ").trim();
+    if (text.length <= MAX_GIT_DIAGNOSTIC_CHARS)
+        return text;
+    return text.slice(0, MAX_GIT_DIAGNOSTIC_CHARS - 3) + "...";
+}
 function childProcessMessage(error) {
-    const stderr = error?.stderr?.toString?.().trim();
+    const failure = error;
+    const stderr = boundedDiagnostic(failure?.stderr?.toString?.());
     if (stderr)
         return stderr;
-    const stdout = error?.stdout?.toString?.().trim();
+    const stdout = boundedDiagnostic(failure?.stdout?.toString?.());
     if (stdout)
         return stdout;
-    return error?.message || "command failed";
+    return boundedDiagnostic(failure?.message) || "command failed";
 }
 function gitSubcommand(args) {
     for (let i = 0; i < args.length; i++) {
@@ -21,16 +30,24 @@ function gitSubcommand(args) {
     return "";
 }
 export function runGit(args, options = {}) {
+    const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES;
+    if (!Number.isSafeInteger(maxBuffer) || maxBuffer <= 0) {
+        throw new Error("git maxBuffer must be a positive safe integer");
+    }
     try {
         return execFileSync("git", args, {
             encoding: "utf-8",
             cwd: options.cwd,
             stdio: options.stdio || "pipe",
+            maxBuffer,
         });
     }
     catch (error) {
         const command = gitSubcommand(args);
         const subcommand = command ? ` ${command}` : "";
+        if (error?.code === "ENOBUFS") {
+            throw new Error(`git${subcommand} failed: output exceeded configured maxBuffer=${maxBuffer} bytes`);
+        }
         throw new Error(`git${subcommand} failed: ${childProcessMessage(error)}`);
     }
 }
