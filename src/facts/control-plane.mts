@@ -67,6 +67,29 @@ export interface ControlPlaneRelation {
   };
 }
 
+export interface MergedResidueDeletionCandidate {
+  ref: string;
+  expected_sha: string;
+  merged_prs: number[];
+}
+
+export type MergedResidueDeletionExclusionReason =
+  | "default"
+  | "active_open_pr_head"
+  | "protected"
+  | "persistent";
+
+export interface MergedResidueDeletionExclusion extends MergedResidueDeletionCandidate {
+  reasons: MergedResidueDeletionExclusionReason[];
+}
+
+export interface MergedResidueDeletionPlan {
+  contract: "plan_only";
+  destructive_authority: false;
+  candidates: MergedResidueDeletionCandidate[];
+  excluded: MergedResidueDeletionExclusion[];
+}
+
 export interface ControlPlaneGraph {
   repository: string;
   default_branch: string;
@@ -441,5 +464,54 @@ export function analyzeControlPlaneObservation(input: ControlPlaneObservation): 
         .map((branch) => branch.name)
         .sort(),
     },
+  };
+}
+
+
+export function planMergedResidueDeletions(
+  graph: ControlPlaneGraph,
+  persistentRefs: readonly string[] = [],
+): MergedResidueDeletionPlan {
+  const persistent = new Set(
+    persistentRefs.map((ref, index) => text(ref, `MergedResidueDeletionPlan.persistent_refs[${index}]`)),
+  );
+  const active = new Set(graph.derived.active_pr_head_branches);
+  const branches = new Map(graph.branches.map((branch) => [branch.name, branch]));
+
+  const candidates: MergedResidueDeletionCandidate[] = [];
+  const excluded: MergedResidueDeletionExclusion[] = [];
+
+  for (const residue of graph.derived.exact_merged_pr_head_residues) {
+    const branch = branches.get(residue.ref);
+    if (!branch || branch.sha !== residue.sha) {
+      fail(
+        "MergedResidueDeletionPlan",
+        `stale merged residue identity for "${residue.ref}": expected ${residue.sha}, observed ${branch?.sha || "missing"}`,
+      );
+    }
+
+    const candidate: MergedResidueDeletionCandidate = {
+      ref: residue.ref,
+      expected_sha: residue.sha,
+      merged_prs: [...residue.prs].sort((a, b) => a - b),
+    };
+    const reasons: MergedResidueDeletionExclusionReason[] = [];
+    if (residue.ref === graph.default_branch) reasons.push("default");
+    if (active.has(residue.ref)) reasons.push("active_open_pr_head");
+    if (branch.protected) reasons.push("protected");
+    if (persistent.has(residue.ref)) reasons.push("persistent");
+
+    if (reasons.length > 0) excluded.push({ ...candidate, reasons });
+    else candidates.push(candidate);
+  }
+
+  candidates.sort((a, b) => a.ref.localeCompare(b.ref));
+  excluded.sort((a, b) => a.ref.localeCompare(b.ref));
+
+  return {
+    contract: "plan_only",
+    destructive_authority: false,
+    candidates,
+    excluded,
   };
 }

@@ -12,6 +12,13 @@ export interface RunGitOptions {
   stdio?: ExecFileSyncOptionsWithStringEncoding["stdio"];
 }
 
+export interface ExactRemoteBranchDeletionInput {
+  cwd: string;
+  branch: string;
+  expectedSha: string;
+  remote?: string;
+}
+
 export interface BasePolicyReadResult {
   policy: unknown | null;
   error: string | null;
@@ -132,6 +139,27 @@ export function resolveRemoteBaseRef(baseRef: unknown, cwd: string, remote = "or
 export function listTrackedFilesAtRef(ref: string, cwd: string): string[] {
   const output = runGit(["ls-tree", "-r", "-z", "--name-only", ref], { cwd });
   return output.split("\0").filter(Boolean);
+}
+
+export function deleteRemoteBranchWithLease(input: ExactRemoteBranchDeletionInput): string {
+  const branch = input.branch;
+  const remote = input.remote || "origin";
+  const expectedSha = input.expectedSha.toLowerCase();
+
+  if (!/^[0-9a-f]{40}$/.test(expectedSha)) {
+    throw new Error("exact remote branch deletion requires a 40-hex expected SHA");
+  }
+  if (!remote) throw new Error("exact remote branch deletion requires a remote");
+
+  runGit(["check-ref-format", "--branch", branch], { cwd: input.cwd });
+  const ref = `refs/heads/${branch}`;
+  return runGit([
+    "push",
+    "--porcelain",
+    `--force-with-lease=${ref}:${expectedSha}`,
+    remote,
+    `:${ref}`,
+  ], { cwd: input.cwd }).trim();
 }
 
 export function acquirePullRequestObservation(input: PullRequestObservationInput): RepositoryObservation {
