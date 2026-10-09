@@ -36,7 +36,6 @@ export interface MarkdownOwnedBlockIdentityRegion {
 export type DiffFactSelector = {
     kind: "changed_paths";
     patterns: readonly string[];
-    /** Internal use: resolve HEAD freeze patterns as an exact document fact. */
     patterns_from?: {
         path: string;
         format: "json";
