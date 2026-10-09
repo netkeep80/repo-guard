@@ -42,10 +42,6 @@ export interface MarkdownOwnedBlockSpec {
   endMarker: string;
 }
 
-export interface MarkdownStructureOptions {
-  transparentOwnedBlocks?: readonly MarkdownOwnedBlockSpec[];
-}
-
 export interface MarkdownOwnedBlock {
   blockId: string;
   start: number;
@@ -331,8 +327,9 @@ export function insertMarkdownChild(args: {
   mode: MarkdownDocumentMode;
   parentAnchorId: string;
   child: MarkdownChildSpec;
+  options?: MarkdownStructureOptions;
 }): string {
-  const { source, mode, parentAnchorId, child } = args;
+  const { source, mode, parentAnchorId, child, options = {} } = args;
   if (mode === "source") failMarkdownStructure(`${parentAnchorId}: SOURCE document is read-only`);
   if (mode === "generated") failMarkdownStructure(`${parentAnchorId}: whole-file GENERATED mode is not supported`);
   validateMarkdownChild(child);
@@ -341,7 +338,7 @@ export function insertMarkdownChild(args: {
   if (context.anchors.some((anchor) => anchor.anchorId === child.anchorId)) {
     failMarkdownStructure(`anchor is duplicated: ${child.anchorId}`);
   }
-  const parent = nodeIn(context, parentAnchorId);
+  const parent = nodeIn(context, parentAnchorId, options);
   if (!parent) failMarkdownStructure(`${parentAnchorId}: anchor is not a canonical tree node`);
   if (parent.heading.level >= 6) {
     failMarkdownStructure(`${parentAnchorId}: heading level 6 cannot have a Markdown child`);
@@ -366,8 +363,14 @@ export function insertMarkdownChild(args: {
   }
 
   const updatedContext = markdownStructure(updated);
-  for (const anchor of context.anchors) anchorIn(updatedContext, anchor.anchorId);
-  const created = nodeIn(updatedContext, child.anchorId);
+  for (const anchor of context.anchors) {
+    anchorIn(updatedContext, anchor.anchorId);
+    const original = nodeIn(context, anchor.anchorId, options);
+    if (original && !nodeIn(updatedContext, anchor.anchorId, options)) {
+      failMarkdownStructure(`existing canonical node became invalid: ${anchor.anchorId}`);
+    }
+  }
+  const created = nodeIn(updatedContext, child.anchorId, options);
   if (!created || created.heading.level !== parent.heading.level + 1) {
     failMarkdownStructure("inserted child has invalid heading level");
   }

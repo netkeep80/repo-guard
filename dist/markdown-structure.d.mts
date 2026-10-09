@@ -35,9 +35,6 @@ export interface MarkdownOwnedBlockSpec {
     beginMarker: string;
     endMarker: string;
 }
-export interface MarkdownStructureOptions {
-    transparentOwnedBlocks?: readonly MarkdownOwnedBlockSpec[];
-}
 export interface MarkdownOwnedBlock {
     blockId: string;
     start: number;
@@ -57,6 +54,7 @@ export declare function insertMarkdownChild(args: {
     mode: MarkdownDocumentMode;
     parentAnchorId: string;
     child: MarkdownChildSpec;
+    options?: MarkdownStructureOptions;
 }): string;
 export declare function readOwnedMarkdownBlock(source: string, block: MarkdownOwnedBlockSpec): MarkdownOwnedBlock | null;
 export declare function replaceOwnedMarkdownBlock(args: {
