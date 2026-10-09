@@ -308,10 +308,10 @@ interface RequirementAuthorityPolicyProjection {
 }
 
 export function requirementAuthorityScopeFromPolicy(policy: RequirementAuthorityPolicyProjection | null | undefined): RequirementAuthorityScopeEntry[] {
-  const closed = policy?.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository" && rule.kind === "set_equal") === true;
+  const closed = policy?.document_relations?.rules?.some((rule: Record<string, unknown>) => rule.id === "requirements-strict:closed-repository" && rule.kind === "set_equal") === true;
   if (!closed) return [];
   const sources = policy?.anchors?.types?.requirement_artifact_path?.sources || [];
-  return normalizeAuthorityScope(sources.flatMap((source) => {
+  return normalizeAuthorityScope(sources.flatMap((source: Record<string, unknown>) => {
     if (source.kind !== "structured_pointer" || source.pointer !== "/artifacts" || source.item_field !== "path") return [];
     if ((source.format !== "json" && source.format !== "yaml") || typeof source.glob !== "string") return [];
     return [{ glob: source.glob, format: source.format }];
