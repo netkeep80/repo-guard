@@ -597,7 +597,12 @@ export function readFact(context: FactReadContext, ref: FactRef): DocumentFactRe
 }
 
 export function stripMarkdownInline(line: string): string {
-  return line.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]").replace(/https?:\/\/\S+/g, "");
+  return line
+    .replace(/<!--.*?-->/g, "")
+    .replace(/<\/?[A-Za-z][^>]*>/g, "")
+    .replace(/`[^`]*`/g, "")
+    .replace(/\]\([^)]*\)/g, "]")
+    .replace(/https?:\/\/\S+/g, "");
 }
 
 export function markdownSection(markdown: MarkdownDocument, section: string): MarkdownSection {
