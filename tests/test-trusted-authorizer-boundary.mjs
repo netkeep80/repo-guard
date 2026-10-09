@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  describeGhFailure,
   detectTrustedAuthorizerLocally,
   isBotUser,
   isPermissionTrusted,
@@ -38,6 +39,13 @@ describe("trusted authorizer boundary", () => {
     assert.equal(evidence.principal.author_association, "OWNER");
     assert.deepEqual(evidence.observed_labels, ["governance-approved"]);
     assert.equal(evidence.permission.status, "unavailable");
+  });
+
+  it("preserves concrete gh stderr in diagnostics without multiline noise", () => {
+    assert.equal(
+      describeGhFailure({ stderr: "HTTP 403: Resource not accessible by integration\n" }),
+      "HTTP 403: Resource not accessible by integration",
+    );
   });
 
   it("fails closed for malformed primitive trust inputs", () => {

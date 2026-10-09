@@ -8,12 +8,23 @@ function isValidRepo(repoFullName) {
 function isValidIssueNumber(number) {
     return POSITIVE_INTEGER.test(String(number));
 }
-function safeGhJson(args) {
+export function describeGhFailure(error) {
+    if (error && typeof error === "object") {
+        const candidate = error;
+        const stderr = typeof candidate.stderr === "string" ? candidate.stderr.trim() : "";
+        const message = typeof candidate.message === "string" ? candidate.message.trim() : "";
+        const detail = stderr || message || (candidate.status !== undefined ? `exit status ${String(candidate.status)}` : "unknown gh failure");
+        return detail.replace(/\s+/g, " ").slice(0, 500);
+    }
+    return String(error).replace(/\s+/g, " ").slice(0, 500);
+}
+function safeGhJson(args, operation) {
     try {
         const out = execFileSync("gh", args, { encoding: "utf-8", timeout: 30000 });
         return out.trim() ? JSON.parse(out) : null;
     }
-    catch {
+    catch (error) {
+        console.error(`repo-guard: ${operation} failed: ${describeGhFailure(error)}`);
         return null;
     }
 }
@@ -25,29 +36,26 @@ export function fetchIssueAuthorContext(repoFullName, issueNumber) {
         `repos/${repoFullName}/issues/${issueNumber}`,
         "--jq",
         "{body: .body, user: {login: .user.login, type: .user.type}, author_association: .author_association, labels: [.labels[].name]}",
-    ]);
+    ], `linked issue #${String(issueNumber)} fetch`);
 }
 export function fetchUserRepoPermission(repoFullName, username) {
     if (!isValidRepo(repoFullName) || typeof username !== "string" || username.length === 0) {
         return { status: "unavailable", permission: null, reason: "invalid_permission_lookup_input" };
     }
     const encodedUsername = encodeURIComponent(username);
-    try {
-        const out = execFileSync("gh", [
-            "api",
-            `repos/${repoFullName}/collaborators/${encodedUsername}/permission`,
-            "--jq",
-            "{permission, role_name}",
-        ], { encoding: "utf-8", timeout: 30000 });
-        const result = out.trim() ? JSON.parse(out) : null;
-        if (!result || typeof result.permission !== "string") {
-            return { status: "unavailable", permission: null, reason: "permission_response_invalid" };
-        }
-        return { status: "observed", permission: result.permission, role_name: result.role_name };
-    }
-    catch {
+    const result = safeGhJson([
+        "api",
+        `repos/${repoFullName}/collaborators/${encodedUsername}/permission`,
+        "--jq",
+        "{permission, role_name}",
+    ], `repository permission lookup for ${username}`);
+    if (!result) {
         return { status: "unavailable", permission: null, reason: "permission_lookup_failed" };
     }
+    if (typeof result.permission !== "string") {
+        return { status: "unavailable", permission: null, reason: "permission_response_invalid" };
+    }
+    return { status: "observed", permission: result.permission, role_name: result.role_name };
 }
 export function isPermissionTrusted(permission) {
     return typeof permission === "string" && TRUSTED_PERMISSIONS.has(permission);
