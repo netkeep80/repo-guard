@@ -87,6 +87,11 @@ describe("GitHub event and ChangeIntent resolution", () => {
     }
   });
 
+  it("preserves caller GH_TOKEN across the composite action boundary", () => {
+    const action = readFileSync(resolve(projectRoot, "action.yml"), "utf-8");
+    assert.doesNotMatch(action, /GH_TOKEN:\\s*\\$\\{\\{\\s*env\\.GH_TOKEN\\s*\\}\\}/);
+  });
+
   it("uses PR ChangeIntent and linked-issue GovernanceGrant independently", () => {
     const prBody = `${intent(["schemas/**"])}\n\nFixes #77`;
     const facts = resolvePRChangeIntentFacts({ prBody, issueBody: `${intent(["schemas/**"])}\n\n${grant()}` });
