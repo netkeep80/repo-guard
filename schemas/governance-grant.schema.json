@@ -7,13 +7,88 @@
   "minProperties": 1,
   "properties": {
     "authorized_governance_paths": {
-      "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "minItems": 1
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
     },
     "allow_policy_relaxation": {
-      "type": "array", "items": { "type": "string", "pattern": "^/" }, "uniqueItems": true
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^/"
+      },
+      "uniqueItems": true
     },
     "allow_atomic_governance_cutover": {
       "type": "boolean"
+    },
+    "requirement_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_authority_sha256",
+        "expected_head_authority_sha256",
+        "add",
+        "remove"
+      ],
+      "properties": {
+        "base_authority_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "expected_head_authority_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "add": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/requirement_relation_tuple"
+          },
+          "uniqueItems": true
+        },
+        "remove": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/requirement_relation_tuple"
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "definitions": {
+    "requirement_relation_tuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "relation",
+        "object"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relation": {
+          "enum": [
+            "requires",
+            "implements",
+            "verifies",
+            "documents",
+            "immutable"
+          ]
+        },
+        "object": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }

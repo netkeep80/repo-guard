@@ -39,6 +39,7 @@ interface ConstraintFacts extends RelationEvaluationFacts {
 interface ConstraintContext {
   executionPhase?: ExecutionPhase;
   replacedStateConstraintKeys?: readonly string[];
+  satisfiedTransactionConstraintKeys?: readonly string[];
 }
 interface ConstraintIR { constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
@@ -97,10 +98,12 @@ function advisoryCheck(check: unknown, advisory: boolean | undefined): unknown {
 export function evaluateConstraintIR(facts: ConstraintFacts, context: ConstraintContext = {}): RuleResult[] {
   const executionPhase = requestedExecutionPhase(context);
   const replacedStateConstraints = new Set(context.replacedStateConstraintKeys || []);
+  const satisfiedTransactionConstraints = new Set(context.satisfiedTransactionConstraintKeys || []);
   const { constraints } = compileConstraintIR(facts), results: RuleResult[] = [];
   for (const constraint of constraints) {
     if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
     if (replacedStateConstraints.has(constraint.key) && constraintPhase(constraint) === "state") continue;
+    if (satisfiedTransactionConstraints.has(constraint.key) && constraintPhase(constraint) === "transaction") continue;
     if (constraint.kind !== "primitive_relation") throw new Error(`runtime constraint kind "${(constraint as { kind?: unknown }).kind}" is unsupported`);
     const evaluated = evaluatePrimitiveRelation(facts, primitiveRelation(constraint));
     const check = advisoryCheck(withConstraintEvidence(evaluated, constraint), constraint.advisory);
