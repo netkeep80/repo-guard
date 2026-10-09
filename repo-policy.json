@@ -40,10 +40,6 @@
       "scripts/build.mjs",
       "scripts/check-dist.mjs",
       "scripts/verify-release-ref.mjs"
-    ],
-    "operational_paths": [
-      ".claude/**",
-      ".gitkeep"
     ]
   },
   "size_rules": [
