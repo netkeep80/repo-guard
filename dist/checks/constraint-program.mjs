@@ -154,10 +154,13 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
         }, {}, "transaction"));
         // Apply the HEAD freeze immediately, not only after merge: a policy-extension
         // PR must not also mutate, create, delete, or rename any newly frozen path.
-        add("paths:pr-immutable:head-mutation", primitiveRuntime("pr-immutable-head-mutation", "paths:pr-immutable:head-mutation", "path_set_disjoint", {
-            left: diffFact("repository_path_set", { kind: "changed_paths", patterns: ["**"], include_previous_paths: true }),
-            right: policyStringSetFact("head", "/paths/pr_immutable"),
-        }, {}, "transaction"));
+        add("paths:pr-immutable:head-mutation", primitiveRuntime("pr-immutable-head-mutation", "paths:pr-immutable:head-mutation", "numeric_bound", {
+            source: diffFact("repository_path_set", {
+                kind: "changed_paths", patterns: [],
+                patterns_from: { path: "repo-policy.json", format: "json", snapshot: "head", pointer: "/paths/pr_immutable" },
+                include_previous_paths: true,
+            }),
+        }, { max: 0 }, "transaction"));
         add("paths:pr-immutable:strictness", null, set("superset_stricter", prImmutable, {
             pointer: "/paths/pr_immutable",
             weakenKind: "pr_immutable_path_removed",
