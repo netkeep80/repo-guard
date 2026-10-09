@@ -48,6 +48,7 @@ const pureReadOnlyParallel = [
   "test-documentation-language.mjs",
   "test-execution-phases.mjs",
   "test-generated-cochange-identity.mjs",
+  "test-git-output-buffer.mjs",
   "test-github-pr-boundary.mjs",
   "test-governance-paths.mjs",
   "test-hardening.mjs",

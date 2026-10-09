@@ -56,6 +56,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-doctor.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-git-output-buffer.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-p0-1-machine-safe-git-transaction-coverage.mjs"
     relations: [requires, verifies]
   - path: "tests/test-p0-1-machine-safe-git-transaction.mjs"
