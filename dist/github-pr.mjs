@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
+import { evaluatePrimitiveRelation } from "./checks/relation-kernel.mjs";
 import { parseJson, parseYaml } from "./document-facts.mjs";
 import { acquirePullRequestObservation, getDiffObservation, listTrackedFilesAtRef, readFileAtRef } from "./git.mjs";
 import { createImmutableSnapshotDocumentCache } from "./immutable-snapshot-cache.mjs";
@@ -11,7 +12,7 @@ import { evaluatePolicyPipeline } from "./runtime/pipeline.mjs";
 import { createAnalysisCollector } from "./runtime/analysis-report.mjs";
 import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/renderers.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
-import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, normalizeRequirementAuthority } from "./requirement-relations.mjs";
+import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"];
 function githubEventPath() { return process.env.RG_EVENT_PATH || process.env.GITHUB_EVENT_PATH; }
@@ -111,6 +112,33 @@ function requirementTransitionGrant(value) {
     return value && typeof value === "object" && !Array.isArray(value)
         ? value.requirement_transition ?? null
         : null;
+}
+const REQUIREMENT_OVERLAP_SHADOW_ID = "requirement-verification-overlap-shadow";
+const REQUIREMENT_IMPLEMENTATION_ANCHOR = "__requirement_changed_implementation";
+const REQUIREMENT_OVERLAP_ANCHOR = "__requirement_verification_overlap";
+function requirementVerificationOverlapShadow(baseGraph, headGraph, changedFiles) {
+    const projection = projectRequirementTransactionEvidence({ base: baseGraph, head: headGraph, changedFiles });
+    const instances = (values) => values.map((value) => ({ value, file: "<requirement-relation-projection>" }));
+    const evaluated = evaluatePrimitiveRelation({
+        anchors: { byType: {
+                [REQUIREMENT_IMPLEMENTATION_ANCHOR]: instances(projection.implementation_requirements),
+                [REQUIREMENT_OVERLAP_ANCHOR]: instances(projection.overlap_requirements),
+            } },
+    }, {
+        relation_id: REQUIREMENT_OVERLAP_SHADOW_ID,
+        primitive: "set_presence_implies",
+        operands: {
+            left: { source: "repository", selector: { kind: "anchor_values", anchor_type: REQUIREMENT_IMPLEMENTATION_ANCHOR }, type: "string_set" },
+            right: { source: "repository", selector: { kind: "anchor_values", anchor_type: REQUIREMENT_OVERLAP_ANCHOR }, type: "string_set" },
+        },
+        parameters: {},
+    });
+    const kernelData = evaluated.data && typeof evaluated.data === "object" && !Array.isArray(evaluated.data) ? evaluated.data : {};
+    return {
+        ...evaluated,
+        advisory: true,
+        data: { ...kernelData, relation_id: REQUIREMENT_OVERLAP_SHADOW_ID, projection },
+    };
 }
 function headPolicyRuntime(roots, observation, reader, quiet) {
     return loadRuntime(() => {
@@ -269,6 +297,10 @@ export function runCheckPR(roots, args = []) {
                             actual_delta: transition.actual_delta,
                         },
                     },
+                });
+                initialChecks.push({
+                    name: REQUIREMENT_OVERLAP_SHADOW_ID,
+                    check: requirementVerificationOverlapShadow(baseGraph, headGraph, diff.files),
                 });
             }
         }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ParsedDiffFile } from "./diff/parser.mjs";
 import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
 import { matchesAny } from "./utils/path-patterns.mjs";
 
@@ -98,6 +99,14 @@ export interface RequirementTransitionCheck {
   base_authority_sha256: string;
   head_authority_sha256: string;
   authority_scope_changed: boolean;
+}
+
+export interface RequirementTransactionEvidenceProjection {
+  changed_implementation_paths: string[];
+  changed_verification_paths: string[];
+  implementation_requirements: string[];
+  verification_requirements: string[];
+  overlap_requirements: string[];
 }
 
 type JsonObject = Record<string, unknown>;
@@ -339,6 +348,44 @@ export function buildRequirementAuthorityFromSnapshot(input: {
     sources.push({ path, format: formats[0]!, content: String(raw) });
   }
   return normalizeRequirementAuthority({ snapshot: input.snapshot, revision: input.revision, scope, sources });
+}
+
+function uniqueSortedStrings(values: Iterable<string>): string[] {
+  return [...new Set(values)].sort();
+}
+
+export function projectRequirementTransactionEvidence(input: {
+  base: RequirementRelationGraph;
+  head: RequirementRelationGraph;
+  changedFiles: readonly ParsedDiffFile[];
+}): RequirementTransactionEvidenceProjection {
+  const changedIdentityPaths = new Set<string>();
+  const changedHeadPaths = new Set<string>();
+  for (const file of input.changedFiles) {
+    changedIdentityPaths.add(file.path);
+    if (file.previousPath) changedIdentityPaths.add(file.previousPath);
+    if (file.status !== "deleted") changedHeadPaths.add(file.path);
+  }
+
+  const implementationRelations = [...input.base.relations, ...input.head.relations].filter((relation) =>
+    relation.relation === "implements"
+    && relation.object.startsWith("src/")
+    && changedIdentityPaths.has(relation.object));
+  const verificationRelations = input.head.relations.filter((relation) =>
+    relation.relation === "verifies"
+    && relation.object.startsWith("tests/")
+    && changedHeadPaths.has(relation.object));
+
+  const implementationRequirements = uniqueSortedStrings(implementationRelations.map((relation) => relation.subject));
+  const verificationRequirements = uniqueSortedStrings(verificationRelations.map((relation) => relation.subject));
+  const verificationSet = new Set(verificationRequirements);
+  return {
+    changed_implementation_paths: uniqueSortedStrings(implementationRelations.map((relation) => relation.object)),
+    changed_verification_paths: uniqueSortedStrings(verificationRelations.map((relation) => relation.object)),
+    implementation_requirements: implementationRequirements,
+    verification_requirements: verificationRequirements,
+    overlap_requirements: implementationRequirements.filter((subject) => verificationSet.has(subject)),
+  };
 }
 
 export function compareRequirementRelationGraphs(base: RequirementRelationGraph, head: RequirementRelationGraph): RequirementRelationDelta {
