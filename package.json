@@ -1,6 +1,6 @@
 {
   "name": "repo-guard",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "description": "Исполняемая политика репозитория с проверкой JSON Schema и правил по git diff",
   "type": "module",
   "main": "dist/repo-guard.mjs",
