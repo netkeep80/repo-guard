@@ -9,6 +9,7 @@ const pureReadOnlyParallel = [
   "test-analysis-report-boundary.mjs",
   "test-641-closure-falsifier.mjs",
   "test-647-control-plane-graph.mjs",
+  "test-647-control-plane-doctor.mjs",
   "test-anchor-diagnostics-boundary.mjs",
   "test-anchor-extractors.mjs",
   "test-architectural-constraints.mjs",

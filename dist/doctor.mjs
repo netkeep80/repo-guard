@@ -2,6 +2,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { loadPolicyRuntime } from "./runtime/validation.mjs";
+import { analyzeControlPlaneObservation, controlPlaneObservationFromGitHub, } from "./facts/control-plane.mjs";
 const PASS = "PASS";
 const WARN = "WARN";
 const FAIL = "FAIL";
@@ -113,6 +114,108 @@ function githubRepositorySlug(repoRoot) {
     catch {
         return null;
     }
+}
+function ghApiJson(endpoint) {
+    return JSON.parse(execFileSync("gh", ["api", endpoint], {
+        encoding: "utf-8",
+        stdio: "pipe",
+        maxBuffer: 4 * 1024 * 1024,
+    }));
+}
+function ghApiProjectedItems(endpoint, label, jq) {
+    const raw = execFileSync("gh", ["api", "--paginate", "--jq", jq, endpoint], {
+        encoding: "utf-8",
+        stdio: "pipe",
+        maxBuffer: 4 * 1024 * 1024,
+    }).trim();
+    if (!raw)
+        return [];
+    return raw.split(/\r?\n/).map((line, index) => {
+        try {
+            return JSON.parse(line);
+        }
+        catch (error) {
+            throw new Error(`${label} item ${index + 1} is not JSON: ${error.message}`);
+        }
+    });
+}
+export function controlPlaneDoctorCheckFromGraph(graph) {
+    const openIssues = graph.issues.filter((issue) => issue.state === "open").length;
+    const openPrs = graph.pull_requests.filter((pr) => pr.state === "open").length;
+    const rootAvailable = graph.root_issue_number !== null;
+    const issueDrift = rootAvailable && (graph.derived.unreachable_open_issues.length > 0
+        || graph.derived.unowned_open_prs.length > 0);
+    const branchDrift = graph.derived.moved_or_missing_pr_heads.length > 0
+        || graph.derived.exact_merged_pr_head_residues.length > 0
+        || graph.derived.exact_closed_unmerged_pr_head_residues.length > 0
+        || graph.derived.unclassified_non_default_refs.length > 0;
+    const status = issueDrift || branchDrift ? WARN : PASS;
+    const issueSummary = rootAvailable
+        ? `issues ${graph.derived.reachable_open_issues.length}/${openIssues} reachable; PRs ${graph.derived.owned_open_prs.length}/${openPrs} owned`
+        : `roadmap root not inferred; ${openIssues} open issues and ${openPrs} open PRs observed`;
+    const branchSummary = `branches ${graph.branches.length}: active ${graph.derived.active_pr_head_branches.length}, merged-residue ${graph.derived.exact_merged_pr_head_residues.length}, closed-unmerged ${graph.derived.exact_closed_unmerged_pr_head_residues.length}, unclassified ${graph.derived.unclassified_non_default_refs.length}`;
+    return {
+        name: "control-plane-hygiene",
+        status,
+        message: `${graph.repository}: ${issueSummary}; ${branchSummary}; delete_branch_on_merge=${String(graph.delete_branch_on_merge)}`,
+        hint: status === WARN ? "Read-only diagnostic only; reconcile ownership/lifecycle evidence before any destructive action" : undefined,
+        data: {
+            repository: graph.repository,
+            root_issue_number: graph.root_issue_number,
+            delete_branch_on_merge: graph.delete_branch_on_merge,
+            counts: {
+                branches: graph.branches.length,
+                open_issues: openIssues,
+                reachable_open_issues: rootAvailable ? graph.derived.reachable_open_issues.length : null,
+                open_prs: openPrs,
+                owned_open_prs: rootAvailable ? graph.derived.owned_open_prs.length : null,
+                active_pr_head_branches: graph.derived.active_pr_head_branches.length,
+                exact_merged_pr_head_residues: graph.derived.exact_merged_pr_head_residues.length,
+                exact_closed_unmerged_pr_head_residues: graph.derived.exact_closed_unmerged_pr_head_residues.length,
+                unclassified_non_default_refs: graph.derived.unclassified_non_default_refs.length,
+            },
+            diagnostics: {
+                unreachable_open_issues: rootAvailable ? graph.derived.unreachable_open_issues : [],
+                unowned_open_prs: rootAvailable ? graph.derived.unowned_open_prs : [],
+                moved_or_missing_pr_heads: graph.derived.moved_or_missing_pr_heads,
+                protected_non_default_branches: graph.derived.protected_non_default_branches,
+                unclassified_non_default_refs: graph.derived.unclassified_non_default_refs,
+            },
+        },
+    };
+}
+function checkControlPlaneHygiene(repoRoot) {
+    return check("control-plane-hygiene", () => {
+        if (!existsSync(resolve(repoRoot, ".git"))) {
+            return { name: "control-plane-hygiene", status: WARN, message: "GitHub control-plane hygiene unavailable outside a Git repository" };
+        }
+        const repository = githubRepositorySlug(repoRoot);
+        if (!repository) {
+            return { name: "control-plane-hygiene", status: WARN, message: "GitHub repository identity unavailable; control-plane hygiene not observed" };
+        }
+        try {
+            const metadata = ghApiJson(`repos/${repository}`);
+            const branches = ghApiProjectedItems(`repos/${repository}/branches?per_page=100`, "branches", ".[] | {name, commit: {sha: .commit.sha}, protected}");
+            const issues = ghApiProjectedItems(`repos/${repository}/issues?state=open&per_page=100`, "issues", ".[] | {number, state, title, body, pull_request}");
+            const pullRequests = ghApiProjectedItems(`repos/${repository}/pulls?state=all&per_page=100`, "pull requests", ".[] | {number, state, draft, merged_at, body: (if .state == \"open\" then (.body // \"\") else \"\" end), head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}");
+            const observation = controlPlaneObservationFromGitHub({
+                repository,
+                repository_metadata: metadata,
+                branches,
+                issues,
+                pull_requests: pullRequests,
+            });
+            return controlPlaneDoctorCheckFromGraph(analyzeControlPlaneObservation(observation));
+        }
+        catch (error) {
+            return {
+                name: "control-plane-hygiene",
+                status: WARN,
+                message: `${repository}: read-only GitHub control-plane observation unavailable: ${error.message}`,
+                hint: "Authenticate gh with contents/pull-requests/issues read access; doctor never mutates GitHub lifecycle state",
+            };
+        }
+    });
 }
 function coverageBranch(repoRoot) {
     const workspace = process.env.GITHUB_WORKSPACE;
@@ -254,6 +357,7 @@ export function runDoctor(roots) {
     results.push(checkGitEvidence(roots.repoRoot));
     results.push(checkPolicyDiscovery(roots.repoRoot, roots.packageRoot));
     results.push(checkMergeBarrierCoverage(roots.repoRoot));
+    results.push(checkControlPlaneHygiene(roots.repoRoot));
     results.push(checkEventContext());
     results.push(checkAuth());
     results.push(checkGhCli());
