@@ -9,6 +9,9 @@ const E = "e".repeat(40);
 const F = "f".repeat(40);
 const G = "1".repeat(40);
 const H = "2".repeat(40);
+const I = "3".repeat(40);
+const J = "4".repeat(40);
+const K = "5".repeat(40);
 
 function selfHostFixture() {
   return {
@@ -23,6 +26,9 @@ function selfHostFixture() {
       { name: "release/legacy", sha: D, protected: true },
       { name: "moved-head", sha: G },
       { name: "feature/no-owner", sha: H },
+      { name: "merged-residue", sha: I },
+      { name: "closed-unmerged-residue", sha: J },
+      { name: "mixed-history", sha: K },
     ],
     issues: [
       { number: 518, state: "open", title: "[Roadmap] Product constitution", body: "" },
@@ -75,6 +81,34 @@ function selfHostFixture() {
           repo_full_name: "netkeep80/repo-guard",
         },
       },
+      {
+        number: 640,
+        state: "closed",
+        merged: true,
+        body: "Part of #518",
+        head: { ref: "merged-residue", sha: I, repo_full_name: "netkeep80/repo-guard" },
+      },
+      {
+        number: 641,
+        state: "closed",
+        merged: false,
+        body: "Part of #518",
+        head: { ref: "closed-unmerged-residue", sha: J, repo_full_name: "netkeep80/repo-guard" },
+      },
+      {
+        number: 642,
+        state: "closed",
+        merged: false,
+        body: "Part of #518",
+        head: { ref: "mixed-history", sha: K, repo_full_name: "netkeep80/repo-guard" },
+      },
+      {
+        number: 643,
+        state: "closed",
+        merged: true,
+        body: "Part of #518",
+        head: { ref: "mixed-history", sha: K, repo_full_name: "netkeep80/repo-guard" },
+      },
     ],
   };
 }
@@ -116,10 +150,17 @@ console.log("\n--- #647 canonical control-plane graph ---");
 
   assert.deepEqual(graph.derived.persistent_default_branches, ["main"]);
   assert.deepEqual(graph.derived.protected_non_default_branches, ["release/legacy"]);
+  assert.deepEqual(graph.derived.exact_merged_pr_head_residues, [
+    { ref: "merged-residue", sha: I, prs: [640] },
+    { ref: "mixed-history", sha: K, prs: [643] },
+  ]);
+  assert.deepEqual(graph.derived.exact_closed_unmerged_pr_head_residues, [
+    { ref: "closed-unmerged-residue", sha: J, prs: [641] },
+  ], "merged exact history takes precedence over earlier unmerged history for the same current ref@SHA");
   assert.deepEqual(
-    graph.derived.unclassified_non_default_no_open_pr,
+    graph.derived.unclassified_non_default_refs,
     ["moved-head", "release/legacy", "tmp-do-not-use"],
-    "protected/name/age do not silently become deletion authority",
+    "protected/name/age do not silently become lifecycle authority",
   );
 
   assert.equal(Object.hasOwn(graph.derived, "deletable_branches"), false, "P0 must not manufacture destructive authority");

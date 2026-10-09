@@ -95,7 +95,9 @@ export interface ControlPlaneGraph {
     moved_or_missing_pr_heads: Array<{ pr: number; ref: string; expected_sha: string; observed_sha: string | null }>;
     persistent_default_branches: string[];
     protected_non_default_branches: string[];
-    unclassified_non_default_no_open_pr: string[];
+    exact_merged_pr_head_residues: Array<{ ref: string; sha: string; prs: number[] }>;
+    exact_closed_unmerged_pr_head_residues: Array<{ ref: string; sha: string; prs: number[] }>;
+    unclassified_non_default_refs: string[];
   };
 }
 
@@ -309,6 +311,27 @@ export function analyzeControlPlaneObservation(input: ControlPlaneObservation): 
     activeHeadBranches.add(branch.name);
   }
 
+  const exactMergedByRef = new Map<string, number[]>();
+  const exactClosedUnmergedByRef = new Map<string, number[]>();
+  for (const pr of pullRequests.filter((item) => item.state === "closed" && item.same_repository)) {
+    const branch = branchByName.get(pr.head_ref);
+    if (!branch || branch.sha !== pr.head_sha) continue;
+    const target = pr.merged ? exactMergedByRef : exactClosedUnmergedByRef;
+    const values = target.get(branch.name) || [];
+    values.push(pr.number);
+    target.set(branch.name, values);
+  }
+  const exactMergedResidues = [...exactMergedByRef.entries()]
+    .filter(([ref]) => ref !== defaultBranch && !activeHeadBranches.has(ref))
+    .map(([ref, prs]) => ({ ref, sha: branchByName.get(ref)!.sha, prs: [...prs].sort((a, b) => a - b) }))
+    .sort((a, b) => a.ref.localeCompare(b.ref));
+  const mergedResidueRefs = new Set(exactMergedResidues.map((item) => item.ref));
+  const exactClosedUnmergedResidues = [...exactClosedUnmergedByRef.entries()]
+    .filter(([ref]) => ref !== defaultBranch && !activeHeadBranches.has(ref) && !mergedResidueRefs.has(ref))
+    .map(([ref, prs]) => ({ ref, sha: branchByName.get(ref)!.sha, prs: [...prs].sort((a, b) => a - b) }))
+    .sort((a, b) => a.ref.localeCompare(b.ref));
+  const closedUnmergedResidueRefs = new Set(exactClosedUnmergedResidues.map((item) => item.ref));
+
   return {
     repository,
     default_branch: defaultBranch,
@@ -327,8 +350,13 @@ export function analyzeControlPlaneObservation(input: ControlPlaneObservation): 
       moved_or_missing_pr_heads: movedOrMissing.sort((a, b) => a.pr - b.pr),
       persistent_default_branches: [defaultBranch],
       protected_non_default_branches: branches.filter((branch) => branch.protected && branch.name !== defaultBranch).map((branch) => branch.name).sort(),
-      unclassified_non_default_no_open_pr: branches
-        .filter((branch) => branch.name !== defaultBranch && !activeHeadBranches.has(branch.name))
+      exact_merged_pr_head_residues: exactMergedResidues,
+      exact_closed_unmerged_pr_head_residues: exactClosedUnmergedResidues,
+      unclassified_non_default_refs: branches
+        .filter((branch) => branch.name !== defaultBranch
+          && !activeHeadBranches.has(branch.name)
+          && !mergedResidueRefs.has(branch.name)
+          && !closedUnmergedResidueRefs.has(branch.name))
         .map((branch) => branch.name)
         .sort(),
     },
