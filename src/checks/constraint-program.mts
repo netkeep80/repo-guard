@@ -129,7 +129,6 @@ const set = (relation: SetRelation, value: unknown, metadata: StrictnessMetadata
 const exact = (value: unknown, metadata: StrictnessMetadata): ExactStrictness => compare("equal_or_incomparable", value, metadata) as ExactStrictness;
 const entity = (metadata: StrictnessMetadata): EntityStrictness => compare("required_entity", true, metadata) as EntityStrictness;
 const leftSubsetPrimitive = relationDescriptorForSetComparison("left_subset").kind;
-const equalSetPrimitive = relationDescriptorForSetComparison("equal").kind;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -275,10 +274,26 @@ export function compileConstraintProgram(
     add("paths:pr-immutable:mutation", primitiveRuntime("pr-immutable-paths", "paths:pr-immutable:mutation", "numeric_bound", {
       source: diffFact("repository_path_set", { kind: "changed_paths", patterns: prImmutable, include_previous_paths: true }),
     }, { max: 0 }, "transaction"));
-    add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", equalSetPrimitive, {
+    add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", leftSubsetPrimitive, {
       left: policyStringSetFact("base", "/paths/pr_immutable"),
       right: policyStringSetFact("head", "/paths/pr_immutable"),
     }, {}, "transaction"));
+    // Apply the HEAD freeze immediately, not only after merge: a policy-extension
+    // PR must not also mutate, create, delete, or rename any newly frozen path.
+    add("paths:pr-immutable:head-mutation", primitiveRuntime("pr-immutable-head-mutation", "paths:pr-immutable:head-mutation", "numeric_bound", {
+      source: diffFact("repository_path_set", {
+        kind: "changed_paths", patterns: [],
+        patterns_from: { path: "repo-policy.json", format: "json", snapshot: "head", pointer: "/paths/pr_immutable" },
+        include_previous_paths: true,
+      }),
+    }, { max: 0 }, "transaction"));
+    add("paths:pr-immutable:strictness", null,
+      set("superset_stricter", prImmutable, {
+        pointer: "/paths/pr_immutable",
+        weakenKind: "pr_immutable_path_removed",
+        itemField: "pattern",
+        message: (item) => `paths.pr_immutable removed: ${item}`,
+      }));
   }
 
   for (const [field, metric, name] of [

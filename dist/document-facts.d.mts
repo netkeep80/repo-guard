@@ -36,6 +36,12 @@ export interface MarkdownOwnedBlockIdentityRegion {
 export type DiffFactSelector = {
     kind: "changed_paths";
     patterns: readonly string[];
+    patterns_from?: {
+        path: string;
+        format: "json";
+        snapshot: "head";
+        pointer: string;
+    };
     mode?: "matching" | "outside";
     exclude_statuses?: readonly DiffFileStatus[];
     include_previous_paths?: boolean;
