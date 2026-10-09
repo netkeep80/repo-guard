@@ -299,6 +299,16 @@ function diffFactSource(context, selector) {
         return candidates.reduce((sum, file) => sum + (file.addedLines?.length || 0) - (file.deletedLines?.length || 0), 0);
     }
     const patterns = [...selector.patterns];
+    if (selector.patterns_from) {
+        const derived = readFact(context, {
+            source: "document",
+            selector: { ...selector.patterns_from, projection: "array_items" },
+            type: "string_set",
+        });
+        if (!derived.ok)
+            return failDocumentFact("document_read_error", `could not resolve changed-path patterns from HEAD: ${derived.error.message}`);
+        patterns.push(...derived.value);
+    }
     const excluded = new Set(selector.exclude_statuses || []);
     const candidates = files.filter((file) => !excluded.has(file.status));
     if (!selector.include_previous_paths) {
