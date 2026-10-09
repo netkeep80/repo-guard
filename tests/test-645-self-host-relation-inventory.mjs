@@ -107,6 +107,17 @@ for (const [requirement, path] of reviewedDirectImportCrossLinks) {
   assert.ok(relations.some((relation) => relation.subject === requirement && relation.relation === "verifies"), `${path}: verifies(${requirement}, artifact) must be visible`);
 }
 
+const reviewedTransitiveCliCrossLinks = [
+  ["RG-04", "tests/test-c3-10a-external-base-cutover.mjs"],
+  ["RG-04", "tests/test-check-diff-boundary.mjs"],
+  ["RG-04", "tests/test-p2-2-lazy-trust-lookup.mjs"],
+];
+for (const [requirement, path] of reviewedTransitiveCliCrossLinks) {
+  const relations = reverse.get(path) || [];
+  assert.ok(relations.some((relation) => relation.subject === requirement && relation.relation === "requires"), `${path}: requires(${requirement}, artifact) must be visible`);
+  assert.ok(relations.some((relation) => relation.subject === requirement && relation.relation === "verifies"), `${path}: verifies(${requirement}, artifact) must be visible`);
+}
+
 console.log(`#645 self-host relation inventory: ${tracked.length}/${tracked.length} tracked artifacts, complete reverse requires provenance, graph=${graph.graph_sha256}, revision=${revision}`);
 
 

@@ -136,6 +136,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-architectural-constraints.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-c3-10a-external-base-cutover.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-c3-10b-contract-surface-cutover.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-3-diagnostic-evidence.mjs"
@@ -147,6 +149,8 @@ artifacts:
   - path: "tests/test-c3-9g-doctor-git-evidence.mjs"
     relations: [requires, verifies]
   - path: "tests/test-canonical-relation-kernel.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-check-diff-boundary.mjs"
     relations: [requires, verifies]
   - path: "tests/test-ci-contract.mjs"
     relations: [requires, verifies]
@@ -169,6 +173,8 @@ artifacts:
   - path: "tests/test-p0-5-trusted-diff-budget-ceilings.mjs"
     relations: [requires, verifies]
   - path: "tests/test-p1-1-policy-normalization.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-p2-2-lazy-trust-lookup.mjs"
     relations: [requires, verifies]
   - path: "tests/test-pipeline.mjs"
     relations: [requires, verifies]
