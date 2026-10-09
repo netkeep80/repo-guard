@@ -430,7 +430,12 @@ export function readFact(context, ref) {
     }
 }
 export function stripMarkdownInline(line) {
-    return line.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]").replace(/https?:\/\/\S+/g, "");
+    return line
+        .replace(/<!--.*?-->/g, "")
+        .replace(/<\/?[A-Za-z][^>]*>/g, "")
+        .replace(/`[^`]*`/g, "")
+        .replace(/\]\([^)]*\)/g, "]")
+        .replace(/https?:\/\/\S+/g, "");
 }
 export function markdownSection(markdown, section) {
     const heading = markdown.headings.find((item) => item.text.toLowerCase() === section.trim().toLowerCase());

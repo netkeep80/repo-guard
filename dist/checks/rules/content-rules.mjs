@@ -65,12 +65,24 @@ function checkRequiredRegexRule(files, rule, documents, trackedFiles = []) {
     }
     return violations;
 }
+function stripDeclaredForeignLanguageSpans(line, targetLanguage) {
+    const target = (targetLanguage || "").toLowerCase();
+    if (!target)
+        return line;
+    return line.replace(/<span\b([^>]*)>(.*?)<\/span\s*>/gi, (whole, attributes) => {
+        const match = attributes.match(/\blang\s*=\s*(?:"([^"]+)"|'([^']+)')/i);
+        const language = (match?.[1] || match?.[2] || "").toLowerCase();
+        if (!language)
+            return whole;
+        return language === target || language.startsWith(target + "-") ? whole : "";
+    });
+}
 function markdownLanguageViolations(file, rule, documents) {
     const allowed = new Set(rule.allow_words || []);
     const maxLatin = rule.max_unapproved_latin_words_per_line ?? 1;
     const violations = [];
     for (const prose of documents.markdown(file.path).proseLines) {
-        const line = stripMarkdownInline(prose.text);
+        const line = stripMarkdownInline(stripDeclaredForeignLanguageSpans(prose.text, rule.language));
         const latin = [...line.matchAll(/(?<![\w])([A-Za-z][A-Za-z-]{2,})(?![\w])/g)]
             .map((match) => match[1]).filter((word) => !allowed.has(word));
         const hasCyrillic = /[А-Яа-яЁё]{3,}/.test(line);

@@ -28,6 +28,41 @@ assert.ok(markdownFiles.length > 0, "в репозитории должны бы
 const violations = checkContentRules(markdownFiles.map((path) => ({ path, status: "modified", addedLines: [] })), [languageRule], { repoRoot: projectRoot });
 assert.deepEqual(violations, [], `Найдена нерусская Markdown-проза:\n${violations.map((v) => `${v.file}:${v.line_number}: ${v.unapproved_words.join(", ")} — ${v.line}`).join("\n")}`);
 
+
+const syntheticRuRule = {
+  id: "synthetic-russian-first",
+  glob: "**/*.md",
+  mode: "markdown_language",
+  language: "ru",
+  allow_words: [],
+  max_unapproved_latin_words_per_line: 1,
+};
+const syntheticFile = [{ path: "fixture.md", status: "modified", addedLines: [] }];
+const syntheticViolations = (content) => checkContentRules(
+  syntheticFile,
+  [syntheticRuRule],
+  { readFile: () => content },
+);
+
+assert.deepEqual(
+  syntheticViolations('Русский текст <a id="mts-v015-v15-term-01"></a> продолжается.'),
+  [],
+  "HTML markup must not be classified as Latin prose",
+);
+assert.deepEqual(
+  syntheticViolations('Русский текст <span lang="en">Canonical JSON source uses deterministic projection.</span> продолжается.'),
+  [],
+  "explicit same-line foreign-language span must be excluded from the target-language scan",
+);
+assert.ok(
+  syntheticViolations("Русский текст Canonical JSON source uses deterministic projection.").length > 0,
+  "unmarked English prose must remain a blocking language violation",
+);
+assert.ok(
+  syntheticViolations('Русский текст <span lang="en">Canonical JSON source uses deterministic projection.').length > 0,
+  "an unclosed foreign-language span must not hide prose from the language checker",
+);
+
 const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
 const readme = read("README.md");
 assert.doesNotMatch(readme, /Constraint IR|contract\.overrides/, "README не должен описывать переходную архитектуру");
