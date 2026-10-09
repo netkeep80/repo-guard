@@ -4,8 +4,10 @@ import {
   checkRequirementTransition,
   compareRequirementRelationGraphs,
   normalizeRequirementAuthority,
+  projectRequirementTransactionEvidence,
   normalizeRequirementTransitionGrant,
 } from "../dist/requirement-relations.mjs";
+import { evaluatePrimitiveRelation } from "../dist/checks/relation-kernel.mjs";
 
 const BASE = "a".repeat(40);
 const HEAD = "b".repeat(40);
@@ -233,6 +235,96 @@ console.log("\n--- transition identity boundaries ---");
   const verdict = checkRequirementTransition({ base, head, grant: spurious, trustedAuthorizer: trusted });
   assert.equal(verdict.ok, false);
   assert.ok(verdict.reasons.includes("requirement_transition_grant_without_relation_delta"));
+}
+
+console.log("\n--- #670 requirement transaction evidence projection ---");
+{
+  const relation = (path, kind) => artifact(path, kind);
+  const base = graph("base", BASE, [[
+    "requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("src/a.mts", "implements"), relation("tests/a.mjs", "verifies")]),
+  ]]);
+  const head = graph("head", HEAD, [[
+    "requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("src/a.mts", "implements"), relation("tests/a.mjs", "verifies")]),
+  ]]);
+  const kernel = (projection) => evaluatePrimitiveRelation({
+    anchors: { byType: {
+      __implementation: projection.implementation_requirements.map((value) => ({ value, file: "<projection>" })),
+      __overlap: projection.overlap_requirements.map((value) => ({ value, file: "<projection>" })),
+    } },
+  }, {
+    relation_id: "test:requirement-overlap",
+    primitive: "set_presence_implies",
+    operands: {
+      left: { source: "repository", selector: { kind: "anchor_values", anchor_type: "__implementation" }, type: "string_set" },
+      right: { source: "repository", selector: { kind: "anchor_values", anchor_type: "__overlap" }, type: "string_set" },
+    },
+    parameters: {},
+  });
+
+  const related = projectRequirementTransactionEvidence({
+    base, head,
+    changedFiles: [{ path: "src/a.mts", status: "modified" }, { path: "tests/a.mjs", status: "modified" }],
+  });
+  assert.deepEqual(related.implementation_requirements, ["RG-A"]);
+  assert.deepEqual(related.verification_requirements, ["RG-A"]);
+  assert.deepEqual(related.overlap_requirements, ["RG-A"]);
+  assert.equal(kernel(related).ok, true);
+
+  const unrelatedHead = graph("head", HEAD, [
+    ["requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("src/a.mts", "implements")])],
+    ["requirements/r2.json", req("RG-B", [artifact("requirements/r2.json"), relation("tests/b.mjs", "verifies")])],
+  ]);
+  const unrelatedBase = graph("base", BASE, [
+    ["requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("src/a.mts", "implements")])],
+    ["requirements/r2.json", req("RG-B", [artifact("requirements/r2.json"), relation("tests/b.mjs", "verifies")])],
+  ]);
+  const unrelated = projectRequirementTransactionEvidence({
+    base: unrelatedBase, head: unrelatedHead,
+    changedFiles: [{ path: "src/a.mts", status: "modified" }, { path: "tests/b.mjs", status: "modified" }],
+  });
+  assert.deepEqual(unrelated.overlap_requirements, []);
+  assert.equal(kernel(unrelated).ok, false);
+
+  const noTest = projectRequirementTransactionEvidence({
+    base, head,
+    changedFiles: [{ path: "src/a.mts", status: "modified" }],
+  });
+  assert.deepEqual(noTest.verification_requirements, []);
+  assert.equal(kernel(noTest).ok, false);
+
+  const deletedBase = graph("base", BASE, [[
+    "requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("src/old.mts", "implements"), relation("tests/a.mjs", "verifies")]),
+  ]]);
+  const deletedHead = graph("head", HEAD, [[
+    "requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("tests/a.mjs", "verifies")]),
+  ]]);
+  const deletedImplementation = projectRequirementTransactionEvidence({
+    base: deletedBase, head: deletedHead,
+    changedFiles: [{ path: "src/old.mts", status: "deleted" }, { path: "tests/a.mjs", status: "modified" }],
+  });
+  assert.deepEqual(deletedImplementation.changed_implementation_paths, ["src/old.mts"]);
+  assert.deepEqual(deletedImplementation.overlap_requirements, ["RG-A"]);
+  assert.equal(kernel(deletedImplementation).ok, true);
+
+  const deletedTest = projectRequirementTransactionEvidence({
+    base, head,
+    changedFiles: [{ path: "src/a.mts", status: "modified" }, { path: "tests/a.mjs", status: "deleted" }],
+  });
+  assert.deepEqual(deletedTest.changed_verification_paths, []);
+  assert.equal(kernel(deletedTest).ok, false);
+
+  const distOnlyBase = graph("base", BASE, [[
+    "requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("dist/a.mjs", "implements"), relation("tests/a.mjs", "verifies")]),
+  ]]);
+  const distOnlyHead = graph("head", HEAD, [[
+    "requirements/r1.json", req("RG-A", [artifact("requirements/r1.json"), relation("dist/a.mjs", "implements"), relation("tests/a.mjs", "verifies")]),
+  ]]);
+  const distOnly = projectRequirementTransactionEvidence({
+    base: distOnlyBase, head: distOnlyHead,
+    changedFiles: [{ path: "dist/a.mjs", status: "modified" }, { path: "tests/a.mjs", status: "modified" }],
+  });
+  assert.deepEqual(distOnly.implementation_requirements, []);
+  assert.equal(kernel(distOnly).ok, true);
 }
 
 console.log("requirement relation normalization + #644 transition matrix passed");

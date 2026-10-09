@@ -271,4 +271,98 @@ console.log("\n--- #644 check-pr administrative transition evidence boundary ---
   }
 }
 
+console.log("\n--- #670 check-pr advisory overlap shadow ---");
+{
+  const rawPolicy = policy(["src/**", "tests/**"]);
+  const requirement = (id, artifacts) => [
+    `id: ${id}`,
+    "artifacts:",
+    ...artifacts.flatMap(({ path, relations }) => [
+      `  - path: ${path}`,
+      `    relations: [${relations.join(", ")}]`,
+    ]),
+    "",
+  ].join("\n");
+  const r1 = requirement("RG-A", [
+    { path: "requirements/r1.yaml", relations: ["requires"] },
+    { path: "repo-policy.json", relations: ["requires"] },
+    { path: "src/a.mts", relations: ["requires", "implements"] },
+  ]);
+  const r2 = requirement("RG-B", [
+    { path: "requirements/r2.yaml", relations: ["requires"] },
+    { path: "tests/b.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const root = initRepo(rawPolicy, { "requirements/r1.yaml": r1, "requirements/r2.yaml": r2 }, {
+    "src/a.mts": "export const a = 1;\n",
+    "tests/b.mjs": "export const b = 1;\n",
+  });
+  try {
+    writeFileSync(join(root, "src/a.mts"), "export const a = 2;\n");
+    writeFileSync(join(root, "tests/b.mjs"), "export const b = 2;\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "implementation with unrelated verification");
+    const result = run(root, "", ["src/**", "tests/**"]);
+    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 0, output);
+    assert.match(output, /WARN: requirement-verification-overlap-shadow/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+{
+  const rawPolicy = policy(["src/**", "tests/**"]);
+  const r1 = [
+    "id: RG-A",
+    "artifacts:",
+    "  - path: requirements/r1.yaml",
+    "    relations: [requires]",
+    "  - path: repo-policy.json",
+    "    relations: [requires]",
+    "  - path: src/a.mts",
+    "    relations: [requires, implements]",
+    "  - path: tests/a.mjs",
+    "    relations: [requires, verifies]",
+    "",
+  ].join("\n");
+  const root = initRepo(rawPolicy, { "requirements/r1.yaml": r1 }, {
+    "src/a.mts": "export const a = 1;\n",
+    "tests/a.mjs": "export const t = 1;\n",
+  });
+  try {
+    writeFileSync(join(root, "src/a.mts"), "export const a = 2;\n");
+    writeFileSync(join(root, "tests/a.mjs"), "export const t = 2;\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "implementation with related verification");
+    const result = run(root, "", ["src/**", "tests/**"]);
+    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 0, output);
+    assert.match(output, /PASS: requirement-verification-overlap-shadow/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+
+console.log("\n--- #670 no requirement authority means no overlap shadow ---");
+{
+  const rawPolicy = policy(["src/**", "tests/**"]);
+  delete rawPolicy.packs;
+  const root = initRepo(rawPolicy, {}, {
+    "src/a.mts": "export const a = 1;\n",
+    "tests/a.mjs": "export const t = 1;\n",
+  });
+  try {
+    writeFileSync(join(root, "src/a.mts"), "export const a = 2;\n");
+    writeFileSync(join(root, "tests/a.mjs"), "export const t = 2;\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "plain repository without requirement authority");
+    const result = run(root, "", ["src/**", "tests/**"]);
+    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 0, output);
+    assert.doesNotMatch(output, /requirement-verification-overlap-shadow/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 console.log("#644 check-pr requirement transition runtime witnesses passed");

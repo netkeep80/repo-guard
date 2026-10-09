@@ -240,6 +240,36 @@ export function buildRequirementAuthorityFromSnapshot(input) {
     }
     return normalizeRequirementAuthority({ snapshot: input.snapshot, revision: input.revision, scope, sources });
 }
+function uniqueSortedStrings(values) {
+    return [...new Set(values)].sort();
+}
+export function projectRequirementTransactionEvidence(input) {
+    const changedIdentityPaths = new Set();
+    const changedHeadPaths = new Set();
+    for (const file of input.changedFiles) {
+        changedIdentityPaths.add(file.path);
+        if (file.previousPath)
+            changedIdentityPaths.add(file.previousPath);
+        if (file.status !== "deleted")
+            changedHeadPaths.add(file.path);
+    }
+    const implementationRelations = [...input.base.relations, ...input.head.relations].filter((relation) => relation.relation === "implements"
+        && relation.object.startsWith("src/")
+        && changedIdentityPaths.has(relation.object));
+    const verificationRelations = input.head.relations.filter((relation) => relation.relation === "verifies"
+        && relation.object.startsWith("tests/")
+        && changedHeadPaths.has(relation.object));
+    const implementationRequirements = uniqueSortedStrings(implementationRelations.map((relation) => relation.subject));
+    const verificationRequirements = uniqueSortedStrings(verificationRelations.map((relation) => relation.subject));
+    const verificationSet = new Set(verificationRequirements);
+    return {
+        changed_implementation_paths: uniqueSortedStrings(implementationRelations.map((relation) => relation.object)),
+        changed_verification_paths: uniqueSortedStrings(verificationRelations.map((relation) => relation.object)),
+        implementation_requirements: implementationRequirements,
+        verification_requirements: verificationRequirements,
+        overlap_requirements: implementationRequirements.filter((subject) => verificationSet.has(subject)),
+    };
+}
 export function compareRequirementRelationGraphs(base, head) {
     const baseMap = new Map(base.relations.map((relation) => [identityKey(relationIdentity(relation)), relationIdentity(relation)]));
     const headMap = new Map(head.relations.map((relation) => [identityKey(relationIdentity(relation)), relationIdentity(relation)]));
