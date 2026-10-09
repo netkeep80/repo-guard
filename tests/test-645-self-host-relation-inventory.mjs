@@ -50,7 +50,7 @@ const requiresRelations = graph.relations.filter((relation) => relation.relation
 const requires = [...new Set(requiresRelations.map((relation) => relation.object))].sort();
 
 assert.deepEqual(requires, tracked, "every exact tracked artifact must have requires provenance");
-assert.equal(requiresRelations.length, tracked.length, "P0 keeps exactly one primary requires owner per tracked artifact");
+assert.ok(requiresRelations.length >= tracked.length, "every tracked artifact must have at least one requires relation");
 
 const forward = new Map();
 const reverse = new Map();
@@ -67,7 +67,7 @@ assert.deepEqual([...forward.keys()].sort(), expectedIds);
 assert.equal(reverse.size, tracked.length);
 for (const path of tracked) {
   const relations = reverse.get(path) || [];
-  assert.equal(relations.filter((relation) => relation.relation === "requires").length, 1, `${path}: requires owner must be unique in P0`);
+  assert.ok(relations.some((relation) => relation.relation === "requires"), `${path}: at least one requires relation is mandatory`);
   for (const relation of relations) {
     assert.equal(typeof relation.provenance.source_path, "string");
     assert.equal(relation.provenance.snapshot, "head");
@@ -81,7 +81,19 @@ for (const path of tracked.filter((path) => path.startsWith("tests/"))) {
   assert.ok((reverse.get(path) || []).some((relation) => relation.relation === "verifies"), `${path}: test artifact must verify`);
 }
 
-console.log(`#645 self-host relation inventory: ${tracked.length}/${tracked.length} tracked artifacts, unique requires provenance, graph=${graph.graph_sha256}, revision=${revision}`);
+const documentationLanguageRelations = reverse.get("tests/test-documentation-language.mjs") || [];
+const documentationLanguageRequires = new Set(
+  documentationLanguageRelations.filter((relation) => relation.relation === "requires").map((relation) => relation.subject),
+);
+const documentationLanguageVerifies = new Set(
+  documentationLanguageRelations.filter((relation) => relation.relation === "verifies").map((relation) => relation.subject),
+);
+for (const requirement of ["RG-04", "RG-06"]) {
+  assert.ok(documentationLanguageRequires.has(requirement), `documentation-language must expose requires(${requirement}, artifact)`);
+  assert.ok(documentationLanguageVerifies.has(requirement), `documentation-language must expose verifies(${requirement}, artifact)`);
+}
+
+console.log(`#645 self-host relation inventory: ${tracked.length}/${tracked.length} tracked artifacts, complete reverse requires provenance, graph=${graph.graph_sha256}, revision=${revision}`);
 
 
 // #662 PRE-POLICY differential witness.
