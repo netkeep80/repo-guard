@@ -11,7 +11,6 @@ const set = (relation, value, metadata) => compare(relation, array(value), metad
 const exact = (value, metadata) => compare("equal_or_incomparable", value, metadata);
 const entity = (metadata) => compare("required_entity", true, metadata);
 const leftSubsetPrimitive = relationDescriptorForSetComparison("left_subset").kind;
-const equalSetPrimitive = relationDescriptorForSetComparison("equal").kind;
 function object(value) {
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -149,10 +148,22 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
         add("paths:pr-immutable:mutation", primitiveRuntime("pr-immutable-paths", "paths:pr-immutable:mutation", "numeric_bound", {
             source: diffFact("repository_path_set", { kind: "changed_paths", patterns: prImmutable, include_previous_paths: true }),
         }, { max: 0 }, "transaction"));
-        add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", equalSetPrimitive, {
+        add("paths:pr-immutable:policy-set", primitiveRuntime("pr-immutable-policy-set", "paths:pr-immutable:policy-set", leftSubsetPrimitive, {
             left: policyStringSetFact("base", "/paths/pr_immutable"),
             right: policyStringSetFact("head", "/paths/pr_immutable"),
         }, {}, "transaction"));
+        // Apply the HEAD freeze immediately, not only after merge: a policy-extension
+        // PR must not also mutate, create, delete, or rename any newly frozen path.
+        add("paths:pr-immutable:head-mutation", primitiveRuntime("pr-immutable-head-mutation", "paths:pr-immutable:head-mutation", "path_set_disjoint", {
+            left: diffFact("repository_path_set", { kind: "changed_paths", patterns: ["**"], include_previous_paths: true }),
+            right: policyStringSetFact("head", "/paths/pr_immutable"),
+        }, {}, "transaction"));
+        add("paths:pr-immutable:strictness", null, set("superset_stricter", prImmutable, {
+            pointer: "/paths/pr_immutable",
+            weakenKind: "pr_immutable_path_removed",
+            itemField: "pattern",
+            message: (item) => `paths.pr_immutable removed: ${item}`,
+        }));
     }
     for (const [field, metric, name] of [
         ["max_new_docs", "new_docs", "canonical-docs-budget"], ["max_new_files", "new_files", "max-new-files"], ["max_net_added_lines", "net_added_lines", "max-net-added-lines"],
