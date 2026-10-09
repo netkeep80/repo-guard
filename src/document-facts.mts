@@ -50,6 +50,8 @@ export type DiffFactSelector =
   | {
       kind: "changed_paths";
       patterns: readonly string[];
+      // Internal use: resolve HEAD freeze patterns as an exact document fact.
+      patterns_from?: { path: string; format: "json"; snapshot: "head"; pointer: string };
       mode?: "matching" | "outside";
       exclude_statuses?: readonly DiffFileStatus[];
       include_previous_paths?: boolean;
@@ -469,6 +471,15 @@ function diffFactSource(context: FactReadContext, selector: DiffFactSelector): u
   }
 
   const patterns = [...selector.patterns];
+  if (selector.patterns_from) {
+    const derived = readFact(context, {
+      source: "document",
+      selector: { ...selector.patterns_from, projection: "array_items" },
+      type: "string_set",
+    });
+    if (!derived.ok) return failDocumentFact("document_read_error", `could not resolve changed-path patterns from HEAD: ${derived.error.message}`);
+    patterns.push(...derived.value as string[]);
+  }
   const excluded = new Set(selector.exclude_statuses || []);
   const candidates = files.filter((file) => !excluded.has(file.status));
   if (!selector.include_previous_paths) {
