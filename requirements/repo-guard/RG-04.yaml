@@ -154,6 +154,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-current-policy-vocabulary-projection.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-documentation-language.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-generated-cochange-identity.mjs"
     relations: [requires, verifies]
   - path: "tests/test-github-pr-boundary.mjs"
