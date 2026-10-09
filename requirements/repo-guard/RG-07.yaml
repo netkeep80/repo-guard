@@ -58,6 +58,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-projection-analysis.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-projection-freshness-red.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-projection-lowering.mjs"
     relations: [requires, verifies]
   - path: "tests/test-projection-model-contract.mjs"

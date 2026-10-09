@@ -124,6 +124,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-641-closure-falsifier.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-644-a-requirement-relation-core.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-645-self-host-relation-inventory.mjs"
     relations: [requires, verifies]
   - path: "tests/test-analysis-report-boundary.mjs"
@@ -139,6 +141,8 @@ artifacts:
   - path: "tests/test-c3-3-diagnostic-evidence.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-3b-trace-anchor-lowering.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-c3-3d2-change-profile-lowering.mjs"
     relations: [requires, verifies]
   - path: "tests/test-c3-9g-doctor-git-evidence.mjs"
     relations: [requires, verifies]
@@ -161,6 +165,10 @@ artifacts:
   - path: "tests/test-github-pr-boundary.mjs"
     relations: [requires, verifies]
   - path: "tests/test-github-pr.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-p0-5-trusted-diff-budget-ceilings.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-p1-1-policy-normalization.mjs"
     relations: [requires, verifies]
   - path: "tests/test-pipeline.mjs"
     relations: [requires, verifies]

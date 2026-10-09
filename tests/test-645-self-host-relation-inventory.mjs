@@ -93,6 +93,20 @@ for (const requirement of ["RG-04", "RG-06"]) {
   assert.ok(documentationLanguageVerifies.has(requirement), `documentation-language must expose verifies(${requirement}, artifact)`);
 }
 
+const reviewedDirectImportCrossLinks = [
+  ["RG-04", "tests/test-644-a-requirement-relation-core.mjs"],
+  ["RG-04", "tests/test-c3-3d2-change-profile-lowering.mjs"],
+  ["RG-04", "tests/test-p0-5-trusted-diff-budget-ceilings.mjs"],
+  ["RG-04", "tests/test-p1-1-policy-normalization.mjs"],
+  ["RG-05", "tests/test-c3-9g-doctor-git-evidence.mjs"],
+  ["RG-07", "tests/test-projection-freshness-red.mjs"],
+];
+for (const [requirement, path] of reviewedDirectImportCrossLinks) {
+  const relations = reverse.get(path) || [];
+  assert.ok(relations.some((relation) => relation.subject === requirement && relation.relation === "requires"), `${path}: requires(${requirement}, artifact) must be visible`);
+  assert.ok(relations.some((relation) => relation.subject === requirement && relation.relation === "verifies"), `${path}: verifies(${requirement}, artifact) must be visible`);
+}
+
 console.log(`#645 self-host relation inventory: ${tracked.length}/${tracked.length} tracked artifacts, complete reverse requires provenance, graph=${graph.graph_sha256}, revision=${revision}`);
 
 
