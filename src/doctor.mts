@@ -146,31 +146,28 @@ function githubRepositorySlug(repoRoot: string): string | null {
   }
 }
 
-function ghApiJson(endpoint: string, options: { jq?: string } = {}): unknown {
-  const args = [
-    "api",
-    ...(options.jq ? ["--jq", options.jq] : []),
-    endpoint,
-  ];
-  return JSON.parse(execFileSync("gh", args, { encoding: "utf-8", stdio: "pipe" }));
+function ghApiJson(endpoint: string): unknown {
+  return JSON.parse(execFileSync("gh", ["api", endpoint], {
+    encoding: "utf-8",
+    stdio: "pipe",
+    maxBuffer: 4 * 1024 * 1024,
+  }));
 }
 
-function ghApiPagedItems(
-  endpoint: string,
-  label: string,
-  jq: string,
-  pageSize = 100,
-  maxPages = 100,
-): unknown[] {
-  const out: unknown[] = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const separator = endpoint.includes("?") ? "&" : "?";
-    const value = ghApiJson(`${endpoint}${separator}per_page=${pageSize}&page=${page}`, { jq });
-    if (!Array.isArray(value)) throw new Error(`${label} page ${page} must be an array`);
-    out.push(...value);
-    if (value.length < pageSize) return out;
-  }
-  throw new Error(`${label} exceeded bounded pagination limit of ${maxPages} pages`);
+function ghApiProjectedItems(endpoint: string, label: string, jq: string): unknown[] {
+  const raw = execFileSync("gh", ["api", "--paginate", "--jq", jq, endpoint], {
+    encoding: "utf-8",
+    stdio: "pipe",
+    maxBuffer: 4 * 1024 * 1024,
+  }).trim();
+  if (!raw) return [];
+  return raw.split(/\r?\n/).map((line, index) => {
+    try {
+      return JSON.parse(line);
+    } catch (error: unknown) {
+      throw new Error(`${label} item ${index + 1} is not JSON: ${(error as Error).message}`);
+    }
+  });
 }
 
 export function controlPlaneDoctorCheckFromGraph(graph: ControlPlaneGraph): DoctorCheck {
@@ -231,23 +228,21 @@ function checkControlPlaneHygiene(repoRoot: string): DoctorCheck {
       return { name: "control-plane-hygiene", status: WARN, message: "GitHub repository identity unavailable; control-plane hygiene not observed" };
     }
     try {
-      const metadata = ghApiJson(`repos/${repository}`, {
-        jq: "{default_branch, delete_branch_on_merge}",
-      });
-      const branches = ghApiPagedItems(
-        `repos/${repository}/branches`,
+      const metadata = ghApiJson(`repos/${repository}`);
+      const branches = ghApiProjectedItems(
+        `repos/${repository}/branches?per_page=100`,
         "branches",
-        "[.[] | {name, commit: {sha: .commit.sha}, protected}]",
+        ".[] | {name, commit: {sha: .commit.sha}, protected}",
       );
-      const issues = ghApiPagedItems(
-        `repos/${repository}/issues?state=open`,
+      const issues = ghApiProjectedItems(
+        `repos/${repository}/issues?state=open&per_page=100`,
         "issues",
-        "[.[] | {number, state, title, body, pull_request}]",
+        ".[] | {number, state, title, body, pull_request}",
       );
-      const pullRequests = ghApiPagedItems(
-        `repos/${repository}/pulls?state=all`,
+      const pullRequests = ghApiProjectedItems(
+        `repos/${repository}/pulls?state=all&per_page=100`,
         "pull requests",
-        "[.[] | {number, state, draft, merged_at, body: (if .state == \"open\" then (.body // \"\") else \"\" end), head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}]",
+        ".[] | {number, state, draft, merged_at, body: (if .state == \"open\" then (.body // \"\") else \"\" end), head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}",
       );
       const observation = controlPlaneObservationFromGitHub({
         repository,
