@@ -41,6 +41,15 @@ export interface ControlPlaneObservation {
   pull_requests: readonly ControlPlanePullRequestObservation[];
 }
 
+export interface GitHubControlPlanePayload {
+  repository: string;
+  repository_metadata: unknown;
+  branches: unknown;
+  issues: unknown;
+  pull_requests: unknown;
+  root_issue_number?: number | null;
+}
+
 export type ControlPlaneRelationKind =
   | "parent"
   | "related"
@@ -118,6 +127,16 @@ function sha(value: unknown, label: string): string {
 
 function positiveInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) fail(label, "must be a positive integer");
+  return value;
+}
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(label, "must be an object");
+  return value as Record<string, unknown>;
+}
+
+function list(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) fail(label, "must be an array");
   return value;
 }
 
@@ -205,6 +224,68 @@ function reachableIssues(root: number | null, openIssues: Set<number>, relations
     return result;
   };
   return new Set([...openIssues].filter((number) => reaches(number)));
+}
+
+export function controlPlaneObservationFromGitHub(input: GitHubControlPlanePayload): ControlPlaneObservation {
+  const repository = text(input.repository, "GitHubControlPlane.repository");
+  const metadata = record(input.repository_metadata, "GitHubControlPlane.repository_metadata");
+  const rawIssues = list(input.issues, "GitHubControlPlane.issues")
+    .map((value, index) => record(value, `GitHubControlPlane.issues[${index}]`))
+    .filter((value) => !Object.hasOwn(value, "pull_request"));
+
+  const issues: ControlPlaneIssueObservation[] = rawIssues.map((value, index) => ({
+    number: positiveInteger(value.number, `GitHubControlPlane.issues[${index}].number`),
+    state: issueState(value.state, `GitHubControlPlane.issues[${index}].state`),
+    title: typeof value.title === "string" ? value.title : "",
+    body: typeof value.body === "string" ? value.body : "",
+  }));
+
+  const inferredRoots = issues
+    .filter((issue) => issue.state === "open" && /^\[Roadmap\]/i.test(issue.title || ""))
+    .map((issue) => issue.number);
+  const rootIssueNumber = input.root_issue_number === undefined
+    ? inferredRoots.length === 1 ? inferredRoots[0]! : null
+    : input.root_issue_number;
+
+  const branches: ControlPlaneBranchObservation[] = list(input.branches, "GitHubControlPlane.branches").map((value, index) => {
+    const branch = record(value, `GitHubControlPlane.branches[${index}]`);
+    const commit = record(branch.commit, `GitHubControlPlane.branches[${index}].commit`);
+    return {
+      name: text(branch.name, `GitHubControlPlane.branches[${index}].name`),
+      sha: sha(commit.sha, `GitHubControlPlane.branches[${index}].commit.sha`),
+      protected: branch.protected === true,
+    };
+  });
+
+  const pullRequests: ControlPlanePullRequestObservation[] = list(input.pull_requests, "GitHubControlPlane.pull_requests").map((value, index) => {
+    const pr = record(value, `GitHubControlPlane.pull_requests[${index}]`);
+    const head = record(pr.head, `GitHubControlPlane.pull_requests[${index}].head`);
+    const headRepository = head.repo && typeof head.repo === "object" && !Array.isArray(head.repo)
+      ? head.repo as Record<string, unknown>
+      : null;
+    return {
+      number: positiveInteger(pr.number, `GitHubControlPlane.pull_requests[${index}].number`),
+      state: prState(pr.state, `GitHubControlPlane.pull_requests[${index}].state`),
+      draft: pr.draft === true,
+      merged: pr.merged === true || pr.merged_at !== null && pr.merged_at !== undefined,
+      body: typeof pr.body === "string" ? pr.body : "",
+      head: {
+        ref: text(head.ref, `GitHubControlPlane.pull_requests[${index}].head.ref`),
+        sha: sha(head.sha, `GitHubControlPlane.pull_requests[${index}].head.sha`),
+        repo_full_name: typeof headRepository?.full_name === "string" ? headRepository.full_name : null,
+      },
+    };
+  });
+
+  return {
+    repository,
+    default_branch: text(metadata.default_branch, "GitHubControlPlane.repository_metadata.default_branch"),
+    delete_branch_on_merge: typeof metadata.delete_branch_on_merge === "boolean" ? metadata.delete_branch_on_merge : null,
+    root_issue_number: rootIssueNumber,
+    branches,
+    issues,
+    pull_requests: pullRequests,
+  };
 }
 
 export function analyzeControlPlaneObservation(input: ControlPlaneObservation): ControlPlaneGraph {
