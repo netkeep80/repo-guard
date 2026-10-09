@@ -13,7 +13,7 @@ const D = "d".repeat(40);
 function payload({ roadmap = "one" } = {}) {
   const issues = [
     { number: 518, state: "open", title: roadmap === "none" ? "Product plan" : "[Roadmap] Product plan", body: "" },
-    { number: 647, state: "open", title: "Control plane", body: "Part of #518." },
+    { number: 647, state: "open", title: "Control plane", body: "Part of #518.", pull_request: null },
     { number: 648, state: "open", title: "PR mirror", body: "", pull_request: { url: "https://example.test/pr/648" } },
   ];
   if (roadmap === "two") issues.push({ number: 700, state: "open", title: "[Roadmap] Another", body: "" });
@@ -52,7 +52,7 @@ console.log("\n--- #647 GitHub provider projection ---");
 {
   const observation = controlPlaneObservationFromGitHub(payload());
   assert.equal(observation.root_issue_number, 518);
-  assert.equal(observation.issues.length, 2, "GitHub pull-request mirrors from /issues must not become Issue entities");
+  assert.equal(observation.issues.length, 2, "GitHub pull-request mirrors from /issues must not become Issue entities while pull_request:null remains a real Issue");
   assert.equal(observation.pull_requests[1].merged, true);
   assert.deepEqual(observation.pull_requests[0].head, {
     ref: "research/647",

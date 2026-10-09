@@ -231,7 +231,7 @@ export function controlPlaneObservationFromGitHub(input: GitHubControlPlanePaylo
   const metadata = record(input.repository_metadata, "GitHubControlPlane.repository_metadata");
   const rawIssues = list(input.issues, "GitHubControlPlane.issues")
     .map((value, index) => record(value, `GitHubControlPlane.issues[${index}]`))
-    .filter((value) => !Object.hasOwn(value, "pull_request"));
+    .filter((value) => value.pull_request == null);
 
   const issues: ControlPlaneIssueObservation[] = rawIssues.map((value, index) => ({
     number: positiveInteger(value.number, `GitHubControlPlane.issues[${index}].number`),
