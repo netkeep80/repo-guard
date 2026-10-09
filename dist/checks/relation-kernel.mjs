@@ -1,3 +1,4 @@
+import { matchesAny } from "../utils/path-patterns.mjs";
 import { DocumentFactFailure, readFact, resolveJsonPointer, } from "../document-facts.mjs";
 const set = (values = []) => new Set(values);
 export function compareSets(left = [], right = [], relation = "equal") {
@@ -203,6 +204,25 @@ function referencedPathsExist(facts, relation) {
     const missingPaths = referencedPaths.filter((path) => !tracked.has(path)).sort();
     return { ok: missingPaths.length === 0, message: missingPaths.length ? `document relation "${relation.relation_id}" references missing repository paths` : undefined, data: { kind: relation.primitive, source, referenced_paths: referencedPaths, missing_paths: missingPaths } };
 }
+// Internal path-pattern relation. Unlike plain set_disjoint this preserves glob
+// semantics, including previous-path identities from rename-aware diff facts.
+function pathSetDisjoint(facts, relation) {
+    const left = factOperand(facts, relation, "left"), right = factOperand(facts, relation, "right");
+    const data = { kind: relation.primitive, left, right };
+    if (!left.ok || !right.ok)
+        return { ok: false, message: `relation "${relation.relation_id}" could not read path sets`, data };
+    if (!Array.isArray(left.value) || !Array.isArray(right.value)
+        || left.value.some((value) => typeof value !== "string")
+        || right.value.some((value) => typeof value !== "string")) {
+        return { ok: false, message: `relation "${relation.relation_id}" requires string path sets`, data };
+    }
+    const overlappingPaths = [...new Set(left.value.filter((path) => matchesAny(path, right.value)))].sort();
+    return {
+        ok: overlappingPaths.length === 0,
+        message: overlappingPaths.length ? `relation "${relation.relation_id}" touched an immutable HEAD path` : undefined,
+        data: { ...data, overlapping_paths: overlappingPaths },
+    };
+}
 function setRelation(facts, relation, comparison) {
     const left = factOperand(facts, relation, "left"), right = factOperand(facts, relation, "right");
     if (!left.ok || !right.ok)
@@ -317,6 +337,15 @@ const DESCRIPTORS = [
         operands: ["source"],
         phase: "transaction",
         evaluate: numericBound,
+        strictness: "incomparable",
+        identity: ["id"],
+    },
+    {
+        kind: "path_set_disjoint",
+        public: false,
+        operands: ["left", "right"],
+        phase: "transaction",
+        evaluate: pathSetDisjoint,
         strictness: "incomparable",
         identity: ["id"],
     },
