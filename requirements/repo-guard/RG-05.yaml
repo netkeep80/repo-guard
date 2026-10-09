@@ -56,6 +56,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-c3-8g-suite-observation-cache.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-c3-9g-doctor-git-evidence.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-c3.8c-linked-issue-observation.mjs"
     relations: [requires, verifies]
   - path: "tests/test-current-base-ref.mjs"
