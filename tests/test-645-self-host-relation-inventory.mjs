@@ -96,14 +96,14 @@ function fixtureGraph(snapshot, declarations) {
     grouped.set(declaration.subject, artifacts);
   }
   const fixtureSources = [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([subject, artifacts]) => ({
-    path: \`requirements/\${subject}.yaml\`,
+    path: `requirements/${subject}.yaml`,
     format: "yaml",
     content: [
-      \`id: \${subject}\`,
+      `id: ${subject}`,
       "artifacts:",
       ...artifacts.flatMap(({ path, relations }) => [
-        \`  - path: \${JSON.stringify(path)}\`,
-        \`    relations: [\${relations.join(", ")}]\`,
+        `  - path: ${JSON.stringify(path)}`,
+        `    relations: [${relations.join(", ")}]`,
       ]),
       "",
     ].join("\n"),
