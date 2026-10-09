@@ -118,16 +118,23 @@ function githubRepositorySlug(repoRoot) {
 function ghApiJson(endpoint, options = {}) {
     const args = [
         "api",
-        ...(options.paginate ? ["--paginate", "--slurp"] : []),
         ...(options.jq ? ["--jq", options.jq] : []),
         endpoint,
     ];
     return JSON.parse(execFileSync("gh", args, { encoding: "utf-8", stdio: "pipe" }));
 }
-function paginatedItems(value, label) {
-    if (!Array.isArray(value))
-        throw new Error(`${label} must be an array`);
-    return value.every(Array.isArray) ? value.flat() : value;
+function ghApiPagedItems(endpoint, label, jq, pageSize = 100, maxPages = 100) {
+    const out = [];
+    for (let page = 1; page <= maxPages; page++) {
+        const separator = endpoint.includes("?") ? "&" : "?";
+        const value = ghApiJson(`${endpoint}${separator}per_page=${pageSize}&page=${page}`, { jq });
+        if (!Array.isArray(value))
+            throw new Error(`${label} page ${page} must be an array`);
+        out.push(...value);
+        if (value.length < pageSize)
+            return out;
+    }
+    throw new Error(`${label} exceeded bounded pagination limit of ${maxPages} pages`);
 }
 export function controlPlaneDoctorCheckFromGraph(graph) {
     const openIssues = graph.issues.filter((issue) => issue.state === "open").length;
@@ -187,18 +194,9 @@ function checkControlPlaneHygiene(repoRoot) {
             const metadata = ghApiJson(`repos/${repository}`, {
                 jq: "{default_branch, delete_branch_on_merge}",
             });
-            const branches = paginatedItems(ghApiJson(`repos/${repository}/branches?per_page=100`, {
-                paginate: true,
-                jq: "[.[][] | {name, commit: {sha: .commit.sha}, protected}]",
-            }), "branches");
-            const issues = paginatedItems(ghApiJson(`repos/${repository}/issues?state=open&per_page=100`, {
-                paginate: true,
-                jq: "[.[][] | {number, state, title, body, pull_request}]",
-            }), "issues");
-            const pullRequests = paginatedItems(ghApiJson(`repos/${repository}/pulls?state=all&per_page=100`, {
-                paginate: true,
-                jq: "[.[][] | {number, state, draft, merged_at, body: (if .state == \"open\" then (.body // \"\") else \"\" end), head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}]",
-            }), "pull requests");
+            const branches = ghApiPagedItems(`repos/${repository}/branches`, "branches", "[.[] | {name, commit: {sha: .commit.sha}, protected}]");
+            const issues = ghApiPagedItems(`repos/${repository}/issues?state=open`, "issues", "[.[] | {number, state, title, body, pull_request}]");
+            const pullRequests = ghApiPagedItems(`repos/${repository}/pulls?state=all`, "pull requests", "[.[] | {number, state, draft, merged_at, body: (if .state == \"open\" then (.body // \"\") else \"\" end), head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}]");
             const observation = controlPlaneObservationFromGitHub({
                 repository,
                 repository_metadata: metadata,
