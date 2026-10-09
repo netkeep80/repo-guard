@@ -159,6 +159,12 @@ function issueBodyRelations(issue: { number: number; body: string }): ControlPla
       for (const target of numbers(parent[1] || "")) add("parent", target, line);
       continue;
     }
+    const partOf = line.match(/^part\s+of\b(.*)$/i);
+    if (partOf) {
+      continuation = null;
+      for (const target of numbers(partOf[1] || "")) add("parent", target, line);
+      continue;
+    }
     const related = line.match(/^(?:related(?:\s+issues?)?|depends\s+on|dependencies|связанные\s+исследования)\s*:\s*(.*)$/i);
     if (related) {
       continuation = "related";

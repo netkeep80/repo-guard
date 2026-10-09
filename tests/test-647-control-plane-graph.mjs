@@ -26,6 +26,7 @@ function selfHostFixture() {
     ],
     issues: [
       { number: 518, state: "open", title: "[Roadmap] Product constitution", body: "" },
+      { number: 589, state: "open", title: "Semantic evidence", body: "Part of #518." },
       { number: 608, state: "open", title: "MDDB", body: "Parent roadmap: #518" },
       { number: 622, state: "open", title: "Projection API", body: "Related:\n- #608\n" },
       { number: 644, state: "open", title: "Requirement transitions", body: "Родительский roadmap: #518" },
@@ -89,7 +90,7 @@ console.log("\n--- #647 canonical control-plane graph ---");
 
   assert.deepEqual(
     graph.derived.reachable_open_issues,
-    [518, 608, 622, 644, 647],
+    [518, 589, 608, 622, 644, 647],
     "direct and transitive issue reachability must converge on the roadmap root",
   );
   assert.deepEqual(graph.derived.unreachable_open_issues, [999]);
