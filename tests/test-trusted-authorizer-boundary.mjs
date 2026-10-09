@@ -43,7 +43,7 @@ describe("trusted authorizer boundary", () => {
 
   it("preserves concrete gh stderr in diagnostics without multiline noise", () => {
     assert.equal(
-      describeGhFailure({ stderr: "HTTP 403: Resource not accessible by integration\\n" }),
+      describeGhFailure({ stderr: "HTTP 403: Resource not accessible by integration\n" }),
       "HTTP 403: Resource not accessible by integration",
     );
   });
