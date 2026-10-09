@@ -173,7 +173,7 @@ test("HEAD additions are frozen before merge: no same-PR mutation or replacement
   for (const status of ["added", "modified", "deleted"]) {
     const check = headMutationCheck([file("repo-policy.json"), file("docs/another.md", status)], options);
     assert.equal(check?.ok, false, `HEAD path with status ${status} must be blocked`);
-    assert.deepEqual(check.data.overlapping_paths, ["docs/another.md"]);
+    assert.deepEqual(check.data.source_values, ["docs/another.md"]);
   }
   const renameAway = headMutationCheck([file("docs/moved.md", "renamed", "docs/another.md")], options);
   assert.equal(renameAway?.ok, false);
@@ -186,7 +186,7 @@ test("HEAD immutable glob matches changed paths, including rename sources", () =
   assert.equal(headMutationCheck([file("repo-policy.json")], options)?.ok, true);
   const check = headMutationCheck([file("contracts/elsewhere.json", "renamed", "contracts/accepted-v0.15.json")], options);
   assert.equal(check?.ok, false);
-  assert.deepEqual(check.data.overlapping_paths, ["contracts/accepted-v0.15.json"]);
+  assert.deepEqual(check.data.source_values, ["contracts/accepted-v0.15.json"]);
 });
 
 test("GovernanceGrant cannot bypass immutable path mutation or set shrinkage", () => {
