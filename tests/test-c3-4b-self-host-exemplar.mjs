@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
-import { listBuiltInPacks } from "../dist/policy-packs.mjs";
+import { listBuiltInPacks, resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { renderInitScaffold } from "../dist/init.mjs";
 import { checkGovernanceChangeAuthorization } from "../dist/checks/rules/governance-paths.mjs";
 
@@ -146,6 +146,15 @@ describe("C3.4b canonical self-host exemplar", () => {
 
     const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
     const packs = new Set(listBuiltInPacks());
+    const configuredPacks = new Set(Object.keys(policy.packs || {}));
+    const resolvedSelf = resolvePolicyPacks(policy);
+    assert.equal(resolvedSelf.ok, true, "live self-policy packs must lower successfully");
+    for (const name of configuredPacks) {
+      assert.equal(exceptionKeys.includes(`pack:${name}`), false, `active self-host pack must not also be excepted: ${name}`);
+    }
+    if (resolvedSelf.policy.anchors) {
+      assert.equal(exceptionKeys.includes("rule:anchor-extraction"), false, "active anchor extraction must not also be excepted");
+    }
     for (const key of exceptionKeys) {
       const reason = exceptions[key];
       assert.equal(typeof reason, "string");

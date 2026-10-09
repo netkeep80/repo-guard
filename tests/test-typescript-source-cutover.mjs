@@ -4,13 +4,15 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defaultRuleFamilies } from "../dist/checks/default-rule-families.mjs";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { listBuiltInPacks } from "../dist/policy-packs.mjs";
+import { listBuiltInPacks, resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { COMMANDS } from "../dist/repo-guard.mjs";
 
 const projectRoot = resolve(new URL("..", import.meta.url).pathname);
 const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
 const json = (path) => JSON.parse(read(path));
 const policy = json("repo-policy.json");
+const resolvedPolicy = resolvePolicyPacks(policy);
+const runtimePolicy = resolvedPolicy.ok ? resolvedPolicy.policy : policy;
 const workflowText = read(".github/workflows/ci.yml");
 const workflow = parseYaml(workflowText);
 const coverage = json("docs/self-hosting-coverage.json");
@@ -23,11 +25,11 @@ function hasException(id) {
 
 function selfFacts() {
   return {
-    policy,
-    basePolicy: policy,
-    headPolicy: policy,
+    policy: runtimePolicy,
+    basePolicy: runtimePolicy,
+    headPolicy: runtimePolicy,
     changeIntent: { change_type: "refactor" },
-    trustedGovernancePaths: policy.paths.governance_paths,
+    trustedGovernancePaths: runtimePolicy.paths.governance_paths,
     diff: { files: { checked: [] } },
   };
 }
@@ -96,6 +98,7 @@ describe("derived capability inventory", () => {
   });
 
   it("derives rule families from the runtime registry", () => {
+    assert.equal(resolvedPolicy.ok, true, "live self-policy packs must lower before deriving active rule families");
     const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
     assert.ok(ruleIds.size > 0);
     for (const family of defaultRuleFamilies) {
