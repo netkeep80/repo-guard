@@ -208,7 +208,7 @@ function markdownNewline(source) {
     return source.includes("\r\n") ? "\r\n" : "\n";
 }
 export function insertMarkdownChild(args) {
-    const { source, mode, parentAnchorId, child } = args;
+    const { source, mode, parentAnchorId, child, options = {} } = args;
     if (mode === "source")
         failMarkdownStructure(`${parentAnchorId}: SOURCE document is read-only`);
     if (mode === "generated")
@@ -218,7 +218,7 @@ export function insertMarkdownChild(args) {
     if (context.anchors.some((anchor) => anchor.anchorId === child.anchorId)) {
         failMarkdownStructure(`anchor is duplicated: ${child.anchorId}`);
     }
-    const parent = nodeIn(context, parentAnchorId);
+    const parent = nodeIn(context, parentAnchorId, options);
     if (!parent)
         failMarkdownStructure(`${parentAnchorId}: anchor is not a canonical tree node`);
     if (parent.heading.level >= 6) {
@@ -239,9 +239,14 @@ export function insertMarkdownChild(args) {
         failMarkdownStructure("insert child modified bytes outside insertion point");
     }
     const updatedContext = markdownStructure(updated);
-    for (const anchor of context.anchors)
+    for (const anchor of context.anchors) {
         anchorIn(updatedContext, anchor.anchorId);
-    const created = nodeIn(updatedContext, child.anchorId);
+        const original = nodeIn(context, anchor.anchorId, options);
+        if (original && !nodeIn(updatedContext, anchor.anchorId, options)) {
+            failMarkdownStructure(`existing canonical node became invalid: ${anchor.anchorId}`);
+        }
+    }
+    const created = nodeIn(updatedContext, child.anchorId, options);
     if (!created || created.heading.level !== parent.heading.level + 1) {
         failMarkdownStructure("inserted child has invalid heading level");
     }

@@ -48,6 +48,51 @@ assert.deepEqual(
   "section inventory must be part of the curated runtime surface after P10b",
 );
 
+
+// #622: caller-owned transparent metadata is accepted for insertion, not only reads.
+const ownedBlock = {
+  blockId: "metadata",
+  beginMarker: "<!-- owned:begin -->",
+  endMarker: "<!-- owned:end -->",
+};
+const hybridSource = [
+  '<a id="parent"></a>',
+  ownedBlock.beginMarker,
+  "generated metadata",
+  ownedBlock.endMarker,
+  "# Parent",
+  "Authored payload",
+  "",
+  '<a id="sibling"></a>',
+  "## Sibling",
+  "Sibling content",
+].join("\n");
+const insertion = {
+  source: hybridSource,
+  mode: "hybrid",
+  parentAnchorId: "parent",
+  child: { anchorId: "new-child", title: "New Child", payload: "New payload" },
+};
+assert.throws(() => api.insertMarkdownChild(insertion), /not a canonical tree node/);
+const withTransparency = api.insertMarkdownChild({
+  ...insertion,
+  options: { transparentOwnedBlocks: [ownedBlock] },
+});
+assert.equal(api.readMarkdownNode(withTransparency, "parent", {
+  transparentOwnedBlocks: [ownedBlock],
+}).heading.text, "Parent");
+assert.deepEqual(
+  api.listMarkdownChildren(withTransparency, "parent", {
+    transparentOwnedBlocks: [ownedBlock],
+  }).map((node) => node.anchorId),
+  ["sibling", "new-child"],
+);
+assert.ok(withTransparency.startsWith(hybridSource));
+assert.throws(() => api.insertMarkdownChild({
+  ...insertion,
+  options: { transparentOwnedBlocks: [{ ...ownedBlock, endMarker: "<!-- missing -->" }] },
+}), /malformed owned block/);
+
 const model = api.normalizeProjectionModel({
   schema: "repo-guard/projection-model/v0",
   id: "projection.public-api.smoke",
