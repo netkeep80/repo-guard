@@ -10,7 +10,7 @@ import { createAnalysisTextPresenter, renderDiffAnalysis, renderEnforcementMode 
 
 interface InitialPolicyCheck { name: string; check: unknown; }
 export interface PolicyPipelineInput extends RepositoryFactsInput { mode: string; initialChecks?: readonly InitialPolicyCheck[] | null; }
-export interface PolicyPipelineOptions { quiet?: boolean; printEnforcement?: boolean; ruleNamePrefix?: string; excludeRuleFamilies?: readonly string[]; executionPhase?: ExecutionPhase; policyOrigin?: "base" | "head" | "shared"; }
+export interface PolicyPipelineOptions { quiet?: boolean; printEnforcement?: boolean; ruleNamePrefix?: string; excludeRuleFamilies?: readonly string[]; executionPhase?: ExecutionPhase; policyOrigin?: "base" | "head" | "shared"; satisfiedTransactionConstraintKeys?: readonly string[]; }
 type AnalysisCollector = ReturnType<typeof createAnalysisCollector>;
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
@@ -27,9 +27,10 @@ export function evaluatePolicyPipeline(input: PolicyPipelineInput, options: Poli
   const facts = buildPolicyFacts({ ...runtimeInput, changeIntent, changeIntentSource });
   if (!quiet) console.log(`\n${renderDiffAnalysis(facts)}`);
   const obligationPlan = buildStateObligationPlan(facts), replacedStateConstraintKeys = obligationPlan?.replaced_base_state_constraints.map((item) => item.key) || [];
+  const satisfiedTransactionConstraintKeys = [...new Set(options.satisfiedTransactionConstraintKeys || [])];
   if (!quiet && replacedStateConstraintKeys.length) console.log(`State obligation plan: replaced ${replacedStateConstraintKeys.length} exact BASE state constraint(s): ${replacedStateConstraintKeys.join(", ")}`);
   const anchorDiagnostics = buildAnchorDiagnostics(facts);
-  runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies, executionPhase: options.executionPhase, replacedStateConstraintKeys });
+  runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies, executionPhase: options.executionPhase, replacedStateConstraintKeys, satisfiedTransactionConstraintKeys });
   return {
     command: input.mode,
     repositoryRoot: facts.repositoryRoot,
@@ -37,6 +38,7 @@ export function evaluatePolicyPipeline(input: PolicyPipelineInput, options: Poli
     ...(facts.repositoryObservation ? { repositoryObservation: facts.repositoryObservation } : {}),
     ...(obligationPlan ? { obligationPlan } : {}),
     ...(options.executionPhase ? { executionPhase: options.executionPhase } : {}),
+    ...(satisfiedTransactionConstraintKeys.length ? { satisfiedTransactionConstraintKeys } : {}),
     ...anchorDiagnostics,
   };
 }

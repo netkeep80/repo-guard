@@ -11,6 +11,7 @@ import { evaluatePolicyPipeline } from "./runtime/pipeline.mjs";
 import { createAnalysisCollector } from "./runtime/analysis-report.mjs";
 import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/renderers.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
+import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, normalizeRequirementAuthority } from "./requirement-relations.mjs";
 
 type PolicyRuntime = ReturnType<typeof loadPolicyRuntimeFromObject>;
 type RuntimePolicy = PolicyRuntime["policy"];
@@ -85,6 +86,11 @@ function policyAt(reader: SnapshotReader, ref: string) {
   try { const raw = reader(ref, "repo-policy.json"); return raw == null ? { policy: null, error: "empty_base_policy" } : { policy: JSON.parse(raw), error: null }; }
   catch (error: unknown) { return { policy: null, error: `base_policy_read_error: ${(error as Error).message}` }; }
 }
+function requirementTransitionGrant(value: unknown): unknown {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as { requirement_transition?: unknown }).requirement_transition ?? null
+    : null;
+}
 function headPolicyRuntime(roots: CheckPrRoots, observation: RepositoryObservation, reader: SnapshotReader, quiet: boolean): PolicyRuntime | null {
   return loadRuntime(() => {
     const raw = reader(observation.evaluated.commit_sha, "repo-policy.json");
@@ -155,11 +161,68 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   if (resolved.grantResult && !resolved.grantResult.ok) initialChecks.push({ name: "governance-grant", check: { ok: false, message: `[${resolved.grantResult.error}]: ${resolved.grantResult.message}` } });
   else if ((resolved.grantResult as { grant?: unknown } | null | undefined)?.grant) { const grant = (resolved.grantResult as { grant?: unknown }).grant, check = validationCheck(ajv, governanceGrantSchema, grant, "governance-grant (linked issue)"); initialChecks.push({ name: "governance-grant", check }); if (check.ok) governanceGrant = grant; }
 
-  let diff, trackedFiles: string[];
-  try { diff = getDiffObservation(base, exactHead, roots.repoRoot); trackedFiles = listTrackedFilesAtRef(observation.evaluated.commit_sha, roots.repoRoot); }
+  let diff, trackedFiles: string[], baseTrackedFiles: string[];
+  try {
+    diff = getDiffObservation(base, exactHead, roots.repoRoot);
+    baseTrackedFiles = listTrackedFilesAtRef(base, roots.repoRoot);
+    trackedFiles = listTrackedFilesAtRef(observation.evaluated.commit_sha, roots.repoRoot);
+  }
   catch (error: unknown) { return fail(roots, format, "check_pr.diff", (error as Error).message); }
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
   if (governanceGrant !== null && basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
+
+  let requirementTransitionAuthorized = false;
+  if (basePolicy) {
+    try {
+      const baseAuthority = buildRequirementAuthorityFromSnapshot({
+        policy: basePolicy,
+        snapshot: "base",
+        revision: base,
+        trackedFiles: baseTrackedFiles,
+        readFileAtRef: readSnapshotFile,
+      });
+      const headAuthority = buildRequirementAuthorityFromSnapshot({
+        policy: headRuntime.policy,
+        snapshot: "head",
+        revision: exactHead,
+        trackedFiles,
+        readFileAtRef: readSnapshotFile,
+      });
+      if (baseAuthority || headAuthority) {
+        const baseGraph = baseAuthority || normalizeRequirementAuthority({ snapshot: "base", revision: base, scope: [], sources: [] });
+        const headGraph = headAuthority || normalizeRequirementAuthority({ snapshot: "head", revision: exactHead, scope: [], sources: [] });
+        const transition = checkRequirementTransition({
+          base: baseGraph,
+          head: headGraph,
+          grant: requirementTransitionGrant(governanceGrant),
+          trustedAuthorizer,
+        });
+        requirementTransitionAuthorized = transition.authorized;
+        initialChecks.push({
+          name: "requirement-transition",
+          check: {
+            ok: transition.ok,
+            message: transition.ok ? "requirement authority transition is exact and trusted" : "requirement authority transition is not exactly authorized",
+            details: transition.reasons,
+            data: {
+              required: transition.required,
+              authorized: transition.authorized,
+              authority_scope_changed: transition.authority_scope_changed,
+              base_authority_sha256: transition.base_authority_sha256,
+              head_authority_sha256: transition.head_authority_sha256,
+              actual_delta: transition.actual_delta,
+            },
+          },
+        });
+      }
+    } catch (error: unknown) {
+      initialChecks.push({
+        name: "requirement-transition",
+        check: { ok: false, message: `requirement authority transition evaluation failed: ${error instanceof Error ? error.message : String(error)}` },
+      });
+    }
+  }
+  const satisfiedTransactionConstraintKeys = requirementTransitionAuthorized ? ["trace:changed-requirements-need-evidence"] : [];
 
   const baseInput = {
     mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
@@ -168,14 +231,18 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks,
   } as PipelineInput;
   const changed = Boolean(basePolicy && !isDeepStrictEqual(basePolicy, headRuntime.policy)), origin = changed ? "base" : "shared";
-  const plan: Array<{ policyOrigin: "base" | "head" | "shared"; input: PipelineInput; options: PipelineOptions }> = [{ policyOrigin: origin, input: baseInput, options: { quiet, policyOrigin: origin } }];
+  const plan: Array<{ policyOrigin: "base" | "head" | "shared"; input: PipelineInput; options: PipelineOptions }> = [{
+    policyOrigin: origin,
+    input: baseInput,
+    options: { quiet, policyOrigin: origin, satisfiedTransactionConstraintKeys },
+  }];
   if (changed) {
     const proposedEnforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: headRuntime.policy } as Parameters<typeof resolveEnforcementMode>[0]);
     if (!proposedEnforcement.ok) return fail(roots, format, "check_pr.proposed_enforcement", proposedEnforcement.message);
     plan.push({
       policyOrigin: "head",
       input: { ...baseInput, policy: headRuntime.policy, enforcement: proposedEnforcement, initialChecks: [] } as PipelineInput,
-      options: { quiet: true, printEnforcement: false, ruleNamePrefix: "proposed-policy:", excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES, policyOrigin: "head" },
+      options: { quiet: true, printEnforcement: false, ruleNamePrefix: "proposed-policy:", excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES, policyOrigin: "head", satisfiedTransactionConstraintKeys },
     });
   }
 

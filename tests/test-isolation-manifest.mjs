@@ -8,6 +8,7 @@ const entry = (testClass, execution, resources, reason) => ({
 const pureReadOnlyParallel = [
   "test-analysis-report-boundary.mjs",
   "test-641-closure-falsifier.mjs",
+  "test-644-requirement-transition-falsifier.mjs",
   "test-647-control-plane-graph.mjs",
   "test-647-control-plane-doctor.mjs",
   "test-647-merged-residue-planner.mjs",
@@ -70,6 +71,7 @@ const pureReadOnlyParallel = [
   "test-policy-delta-rules.mjs",
   "test-policy-packs.mjs",
   "test-pr-immutable-paths.mjs",
+  "test-644-a-requirement-relation-core.mjs",
   "test-projection-freshness-red.mjs",
   "test-projection-model-contract.mjs",
   "test-projection-lowering.mjs",
@@ -110,6 +112,7 @@ const externalIntegrationParallel = [
 ];
 
 const externalIntegrationSerial = [
+  "test-644-b-requirement-transition-runtime.mjs",
   "test-atomic-governance-cutover.mjs",
   "test-c3-10a-external-base-cutover.mjs",
   "test-c3-5-scenario-library.mjs",

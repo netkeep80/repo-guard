@@ -23,10 +23,11 @@ export function evaluatePolicyPipeline(input, options, reporter) {
     if (!quiet)
         console.log(`\n${renderDiffAnalysis(facts)}`);
     const obligationPlan = buildStateObligationPlan(facts), replacedStateConstraintKeys = obligationPlan?.replaced_base_state_constraints.map((item) => item.key) || [];
+    const satisfiedTransactionConstraintKeys = [...new Set(options.satisfiedTransactionConstraintKeys || [])];
     if (!quiet && replacedStateConstraintKeys.length)
         console.log(`State obligation plan: replaced ${replacedStateConstraintKeys.length} exact BASE state constraint(s): ${replacedStateConstraintKeys.join(", ")}`);
     const anchorDiagnostics = buildAnchorDiagnostics(facts);
-    runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies, executionPhase: options.executionPhase, replacedStateConstraintKeys });
+    runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies, executionPhase: options.executionPhase, replacedStateConstraintKeys, satisfiedTransactionConstraintKeys });
     return {
         command: input.mode,
         repositoryRoot: facts.repositoryRoot,
@@ -34,6 +35,7 @@ export function evaluatePolicyPipeline(input, options, reporter) {
         ...(facts.repositoryObservation ? { repositoryObservation: facts.repositoryObservation } : {}),
         ...(obligationPlan ? { obligationPlan } : {}),
         ...(options.executionPhase ? { executionPhase: options.executionPhase } : {}),
+        ...(satisfiedTransactionConstraintKeys.length ? { satisfiedTransactionConstraintKeys } : {}),
         ...anchorDiagnostics,
     };
 }
