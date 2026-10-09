@@ -85,7 +85,10 @@ runs:
       id: run-repo-guard
       shell: bash
       env:
-        GH_TOKEN: ${{ env.GH_TOKEN }}
+        # GH_TOKEN is intentionally not rebound here.
+        # Composite steps inherit the caller step's runner environment; rebinding
+        # through the composite env context can replace that inherited token with
+        # an empty value.
         RG_MODE: ${{ inputs.mode }}
         RG_ENFORCEMENT: ${{ inputs.enforcement }}
         RG_REPO_ROOT: ${{ inputs.repo-root }}

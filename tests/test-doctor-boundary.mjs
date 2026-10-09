@@ -13,12 +13,13 @@ describe("doctor result boundary", () => {
     try {
       const report = runDoctor({ packageRoot: root, repoRoot: resolve(root, "does-not-exist") });
       assert.equal(Array.isArray(report.results), true);
-      assert.equal(report.results.length, 8);
+      assert.equal(report.results.length, 9);
       assert.equal(report.passes + report.warns + report.fails, report.results.length);
       assert.ok(report.fails > 0);
       assert.equal(report.results[0]?.name, "repository-root");
       assert.equal(report.results[0]?.status, "FAIL");
       assert.equal(report.results.some((item) => item.name === "merge-barrier-coverage"), true);
+      assert.equal(report.results.some((item) => item.name === "control-plane-hygiene"), true);
     } finally {
       console.log = originalLog;
     }
