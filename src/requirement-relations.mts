@@ -303,8 +303,8 @@ export function normalizeRequirementAuthority(input: RequirementAuthorityInput):
 }
 
 interface RequirementAuthorityPolicyProjection {
-  anchors?: { types?: { requirement_artifact_path?: { sources?: Array<Record<string, unknown>> } } };
-  document_relations?: { rules?: Array<Record<string, unknown>> };
+  anchors?: { types?: any };
+  document_relations?: any;
 }
 
 export function requirementAuthorityScopeFromPolicy(policy: RequirementAuthorityPolicyProjection | null | undefined): RequirementAuthorityScopeEntry[] {
