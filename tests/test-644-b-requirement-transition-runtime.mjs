@@ -342,4 +342,27 @@ console.log("\n--- #670 check-pr advisory overlap shadow ---");
   }
 }
 
+
+console.log("\n--- #670 no requirement authority means no overlap shadow ---");
+{
+  const rawPolicy = policy(["src/**", "tests/**"]);
+  delete rawPolicy.packs;
+  const root = initRepo(rawPolicy, {}, {
+    "src/a.mts": "export const a = 1;\n",
+    "tests/a.mjs": "export const t = 1;\n",
+  });
+  try {
+    writeFileSync(join(root, "src/a.mts"), "export const a = 2;\n");
+    writeFileSync(join(root, "tests/a.mjs"), "export const t = 2;\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "plain repository without requirement authority");
+    const result = run(root, "", ["src/**", "tests/**"]);
+    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.equal(result.status, 0, output);
+    assert.doesNotMatch(output, /requirement-verification-overlap-shadow/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 console.log("#644 check-pr requirement transition runtime witnesses passed");
