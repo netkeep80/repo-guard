@@ -64,9 +64,9 @@ export function describeGhFailure(error: unknown): string {
     const stderr = typeof candidate.stderr === "string" ? candidate.stderr.trim() : "";
     const message = typeof candidate.message === "string" ? candidate.message.trim() : "";
     const detail = stderr || message || (candidate.status !== undefined ? `exit status ${String(candidate.status)}` : "unknown gh failure");
-    return detail.replace(/\\s+/g, " ").slice(0, 500);
+    return detail.replace(/\s+/g, " ").slice(0, 500);
   }
-  return String(error).replace(/\\s+/g, " ").slice(0, 500);
+  return String(error).replace(/\s+/g, " ").slice(0, 500);
 }
 
 function safeGhJson(args: string[], operation: string): unknown | null {
