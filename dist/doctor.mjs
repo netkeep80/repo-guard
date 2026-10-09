@@ -115,8 +115,13 @@ function githubRepositorySlug(repoRoot) {
         return null;
     }
 }
-function ghApiJson(endpoint, paginate = false) {
-    const args = ["api", ...(paginate ? ["--paginate", "--slurp"] : []), endpoint];
+function ghApiJson(endpoint, options = {}) {
+    const args = [
+        "api",
+        ...(options.paginate ? ["--paginate", "--slurp"] : []),
+        ...(options.jq ? ["--jq", options.jq] : []),
+        endpoint,
+    ];
     return JSON.parse(execFileSync("gh", args, { encoding: "utf-8", stdio: "pipe" }));
 }
 function paginatedItems(value, label) {
@@ -179,10 +184,21 @@ function checkControlPlaneHygiene(repoRoot) {
             return { name: "control-plane-hygiene", status: WARN, message: "GitHub repository identity unavailable; control-plane hygiene not observed" };
         }
         try {
-            const metadata = ghApiJson(`repos/${repository}`);
-            const branches = paginatedItems(ghApiJson(`repos/${repository}/branches?per_page=100`, true), "branches");
-            const issues = paginatedItems(ghApiJson(`repos/${repository}/issues?state=open&per_page=100`, true), "issues");
-            const pullRequests = paginatedItems(ghApiJson(`repos/${repository}/pulls?state=all&per_page=100`, true), "pull requests");
+            const metadata = ghApiJson(`repos/${repository}`, {
+                jq: "{default_branch, delete_branch_on_merge}",
+            });
+            const branches = paginatedItems(ghApiJson(`repos/${repository}/branches?per_page=100`, {
+                paginate: true,
+                jq: "[.[][] | {name, commit: {sha: .commit.sha}, protected}]",
+            }), "branches");
+            const issues = paginatedItems(ghApiJson(`repos/${repository}/issues?state=open&per_page=100`, {
+                paginate: true,
+                jq: "[.[][] | {number, state, title, body, pull_request}]",
+            }), "issues");
+            const pullRequests = paginatedItems(ghApiJson(`repos/${repository}/pulls?state=all&per_page=100`, {
+                paginate: true,
+                jq: "[.[][] | {number, state, draft, merged_at, body: (if .state == \"open\" then (.body // \"\") else \"\" end), head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}]",
+            }), "pull requests");
             const observation = controlPlaneObservationFromGitHub({
                 repository,
                 repository_metadata: metadata,
