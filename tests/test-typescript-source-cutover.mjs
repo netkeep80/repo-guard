@@ -49,7 +49,7 @@ describe("repo-guard self-hosting security boundary", () => {
       "repo-policy.json", "schemas/", ".github/workflows/", ".github/PULL_REQUEST_TEMPLATE.md",
       ".github/ISSUE_TEMPLATE/", "templates/", "action.yml",
     ]) assert.ok(policy.paths.governance_paths.includes(path), `missing governance path ${path}`);
-    assert.equal((policy.paths.operational_paths || []).some((path) => path.startsWith(".github/")), false);
+    assert.equal(Object.hasOwn(policy.paths, "operational_paths"), false, "self-policy must not configure inert operational-path exclusions");
   });
 
   it("exercises both enforcement modes", () => {
