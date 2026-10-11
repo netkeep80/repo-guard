@@ -19,6 +19,7 @@ interface GovernanceCheckInput {
   governanceGrant?: GovernanceGrantProjection | null;
   trustedAuthorizer?: TrustedAuthorizerProjection | null;
   changeIntentType?: string | null;
+  routineRequirementPaths?: readonly string[];
 }
 
 interface GovernanceCheckResult {
@@ -41,6 +42,7 @@ interface GovernanceRuleFacts {
   diff: { files: { all: ParsedDiffFile[] } };
   governanceGrant?: GovernanceGrantProjection | null;
   trustedAuthorizer?: TrustedAuthorizerProjection | null;
+  routineRequirementPaths?: readonly string[];
 }
 
 const expand = (pattern: unknown): string[] => typeof pattern !== "string" || !pattern ? [] : [pattern.endsWith("/") ? `${pattern}**` : pattern];
@@ -50,7 +52,7 @@ export function expandGovernancePatterns(patterns: unknown[] = []): string[] {
 const trusted = (authorizer: TrustedAuthorizerProjection | null | undefined): boolean => authorizer?.trusted === true && authorizer.source === "repository_permission";
 const uniqueSorted = (paths: string[]): string[] => [...new Set(paths)].sort();
 
-export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null }: GovernanceCheckInput): GovernanceCheckResult {
+export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null, routineRequirementPaths = [] }: GovernanceCheckInput): GovernanceCheckResult {
   const patterns = expandGovernancePatterns(governancePaths || []), governanceChange = changeIntentType === "governance";
   const matchesBoundary = (path: string): boolean => matchesAny(path, patterns);
   if (!patterns.length && !governanceChange) return { ok: true };
@@ -67,7 +69,8 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
     : [];
   if (!governanceChange && !touched.length) return { ok: true, touched_governance_paths: [] };
 
-  const unauthorized = touched.filter((path) => !matchesAny(path, expandGovernancePatterns(authorized)));
+  const routine = governanceChange ? new Set<string>() : new Set(routineRequirementPaths);
+  const unauthorized = touched.filter((path) => !routine.has(path) && !matchesAny(path, expandGovernancePatterns(authorized)));
   const details = [
     ...nonGovernance.map((path) => `governance ChangeIntent cannot change non-governance path ${path}`),
     ...unauthorized.map((path) => `governance path ${path} changed without matching GovernanceGrant authorization`),
@@ -102,6 +105,7 @@ export const governancePathsRuleFamily: RuleFamily = {
     return { name: "governance-change-authorization", check: checkGovernanceChangeAuthorization({
       files: (facts as GovernanceRuleFacts).diff.files.all, governancePaths, governanceGrant: (facts as GovernanceRuleFacts).governanceGrant, trustedAuthorizer: (facts as GovernanceRuleFacts).trustedAuthorizer,
       changeIntentType: (facts as GovernanceRuleFacts).changeIntent?.change_type,
+      routineRequirementPaths: (facts as GovernanceRuleFacts).routineRequirementPaths,
     }) };
   },
 };
