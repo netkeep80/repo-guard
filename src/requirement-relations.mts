@@ -315,12 +315,12 @@ export function normalizeRequirementAuthority(input: RequirementAuthorityInput):
 interface RequirementAuthorityPolicyProjection {
   anchors?: { types?: any };
   document_relations?: any;
-  paths?: { governance_paths?: string[] };
+  paths?: { governance_paths?: unknown };
 }
 
 export function requirementAuthorityScopeFromPolicy(policy: RequirementAuthorityPolicyProjection | null | undefined): RequirementAuthorityScopeEntry[] {
   const closed = policy?.document_relations?.rules?.some((rule: Record<string, unknown>) => rule.id === "requirements-strict:closed-repository" && rule.kind === "set_equal") === true;
-  const governed = policy?.paths?.governance_paths || [];
+  const governed = Array.isArray(policy?.paths?.governance_paths) ? policy.paths.governance_paths : [];
   if (!closed && !governed.length) return [];
   const sources = closed ? policy?.anchors?.types?.requirement_artifact_path?.sources || [] : policy?.anchors?.types?.requirement_id?.sources || [];
   return normalizeAuthorityScope(sources.flatMap((source: Record<string, unknown>) => {
@@ -343,7 +343,8 @@ export function buildRequirementAuthorityFromSnapshot(input: {
   const scope = requirementAuthorityScopeFromPolicy(input.policy);
   if (!scope.length) return null;
   const closed = input.policy?.document_relations?.rules?.some((rule: Record<string, unknown>) => rule.id === "requirements-strict:closed-repository") === true;
-  const governed = (input.policy?.paths?.governance_paths || []).map((pattern: string) => pattern.endsWith("/") ? `${pattern}**` : pattern);
+  const patterns = input.policy?.paths?.governance_paths;
+  const governed = (Array.isArray(patterns) ? patterns : []).filter((value): value is string => typeof value === "string").map((pattern) => pattern.endsWith("/") ? `${pattern}**` : pattern);
   const sources: RequirementAuthoritySource[] = [];
   for (const pathValue of [...new Set(input.trackedFiles)].sort()) {
     const path = repositoryPath(pathValue, "RequirementAuthority.trackedFiles");

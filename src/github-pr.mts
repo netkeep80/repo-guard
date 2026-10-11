@@ -233,7 +233,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
             readFileAtRef: readSnapshotFile,
             governancePaths: Array.isArray(trustedGovernancePaths) ? trustedGovernancePaths as string[] : [],
             forbiddenPaths: (basePolicy as { paths?: { forbidden?: string[] } }).paths?.forbidden || [],
-            closedRepository: basePolicy.document_relations?.rules?.some((rule: { id?: string }) => rule.id === "requirements-strict:closed-repository") === true,
+            closedRepository: basePolicy.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository") === true,
           })
           : null;
         if (routine?.ok && (changeIntent as { change_type?: string } | null)?.change_type !== "governance") routineRequirementPaths = routine.requirement_paths;

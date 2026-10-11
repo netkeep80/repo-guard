@@ -366,7 +366,7 @@ console.log("\n--- #670 no requirement authority means no overlap shadow ---");
 }
 
 
-console.log("\\n--- #681 MNC-style routine governed YAML trace additions without issue grants ---");
+console.log("\n--- #681 MNC-style routine governed YAML trace additions without issue grants ---");
 {
   const rawPolicy = policy(["tests/**", "experiments/**"]);
   rawPolicy.paths.governance_paths.push("requirements/**", ".github/workflows/**");
@@ -381,7 +381,7 @@ console.log("\\n--- #681 MNC-style routine governed YAML trace additions without
     "  - path: repo-policy.json",
     "    relations: [requires]",
     "",
-  ].join("\\n");
+  ].join("\n");
   const newEdges = [
     "  - path: experiments/algorithm.mjs",
     "    relations: [requires, implements]",
@@ -392,12 +392,12 @@ console.log("\\n--- #681 MNC-style routine governed YAML trace additions without
     "  - path: experiments/NOTES.md",
     "    relations: [requires, documents]",
     "",
-  ].join("\\n");
+  ].join("\n");
   const files = {
-    "experiments/algorithm.mjs": "export const value = 7;\\n",
-    "tests/algorithm.test.mjs": "export const observed = true;\\n",
-    "experiments/fixture.json": "{\\\"value\\\":7}\\n",
-    "experiments/NOTES.md": "# Experiment\\n",
+    "experiments/algorithm.mjs": "export const value = 7;\n",
+    "tests/algorithm.test.mjs": "export const observed = true;\n",
+    "experiments/fixture.json": JSON.stringify({ value: 7 }) + "\n",
+    "experiments/NOTES.md": "# Experiment\n",
   };
   function scenario(name, nextRequirement, additionalFiles, expectedGreen, diagnostic) {
     const root = initRepo(rawPolicy, { "requirements/r1.yaml": baseline });
@@ -420,13 +420,13 @@ console.log("\\n--- #681 MNC-style routine governed YAML trace additions without
   scenario("MNC code test fixture docs routine", baseline + newEdges, files, true, /PASS: governance-change-authorization/);
   scenario("normative meaning must not auto authorize", baseline.replace("Accepted normative", "Replaced normative") + newEdges,
     files, false, /routine_normative_semantics_changed|FAIL: governance-change-authorization/);
-  scenario("standalone self-authored requires edge", baseline + "  - path: garbage.tmp\\n    relations: [requires]\\n",
-    { "garbage.tmp": "garbage\\n" }, false, /routine_requires_typed_evidence|FAIL: governance-change-authorization/);
-  scenario("forbidden untyped support path with valid evidence", baseline + newEdges + "  - path: garbage.tmp\\n    relations: [requires]\\n",
-    { ...files, "garbage.tmp": "garbage\\n" }, false, /routine_target_protected|FAIL: governance-change-authorization/);
+  scenario("standalone self-authored requires edge", baseline + "  - path: garbage.tmp\n    relations: [requires]\n",
+    { "garbage.tmp": "garbage\n" }, false, /routine_requires_typed_evidence|FAIL: governance-change-authorization/);
+  scenario("forbidden untyped support path with valid evidence", baseline + newEdges + "  - path: garbage.tmp\n    relations: [requires]\n",
+    { ...files, "garbage.tmp": "garbage\n" }, false, /routine_target_protected|FAIL: governance-change-authorization/);
   scenario("workflow changes are never routine", baseline + newEdges +
-    "  - path: .github/workflows/inject.yml\\n    relations: [requires, verifies]\\n",
-    { ...files, ".github/workflows/inject.yml": "name: untrusted\\n" }, false,
+    "  - path: .github/workflows/inject.yml\n    relations: [requires, verifies]\n",
+    { ...files, ".github/workflows/inject.yml": "name: untrusted\n" }, false,
     /routine_target_protected|FAIL: governance-change-authorization/);
   scenario("immutable relation addition is not routine", baseline + newEdges.replace(
     "relations: [requires, implements]", "relations: [requires, implements, immutable]"),
@@ -440,7 +440,7 @@ console.log("\\n--- #681 MNC-style routine governed YAML trace additions without
     "  - path: requirements/r2.yaml",
     "    relations: [requires]",
     "",
-  ].join("\\n");
+  ].join("\n");
   scenario("new requirement identity needs independent authority", baseline + newEdges,
     { ...files, "requirements/r2.yaml": addedRequirement }, false, /routine_requirement_sources_changed|FAIL: governance-change-authorization/);
 }
