@@ -151,3 +151,11 @@ artifacts:
 
 При таком явном включении любой отслеживаемый путь, отсутствующий в `artifacts[].path`, является блокирующим необоснованным файлом, а любой объявленный путь, отсутствующий в дереве `Git`, — блокирующим отсутствующим артефактом.
 
+
+## Routine typed trace relations (RG-03; issue 681)
+
+With `requirements-strict` and a trusted BASE `paths.governance_paths` protecting requirement YAML/JSON, `check-pr` now checks an exact `RequirementGraph(BASE) → RequirementGraph(HEAD)` for routine additive trace relations. No linked-issue `GovernanceGrant` is required **only** when the existing requirement sources, identifiers, normative fields, and preexisting artifact metadata are unchanged, and the added relations point to actual changed tracked, non-governance, non-forbidden files. A typed `implements`, `verifies`, or `documents` witness is required; `immutable`, relation removals, and new requirement identities cannot use this path. Closed-repository mode additionally forbids new untyped `requires` justification.
+
+The runtime derives `routineRequirementPaths` only after validating both immutable Git snapshots and the real diff. This is not a policy allowlist and cannot be declared by HEAD or ChangeIntent. Trust-policy and workflow edits, scientific author acceptance, and other external authority transitions continue to require their existing independent gates. No new approval source or change-grant DSL is introduced.
+
+In repositories with `closed_repository: false`, a governed requirement's `/id` extraction still supplies the authority source list for this transition check; repository closure is not implicitly enabled. Existing consumers must pin the released repo-guard SHA and run blocking (not solely advisory) negative controls before relying on automatic clearance. A `repo-guard-grant` remains the fail-closed mechanism for actual normative or governance changes.

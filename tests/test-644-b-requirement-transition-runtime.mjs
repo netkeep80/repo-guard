@@ -365,4 +365,85 @@ console.log("\n--- #670 no requirement authority means no overlap shadow ---");
   }
 }
 
+
+console.log("\\n--- #681 MNC-style routine governed YAML trace additions without issue grants ---");
+{
+  const rawPolicy = policy(["tests/**", "experiments/**"]);
+  rawPolicy.paths.governance_paths.push("requirements/**", ".github/workflows/**");
+  rawPolicy.paths.forbidden = ["*.tmp"];
+  rawPolicy.packs["requirements-strict"].closed_repository = false;
+  const baseline = [
+    "id: RG-R1",
+    "description: Accepted normative sentence.",
+    "artifacts:",
+    "  - path: requirements/r1.yaml",
+    "    relations: [requires]",
+    "  - path: repo-policy.json",
+    "    relations: [requires]",
+    "",
+  ].join("\\n");
+  const newEdges = [
+    "  - path: experiments/algorithm.mjs",
+    "    relations: [requires, implements]",
+    "  - path: tests/algorithm.test.mjs",
+    "    relations: [requires, verifies]",
+    "  - path: experiments/fixture.json",
+    "    relations: [requires]",
+    "  - path: experiments/NOTES.md",
+    "    relations: [requires, documents]",
+    "",
+  ].join("\\n");
+  const files = {
+    "experiments/algorithm.mjs": "export const value = 7;\\n",
+    "tests/algorithm.test.mjs": "export const observed = true;\\n",
+    "experiments/fixture.json": "{\\\"value\\\":7}\\n",
+    "experiments/NOTES.md": "# Experiment\\n",
+  };
+  function scenario(name, nextRequirement, additionalFiles, expectedGreen, diagnostic) {
+    const root = initRepo(rawPolicy, { "requirements/r1.yaml": baseline });
+    try {
+      if (nextRequirement !== null) writeFileSync(join(root, "requirements/r1.yaml"), nextRequirement);
+      for (const [path, content] of Object.entries(additionalFiles)) {
+        mkdirSync(resolve(root, path, ".."), { recursive: true });
+        writeFileSync(join(root, path), content);
+      }
+      git(root, "add", "-A");
+      git(root, "commit", "-m", name);
+      const runResult = run(root, "", ["requirements/**", "experiments/**", "tests/**", ".github/**"]);
+      const output = `${runResult.stdout || ""}${runResult.stderr || ""}`;
+      assert.equal(runResult.status === 0, expectedGreen, `${name}: ${output}`);
+      if (diagnostic) assert.match(output, diagnostic, `${name}: ${output}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+  scenario("MNC code test fixture docs routine", baseline + newEdges, files, true, /PASS: governance-change-authorization/);
+  scenario("normative meaning must not auto authorize", baseline.replace("Accepted normative", "Replaced normative") + newEdges,
+    files, false, /routine_normative_semantics_changed|FAIL: governance-change-authorization/);
+  scenario("standalone self-authored requires edge", baseline + "  - path: garbage.tmp\\n    relations: [requires]\\n",
+    { "garbage.tmp": "garbage\\n" }, false, /routine_requires_typed_evidence|FAIL: governance-change-authorization/);
+  scenario("forbidden untyped support path with valid evidence", baseline + newEdges + "  - path: garbage.tmp\\n    relations: [requires]\\n",
+    { ...files, "garbage.tmp": "garbage\\n" }, false, /routine_target_protected|FAIL: governance-change-authorization/);
+  scenario("workflow changes are never routine", baseline + newEdges +
+    "  - path: .github/workflows/inject.yml\\n    relations: [requires, verifies]\\n",
+    { ...files, ".github/workflows/inject.yml": "name: untrusted\\n" }, false,
+    /routine_target_protected|FAIL: governance-change-authorization/);
+  scenario("immutable relation addition is not routine", baseline + newEdges.replace(
+    "relations: [requires, implements]", "relations: [requires, implements, immutable]"),
+    files, false, /routine_target_protected|FAIL: governance-change-authorization/);
+  scenario("source path added without target diff is not routine", baseline + newEdges,
+    { "experiments/algorithm.mjs": files["experiments/algorithm.mjs"] }, false,
+    /routine_target_not_exact_changed_file|FAIL: governance-change-authorization/);
+  const addedRequirement = [
+    "id: RG-R2",
+    "artifacts:",
+    "  - path: requirements/r2.yaml",
+    "    relations: [requires]",
+    "",
+  ].join("\\n");
+  scenario("new requirement identity needs independent authority", baseline + newEdges,
+    { ...files, "requirements/r2.yaml": addedRequirement }, false, /routine_requirement_sources_changed|FAIL: governance-change-authorization/);
+}
+console.log("#681 routine requirement trace transition integration matrix passed");
+
 console.log("#644 check-pr requirement transition runtime witnesses passed");
