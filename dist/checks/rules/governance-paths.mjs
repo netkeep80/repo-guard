@@ -6,7 +6,7 @@ export function expandGovernancePatterns(patterns = []) {
 }
 const trusted = (authorizer) => authorizer?.trusted === true && authorizer.source === "repository_permission";
 const uniqueSorted = (paths) => [...new Set(paths)].sort();
-export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null }) {
+export function checkGovernanceChangeAuthorization({ files, governancePaths, governanceGrant, trustedAuthorizer, changeIntentType = null, routineRequirementPaths = [] }) {
     const patterns = expandGovernancePatterns(governancePaths || []), governanceChange = changeIntentType === "governance";
     const matchesBoundary = (path) => matchesAny(path, patterns);
     if (!patterns.length && !governanceChange)
@@ -23,7 +23,8 @@ export function checkGovernanceChangeAuthorization({ files, governancePaths, gov
         : [];
     if (!governanceChange && !touched.length)
         return { ok: true, touched_governance_paths: [] };
-    const unauthorized = touched.filter((path) => !matchesAny(path, expandGovernancePatterns(authorized)));
+    const routine = governanceChange ? new Set() : new Set(routineRequirementPaths);
+    const unauthorized = touched.filter((path) => !routine.has(path) && !matchesAny(path, expandGovernancePatterns(authorized)));
     const details = [
         ...nonGovernance.map((path) => `governance ChangeIntent cannot change non-governance path ${path}`),
         ...unauthorized.map((path) => `governance path ${path} changed without matching GovernanceGrant authorization`),
@@ -59,6 +60,7 @@ export const governancePathsRuleFamily = {
         return { name: "governance-change-authorization", check: checkGovernanceChangeAuthorization({
                 files: facts.diff.files.all, governancePaths, governanceGrant: facts.governanceGrant, trustedAuthorizer: facts.trustedAuthorizer,
                 changeIntentType: facts.changeIntent?.change_type,
+                routineRequirementPaths: facts.routineRequirementPaths,
             }) };
     },
 };

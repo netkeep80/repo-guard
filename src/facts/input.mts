@@ -38,6 +38,7 @@ export interface RepositoryFactsInput {
   governanceGrant?: unknown;
   trustedGovernancePaths?: unknown;
   trustedAuthorizer?: unknown;
+  routineRequirementPaths?: readonly string[];
   enforcement: RepositoryFactsEnforcement;
   diffText: string;
   diffFiles?: ParsedDiffFile[] | null;
@@ -54,7 +55,7 @@ export function buildPolicyFacts(input: RepositoryFactsInput) {
     mode = "check-diff", repositoryRoot, policy, basePolicy = null, headPolicy = null, baseRef = null, headRef = null,
     repositoryIdentity = null, snapshotDocuments = null, repositoryObservation = null,
     changeIntent = null, changeIntentSource = "none", governanceGrant = null,
-    trustedGovernancePaths = null, trustedAuthorizer = null, enforcement, diffText, diffFiles = null,
+    trustedGovernancePaths = null, trustedAuthorizer = null, routineRequirementPaths = [], enforcement, diffText, diffFiles = null,
     trackedFiles = null, diagnostics = {}, readFile = null, readFileAtRef = null,
   } = input;
   const allFiles = diffFiles || parseDiff(diffText);
@@ -70,7 +71,7 @@ export function buildPolicyFacts(input: RepositoryFactsInput) {
   return {
     mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryIdentity, snapshotDocuments, repositoryObservation,
     changeIntent, changeIntentSource, governanceGrant,
-    trustedGovernancePaths, trustedAuthorizer, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
+    trustedGovernancePaths, trustedAuthorizer, routineRequirementPaths, readFile: cachedReadFile, readFileAtRef: snapshotReadFile, documents,
     enforcementMode: enforcement.mode, enforcement,
     diff: { files: { all: allFiles, checked: checkedFiles, skippedOperational: allFiles.filter((file) => !checkedFiles.includes(file)) } },
     anchors: extractAnchors(policy, options), trackedFiles: resolvedTrackedFiles,

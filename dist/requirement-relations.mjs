@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
 import { matchesAny } from "./utils/path-patterns.mjs";
 export const REQUIREMENT_RELATION_KINDS = [
@@ -209,24 +210,35 @@ export function normalizeRequirementAuthority(input) {
 }
 export function requirementAuthorityScopeFromPolicy(policy) {
     const closed = policy?.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository" && rule.kind === "set_equal") === true;
-    if (!closed)
+    const governed = Array.isArray(policy?.paths?.governance_paths) ? policy.paths.governance_paths : [];
+    if (!closed && !governed.length)
         return [];
-    const sources = policy?.anchors?.types?.requirement_artifact_path?.sources || [];
+    const sources = closed ? policy?.anchors?.types?.requirement_artifact_path?.sources || [] : policy?.anchors?.types?.requirement_id?.sources || [];
     return normalizeAuthorityScope(sources.flatMap((source) => {
-        if (source.kind !== "structured_pointer" || source.pointer !== "/artifacts" || source.item_field !== "path")
+        if (typeof source.glob !== "string")
             return [];
-        if ((source.format !== "json" && source.format !== "yaml") || typeof source.glob !== "string")
-            return [];
-        return [{ glob: source.glob, format: source.format }];
+        if (closed && source.kind === "structured_pointer" && source.pointer === "/artifacts" && source.item_field === "path"
+            && (source.format === "json" || source.format === "yaml"))
+            return [{ glob: source.glob, format: source.format }];
+        if (!closed && source.kind === "structured_pointer" && source.pointer === "/id" && source.format === "yaml")
+            return [{ glob: source.glob, format: "yaml" }];
+        if (!closed && source.kind === "json_field" && source.field === "id")
+            return [{ glob: source.glob, format: "json" }];
+        return [];
     }));
 }
 export function buildRequirementAuthorityFromSnapshot(input) {
     const scope = requirementAuthorityScopeFromPolicy(input.policy);
     if (!scope.length)
         return null;
+    const closed = input.policy?.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository") === true;
+    const patterns = input.policy?.paths?.governance_paths;
+    const governed = (Array.isArray(patterns) ? patterns : []).filter((value) => typeof value === "string").map((pattern) => pattern.endsWith("/") ? `${pattern}**` : pattern);
     const sources = [];
     for (const pathValue of [...new Set(input.trackedFiles)].sort()) {
         const path = repositoryPath(pathValue, "RequirementAuthority.trackedFiles");
+        if (!closed && !matchesAny(path, governed))
+            continue;
         const matching = scope.filter((entry) => matchesAny(path, [entry.glob]));
         if (!matching.length)
             continue;
@@ -277,6 +289,83 @@ export function compareRequirementRelationGraphs(base, head) {
         add: canonicalIdentities([...headMap.entries()].filter(([key]) => !baseMap.has(key)).map(([, value]) => value)),
         remove: canonicalIdentities([...baseMap.entries()].filter(([key]) => !headMap.has(key)).map(([, value]) => value)),
     };
+}
+/**
+ * A derived BASE-authorized trace transition, never an external GovernanceGrant.
+ * Normative fields and existing artifact metadata must be identical.
+ */
+export function checkRoutineRequirementTransition(input) {
+    const reasons = [];
+    const delta = compareRequirementRelationGraphs(input.base, input.head);
+    const basePaths = input.base.authority_manifest.map((entry) => entry.path);
+    const headPaths = input.head.authority_manifest.map((entry) => entry.path);
+    if (input.base.authority_scope_sha256 !== input.head.authority_scope_sha256)
+        reasons.push("routine_authority_scope_changed");
+    if (!isDeepStrictEqual(basePaths, headPaths))
+        reasons.push("routine_requirement_sources_changed");
+    if (!delta.add.length || delta.remove.length)
+        reasons.push("routine_requires_additive_relation_delta");
+    const changed = new Map(input.changedFiles.map((file) => [file.path, file]));
+    const tracked = new Set(input.headTrackedFiles);
+    const expand = (patterns) => patterns.map((pattern) => pattern.endsWith("/") ? `${pattern}**` : pattern);
+    const governance = expand(input.governancePaths), forbidden = expand(input.forbiddenPaths);
+    const typed = new Set(delta.add.filter((edge) => ["implements", "verifies", "documents"].includes(edge.relation)).map((edge) => edge.object));
+    if (!typed.size)
+        reasons.push("routine_requires_typed_evidence");
+    const grouped = new Map();
+    for (const edge of delta.add) {
+        const kinds = grouped.get(edge.object) || new Set();
+        kinds.add(edge.relation);
+        grouped.set(edge.object, kinds);
+        const file = changed.get(edge.object);
+        if (!file || file.status === "deleted" || file.previousPath || !tracked.has(edge.object)) {
+            reasons.push(`routine_target_not_exact_changed_file:${edge.object}`);
+        }
+        if (edge.relation === "immutable" || matchesAny(edge.object, governance) || matchesAny(edge.object, forbidden)) {
+            reasons.push(`routine_target_protected:${edge.object}`);
+        }
+    }
+    if (input.closedRepository)
+        for (const [path, kinds] of grouped) {
+            if (![...kinds].some((kind) => kind === "implements" || kind === "verifies" || kind === "documents")) {
+                reasons.push(`routine_untyped_closed_repository_justification:${path}`);
+            }
+        }
+    for (const path of basePaths) {
+        const rawBase = input.readFileAtRef(input.base.revision, path);
+        const rawHead = input.readFileAtRef(input.head.revision, path);
+        const format = input.base.authority_manifest.find((entry) => entry.path === path).format;
+        if (typeof rawBase !== "string" || typeof rawHead !== "string") {
+            reasons.push(`routine_requirement_snapshot_unavailable:${path}`);
+            continue;
+        }
+        const before = object(parseSource({ path, format, content: rawBase }), `${path}:base`);
+        const after = object(parseSource({ path, format, content: rawHead }), `${path}:head`);
+        const normative = (root) => Object.fromEntries(Object.entries(root).filter(([key]) => key !== "artifacts"));
+        if (!isDeepStrictEqual(normative(before), normative(after))) {
+            reasons.push(`routine_normative_semantics_changed:${path}`);
+        }
+        const metadata = (root) => new Map((root.artifacts === undefined ? [] : array(root.artifacts, `${path}#/artifacts`)).map((value, index) => {
+            const artifact = object(value, `${path}#/artifacts/${index}`);
+            const name = repositoryPath(artifact.path, `${path}#/artifacts/${index}/path`);
+            return [name, Object.fromEntries(Object.entries(artifact).filter(([key]) => key !== "relations"))];
+        }));
+        const oldMetadata = metadata(before), newMetadata = metadata(after);
+        for (const [artifactPath, oldValue] of oldMetadata) {
+            if (newMetadata.has(artifactPath) && !isDeepStrictEqual(oldValue, newMetadata.get(artifactPath))) {
+                reasons.push(`routine_artifact_authority_changed:${artifactPath}`);
+            }
+        }
+        for (const [artifactPath, current] of newMetadata) {
+            if (!oldMetadata.has(artifactPath) && ["governance", "requirement", "immutable", "authority", "contract"].includes(String(current.role ?? "").toLowerCase())) {
+                reasons.push(`routine_new_protected_artifact_role:${artifactPath}`);
+            }
+        }
+    }
+    const requirementPaths = basePaths.filter((path) => changed.has(path));
+    if (!requirementPaths.length)
+        reasons.push("routine_requirement_diff_missing");
+    return { ok: reasons.length === 0, reasons, requirement_paths: reasons.length === 0 ? requirementPaths : [] };
 }
 function normalizeGrantIdentity(value, label) {
     const input = object(value, label);
