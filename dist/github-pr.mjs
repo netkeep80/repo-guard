@@ -12,7 +12,7 @@ import { evaluatePolicyPipeline } from "./runtime/pipeline.mjs";
 import { createAnalysisCollector } from "./runtime/analysis-report.mjs";
 import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/renderers.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
-import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
+import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, checkRoutineRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"];
 function githubEventPath() { return process.env.RG_EVENT_PATH || process.env.GITHUB_EVENT_PATH; }
@@ -256,6 +256,7 @@ export function runCheckPR(roots, args = []) {
         }
         catch { }
     let requirementTransitionAuthorized = false;
+    let routineRequirementPaths = [];
     if (basePolicy) {
         try {
             const baseAuthority = buildRequirementAuthorityFromSnapshot({
@@ -282,15 +283,28 @@ export function runCheckPR(roots, args = []) {
                     trustedAuthorizer,
                 });
                 requirementTransitionAuthorized = transition.authorized;
+                const routine = governanceGrant === null && !transition.ok
+                    ? checkRoutineRequirementTransition({
+                        base: baseGraph, head: headGraph, changedFiles: diff.files, headTrackedFiles: trackedFiles,
+                        readFileAtRef: readSnapshotFile,
+                        governancePaths: Array.isArray(trustedGovernancePaths) ? trustedGovernancePaths : [],
+                        forbiddenPaths: basePolicy.paths?.forbidden || [],
+                        closedRepository: basePolicy.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository") === true,
+                    })
+                    : null;
+                if (routine?.ok && changeIntent?.change_type !== "governance")
+                    routineRequirementPaths = routine.requirement_paths;
+                const accepted = transition.ok || routineRequirementPaths.length > 0;
                 initialChecks.push({
                     name: "requirement-transition",
                     check: {
-                        ok: transition.ok,
-                        message: transition.ok ? "requirement authority transition is exact and trusted" : "requirement authority transition is not exactly authorized",
-                        details: transition.reasons,
+                        ok: accepted,
+                        message: accepted ? "requirement authority transition is exact (trusted grant or proven routine trace addition)" : "requirement authority transition is not exactly authorized",
+                        details: accepted ? [] : [...transition.reasons, ...(routine?.reasons || [])],
                         data: {
                             required: transition.required,
                             authorized: transition.authorized,
+                            automatic_routine: routineRequirementPaths.length > 0,
                             authority_scope_changed: transition.authority_scope_changed,
                             base_authority_sha256: transition.base_authority_sha256,
                             head_authority_sha256: transition.head_authority_sha256,
@@ -316,7 +330,7 @@ export function runCheckPR(roots, args = []) {
         mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
         repositoryIdentity: observation.repository, snapshotDocuments, repositoryObservation: observation,
         trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
-        changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, enforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks,
+        changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, routineRequirementPaths, enforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks,
     };
     const changed = Boolean(basePolicy && !isDeepStrictEqual(basePolicy, headRuntime.policy)), origin = changed ? "base" : "shared";
     const plan = [{
