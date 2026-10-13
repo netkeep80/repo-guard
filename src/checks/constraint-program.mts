@@ -109,6 +109,7 @@ interface ChangeIntentProjection {
 
 interface ConstraintProgramOptions {
   emitRuntime?: boolean;
+  authorizedGrowth?: Readonly<Record<string, number>>;
 }
 
 export interface PolicyRelaxation {
@@ -213,6 +214,7 @@ function addSizeRuleRuntime(
   policy: ConstraintPolicyProjection,
   rule: SizeRuleProjection,
   changeIntent: ChangeIntentProjection | null,
+  authorizedGrowth?: number,
 ): void {
   if (!selectedSizeRule(rule, changeIntent)) return;
   const id = String(rule.id), scope = String(rule.scope ?? ""), metric = String(rule.metric ?? ""), glob = String(rule.glob ?? "**");
@@ -246,7 +248,7 @@ function addSizeRuleRuntime(
       patterns: [glob],
       exclude_paths: excludePaths,
     }),
-  }, { max: rule.max_growth }, "transaction", advisory));
+  }, { max: authorizedGrowth ?? rule.max_growth, ...(authorizedGrowth !== undefined ? { policy_limit: rule.max_growth, effective_limit: authorizedGrowth, trusted_growth_authorization: true } : {}) }, "transaction", advisory));
 }
 
 export function compileConstraintProgram(
@@ -351,7 +353,7 @@ export function compileConstraintProgram(
       owner, pointer: `${pointer}/max_growth`, weakenKind: "size_rule_max_growth_increased", removeKind: "size_rule_max_growth_removed", rule_id: rule.id,
       message: (a, b) => `size_rules[${rule.id}].max_growth: ${a} -> ${b}`, removeMessage: `size_rules[${rule.id}].max_growth removed (was ${rule.max_growth})`,
     }));
-    if (emitRuntime) addSizeRuleRuntime(add, policy, rule, changeIntent);
+    if (emitRuntime) addSizeRuleRuntime(add, policy, rule, changeIntent, options.authorizedGrowth?.[rule.id]);
   }
 
   const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
