@@ -144,5 +144,63 @@ console.log("\n--- C3.3d3 unreadable repository state fails closed ---");
 console.log("\n--- C3.3d3 canonical relation algebra remains finite ---");
 expect("relation descriptor count remains ten", relationDescriptors().length, 10);
 
+console.log("\\n--- #685 exact linked-issue size growth authority ---");
+{
+  const BASE = "a".repeat(40), HEAD = "b".repeat(40);
+  const id = "typescript-tests-controlled-growth";
+  const old = { id, scope: "directory", metric: "files", glob: "ts/test/**", max: 1000, max_growth: 1, count: "all_tracked", level: "blocking" };
+  const grant = (limit = 28, overrides = {}) => ({ size_rule_growth: {
+    base_sha: BASE, head_sha: HEAD, limits: [{ rule_id: id, max_growth: limit }], ...overrides,
+  } });
+  function facts(count = 28, options = {}) {
+    const paths = Array.from({ length: count }, (_, i) => `ts/test/research-${i}.test.ts`);
+    const { policyRule = old, grantValue = null, extra = {}, ...rest } = options;
+    return baseFacts([policyRule], {
+      mode: "check-pr", baseRef: BASE, headRef: HEAD,
+      changeIntent: { change_type: "science" },
+      governanceGrant: grantValue,
+      trustedAuthorizer: { trusted: true, source: "repository_permission" },
+      trackedFiles: paths,
+      diff: { files: { checked: paths.map(path => ({ path, status: "added", addedLines: ["test"], deletedLines: [] })) } },
+      ...extra, ...rest,
+    });
+  }
+  const growth = (f) => evaluateConstraintIR(f).find(x => x.name === `size:${id}:max-growth`)?.check;
+  const authority = (f) => evaluateConstraintIR(f).find(x => x.name === "size-rule-growth-authorization")?.check;
+  const ordinary = facts(28);
+  expect("ordinary PR +28 tests remains BLOCKED", growth(ordinary)?.ok, false);
+  expect("no grant is not reported as authorization", authority(ordinary), undefined);
+  const approved = facts(28, { grantValue: grant() });
+  expect("exact authorized 28 passes growth", growth(approved)?.ok, true);
+  expect("exact trusted issue grant verified", authority(approved)?.ok, true);
+  expect("absolute limit unchanged", compileConstraintIR(approved).constraints.find(x => x.name === `size:${id}:max`)?.parameters?.max, 1000);
+  expect("named growth numeric_bound retains policy limit", compileConstraintIR(approved).constraints.find(x => x.name === `size:${id}:max-growth`)?.parameters?.policy_limit, 1);
+  expect("29 is blocked by 28 allowance", growth(facts(29, { grantValue: grant() }))?.ok, false);
+  expect("ChangeIntent selection cannot self-authorize", growth(facts(28, { extra: { changeIntent: { change_type: "science", budgets: { max_new_files: 1000 } } } }))?.ok, false);
+  for (const [label, badGrant, extra] of [
+    ["stale BASE", grant(28, { base_sha: "c".repeat(40) })],
+    ["stale HEAD", grant(28, { head_sha: "c".repeat(40) })],
+    ["unknown rule", grant(28, { limits: [{ rule_id: "unknown", max_growth: 28 }] })],
+    ["duplicate rule", grant(28, { limits: [{ rule_id: id, max_growth: 28 }, { rule_id: id, max_growth: 28 }] })],
+    ["above absolute max", grant(1001)],
+    ["growth below baseline", grant(1)],
+    ["untrusted author", grant(), { trustedAuthorizer: { trusted: false, source: "none" } }],
+    ["not a check-pr", grant(), { mode: "check-diff" }],
+  ]) {
+    const f = facts(28, { grantValue: badGrant, extra });
+    expect(label + " rejects authority", authority(f)?.ok, false);
+    expect(label + " retains base growth", growth(f)?.ok, false);
+  }
+  const advisoryRule = { ...old, level: "advisory" };
+  expect("advisory rule cannot receive blocking allowance", authority(facts(28, { grantValue: grant(), policyRule: advisoryRule }))?.ok, false);
+  const fileRule = { ...old, scope: "file" };
+  try { authority(facts(28, { grantValue: grant(), policyRule: fileRule })); expect("invalid file growth rule remains rejected", false, true); }
+  catch (error) { expect("invalid file growth rule remains rejected", String(error).includes("file scope"), true); }
+  const scopedRule = { ...old, applies_to_change_types: ["other"] };
+  expect("inapplicable typed rule rejects allowance", authority(facts(28, { grantValue: grant(), policyRule: scopedRule }))?.ok, false);
+  expect("inapplicable typed rule has no numeric growth primitive", growth(facts(28, { grantValue: grant(), policyRule: scopedRule })), undefined);
+  expect("no grant affects strictness", compileConstraintIR(ordinary).constraints.find(x => x.name === `size:${id}:max-growth`)?.parameters?.max, 1);
+}
+
 console.log(`\n${failures === 0 ? "All C3.3d3 lowering tests passed" : `${failures} C3.3d3 assertion(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);

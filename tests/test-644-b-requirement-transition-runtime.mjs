@@ -446,4 +446,83 @@ console.log("\n--- #681 MNC-style routine governed YAML trace additions without 
 }
 console.log("#681 routine requirement trace transition integration matrix passed");
 
+
+console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---");
+{
+  const rawPolicy = policy();
+  delete rawPolicy.packs;
+  rawPolicy.diff_rules.max_new_files = 40;
+  rawPolicy.size_rules = [{
+    id: "typescript-tests-controlled-growth",
+    scope: "directory", metric: "files", glob: "ts/test/**",
+    count: "all_tracked", level: "blocking", max: 1000, max_growth: 1,
+  }];
+  const root = initRepo(rawPolicy, {}, { "ts/test/existing.test.ts": "export const existing = true;\n" });
+  try {
+    for (let i = 0; i < 28; i++) {
+      const file = `ts/test/new-${i}.test.ts`;
+      writeFileSync(resolve(root, file), `export const n${i} = ${i};\n`);
+    }
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "add 28 scientific test witnesses");
+    const baseSha = git(root, "rev-parse", "HEAD~1");
+    const headSha = git(root, "rev-parse", "HEAD");
+    const grant = (id = "typescript-tests-controlled-growth", base = baseSha, head = headSha) => [
+      "```repo-guard-grant",
+      "size_rule_growth:",
+      `  base_sha: ${base}`,
+      `  head_sha: ${head}`,
+      "  limits:",
+      `    - rule_id: ${id}`,
+      "      max_growth: 28",
+      "```",
+    ].join("\n");
+    const ordinary = run(root, "", ["ts/test/**"]);
+    const ordinaryOutput = (ordinary.stdout || "") + (ordinary.stderr || "");
+    assert.notEqual(ordinary.status, 0, ordinaryOutput);
+    assert.match(ordinaryOutput, /size:typescript-tests-controlled-growth:max-growth/);
+
+    const allowed = run(root, grant(), ["ts/test/**"]);
+    const allowedOutput = (allowed.stdout || "") + (allowed.stderr || "");
+    assert.equal(allowed.status, 0, allowedOutput);
+    assert.match(allowedOutput, /PASS: size-rule-growth-authorization/);
+    assert.match(allowedOutput, /PASS: size:typescript-tests-controlled-growth:max-growth/);
+    assert.match(allowedOutput, /PASS: size:typescript-tests-controlled-growth:max/);
+
+
+    for (const [label, injected] of [
+      ["absolute max", "      max: 2000"],
+      ["blocking level", "      level: advisory"],
+    ]) {
+      const malformed = grant().replace("      max_growth: 28", "      max_growth: 28\n" + injected);
+      const rejected = run(root, malformed, ["ts/test/**"]);
+      const output = (rejected.stdout || "") + (rejected.stderr || "");
+      assert.notEqual(rejected.status, 0, label + " " + output);
+      assert.match(output, /FAIL: governance-grant/);
+    }
+    for (const [label, issueBody] of [
+      ["wrong BASE", grant(undefined, "c".repeat(40))],
+      ["wrong HEAD", grant(undefined, undefined, "d".repeat(40))],
+      ["unknown rule", grant("not-a-real-size-rule")],
+    ]) {
+      const rejected = run(root, issueBody, ["ts/test/**"]);
+      const output = (rejected.stdout || "") + (rejected.stderr || "");
+      assert.notEqual(rejected.status, 0, label + " " + output);
+      assert.match(output, /FAIL: size-rule-growth-authorization/);
+    }
+
+    mkdirSync(join(root, "unrelated"), { recursive: true });
+    writeFileSync(join(root, "unrelated", "changes.txt"), "unrelated\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "move exact transaction boundary");
+    const stale = run(root, grant(), ["ts/test/**", "unrelated/**"]);
+    const staleOutput = (stale.stdout || "") + (stale.stderr || "");
+    assert.notEqual(stale.status, 0, staleOutput);
+    assert.match(staleOutput, /FAIL: size-rule-growth-authorization/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+console.log("#685 check-pr exact growth exception integration matrix passed");
+
 console.log("#644 check-pr requirement transition runtime witnesses passed");
