@@ -489,6 +489,17 @@ console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---")
     assert.match(allowedOutput, /PASS: size:typescript-tests-controlled-growth:max-growth/);
     assert.match(allowedOutput, /PASS: size:typescript-tests-controlled-growth:max/);
 
+
+    for (const [label, injected] of [
+      ["absolute max", "      max: 2000"],
+      ["blocking level", "      level: advisory"],
+    ]) {
+      const malformed = grant().replace("      max_growth: 28", "      max_growth: 28\\n" + injected);
+      const rejected = run(root, malformed, ["ts/test/**"]);
+      const output = (rejected.stdout || "") + (rejected.stderr || "");
+      assert.notEqual(rejected.status, 0, label + " " + output);
+      assert.match(output, /FAIL: governance-grant/);
+    }
     for (const [label, issueBody] of [
       ["wrong BASE", grant(undefined, "c".repeat(40))],
       ["wrong HEAD", grant(undefined, undefined, "d".repeat(40))],
@@ -499,6 +510,15 @@ console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---")
       assert.notEqual(rejected.status, 0, label + " " + output);
       assert.match(output, /FAIL: size-rule-growth-authorization/);
     }
+
+    mkdirSync(join(root, "unrelated"), { recursive: true });
+    writeFileSync(join(root, "unrelated", "changes.txt"), "unrelated\\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "move exact transaction boundary");
+    const stale = run(root, grant(), ["ts/test/**", "unrelated/**"]);
+    const staleOutput = (stale.stdout || "") + (stale.stderr || "");
+    assert.notEqual(stale.status, 0, staleOutput);
+    assert.match(staleOutput, /FAIL: size-rule-growth-authorization/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
