@@ -86,7 +86,7 @@ function selectedSizeRule(rule, changeIntent) {
 function sizeRuleExclusions(policy, rule) {
     return [...new Set([...strings(policy.paths?.operational_paths), ...strings(rule.ignore)])];
 }
-function addSizeRuleRuntime(add, policy, rule, changeIntent) {
+function addSizeRuleRuntime(add, policy, rule, changeIntent, authorizedGrowth) {
     if (!selectedSizeRule(rule, changeIntent))
         return;
     const id = String(rule.id), scope = String(rule.scope ?? ""), metric = String(rule.metric ?? ""), glob = String(rule.glob ?? "**");
@@ -128,7 +128,7 @@ function addSizeRuleRuntime(add, policy, rule, changeIntent) {
             patterns: [glob],
             exclude_paths: excludePaths,
         }),
-    }, { max: rule.max_growth }, "transaction", advisory));
+    }, { max: authorizedGrowth ?? rule.max_growth, ...(authorizedGrowth !== undefined ? { policy_limit: rule.max_growth, effective_limit: authorizedGrowth, trusted_growth_authorization: true } : {}) }, "transaction", advisory));
 }
 export function compileConstraintProgram(policy = {}, changeIntent = null, options = {}) {
     const emitRuntime = options.emitRuntime !== false;
@@ -224,7 +224,7 @@ export function compileConstraintProgram(policy = {}, changeIntent = null, optio
                 message: (a, b) => `size_rules[${rule.id}].max_growth: ${a} -> ${b}`, removeMessage: `size_rules[${rule.id}].max_growth removed (was ${rule.max_growth})`,
             }));
         if (emitRuntime)
-            addSizeRuleRuntime(add, policy, rule, changeIntent);
+            addSizeRuleRuntime(add, policy, rule, changeIntent, options.authorizedGrowth?.[rule.id]);
     }
     const documentRelations = policy.document_relations, documents = documentRelations?.documents || {};
     for (const rule of array(documentRelations?.rules)) {
