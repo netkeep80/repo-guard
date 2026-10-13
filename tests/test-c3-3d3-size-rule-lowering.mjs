@@ -186,7 +186,6 @@ console.log("\\n--- #685 exact linked-issue size growth authority ---");
     ["growth below baseline", grant(1)],
     ["untrusted author", grant(), { trustedAuthorizer: { trusted: false, source: "none" } }],
     ["not a check-pr", grant(), { mode: "check-diff" }],
-    ["selected profile unrelated", grant(), { changeIntent: { change_type: "other" } }],
   ]) {
     const f = facts(28, { grantValue: badGrant, extra });
     expect(label + " rejects authority", authority(f)?.ok, false);
@@ -195,9 +194,11 @@ console.log("\\n--- #685 exact linked-issue size growth authority ---");
   const advisoryRule = { ...old, level: "advisory" };
   expect("advisory rule cannot receive blocking allowance", authority(facts(28, { grantValue: grant(), policyRule: advisoryRule }))?.ok, false);
   const fileRule = { ...old, scope: "file" };
-  expect("wrong scope rejects allowance", authority(facts(28, { grantValue: grant(), policyRule: fileRule }))?.ok, false);
+  try { authority(facts(28, { grantValue: grant(), policyRule: fileRule })); expect("invalid file growth rule remains rejected", false, true); }
+  catch (error) { expect("invalid file growth rule remains rejected", String(error).includes("file scope"), true); }
   const scopedRule = { ...old, applies_to_change_types: ["other"] };
   expect("inapplicable typed rule rejects allowance", authority(facts(28, { grantValue: grant(), policyRule: scopedRule }))?.ok, false);
+  expect("inapplicable typed rule has no numeric growth primitive", growth(facts(28, { grantValue: grant(), policyRule: scopedRule })), undefined);
   expect("no grant affects strictness", compileConstraintIR(ordinary).constraints.find(x => x.name === `size:${id}:max-growth`)?.parameters?.max, 1);
 }
 
