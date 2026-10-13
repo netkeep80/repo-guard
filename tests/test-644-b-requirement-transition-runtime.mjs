@@ -494,7 +494,7 @@ console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---")
       ["absolute max", "      max: 2000"],
       ["blocking level", "      level: advisory"],
     ]) {
-      const malformed = grant().replace("      max_growth: 28", "      max_growth: 28\\n" + injected);
+      const malformed = grant().replace("      max_growth: 28", "      max_growth: 28\n" + injected);
       const rejected = run(root, malformed, ["ts/test/**"]);
       const output = (rejected.stdout || "") + (rejected.stderr || "");
       assert.notEqual(rejected.status, 0, label + " " + output);
@@ -512,7 +512,7 @@ console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---")
     }
 
     mkdirSync(join(root, "unrelated"), { recursive: true });
-    writeFileSync(join(root, "unrelated", "changes.txt"), "unrelated\\n");
+    writeFileSync(join(root, "unrelated", "changes.txt"), "unrelated\n");
     git(root, "add", "-A");
     git(root, "commit", "-m", "move exact transaction boundary");
     const stale = run(root, grant(), ["ts/test/**", "unrelated/**"]);
