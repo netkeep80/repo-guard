@@ -32,6 +32,11 @@ interface ConstraintFacts extends RelationEvaluationFacts {
   readFile?: (filePath: string) => unknown;
   documents?: DocumentReader;
   policy: ConstraintPolicyProjection;
+  mode?: string;
+  baseRef?: string | null;
+  headRef?: string | null;
+  governanceGrant?: unknown;
+  trustedAuthorizer?: { trusted?: boolean; source?: string } | null;
   changeIntent?: { change_type?: string; [key: string]: unknown } | null;
   diff: { files: { checked: ParsedDiffFile[] } };
   derived?: unknown;
@@ -45,6 +50,43 @@ interface ConstraintIR { constraints: RuntimeConstraint[]; }
 interface RuleResult { name: string; check: unknown; }
 
 const BUDGET_EVIDENCE_FIELDS = ["policy_limit", "intent_limit", "effective_limit"] as const;
+
+interface GrowthRule { id?: string; scope?: string; metric?: string; max?: number; max_growth?: number; count?: string; level?: string; applies_to_change_types?: string[]; }
+function sizeGrowthAuthorization(facts: ConstraintFacts): { present: boolean; ok: boolean; limits: Record<string, number>; reasons: string[] } {
+  const grantContainer = facts.governanceGrant;
+  const grant = grantContainer && typeof grantContainer === "object" && !Array.isArray(grantContainer)
+    ? (grantContainer as { size_rule_growth?: unknown }).size_rule_growth : null;
+  if (grant === null || grant === undefined) return { present: false, ok: true, limits: {}, reasons: [] };
+  const reasons: string[] = [], limits: Record<string, number> = {};
+  const value = grant && typeof grant === "object" && !Array.isArray(grant) ? grant as Record<string, unknown> : {};
+  const trusted = facts.trustedAuthorizer;
+  if (facts.mode !== "check-pr" || !trusted || trusted.trusted !== true || trusted.source !== "repository_permission") reasons.push("growth_authorizer_untrusted");
+  const sha = (v: unknown): boolean => typeof v === "string" && /^[0-9a-f]{40}$/i.test(v);
+  if (!sha(value.base_sha) || !sha(value.head_sha) || value.base_sha !== facts.baseRef || value.head_sha !== facts.headRef) reasons.push("growth_snapshot_mismatch");
+  const entries = value.limits, seen = new Set<string>();
+  const rules: GrowthRule[] = Array.isArray(facts.policy.size_rules) ? facts.policy.size_rules as GrowthRule[] : [];
+  if (!Array.isArray(entries) || !entries.length) reasons.push("growth_limits_missing");
+  else for (const entry of entries) {
+    const item = entry && typeof entry === "object" && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+    const id = item.rule_id;
+    if (typeof id !== "string" || !id || seen.has(id)) { reasons.push("growth_rule_duplicate_or_invalid"); continue; }
+    seen.add(id);
+    const matches = rules.filter((rule) => rule.id === id);
+    if (matches.length !== 1) { reasons.push(`growth_rule_unknown_or_ambiguous:${id}`); continue; }
+    const rule = matches[0]!;
+    if (rule.scope !== "directory" || !["lines", "files"].includes(String(rule.metric)) || (rule.count && rule.count !== "all_tracked") || rule.level === "advisory" || !Number.isInteger(rule.max_growth) || !Number.isInteger(rule.max)) {
+      reasons.push(`growth_rule_ineligible:${id}`); continue;
+    }
+    if (Array.isArray(rule.applies_to_change_types) && !rule.applies_to_change_types.includes(facts.changeIntent?.change_type ?? "")) {
+      reasons.push(`growth_rule_not_applicable:${id}`); continue;
+    }
+    if (!Number.isInteger(item.max_growth) || (item.max_growth as number) <= rule.max_growth! || (item.max_growth as number) > rule.max!) {
+      reasons.push(`growth_limit_invalid:${id}`); continue;
+    }
+    limits[id] = item.max_growth as number;
+  }
+  return { present: true, ok: reasons.length === 0, limits: reasons.length ? {} : limits, reasons };
+}
 
 function requestedExecutionPhase(context: ConstraintContext): ExecutionPhase {
   const phase = context.executionPhase ?? "both";
@@ -65,7 +107,7 @@ function constraintAppliesToPhase(constraint: RuntimeConstraint, requested: Exec
 }
 
 export function compileConstraintIR(facts: ConstraintFacts): ConstraintIR {
-  return { constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never)) as RuntimeConstraint[] };
+  return { constraints: runtimeConstraints(compileConstraintProgram(facts.policy, facts.changeIntent as never, { authorizedGrowth: sizeGrowthAuthorization(facts).limits })) as RuntimeConstraint[] };
 }
 
 function primitiveRelation(constraint: RuntimeConstraint): PrimitiveRelation {
@@ -99,7 +141,9 @@ export function evaluateConstraintIR(facts: ConstraintFacts, context: Constraint
   const executionPhase = requestedExecutionPhase(context);
   const replacedStateConstraints = new Set(context.replacedStateConstraintKeys || []);
   const satisfiedTransactionConstraints = new Set(context.satisfiedTransactionConstraintKeys || []);
+  const authorization = sizeGrowthAuthorization(facts);
   const { constraints } = compileConstraintIR(facts), results: RuleResult[] = [];
+  if (authorization.present) results.push({ name: "size-rule-growth-authorization", check: { ok: authorization.ok, message: authorization.ok ? "exact trusted growth exception authorized" : "size rule growth exception rejected", details: authorization.reasons, data: { base_sha: facts.baseRef, head_sha: facts.headRef, effective_limits: authorization.limits } } });
   for (const constraint of constraints) {
     if (!constraintAppliesToPhase(constraint, executionPhase)) continue;
     if (replacedStateConstraints.has(constraint.key) && constraintPhase(constraint) === "state") continue;
