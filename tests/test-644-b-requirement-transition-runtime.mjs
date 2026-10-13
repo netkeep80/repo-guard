@@ -447,7 +447,7 @@ console.log("\n--- #681 MNC-style routine governed YAML trace additions without 
 console.log("#681 routine requirement trace transition integration matrix passed");
 
 
-console.log("\\n--- #685 check-pr end-to-end trusted named growth exception ---");
+console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---");
 {
   const rawPolicy = policy();
   delete rawPolicy.packs;
@@ -457,11 +457,11 @@ console.log("\\n--- #685 check-pr end-to-end trusted named growth exception ---"
     scope: "directory", metric: "files", glob: "ts/test/**",
     count: "all_tracked", level: "blocking", max: 1000, max_growth: 1,
   }];
-  const root = initRepo(rawPolicy, {}, { "ts/test/existing.test.ts": "export const existing = true;\\n" });
+  const root = initRepo(rawPolicy, {}, { "ts/test/existing.test.ts": "export const existing = true;\n" });
   try {
     for (let i = 0; i < 28; i++) {
       const file = `ts/test/new-${i}.test.ts`;
-      writeFileSync(resolve(root, file), `export const n${i} = ${i};\\n`);
+      writeFileSync(resolve(root, file), `export const n${i} = ${i};\n`);
     }
     git(root, "add", "-A");
     git(root, "commit", "-m", "add 28 scientific test witnesses");
@@ -476,7 +476,7 @@ console.log("\\n--- #685 check-pr end-to-end trusted named growth exception ---"
       `    - rule_id: ${id}`,
       "      max_growth: 28",
       "```",
-    ].join("\\n");
+    ].join("\n");
     const ordinary = run(root, "", ["ts/test/**"]);
     const ordinaryOutput = (ordinary.stdout || "") + (ordinary.stderr || "");
     assert.notEqual(ordinary.status, 0, ordinaryOutput);
