@@ -34,7 +34,7 @@ function sizeGrowthAuthorization(facts) {
                 continue;
             }
             const rule = matches[0];
-            if (rule.scope !== "directory" || !["lines", "files"].includes(String(rule.metric)) || (rule.count && rule.count !== "all_tracked") || rule.level === "advisory" || !Number.isInteger(rule.max_growth) || !Number.isInteger(rule.max)) {
+            if (rule.scope !== "directory" || !["lines", "files"].includes(String(rule.metric)) || (rule.count && rule.count !== "all_tracked") || rule.level === "advisory" || typeof rule.max_growth !== "number" || !Number.isInteger(rule.max_growth) || typeof rule.max !== "number" || !Number.isInteger(rule.max)) {
                 reasons.push(`growth_rule_ineligible:${id}`);
                 continue;
             }
@@ -42,7 +42,7 @@ function sizeGrowthAuthorization(facts) {
                 reasons.push(`growth_rule_not_applicable:${id}`);
                 continue;
             }
-            if (!Number.isInteger(item.max_growth) || item.max_growth <= rule.max_growth || item.max_growth > rule.max) {
+            if (typeof item.max_growth !== "number" || !Number.isInteger(item.max_growth) || item.max_growth <= rule.max_growth || item.max_growth > rule.max) {
                 reasons.push(`growth_limit_invalid:${id}`);
                 continue;
             }
