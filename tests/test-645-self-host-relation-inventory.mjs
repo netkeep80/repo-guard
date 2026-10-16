@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextJustificationClosure, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextJustificationClosure, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "../dist/requirement-relations.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedIds = [
@@ -500,3 +500,30 @@ console.log("\n--- #693 vNext H0: supersession does not retire obligations ---")
   }), /must not supersede itself/);
 }
 console.log("#693 vNext H0 supersession/retention boundary passed");
+
+console.log("\n--- #695 vNext transition RED: existential overlap is insufficient ---");
+{
+  const headGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-B", path: "src/b.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const projection = projectRequirementTransactionEvidence({
+    base: headGraph,
+    head: headGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "src/b.mts", status: "modified", addedLines: ["b"], deletedLines: ["b0"] },
+      { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.deepEqual(projection.implementation_requirements, ["R-A", "R-B"]);
+  assert.deepEqual(projection.verification_requirements, ["R-A"]);
+  assert.deepEqual(projection.overlap_requirements, ["R-A"]);
+
+  const existentialOverlapPasses = projection.implementation_requirements.length === 0
+    || projection.overlap_requirements.length > 0;
+  assert.equal(existentialOverlapPasses, false,
+    "#695 RED: one related verifier must not cover a second changed implementation requirement");
+}
+
