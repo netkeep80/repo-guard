@@ -200,6 +200,41 @@ export function evaluateVNextJustificationClosure(input) {
         requirementDependents,
     };
 }
+export function evaluateVNextExactAcceptance(input) {
+    const subjectValue = object(input?.subject, "VNextAcceptance.subject");
+    exactFields(subjectValue, ["id", "semantic_sha256"], "VNextAcceptance.subject");
+    const subjectId = nonEmptyString(subjectValue.id, "VNextAcceptance.subject.id");
+    const subjectDigest = sha256Value(subjectValue.semantic_sha256, "VNextAcceptance.subject.semantic_sha256");
+    if (!Array.isArray(input?.trustedDecisions))
+        fail("VNextAcceptance.trustedDecisions", "must be an array");
+    const seenDecisionIds = new Set();
+    const matching = [];
+    const stale = [];
+    for (const [index, raw] of input.trustedDecisions.entries()) {
+        const label = `VNextAcceptance.trustedDecisions[${index}]`;
+        const decision = object(raw, label);
+        exactFields(decision, ["decision_id", "accepts_subject", "accepts_semantic_sha256"], label);
+        const decisionId = nonEmptyString(decision.decision_id, `${label}.decision_id`);
+        if (seenDecisionIds.has(decisionId))
+            fail(`${label}.decision_id`, `duplicate decision id "${decisionId}"`);
+        seenDecisionIds.add(decisionId);
+        const acceptedSubject = nonEmptyString(decision.accepts_subject, `${label}.accepts_subject`);
+        const acceptedDigest = sha256Value(decision.accepts_semantic_sha256, `${label}.accepts_semantic_sha256`);
+        if (acceptedSubject !== subjectId)
+            continue;
+        if (acceptedDigest === subjectDigest)
+            matching.push(decisionId);
+        else
+            stale.push(decisionId);
+    }
+    matching.sort();
+    stale.sort();
+    return {
+        accepted: matching.length > 0,
+        matching_decisions: matching,
+        stale_decisions: stale,
+    };
+}
 function relationIdentity(value) {
     return { subject: value.subject, relation: value.relation, object: value.object };
 }

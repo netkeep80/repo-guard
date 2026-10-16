@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { checkRequirementTransition, evaluateVNextJustificationClosure, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextJustificationClosure, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedIds = [
@@ -385,3 +385,51 @@ console.log("\n--- #693 vNext J1: valid closure does not self-authorize authorit
   assert.ok(unauthorized.reasons.includes("requirement_transition_authorizer_untrusted"));
 }
 console.log("#693 vNext J1 anti-self-authorization composition passed");
+
+console.log("\n--- #693 vNext L0: exact acceptance is independent of merge/CI ---");
+{
+  const acceptedDigest = "1".repeat(64);
+  const mutatedDigest = "2".repeat(64);
+  const observedResearch = { merged: true, technically_green: true };
+
+  const mergedOnly = evaluateVNextExactAcceptance({
+    subject: { id: "MTS-v0.16-T09", semantic_sha256: acceptedDigest },
+    trustedDecisions: [],
+  });
+  assert.equal(observedResearch.merged, true);
+  assert.equal(observedResearch.technically_green, true);
+  assert.equal(mergedOnly.accepted, false,
+    "repository integration and technical GREEN must not imply external acceptance");
+
+  const exact = evaluateVNextExactAcceptance({
+    subject: { id: "MTS-v0.16-T09", semantic_sha256: acceptedDigest },
+    trustedDecisions: [
+      { decision_id: "D-EXACT-1", accepts_subject: "MTS-v0.16-T09", accepts_semantic_sha256: acceptedDigest },
+      { decision_id: "D-OTHER", accepts_subject: "OTHER", accepts_semantic_sha256: acceptedDigest },
+      { decision_id: "D-EXACT-2", accepts_subject: "MTS-v0.16-T09", accepts_semantic_sha256: acceptedDigest },
+    ],
+  });
+  assert.equal(exact.accepted, true);
+  assert.deepEqual(exact.matching_decisions, ["D-EXACT-1", "D-EXACT-2"]);
+  assert.deepEqual(exact.stale_decisions, []);
+
+  const stale = evaluateVNextExactAcceptance({
+    subject: { id: "MTS-v0.16-T09", semantic_sha256: mutatedDigest },
+    trustedDecisions: [
+      { decision_id: "D-OLD", accepts_subject: "MTS-v0.16-T09", accepts_semantic_sha256: acceptedDigest },
+    ],
+  });
+  assert.equal(stale.accepted, false,
+    "material subject mutation must invalidate an exact acceptance decision");
+  assert.deepEqual(stale.matching_decisions, []);
+  assert.deepEqual(stale.stale_decisions, ["D-OLD"]);
+
+  assert.throws(() => evaluateVNextExactAcceptance({
+    subject: { id: "X", semantic_sha256: acceptedDigest },
+    trustedDecisions: [
+      { decision_id: "D", accepts_subject: "X", accepts_semantic_sha256: acceptedDigest },
+      { decision_id: "D", accepts_subject: "X", accepts_semantic_sha256: acceptedDigest },
+    ],
+  }), /duplicate decision id/);
+}
+console.log("#693 vNext L0 exact acceptance boundary passed");

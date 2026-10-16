@@ -141,6 +141,23 @@ export interface VNextJustificationClosureVerdict {
   requirementDependents: Record<string, string[]>;
 }
 
+export interface VNextSubjectIdentity {
+  id: string;
+  semantic_sha256: string;
+}
+
+export interface VNextTrustedAcceptanceDecision {
+  decision_id: string;
+  accepts_subject: string;
+  accepts_semantic_sha256: string;
+}
+
+export interface VNextExactAcceptanceVerdict {
+  accepted: boolean;
+  matching_decisions: string[];
+  stale_decisions: string[];
+}
+
 type JsonObject = Record<string, unknown>;
 const RELATION_KINDS = new Set<string>(REQUIREMENT_RELATION_KINDS);
 const EXACT_COMMIT_SHA = /^[0-9a-f]{40}$/i;
@@ -336,6 +353,41 @@ export function evaluateVNextJustificationClosure(input: VNextJustificationClosu
     requirementExplanations,
     artifactExplanations: artifactExplanationObject,
     requirementDependents,
+  };
+}
+
+export function evaluateVNextExactAcceptance(input: {
+  subject: VNextSubjectIdentity;
+  trustedDecisions: readonly VNextTrustedAcceptanceDecision[];
+}): VNextExactAcceptanceVerdict {
+  const subjectValue = object(input?.subject, "VNextAcceptance.subject");
+  exactFields(subjectValue, ["id", "semantic_sha256"], "VNextAcceptance.subject");
+  const subjectId = nonEmptyString(subjectValue.id, "VNextAcceptance.subject.id");
+  const subjectDigest = sha256Value(subjectValue.semantic_sha256, "VNextAcceptance.subject.semantic_sha256");
+  if (!Array.isArray(input?.trustedDecisions)) fail("VNextAcceptance.trustedDecisions", "must be an array");
+
+  const seenDecisionIds = new Set<string>();
+  const matching: string[] = [];
+  const stale: string[] = [];
+  for (const [index, raw] of input.trustedDecisions.entries()) {
+    const label = `VNextAcceptance.trustedDecisions[${index}]`;
+    const decision = object(raw, label);
+    exactFields(decision, ["decision_id", "accepts_subject", "accepts_semantic_sha256"], label);
+    const decisionId = nonEmptyString(decision.decision_id, `${label}.decision_id`);
+    if (seenDecisionIds.has(decisionId)) fail(`${label}.decision_id`, `duplicate decision id "${decisionId}"`);
+    seenDecisionIds.add(decisionId);
+    const acceptedSubject = nonEmptyString(decision.accepts_subject, `${label}.accepts_subject`);
+    const acceptedDigest = sha256Value(decision.accepts_semantic_sha256, `${label}.accepts_semantic_sha256`);
+    if (acceptedSubject !== subjectId) continue;
+    if (acceptedDigest === subjectDigest) matching.push(decisionId);
+    else stale.push(decisionId);
+  }
+  matching.sort();
+  stale.sort();
+  return {
+    accepted: matching.length > 0,
+    matching_decisions: matching,
+    stale_decisions: stale,
   };
 }
 
