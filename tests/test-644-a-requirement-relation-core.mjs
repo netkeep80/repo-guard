@@ -382,7 +382,7 @@ console.log("\n--- #681 protected role normalization boundary ---");
   assert.equal(canonicalRole.ok, false);
   assert.ok(canonicalRole.reasons.includes("routine_new_protected_artifact_role:src/a.mts"));
 
-  const paddedRole = evaluateRole(" authority ");
+  const paddedRole = evaluateRole(" AuThOrItY ");
   assert.equal(paddedRole.ok, false,
     "protected artifact roles must not bypass the routine gate through surrounding whitespace");
   assert.ok(paddedRole.reasons.includes("routine_new_protected_artifact_role:src/a.mts"));
