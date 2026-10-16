@@ -280,6 +280,29 @@ console.log("\n--- transition identity boundaries ---");
   assert.notEqual(listBase.authority_semantic_sha256, listHead.authority_semantic_sha256,
     "unrecognized arrays are ordered normative data");
   assert.equal(checkRequirementTransition({ base: listBase, head: listHead }).ok, false);
+
+  assert.throws(
+    () => source("head", '{"id":"R1","title":"first","title":"second","artifacts":[]}', "json"),
+    /invalid YAML|unique|duplicate/i,
+    "duplicate JSON keys must fail closed instead of inheriting JSON.parse last-wins semantics",
+  );
+  for (const scalar of [".nan", ".inf", "-.inf"]) {
+    assert.throws(
+      () => source("head", `id: R1\nscore: ${scalar}\nartifacts: []\n`),
+      /non-finite numbers are not allowed/,
+      `YAML ${scalar} must not collide with null through JSON.stringify`,
+    );
+  }
+  assert.throws(
+    () => source("head", "id: R1\nscore: 9007199254740993\nartifacts: []\n"),
+    /unsafe integers are not allowed/,
+    "unsafe YAML integers must not be rounded before semantic hashing",
+  );
+  assert.throws(
+    () => source("head", '{"id":"R1","score":9007199254740993,"artifacts":[]}', "json"),
+    /unsafe integers are not allowed/,
+    "unsafe JSON integers must not be rounded before semantic hashing",
+  );
 }
 
 console.log("\n--- #670 requirement transaction evidence projection ---");

@@ -92,24 +92,36 @@ function normalizeAuthorityScope(values) {
     return [...byGlob.entries()].map(([glob, format]) => ({ glob, format })).sort((left, right) => left.glob.localeCompare(right.glob) || left.format.localeCompare(right.format));
 }
 function parseSource(source) {
-    if (source.format === "json")
-        return parseJson(source.content);
+    if (source.format === "json") {
+        const parsed = parseJson(source.content);
+        // JSON is a YAML 1.2 subset; reuse the existing strict structural parser to reject
+        // duplicate mapping keys instead of adding a second JSON authority parser.
+        parseYaml(source.content);
+        return parsed;
+    }
     if (source.format === "yaml")
         return parseYaml(source.content);
     const exhaustive = source.format;
     return fail(source.path, `unsupported format "${String(exhaustive)}"`);
 }
 // Canonicalize parsed data, not source formatting; exact source bytes remain separately hashed.
-function canonicalParsedAuthority(value) {
+function canonicalParsedAuthority(value, label) {
+    if (typeof value === "number") {
+        if (!Number.isFinite(value))
+            fail(label, "non-finite numbers are not allowed in requirement authority");
+        if (Number.isInteger(value) && !Number.isSafeInteger(value))
+            fail(label, "unsafe integers are not allowed in requirement authority");
+        return value;
+    }
     if (Array.isArray(value))
-        return value.map(canonicalParsedAuthority);
+        return value.map((item, index) => canonicalParsedAuthority(item, `${label}/${index}`));
     if (!value || typeof value !== "object")
         return value;
     const record = value;
-    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalParsedAuthority(record[key])]));
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalParsedAuthority(record[key], `${label}/${key}`)]));
 }
 // Only the declared artifact/relation sets are order-insensitive. Other arrays remain ordered.
-function canonicalRequirementData(root) {
+function canonicalRequirementData(root, sourcePath) {
     const data = { ...root };
     if (Array.isArray(root.artifacts)) {
         data.artifacts = root.artifacts.map((raw) => {
@@ -119,7 +131,7 @@ function canonicalRequirementData(root) {
             return artifact;
         }).sort((a, b) => String(a.path).localeCompare(String(b.path)));
     }
-    return canonicalParsedAuthority(data);
+    return canonicalParsedAuthority(data, `${sourcePath}#`);
 }
 function normalizeSourceRelations(source, snapshot, revision) {
     const root = object(parseSource(source), source.path);
@@ -216,7 +228,7 @@ export function normalizeRequirementAuthority(input) {
         seenSubjects.set(normalized.subject, source.path);
         relations.push(...normalized.relations);
         manifest.push({ path: source.path, format: source.format, sha256: sha256(source.content) });
-        semanticSources.push({ path: source.path, format: source.format, parsed: canonicalRequirementData(normalized.parsed) });
+        semanticSources.push({ path: source.path, format: source.format, parsed: canonicalRequirementData(normalized.parsed, source.path) });
     }
     relations.sort((left, right) => compareIdentities(relationIdentity(left), relationIdentity(right)));
     const identities = relations.map(relationIdentity);
