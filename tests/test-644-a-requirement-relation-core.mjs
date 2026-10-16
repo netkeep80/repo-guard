@@ -303,6 +303,13 @@ console.log("\n--- transition identity boundaries ---");
     /unsafe integers are not allowed/,
     "unsafe JSON integers must not be rounded before semantic hashing",
   );
+
+  const canonicalPathBase = source("base", "id: R1\nartifacts:\n  - path: ./src/a.mts\n    relations: [requires, implements]\n");
+  const canonicalPathHead = source("head", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\n");
+  assert.deepEqual(compareRequirementRelationGraphs(canonicalPathBase, canonicalPathHead), { add: [], remove: [] },
+    "repository-path spelling aliases normalize to the same relation graph");
+  assert.equal(canonicalPathBase.authority_semantic_sha256, canonicalPathHead.authority_semantic_sha256,
+    "semantic authority identity must use the same canonical repository-path spelling as the relation graph");
 }
 
 console.log("\n--- #670 requirement transaction evidence projection ---");
