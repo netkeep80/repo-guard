@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildRequirementAuthorityFromSnapshot,
   checkRequirementTransition,
+  checkRoutineRequirementTransition,
   compareRequirementRelationGraphs,
   normalizeRequirementAuthority,
   projectRequirementTransactionEvidence,
@@ -325,6 +326,66 @@ console.log("\n--- #670 requirement transaction evidence projection ---");
   });
   assert.deepEqual(distOnly.implementation_requirements, []);
   assert.equal(kernel(distOnly).ok, true);
+}
+
+
+console.log("\n--- #681 protected role normalization boundary ---");
+{
+  const requirementPath = "requirements/r1.yaml";
+  const baseSource = [
+    "id: RG-R1",
+    "artifacts:",
+    "  - path: requirements/r1.yaml",
+    "    relations: [requires]",
+    "",
+  ].join("\n");
+
+  const evaluateRole = (role) => {
+    const headSource = [
+      "id: RG-R1",
+      "artifacts:",
+      "  - path: requirements/r1.yaml",
+      "    relations: [requires]",
+      "  - path: src/a.mts",
+      `    role: "${role}"`,
+      "    relations: [requires, implements]",
+      "",
+    ].join("\n");
+    const base = normalizeRequirementAuthority({
+      snapshot: "base",
+      revision: BASE,
+      sources: [{ path: requirementPath, format: "yaml", content: baseSource }],
+    });
+    const head = normalizeRequirementAuthority({
+      snapshot: "head",
+      revision: HEAD,
+      sources: [{ path: requirementPath, format: "yaml", content: headSource }],
+    });
+    return checkRoutineRequirementTransition({
+      base,
+      head,
+      changedFiles: [
+        { path: requirementPath, status: "modified", addedLines: [], deletedLines: [] },
+        { path: "src/a.mts", status: "added", addedLines: ["export const a = 1;"], deletedLines: [] },
+      ],
+      headTrackedFiles: [requirementPath, "src/a.mts"],
+      readFileAtRef: (revision, path) => path === requirementPath
+        ? (revision === BASE ? baseSource : revision === HEAD ? headSource : null)
+        : null,
+      governancePaths: ["requirements/**"],
+      forbiddenPaths: [],
+      closedRepository: false,
+    });
+  };
+
+  const canonicalRole = evaluateRole("authority");
+  assert.equal(canonicalRole.ok, false);
+  assert.ok(canonicalRole.reasons.includes("routine_new_protected_artifact_role:src/a.mts"));
+
+  const paddedRole = evaluateRole(" authority ");
+  assert.equal(paddedRole.ok, false,
+    "protected artifact roles must not bypass the routine gate through surrounding whitespace");
+  assert.ok(paddedRole.reasons.includes("routine_new_protected_artifact_role:src/a.mts"));
 }
 
 console.log("requirement relation normalization + #644 transition matrix passed");
