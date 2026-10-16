@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextJustificationClosure, evaluateVNextRequirementVerificationCoverage, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextGenerationFreshness, evaluateVNextJustificationClosure, evaluateVNextRequirementVerificationCoverage, lowerVNextGenerationRelation, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { projectionModelIdentity } from "../dist/projection-model.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedIds = [
@@ -600,28 +602,150 @@ console.log("\n--- #695 vNext transition: every changed implementation requireme
 }
 console.log("#695 vNext full verification-coverage boundary passed");
 
-console.log("\n--- #696 vNext projection RED: requires alone cannot prove generation provenance/freshness ---");
+console.log("\n--- #696 vNext projection: generation relation justifies target and reuses freshness lowering ---");
 {
-  const existenceOnly = evaluateVNextJustificationClosure({
+  const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+  const sourceV1 = "claim: alpha\n";
+  const sourceV2 = "claim: beta\n";
+  const targetV1 = "# Generated\nalpha\n";
+
+  const noProjection = evaluateVNextJustificationClosure({
     trustedRootIds: ["ROOT"],
     requirements: [
       { id: "ROOT", artifacts: [] },
       {
         id: "GEN",
         derives_from: ["ROOT"],
-        artifacts: [
-          { path: "model/source.txt", relations: ["requires"] },
-          { path: "derived/output.md", relations: ["requires", "documents"] },
-        ],
+        artifacts: [{ path: "model/source.txt", relations: ["requires"] }],
       },
     ],
     trackedFiles: ["derived/output.md", "model/source.txt"],
   });
-  assert.equal(existenceOnly.ok, true,
-    "control: J1/J2 closure should only prove that both files have a reason to exist");
+  assert.equal(noProjection.ok, false);
+  assert.deepEqual(noProjection.orphanTrackedArtifacts, ["derived/output.md"],
+    "generated target without a generation relation must remain an orphan tracked artifact");
 
-  const hasGenerationProvenance = false;
-  assert.equal(existenceOnly.ok && hasGenerationProvenance, true,
-    "#696 RED: a generated target must not be valid solely because requires-closure is complete");
+  const relation = {
+    relation: "generates",
+    owner_requirement: "GEN",
+    projection_id: "projection.demo",
+    sources: [{ id: "source", path: "model/source.txt" }],
+    target: "derived/output.md",
+    generator_contract: "demo-generator/v1",
+    required_evidence: ["generator-ci"],
+  };
+
+  const closure = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "GEN",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "model/source.txt", relations: ["requires"] }],
+      },
+    ],
+    generationRelations: [relation],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(closure.ok, true);
+  assert.deepEqual(closure.generatedArtifacts, ["derived/output.md"]);
+  assert.deepEqual(
+    closure.artifactExplanations["derived/output.md"],
+    [["ROOT", "GEN", "generates:projection.demo:derived/output.md"]],
+  );
+
+  const model = lowerVNextGenerationRelation(relation);
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: "projection.demo",
+    model_identity: projectionModelIdentity(model),
+    source_identities: [
+      { source_id: "source", algorithm: "sha256", digest: sha256(sourceV1) },
+    ],
+    generator: {
+      contract_id: "demo-generator/v1",
+      tool_identity: "demo-generator@0123456789abcdef",
+    },
+    configuration_digest: sha256("profile:v1\n"),
+    output_identity: { algorithm: "sha256", digest: sha256(targetV1) },
+    evidence: [{ class: "generator-ci", ref: "ci:generator:123" }],
+  };
+  const files = new Map([
+    ["model/source.txt", sourceV1],
+    ["derived/output.md", targetV1],
+    ["notes/unrelated.txt", "unchanged\n"],
+  ]);
+  const facts = {
+    readFile: (path) => {
+      if (!files.has(path)) throw new Error(`missing fixture file: ${path}`);
+      return files.get(path);
+    },
+  };
+
+  const currentProjection = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts,
+  });
+  assert.equal(currentProjection.ok, true);
+  assert.equal(currentProjection.relation_results.length, 2,
+    "one source + one generated target lower to two existing finite identity relations");
+
+  const staleSource = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts: {
+      readFile: (path) => path === "model/source.txt" ? sourceV2 : facts.readFile(path),
+    },
+  });
+  assert.equal(staleSource.ok, false);
+  assert.ok(staleSource.reasons.some((reason) => /source:source/.test(reason)));
+
+  const changedTarget = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts: {
+      readFile: (path) => path === "derived/output.md" ? "# manual edit\n" : facts.readFile(path),
+    },
+  });
+  assert.equal(changedTarget.ok, false);
+  assert.ok(changedTarget.reasons.some((reason) => /target/.test(reason)));
+
+  const unrelated = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts: {
+      readFile: (path) => path === "notes/unrelated.txt" ? "changed unrelated\n" : facts.readFile(path),
+    },
+  });
+  assert.equal(unrelated.ok, true);
+
+  const unjustifiedSource = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      { id: "GEN", derives_from: ["ROOT"], artifacts: [] },
+    ],
+    generationRelations: [relation],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(unjustifiedSource.ok, false);
+  assert.ok(unjustifiedSource.reasons.includes(
+    "projection_source_not_justified:projection.demo:model/source.txt",
+  ));
+
+  const unreachableOwner = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [{ path: "model/source.txt", relations: ["requires"] }] },
+      { id: "GEN", artifacts: [] },
+    ],
+    generationRelations: [relation],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(unreachableOwner.ok, false);
+  assert.ok(unreachableOwner.reasons.includes("orphan_requirement:GEN"));
+  assert.ok(unreachableOwner.reasons.includes("unreachable_generation_owner:projection.demo:GEN"));
 }
-
+console.log("#696 vNext generation/freshness boundary passed");

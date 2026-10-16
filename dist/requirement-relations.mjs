@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
-import { compareSets } from "./checks/relation-kernel.mjs";
+import { compareSets, evaluatePrimitiveRelation } from "./checks/relation-kernel.mjs";
+import { normalizeProjectionModel } from "./projection-model.mjs";
+import { lowerProjectionVerification } from "./projection-lowering.mjs";
 import { matchesAny } from "./utils/path-patterns.mjs";
 export const REQUIREMENT_RELATION_KINDS = [
     "requires",
@@ -73,10 +75,97 @@ function uniqueStrings(value, label) {
         fail(label, "must not contain duplicates");
     return [...unique].sort();
 }
+function normalizeVNextGenerationRelation(raw, label = "VNextGenerationRelation") {
+    const value = object(raw, label);
+    exactFields(value, [
+        "relation",
+        "owner_requirement",
+        "projection_id",
+        "sources",
+        "target",
+        "generator_contract",
+        "required_evidence",
+    ], label);
+    if (value.relation !== "generates")
+        fail(`${label}.relation`, 'must be "generates"');
+    const owner = nonEmptyString(value.owner_requirement, `${label}.owner_requirement`);
+    const projectionId = nonEmptyString(value.projection_id, `${label}.projection_id`);
+    const sources = array(value.sources, `${label}.sources`).map((rawSource, index) => {
+        const sourceLabel = `${label}.sources[${index}]`;
+        const source = object(rawSource, sourceLabel);
+        exactFields(source, ["id", "path"], sourceLabel);
+        return {
+            id: nonEmptyString(source.id, `${sourceLabel}.id`),
+            path: repositoryPath(source.path, `${sourceLabel}.path`),
+        };
+    }).sort((a, b) => a.id.localeCompare(b.id));
+    if (!sources.length)
+        fail(`${label}.sources`, "must contain at least one source");
+    if (new Set(sources.map((item) => item.id)).size !== sources.length)
+        fail(`${label}.sources`, "duplicate source id");
+    if (new Set(sources.map((item) => item.path)).size !== sources.length)
+        fail(`${label}.sources`, "duplicate source path");
+    const requiredEvidence = value.required_evidence === undefined
+        ? []
+        : uniqueStrings(value.required_evidence, `${label}.required_evidence`);
+    return {
+        relation: "generates",
+        owner_requirement: owner,
+        projection_id: projectionId,
+        sources,
+        target: repositoryPath(value.target, `${label}.target`),
+        generator_contract: nonEmptyString(value.generator_contract, `${label}.generator_contract`),
+        required_evidence: requiredEvidence,
+    };
+}
+export function lowerVNextGenerationRelation(raw) {
+    const relation = normalizeVNextGenerationRelation(raw);
+    return normalizeProjectionModel({
+        schema: "repo-guard/projection-model/v0",
+        id: relation.projection_id,
+        sources: relation.sources.map((source) => ({
+            id: source.id,
+            kind: "repository_content",
+            path: source.path,
+            algorithm: "sha256",
+        })),
+        target: {
+            path: relation.target,
+            ownership: "generated",
+        },
+        generator: {
+            contract_id: relation.generator_contract,
+        },
+        required_evidence: relation.required_evidence || [],
+    });
+}
+export function evaluateVNextGenerationFreshness(input) {
+    const relation = normalizeVNextGenerationRelation(input?.relation);
+    const model = lowerVNextGenerationRelation(relation);
+    const lowered = lowerProjectionVerification(model, input?.buildRecord);
+    const relationResults = lowered.map((primitive) => {
+        const result = evaluatePrimitiveRelation(input.facts, primitive);
+        return { relation_id: primitive.relation_id, ok: Boolean(result.ok) };
+    });
+    const reasons = relationResults.filter((result) => !result.ok)
+        .map((result) => `projection_identity_mismatch:${result.relation_id}`)
+        .sort();
+    return {
+        ok: reasons.length === 0,
+        reasons,
+        projection_id: relation.projection_id,
+        relation_results: relationResults,
+    };
+}
 export function evaluateVNextJustificationClosure(input) {
     const trustedRootIds = uniqueStrings(input?.trustedRootIds, "VNextJustification.trustedRootIds");
     if (!Array.isArray(input?.requirements))
         fail("VNextJustification.requirements", "must be an array");
+    if (input?.generationRelations !== undefined && !Array.isArray(input.generationRelations)) {
+        fail("VNextJustification.generationRelations", "must be an array");
+    }
+    const generationRelations = (input?.generationRelations || [])
+        .map((relation, index) => normalizeVNextGenerationRelation(relation, `VNextJustification.generationRelations[${index}]`));
     const trackedFiles = normalizeDocumentFact(input?.trackedFiles, "repository_path_set", "VNextJustification.trackedFiles");
     const requirements = input.requirements.map((raw, index) => {
         const label = `VNextJustification.requirements[${index}]`;
@@ -111,6 +200,16 @@ export function evaluateVNextJustificationClosure(input) {
         byId.set(requirement.id, requirement);
     }
     const reasons = [];
+    const seenProjectionIds = new Set();
+    for (const relation of generationRelations) {
+        if (seenProjectionIds.has(relation.projection_id)) {
+            fail("VNextJustification.generationRelations", `duplicate projection id "${relation.projection_id}"`);
+        }
+        seenProjectionIds.add(relation.projection_id);
+        if (!byId.has(relation.owner_requirement)) {
+            reasons.push(`unknown_generation_owner:${relation.projection_id}:${relation.owner_requirement}`);
+        }
+    }
     const children = new Map();
     const dependents = new Map();
     const supersededBy = new Map();
@@ -186,6 +285,32 @@ export function evaluateVNextJustificationClosure(input) {
             artifactExplanations.set(artifact.path, paths);
         }
     }
+    const generatedArtifacts = new Set();
+    for (const relation of generationRelations) {
+        if (!reachable.has(relation.owner_requirement)) {
+            if (byId.has(relation.owner_requirement)) {
+                reasons.push(`unreachable_generation_owner:${relation.projection_id}:${relation.owner_requirement}`);
+            }
+            continue;
+        }
+        justified.add(relation.target);
+        generatedArtifacts.add(relation.target);
+        const paths = artifactExplanations.get(relation.target) || [];
+        paths.push([
+            ...(explanations.get(relation.owner_requirement) || [relation.owner_requirement]),
+            `generates:${relation.projection_id}:${relation.target}`,
+        ]);
+        artifactExplanations.set(relation.target, paths);
+    }
+    for (const relation of generationRelations) {
+        if (!reachable.has(relation.owner_requirement))
+            continue;
+        for (const source of relation.sources) {
+            if (!justified.has(source.path)) {
+                reasons.push(`projection_source_not_justified:${relation.projection_id}:${source.path}`);
+            }
+        }
+    }
     const justifiedArtifacts = [...justified].sort();
     const artifactComparison = compareSets(trackedFiles, justifiedArtifacts, "equal");
     const orphanTrackedArtifacts = [...artifactComparison.missing].sort();
@@ -218,6 +343,7 @@ export function evaluateVNextJustificationClosure(input) {
         requirementDependents,
         supersededRequirements: [...superseded].sort(),
         supersededBy: supersededByObject,
+        generatedArtifacts: [...generatedArtifacts].sort(),
     };
 }
 export function evaluateVNextExactAcceptance(input) {
