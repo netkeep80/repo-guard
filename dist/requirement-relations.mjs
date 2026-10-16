@@ -99,6 +99,15 @@ function parseSource(source) {
     const exhaustive = source.format;
     return fail(source.path, `unsupported format "${String(exhaustive)}"`);
 }
+// Canonicalize parsed data, not source formatting; exact source bytes remain separately hashed.
+function canonicalParsedAuthority(value) {
+    if (Array.isArray(value))
+        return value.map(canonicalParsedAuthority);
+    if (!value || typeof value !== "object")
+        return value;
+    const record = value;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalParsedAuthority(record[key])]));
+}
 function normalizeSourceRelations(source, snapshot, revision) {
     const root = object(parseSource(source), source.path);
     const subject = nonEmptyString(root.id, `${source.path}#/id`);
@@ -159,7 +168,7 @@ function normalizeSourceRelations(source, snapshot, revision) {
             fail(`${source.path}#${artifactPointer}/relations`, `artifact "${path}" must explicitly include "requires"`);
         }
     }
-    return { subject, relations };
+    return { subject, relations, parsed: root };
 }
 export function normalizeRequirementAuthority(input) {
     const snapshot = input?.snapshot;
@@ -182,6 +191,7 @@ export function normalizeRequirementAuthority(input) {
     const seenSubjects = new Map();
     const relations = [];
     const manifest = [];
+    const semanticSources = [];
     for (const source of sources) {
         if (seenSourcePaths.has(source.path))
             fail(source.path, "duplicate authority source path");
@@ -193,6 +203,7 @@ export function normalizeRequirementAuthority(input) {
         seenSubjects.set(normalized.subject, source.path);
         relations.push(...normalized.relations);
         manifest.push({ path: source.path, format: source.format, sha256: sha256(source.content) });
+        semanticSources.push({ path: source.path, format: source.format, parsed: canonicalParsedAuthority(normalized.parsed) });
     }
     relations.sort((left, right) => compareIdentities(relationIdentity(left), relationIdentity(right)));
     const identities = relations.map(relationIdentity);
@@ -204,6 +215,7 @@ export function normalizeRequirementAuthority(input) {
         authority_scope_sha256: authorityScopeSha256,
         authority_manifest: manifest,
         authority_sha256: sha256(JSON.stringify({ scope, manifest })),
+        authority_semantic_sha256: sha256(JSON.stringify({ scope, semanticSources })),
         graph_sha256: sha256(JSON.stringify(identities)),
         relations,
     };
@@ -405,9 +417,10 @@ function sameIdentities(left, right) {
 export function checkRequirementTransition(input) {
     const actual = compareRequirementRelationGraphs(input.base, input.head);
     const authorityScopeChanged = input.base.authority_scope_sha256 !== input.head.authority_scope_sha256;
-    // Normative source changes remain transitions even if their relation graph is unchanged.
-    const authoritySourceChanged = input.base.authority_sha256 !== input.head.authority_sha256;
-    const required = authoritySourceChanged || authorityScopeChanged || actual.add.length > 0 || actual.remove.length > 0;
+    // Parsed normative changes require authority; formatting alone does not expand scope.
+    // Separate BASE-owned byte protection still applies to governance and immutable paths.
+    const authoritySemanticChanged = input.base.authority_semantic_sha256 !== input.head.authority_semantic_sha256;
+    const required = authoritySemanticChanged || authorityScopeChanged || actual.add.length > 0 || actual.remove.length > 0;
     const reasons = [];
     if (!required) {
         if (input.grant !== undefined && input.grant !== null)

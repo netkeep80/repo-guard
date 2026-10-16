@@ -246,6 +246,31 @@ console.log("\n--- transition identity boundaries ---");
   assert.ok(verdict.reasons.includes("requirement_transition_added_relations_mismatch"));
 }
 
+{
+  const source = (snapshot, content, format = "yaml") => normalizeRequirementAuthority({
+    snapshot, revision: snapshot === "base" ? BASE : HEAD,
+    sources: [{ path: format === "yaml" ? "requirements/r1.yaml" : "requirements/r1.json", format, content }],
+  });
+  const yamlBase = source("base", "id: R1\\nartifacts:\\n  - path: src/a.mts\\n    relations: [requires, implements]\\ntitle: Accepted\\n");
+  const yamlFormatted = source("head", "# comment, no normative effect\\ntitle: Accepted\\nartifacts:\\n  - relations: [requires, implements]\\n    path: src/a.mts\\nid: R1\\n");
+  assert.notEqual(yamlBase.authority_sha256, yamlFormatted.authority_sha256, "raw SHA binds exact source bytes");
+  assert.equal(yamlBase.authority_semantic_sha256, yamlFormatted.authority_semantic_sha256, "YAML comments and mapping order are not normative");
+  const formatOnly = checkRequirementTransition({ base: yamlBase, head: yamlFormatted });
+  assert.equal(formatOnly.ok, true, "formatting-only edit does not require a semantic transition grant");
+  assert.equal(formatOnly.required, false);
+  const changed = source("head", "id: R1\\nartifacts:\\n  - path: src/a.mts\\n    relations: [requires, implements]\\ntitle: Replaced\\n");
+  assert.deepEqual(compareRequirementRelationGraphs(yamlBase, changed), { add: [], remove: [] });
+  assert.notEqual(yamlBase.authority_semantic_sha256, changed.authority_semantic_sha256);
+  assert.equal(checkRequirementTransition({ base: yamlBase, head: changed }).ok, false, "changed normative title is denied without grant");
+  const metaChanged = source("head", "id: R1\\nartifacts:\\n  - path: src/a.mts\\n    role: authority\\n    relations: [requires, implements]\\ntitle: Accepted\\n");
+  assert.deepEqual(compareRequirementRelationGraphs(yamlBase, metaChanged), { add: [], remove: [] });
+  assert.equal(checkRequirementTransition({ base: yamlBase, head: metaChanged }).ok, false, "artifact metadata is normative even if graph is unchanged");
+  const jsonBase = source("base", JSON.stringify({ id: "R1", title: "Accepted", artifacts: [{ path: "src/a.mts", relations: ["requires", "implements"] }] }), "json");
+  const jsonReordered = source("head", JSON.stringify({ artifacts: [{ relations: ["requires", "implements"], path: "src/a.mts" }], title: "Accepted", id: "R1" }), "json");
+  assert.equal(jsonBase.authority_semantic_sha256, jsonReordered.authority_semantic_sha256, "JSON object key ordering is not normative");
+  assert.notEqual(jsonBase.authority_sha256, jsonReordered.authority_sha256, "the original JSON source remains raw-byte addressable");
+}
+
 console.log("\n--- #670 requirement transaction evidence projection ---");
 {
   const relation = (path, kind) => artifact(path, kind);
