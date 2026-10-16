@@ -599,3 +599,29 @@ console.log("\n--- #695 vNext transition: every changed implementation requireme
   assert.deepEqual(generatedCoverage.implementation_requirements, []);
 }
 console.log("#695 vNext full verification-coverage boundary passed");
+
+console.log("\n--- #696 vNext projection RED: requires alone cannot prove generation provenance/freshness ---");
+{
+  const existenceOnly = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "GEN",
+        derives_from: ["ROOT"],
+        artifacts: [
+          { path: "model/source.txt", relations: ["requires"] },
+          { path: "derived/output.md", relations: ["requires", "documents"] },
+        ],
+      },
+    ],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(existenceOnly.ok, true,
+    "control: J1/J2 closure should only prove that both files have a reason to exist");
+
+  const hasGenerationProvenance = false;
+  assert.equal(existenceOnly.ok && hasGenerationProvenance, true,
+    "#696 RED: a generated target must not be valid solely because requires-closure is complete");
+}
+
