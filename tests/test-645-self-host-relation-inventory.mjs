@@ -433,3 +433,41 @@ console.log("\n--- #693 vNext L0: exact acceptance is independent of merge/CI --
   }), /duplicate decision id/);
 }
 console.log("#693 vNext L0 exact acceptance boundary passed");
+
+console.log("\n--- #693 vNext H0 negative witness: superseded is not deletable ---");
+{
+  const naiveDropSuperseded = ({ requirements, trackedFiles }) => {
+    const superseded = new Set(requirements.flatMap((requirement) => requirement.supersedes || []));
+    const active = requirements.filter((requirement) => !superseded.has(requirement.id));
+    const justified = [...new Set(active.flatMap((requirement) =>
+      (requirement.artifacts || [])
+        .filter((artifact) => (artifact.relations || []).includes("requires"))
+        .map((artifact) => artifact.path),
+    ))].sort();
+    const tracked = [...new Set(trackedFiles)].sort();
+    return { ok: JSON.stringify(justified) === JSON.stringify(tracked), justified };
+  };
+
+  const candidate = {
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "OLD",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "history/old.pdf", relations: ["requires", "documents"] }],
+      },
+      {
+        id: "NEW",
+        derives_from: ["ROOT"],
+        supersedes: ["OLD"],
+        artifacts: [{ path: "src/new.mts", relations: ["requires", "implements"] }],
+      },
+    ],
+    trackedFiles: ["src/new.mts"],
+  };
+
+  const naive = naiveDropSuperseded(candidate);
+  assert.equal(naive.ok, false,
+    "#693 RED: marking OLD superseded must not silently delete its accepted artifact obligations");
+}
+
