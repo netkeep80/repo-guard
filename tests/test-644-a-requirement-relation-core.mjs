@@ -225,7 +225,16 @@ console.log("\n--- transition identity boundaries ---");
   const head = graph("head", HEAD, [["requirements/r1.json", req("R1", [artifact("requirements/r1.json")], { title: "new" })]]);
   assert.deepEqual(compareRequirementRelationGraphs(base, head), { add: [], remove: [] });
   assert.notEqual(base.authority_sha256, head.authority_sha256, "authority digest must bind non-relation source content too");
-  assert.equal(checkRequirementTransition({ base, head, trustedAuthorizer: trusted }).ok, true, "content-only requirement edits remain owned by ordinary evidence semantics");
+  const missingGrant = checkRequirementTransition({ base, head, trustedAuthorizer: trusted });
+  assert.equal(missingGrant.ok, false, "content-only normative authority edit must not self-authorize");
+  assert.equal(missingGrant.required, true);
+  assert.ok(missingGrant.reasons.includes("requirement_transition_grant_missing"));
+  const exact = checkRequirementTransition({ base, head, grant: grant(base, head), trustedAuthorizer: trusted });
+  assert.equal(exact.ok, true, "exact trusted grant with empty relation delta authorizes changed normative content");
+  const untrusted = checkRequirementTransition({
+    base, head, grant: grant(base, head), trustedAuthorizer: { trusted: false, source: "repository_permission" },
+  });
+  assert.equal(untrusted.ok, false, "valid grant bytes are insufficient without an independent authorizer");
   const spurious = {
     base_authority_sha256: base.authority_sha256,
     expected_head_authority_sha256: head.authority_sha256,
@@ -234,7 +243,7 @@ console.log("\n--- transition identity boundaries ---");
   };
   const verdict = checkRequirementTransition({ base, head, grant: spurious, trustedAuthorizer: trusted });
   assert.equal(verdict.ok, false);
-  assert.ok(verdict.reasons.includes("requirement_transition_grant_without_relation_delta"));
+  assert.ok(verdict.reasons.includes("requirement_transition_added_relations_mismatch"));
 }
 
 console.log("\n--- #670 requirement transaction evidence projection ---");
