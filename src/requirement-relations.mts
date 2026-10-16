@@ -324,7 +324,7 @@ export function evaluateVNextGenerationFreshness(input: {
   const model = lowerVNextGenerationRelation(relation);
   const lowered = lowerProjectionVerification(model, input?.buildRecord);
   const relationResults = lowered.map((primitive) => {
-    const result = evaluatePrimitiveRelation(input.facts, primitive);
+    const result = evaluatePrimitiveRelation(input.facts, primitive) as { ok?: unknown };
     return { relation_id: primitive.relation_id, ok: Boolean(result.ok) };
   });
   const reasons = relationResults.filter((result) => !result.ok)
