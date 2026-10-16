@@ -122,12 +122,19 @@ function canonicalParsedAuthority(value, label) {
 }
 // Only the declared artifact/relation sets are order-insensitive. Other arrays remain ordered.
 function canonicalRequirementData(root, sourcePath) {
-    const data = { ...root };
+    const data = {
+        ...root,
+        id: nonEmptyString(root.id, `${sourcePath}#/id`),
+    };
     if (Array.isArray(root.artifacts)) {
-        data.artifacts = root.artifacts.map((raw) => {
-            const artifact = { ...object(raw, "canonicalRequirementData.artifact") };
-            if (Array.isArray(artifact.relations))
-                artifact.relations = [...artifact.relations].sort();
+        data.artifacts = root.artifacts.map((raw, artifactIndex) => {
+            const artifact = { ...object(raw, `${sourcePath}#/artifacts/${artifactIndex}`) };
+            artifact.path = repositoryPath(artifact.path, `${sourcePath}#/artifacts/${artifactIndex}/path`);
+            if (Array.isArray(artifact.relations)) {
+                artifact.relations = artifact.relations
+                    .map((value, relationIndex) => relationKind(value, `${sourcePath}#/artifacts/${artifactIndex}/relations/${relationIndex}`))
+                    .sort();
+            }
             return artifact;
         }).sort((a, b) => String(a.path).localeCompare(String(b.path)));
     }

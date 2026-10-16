@@ -310,6 +310,12 @@ console.log("\n--- transition identity boundaries ---");
     "repository-path spelling aliases normalize to the same relation graph");
   assert.equal(canonicalPathBase.authority_semantic_sha256, canonicalPathHead.authority_semantic_sha256,
     "semantic authority identity must use the same canonical repository-path spelling as the relation graph");
+
+  const normalizedTokensBase = source("base", 'id: " R1 "\nartifacts:\n  - path: src/a.mts\n    relations: [" requires ", " implements "]\n');
+  const normalizedTokensHead = source("head", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\n");
+  assert.deepEqual(compareRequirementRelationGraphs(normalizedTokensBase, normalizedTokensHead), { add: [], remove: [] });
+  assert.equal(normalizedTokensBase.authority_semantic_sha256, normalizedTokensHead.authority_semantic_sha256,
+    "semantic authority identity must reuse normalized requirement id and relation-kind tokens");
 }
 
 console.log("\n--- #670 requirement transaction evidence projection ---");
