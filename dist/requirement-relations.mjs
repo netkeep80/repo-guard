@@ -405,6 +405,7 @@ function sameIdentities(left, right) {
 export function checkRequirementTransition(input) {
     const actual = compareRequirementRelationGraphs(input.base, input.head);
     const authorityScopeChanged = input.base.authority_scope_sha256 !== input.head.authority_scope_sha256;
+    // Normative source changes remain transitions even if their relation graph is unchanged.
     const authoritySourceChanged = input.base.authority_sha256 !== input.head.authority_sha256;
     const required = authoritySourceChanged || authorityScopeChanged || actual.add.length > 0 || actual.remove.length > 0;
     const reasons = [];
