@@ -497,6 +497,41 @@ console.log("\n--- #681 MNC-style routine governed YAML trace additions without 
 console.log("#681 routine requirement trace transition integration matrix passed");
 
 
+console.log("\n--- #687 authority source Git mode is part of source identity ---");
+{
+  const rawPolicy = policy(["requirements/**"]);
+  const requirement = [
+    "id: RG-R1",
+    "artifacts:",
+    "  - path: requirements/r1.yaml",
+    "    relations: [requires]",
+    "  - path: repo-policy.json",
+    "    relations: [requires]",
+    "",
+  ].join("\n");
+  const root = initRepo(rawPolicy, { "requirements/r1.yaml": requirement });
+  try {
+    const path = "requirements/r1.yaml";
+    const baseEntry = git(root, "ls-tree", "HEAD", "--", path);
+    assert.match(baseEntry, /^100644 blob /);
+    const blob = git(root, "rev-parse", `HEAD:${path}`);
+    git(root, "update-index", "--cacheinfo", `120000,${blob},${path}`);
+    git(root, "commit", "-m", "change authority source mode only");
+    const headEntry = git(root, "ls-tree", "HEAD", "--", path);
+    assert.match(headEntry, /^120000 blob /);
+    assert.equal(git(root, "rev-parse", `HEAD:${path}`), blob, "mode-only fixture must preserve exact blob identity");
+
+    const result = run(root, "", ["requirements/**"]);
+    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    assert.notEqual(result.status, 0, "authority source type/mode change must not bypass BASE→HEAD authority: " + output);
+    assert.match(output, /requirement-transition|authority|mode/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+console.log("#687 authority source Git mode falsifier passed");
+
+
 console.log("\n--- #685 check-pr end-to-end trusted named growth exception ---");
 {
   const rawPolicy = policy();
