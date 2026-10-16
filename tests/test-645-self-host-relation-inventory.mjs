@@ -749,3 +749,20 @@ console.log("\n--- #696 vNext projection: generation relation justifies target a
   assert.ok(unreachableOwner.reasons.includes("unreachable_generation_owner:projection.demo:GEN"));
 }
 console.log("#696 vNext generation/freshness boundary passed");
+
+console.log("\n--- #693 vNext L1 RED: acceptance must not imply currentness ---");
+{
+  const digest = "3".repeat(64);
+  const exactAcceptance = evaluateVNextExactAcceptance({
+    subject: { id: "VERSION-vNEXT", semantic_sha256: digest },
+    trustedDecisions: [
+      { decision_id: "D-VNEXT", accepts_subject: "VERSION-vNEXT", accepts_semantic_sha256: digest },
+    ],
+  });
+  assert.equal(exactAcceptance.accepted, true);
+
+  // Deliberately naive model under falsification: treating acceptance as currentness.
+  const naiveCurrent = exactAcceptance.accepted;
+  assert.equal(naiveCurrent, false,
+    "#693 RED: exact Author acceptance alone must not cut a candidate over to CURRENT without independent transition authority");
+}
