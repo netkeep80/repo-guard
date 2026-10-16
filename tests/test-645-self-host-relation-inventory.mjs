@@ -750,7 +750,7 @@ console.log("\n--- #696 vNext projection: generation relation justifies target a
 }
 console.log("#696 vNext generation/freshness boundary passed");
 
-console.log("\n--- #693 vNext L1 RED: acceptance must not imply currentness ---");
+console.log("\n--- #693 vNext L1: accepted subject still needs independent CURRENT cutover ---");
 {
   const digest = "3".repeat(64);
   const exactAcceptance = evaluateVNextExactAcceptance({
@@ -761,8 +761,66 @@ console.log("\n--- #693 vNext L1 RED: acceptance must not imply currentness ---"
   });
   assert.equal(exactAcceptance.accepted, true);
 
-  // Deliberately naive model under falsification: treating acceptance as currentness.
-  const naiveCurrent = exactAcceptance.accepted;
-  assert.equal(naiveCurrent, false,
-    "#693 RED: exact Author acceptance alone must not cut a candidate over to CURRENT without independent transition authority");
+  const cutoverBase = fixtureGraph("base", [
+    { subject: "CURRENT", path: "versions/v0.15.json", relations: ["requires"] },
+    { subject: "HISTORY", path: "history/v0.15.json", relations: ["requires", "documents"] },
+  ]);
+  const cutoverHead = fixtureGraph("head", [
+    { subject: "CURRENT", path: "versions/vNEXT.json", relations: ["requires"] },
+    { subject: "HISTORY", path: "history/v0.15.json", relations: ["requires", "documents"] },
+  ]);
+
+  const unauthorizedCutover = checkRequirementTransition({
+    base: cutoverBase,
+    head: cutoverHead,
+    grant: null,
+    trustedAuthorizer: null,
+  });
+  assert.equal(unauthorizedCutover.required, true);
+  assert.equal(unauthorizedCutover.ok, false,
+    "exact acceptance must not self-authorize the CURRENT relation transition");
+  assert.equal(exactAcceptance.accepted && unauthorizedCutover.ok, false,
+    "AUTHOR_ACCEPTED and CURRENT remain independent predicates");
+
+  const exactGrant = {
+    base_authority_sha256: cutoverBase.authority_sha256,
+    expected_head_authority_sha256: cutoverHead.authority_sha256,
+    add: unauthorizedCutover.actual_delta.add,
+    remove: unauthorizedCutover.actual_delta.remove,
+  };
+  const authorizedCutover = checkRequirementTransition({
+    base: cutoverBase,
+    head: cutoverHead,
+    grant: exactGrant,
+    trustedAuthorizer: { trusted: true, source: "repository_permission" },
+  });
+  assert.equal(authorizedCutover.ok, true);
+  assert.equal(exactAcceptance.accepted && authorizedCutover.ok, true,
+    "CURRENT may be established only by exact acceptance composed with independently authorized cutover");
+
+  const postCutoverClosure = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "V015-HISTORY",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "history/v0.15.json", relations: ["requires", "documents"] }],
+      },
+      {
+        id: "VNEXT-CURRENT",
+        derives_from: ["ROOT"],
+        supersedes: ["V015-HISTORY"],
+        artifacts: [{ path: "versions/vNEXT.json", relations: ["requires"] }],
+      },
+    ],
+    trackedFiles: ["history/v0.15.json", "versions/vNEXT.json"],
+  });
+  assert.equal(postCutoverClosure.ok, true);
+  assert.ok(postCutoverClosure.reachableRequirements.includes("V015-HISTORY"),
+    "historical predecessor remains root-justified after CURRENT cutover");
+  assert.ok(postCutoverClosure.justifiedArtifacts.includes("history/v0.15.json"),
+    "predecessor evidence remains justified after supersession/cutover");
+  assert.deepEqual(postCutoverClosure.supersededBy["V015-HISTORY"], ["VNEXT-CURRENT"]);
 }
+console.log("#693 vNext L1 independent CURRENT cutover passed");
