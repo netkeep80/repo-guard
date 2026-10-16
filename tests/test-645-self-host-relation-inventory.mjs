@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextJustificationClosure, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "../dist/requirement-relations.mjs";
+import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextJustificationClosure, evaluateVNextRequirementVerificationCoverage, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedIds = [
@@ -501,29 +501,101 @@ console.log("\n--- #693 vNext H0: supersession does not retire obligations ---")
 }
 console.log("#693 vNext H0 supersession/retention boundary passed");
 
-console.log("\n--- #695 vNext transition RED: existential overlap is insufficient ---");
+console.log("\n--- #695 vNext transition: every changed implementation requirement needs verification coverage ---");
 {
-  const headGraph = fixtureGraph("head", [
+  const partialGraph = fixtureGraph("head", [
     { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
     { subject: "R-B", path: "src/b.mts", relations: ["requires", "implements"] },
     { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
   ]);
-  const projection = projectRequirementTransactionEvidence({
-    base: headGraph,
-    head: headGraph,
+  const partial = evaluateVNextRequirementVerificationCoverage({
+    base: partialGraph,
+    head: partialGraph,
     changedFiles: [
       { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
       { path: "src/b.mts", status: "modified", addedLines: ["b"], deletedLines: ["b0"] },
       { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
     ],
   });
-  assert.deepEqual(projection.implementation_requirements, ["R-A", "R-B"]);
-  assert.deepEqual(projection.verification_requirements, ["R-A"]);
-  assert.deepEqual(projection.overlap_requirements, ["R-A"]);
+  assert.equal(partial.ok, false);
+  assert.deepEqual(partial.implementation_requirements, ["R-A", "R-B"]);
+  assert.deepEqual(partial.verification_requirements, ["R-A"]);
+  assert.deepEqual(partial.missing_verification_requirements, ["R-B"]);
 
-  const existentialOverlapPasses = projection.implementation_requirements.length === 0
-    || projection.overlap_requirements.length > 0;
-  assert.equal(existentialOverlapPasses, false,
-    "#695 RED: one related verifier must not cover a second changed implementation requirement");
+  const relatedGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const relatedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: relatedGraph,
+    head: relatedGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(relatedCoverage.ok, true);
+  assert.deepEqual(relatedCoverage.missing_verification_requirements, []);
+
+  const unrelatedGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-B", path: "tests/b.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const unrelatedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: unrelatedGraph,
+    head: unrelatedGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "tests/b.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(unrelatedCoverage.ok, false);
+  assert.deepEqual(unrelatedCoverage.missing_verification_requirements, ["R-A"]);
+
+  const crossGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-B", path: "src/b.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/cross.mjs", relations: ["requires", "verifies"] },
+    { subject: "R-B", path: "tests/cross.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const crossCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: crossGraph,
+    head: crossGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "src/b.mts", status: "modified", addedLines: ["b"], deletedLines: ["b0"] },
+      { path: "tests/cross.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(crossCoverage.ok, true);
+
+  const deletedBase = fixtureGraph("base", [
+    { subject: "R-A", path: "src/old.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const deletedHead = fixtureGraph("head", [
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const deletedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: deletedBase,
+    head: deletedHead,
+    changedFiles: [
+      { path: "src/old.mts", status: "deleted", addedLines: [], deletedLines: ["old"] },
+      { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(deletedCoverage.ok, true);
+  assert.deepEqual(deletedCoverage.implementation_requirements, ["R-A"]);
+
+  const generatedGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "dist/a.mjs", relations: ["requires", "implements"] },
+  ]);
+  const generatedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: generatedGraph,
+    head: generatedGraph,
+    changedFiles: [{ path: "dist/a.mjs", status: "modified", addedLines: ["x"], deletedLines: ["y"] }],
+  });
+  assert.equal(generatedCoverage.ok, true);
+  assert.deepEqual(generatedCoverage.implementation_requirements, []);
 }
-
+console.log("#695 vNext full verification-coverage boundary passed");

@@ -644,6 +644,24 @@ export function projectRequirementTransactionEvidence(input: {
   };
 }
 
+export function evaluateVNextRequirementVerificationCoverage(input: {
+  base: RequirementRelationGraph;
+  head: RequirementRelationGraph;
+  changedFiles: readonly ParsedDiffFile[];
+}): RequirementTransactionEvidenceProjection & { ok: boolean; missing_verification_requirements: string[] } {
+  const projection = projectRequirementTransactionEvidence(input);
+  const coverage = compareSets(
+    projection.implementation_requirements,
+    projection.verification_requirements,
+    "left_subset",
+  );
+  return {
+    ...projection,
+    ok: coverage.ok,
+    missing_verification_requirements: [...coverage.missing].sort(),
+  };
+}
+
 export function compareRequirementRelationGraphs(base: RequirementRelationGraph, head: RequirementRelationGraph): RequirementRelationDelta {
   const baseMap = new Map(base.relations.map((relation) => [identityKey(relationIdentity(relation)), relationIdentity(relation)]));
   const headMap = new Map(head.relations.map((relation) => [identityKey(relationIdentity(relation)), relationIdentity(relation)]));
