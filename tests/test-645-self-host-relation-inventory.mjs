@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { checkRequirementTransition, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { checkRequirementTransition, evaluateVNextJustificationClosure, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedIds = [
@@ -263,40 +263,85 @@ assert.equal(unauthorizedTransition.ok, false, "#662 evidence must not self-auth
 
 console.log("#662 relation-overlap transaction falsifier passed");
 
-console.log("\n--- #693 vNext J0 negative witness: tracked closure is not requirement closure ---");
+console.log("\n--- #693 vNext J0 double justification closure ---");
 {
-  const naiveArtifactOnlyClosure = ({ requirements, trackedFiles }) => {
-    const justified = [...new Set(requirements.flatMap((requirement) =>
-      (requirement.artifacts || [])
-        .filter((artifact) => (artifact.relations || []).includes("requires"))
-        .map((artifact) => artifact.path),
-    ))].sort();
-    const tracked = [...new Set(trackedFiles)].sort();
-    return { ok: JSON.stringify(justified) === JSON.stringify(tracked), justified, tracked };
-  };
-
-  const cycleWithoutRoot = {
+  const cycleWithoutRoot = evaluateVNextJustificationClosure({
     trustedRootIds: [],
     requirements: [
       { id: "R1", derives_from: ["R2"], artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
       { id: "R2", derives_from: ["R1"], artifacts: [] },
     ],
     trackedFiles: ["src/a.mts"],
-  };
-  const naiveCycle = naiveArtifactOnlyClosure(cycleWithoutRoot);
-  assert.equal(naiveCycle.ok, false,
-    "#693 RED: exact tracked-file closure alone must not accept two requirements that only justify each other");
+  });
+  assert.equal(cycleWithoutRoot.ok, false);
+  assert.deepEqual(cycleWithoutRoot.orphanRequirements, ["R1", "R2"]);
+  assert.ok(cycleWithoutRoot.reasons.includes("orphan_requirement:R1"));
+  assert.ok(cycleWithoutRoot.reasons.includes("orphan_requirement:R2"));
 
-  const orphanRequirement = {
+  const orphanRequirement = evaluateVNextJustificationClosure({
     trustedRootIds: ["ROOT"],
     requirements: [
       { id: "ROOT", derives_from: [], artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
       { id: "ORPHAN", derives_from: [], artifacts: [] },
     ],
     trackedFiles: ["src/a.mts"],
-  };
-  const naiveOrphan = naiveArtifactOnlyClosure(orphanRequirement);
-  assert.equal(naiveOrphan.ok, false,
-    "#693 RED: exact tracked-file closure alone must not accept an orphan canonical requirement");
-}
+  });
+  assert.equal(orphanRequirement.ok, false);
+  assert.deepEqual(orphanRequirement.orphanRequirements, ["ORPHAN"]);
 
+  const valid = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", derives_from: [], artifacts: [] },
+      {
+        id: "FEATURE",
+        derives_from: ["ROOT"],
+        artifacts: [
+          { path: "src/a.mts", relations: ["requires", "implements"] },
+          { path: "tests/a.mjs", relations: ["requires", "verifies"] },
+        ],
+      },
+    ],
+    trackedFiles: ["tests/a.mjs", "src/a.mts"],
+  });
+  assert.equal(valid.ok, true);
+  assert.deepEqual(valid.reachableRequirements, ["FEATURE", "ROOT"]);
+  assert.deepEqual(valid.justifiedArtifacts, ["src/a.mts", "tests/a.mjs"]);
+  assert.deepEqual(valid.requirementExplanations.FEATURE, ["ROOT", "FEATURE"]);
+  assert.deepEqual(valid.artifactExplanations["src/a.mts"], [["ROOT", "FEATURE", "requires:src/a.mts"]]);
+  assert.deepEqual(valid.requirementDependents.ROOT, ["FEATURE"]);
+
+  const orphanInfrastructure = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
+    ],
+    trackedFiles: ["src/a.mts", ".github/workflows/ci.yml"],
+  });
+  assert.equal(orphanInfrastructure.ok, false);
+  assert.deepEqual(orphanInfrastructure.orphanTrackedArtifacts, [".github/workflows/ci.yml"]);
+  assert.ok(orphanInfrastructure.reasons.includes("orphan_tracked_artifact:.github/workflows/ci.yml"));
+
+  const missingRequired = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [{ path: "docs/required.md", relations: ["requires"] }] },
+    ],
+    trackedFiles: [],
+  });
+  assert.equal(missingRequired.ok, false);
+  assert.deepEqual(missingRequired.missingRequiredArtifacts, ["docs/required.md"]);
+
+  const unknownParent = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      { id: "CHILD", derives_from: ["MISSING"], artifacts: [] },
+    ],
+    trackedFiles: [],
+  });
+  assert.equal(unknownParent.ok, false);
+  assert.ok(unknownParent.reasons.includes("unknown_requirement_parent:CHILD:MISSING"));
+  assert.deepEqual(unknownParent.orphanRequirements, ["CHILD"]);
+}
+console.log("#693 vNext J0 double justification closure passed");

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { ParsedDiffFile } from "./diff/parser.mjs";
 import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
+import { compareSets } from "./checks/relation-kernel.mjs";
 import { matchesAny } from "./utils/path-patterns.mjs";
 
 export const REQUIREMENT_RELATION_KINDS = [
@@ -110,6 +111,36 @@ export interface RequirementTransactionEvidenceProjection {
   overlap_requirements: string[];
 }
 
+export interface VNextRequirementArtifact {
+  path: string;
+  relations: readonly RequirementRelationKind[];
+}
+
+export interface VNextRequirementNode {
+  id: string;
+  derives_from?: readonly string[];
+  artifacts?: readonly VNextRequirementArtifact[];
+}
+
+export interface VNextJustificationClosureInput {
+  trustedRootIds: readonly string[];
+  requirements: readonly VNextRequirementNode[];
+  trackedFiles: readonly string[];
+}
+
+export interface VNextJustificationClosureVerdict {
+  ok: boolean;
+  reasons: string[];
+  reachableRequirements: string[];
+  orphanRequirements: string[];
+  justifiedArtifacts: string[];
+  orphanTrackedArtifacts: string[];
+  missingRequiredArtifacts: string[];
+  requirementExplanations: Record<string, string[]>;
+  artifactExplanations: Record<string, string[][]>;
+  requirementDependents: Record<string, string[]>;
+}
+
 type JsonObject = Record<string, unknown>;
 const RELATION_KINDS = new Set<string>(REQUIREMENT_RELATION_KINDS);
 const EXACT_COMMIT_SHA = /^[0-9a-f]{40}$/i;
@@ -167,6 +198,145 @@ function relationKind(value: unknown, label: string): RequirementRelationKind {
   const relation = nonEmptyString(value, label);
   if (!RELATION_KINDS.has(relation)) return fail(label, `unknown relation "${relation}"`);
   return relation as RequirementRelationKind;
+}
+
+function uniqueStrings(value: unknown, label: string): string[] {
+  const values = array(value, label).map((item, index) => nonEmptyString(item, `${label}[${index}]`));
+  const unique = new Set(values);
+  if (unique.size !== values.length) fail(label, "must not contain duplicates");
+  return [...unique].sort();
+}
+
+export function evaluateVNextJustificationClosure(input: VNextJustificationClosureInput): VNextJustificationClosureVerdict {
+  const trustedRootIds = uniqueStrings(input?.trustedRootIds, "VNextJustification.trustedRootIds");
+  if (!Array.isArray(input?.requirements)) fail("VNextJustification.requirements", "must be an array");
+  const trackedFiles = normalizeDocumentFact(input?.trackedFiles, "repository_path_set", "VNextJustification.trackedFiles") as string[];
+
+  const requirements = input.requirements.map((raw, index) => {
+    const label = `VNextJustification.requirements[${index}]`;
+    const value = object(raw, label);
+    exactFields(value, ["id", "derives_from", "artifacts"], label);
+    const id = nonEmptyString(value.id, `${label}.id`);
+    const derivesFrom = value.derives_from === undefined ? [] : uniqueStrings(value.derives_from, `${label}.derives_from`);
+    const artifacts = value.artifacts === undefined ? [] : array(value.artifacts, `${label}.artifacts`).map((rawArtifact, artifactIndex) => {
+      const artifactLabel = `${label}.artifacts[${artifactIndex}]`;
+      const artifact = object(rawArtifact, artifactLabel);
+      exactFields(artifact, ["path", "relations"], artifactLabel);
+      const path = repositoryPath(artifact.path, `${artifactLabel}.path`);
+      const relations = array(artifact.relations, `${artifactLabel}.relations`).map((rawRelation, relationIndex) =>
+        relationKind(rawRelation, `${artifactLabel}.relations[${relationIndex}]`));
+      if (!relations.length) fail(`${artifactLabel}.relations`, "must contain at least one relation");
+      if (new Set(relations).size !== relations.length) fail(`${artifactLabel}.relations`, "must not contain duplicates");
+      return { path, relations: [...relations].sort() };
+    });
+    const artifactPaths = artifacts.map((artifact) => artifact.path);
+    if (new Set(artifactPaths).size !== artifactPaths.length) fail(`${label}.artifacts`, "must not contain duplicate paths");
+    return { id, derivesFrom, artifacts };
+  });
+
+  const byId = new Map<string, typeof requirements[number]>();
+  for (const requirement of requirements) {
+    if (byId.has(requirement.id)) fail("VNextJustification.requirements", `duplicate requirement id "${requirement.id}"`);
+    byId.set(requirement.id, requirement);
+  }
+
+  const reasons: string[] = [];
+  const children = new Map<string, string[]>();
+  const dependents = new Map<string, Set<string>>();
+  for (const requirement of requirements) {
+    for (const parent of requirement.derivesFrom) {
+      if (!byId.has(parent)) {
+        reasons.push(`unknown_requirement_parent:${requirement.id}:${parent}`);
+        continue;
+      }
+      const childList = children.get(parent) || [];
+      childList.push(requirement.id);
+      children.set(parent, childList);
+      const reverse = dependents.get(parent) || new Set<string>();
+      reverse.add(requirement.id);
+      dependents.set(parent, reverse);
+    }
+  }
+  for (const values of children.values()) values.sort();
+
+  const reachable = new Set<string>();
+  const explanations = new Map<string, string[]>();
+  const queue: string[] = [];
+  for (const root of trustedRootIds) {
+    if (!byId.has(root)) {
+      reasons.push(`trusted_root_missing:${root}`);
+      continue;
+    }
+    if (!reachable.has(root)) {
+      reachable.add(root);
+      explanations.set(root, [root]);
+      queue.push(root);
+    }
+  }
+  queue.sort();
+
+  while (queue.length) {
+    const parent = queue.shift()!;
+    for (const child of children.get(parent) || []) {
+      if (reachable.has(child)) continue;
+      reachable.add(child);
+      explanations.set(child, [...(explanations.get(parent) || [parent]), child]);
+      queue.push(child);
+    }
+    queue.sort();
+  }
+
+  const allRequirementIds = [...byId.keys()].sort();
+  const reachableRequirements = [...reachable].sort();
+  const requirementComparison = compareSets(allRequirementIds, reachableRequirements, "equal");
+  const orphanRequirements = [...requirementComparison.missing].sort();
+  for (const id of orphanRequirements) reasons.push(`orphan_requirement:${id}`);
+
+  const justified = new Set<string>();
+  const artifactExplanations = new Map<string, string[][]>();
+  for (const requirementId of reachableRequirements) {
+    const requirement = byId.get(requirementId)!;
+    for (const artifact of requirement.artifacts) {
+      if (!artifact.relations.includes("requires")) continue;
+      justified.add(artifact.path);
+      const paths = artifactExplanations.get(artifact.path) || [];
+      paths.push([...(explanations.get(requirementId) || [requirementId]), `requires:${artifact.path}`]);
+      artifactExplanations.set(artifact.path, paths);
+    }
+  }
+  const justifiedArtifacts = [...justified].sort();
+  const artifactComparison = compareSets(trackedFiles, justifiedArtifacts, "equal");
+  const orphanTrackedArtifacts = [...artifactComparison.missing].sort();
+  const missingRequiredArtifacts = [...artifactComparison.extra].sort();
+  for (const path of orphanTrackedArtifacts) reasons.push(`orphan_tracked_artifact:${path}`);
+  for (const path of missingRequiredArtifacts) reasons.push(`required_artifact_not_tracked:${path}`);
+
+  const requirementExplanations = Object.fromEntries(
+    [...explanations.entries()].sort(([a], [b]) => a.localeCompare(b)),
+  );
+  const artifactExplanationObject = Object.fromEntries(
+    [...artifactExplanations.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([path, paths]) => [path, paths.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]),
+  );
+  const requirementDependents = Object.fromEntries(
+    [...dependents.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, values]) => [id, [...values].sort()]),
+  );
+  const uniqueReasons = [...new Set(reasons)].sort();
+  return {
+    ok: uniqueReasons.length === 0,
+    reasons: uniqueReasons,
+    reachableRequirements,
+    orphanRequirements,
+    justifiedArtifacts,
+    orphanTrackedArtifacts,
+    missingRequiredArtifacts,
+    requirementExplanations,
+    artifactExplanations: artifactExplanationObject,
+    requirementDependents,
+  };
 }
 
 function relationIdentity(value: Pick<RequirementRelationTuple, "subject" | "relation" | "object">): RequirementRelationIdentity {
