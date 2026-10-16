@@ -81,9 +81,12 @@ export function evaluateVNextJustificationClosure(input) {
     const requirements = input.requirements.map((raw, index) => {
         const label = `VNextJustification.requirements[${index}]`;
         const value = object(raw, label);
-        exactFields(value, ["id", "derives_from", "artifacts"], label);
+        exactFields(value, ["id", "derives_from", "supersedes", "artifacts"], label);
         const id = nonEmptyString(value.id, `${label}.id`);
         const derivesFrom = value.derives_from === undefined ? [] : uniqueStrings(value.derives_from, `${label}.derives_from`);
+        const supersedes = value.supersedes === undefined ? [] : uniqueStrings(value.supersedes, `${label}.supersedes`);
+        if (supersedes.includes(id))
+            fail(`${label}.supersedes`, "requirement must not supersede itself");
         const artifacts = value.artifacts === undefined ? [] : array(value.artifacts, `${label}.artifacts`).map((rawArtifact, artifactIndex) => {
             const artifactLabel = `${label}.artifacts[${artifactIndex}]`;
             const artifact = object(rawArtifact, artifactLabel);
@@ -99,7 +102,7 @@ export function evaluateVNextJustificationClosure(input) {
         const artifactPaths = artifacts.map((artifact) => artifact.path);
         if (new Set(artifactPaths).size !== artifactPaths.length)
             fail(`${label}.artifacts`, "must not contain duplicate paths");
-        return { id, derivesFrom, artifacts };
+        return { id, derivesFrom, supersedes, artifacts };
     });
     const byId = new Map();
     for (const requirement of requirements) {
@@ -110,7 +113,19 @@ export function evaluateVNextJustificationClosure(input) {
     const reasons = [];
     const children = new Map();
     const dependents = new Map();
+    const supersededBy = new Map();
+    const superseded = new Set();
     for (const requirement of requirements) {
+        for (const predecessor of requirement.supersedes) {
+            if (!byId.has(predecessor)) {
+                reasons.push(`unknown_superseded_requirement:${requirement.id}:${predecessor}`);
+                continue;
+            }
+            superseded.add(predecessor);
+            const successors = supersededBy.get(predecessor) || new Set();
+            successors.add(requirement.id);
+            supersededBy.set(predecessor, successors);
+        }
         for (const parent of requirement.derivesFrom) {
             if (!byId.has(parent)) {
                 reasons.push(`unknown_requirement_parent:${requirement.id}:${parent}`);
@@ -186,6 +201,9 @@ export function evaluateVNextJustificationClosure(input) {
     const requirementDependents = Object.fromEntries([...dependents.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([id, values]) => [id, [...values].sort()]));
+    const supersededByObject = Object.fromEntries([...supersededBy.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([id, values]) => [id, [...values].sort()]));
     const uniqueReasons = [...new Set(reasons)].sort();
     return {
         ok: uniqueReasons.length === 0,
@@ -198,6 +216,8 @@ export function evaluateVNextJustificationClosure(input) {
         requirementExplanations,
         artifactExplanations: artifactExplanationObject,
         requirementDependents,
+        supersededRequirements: [...superseded].sort(),
+        supersededBy: supersededByObject,
     };
 }
 export function evaluateVNextExactAcceptance(input) {

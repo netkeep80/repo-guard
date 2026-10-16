@@ -434,21 +434,10 @@ console.log("\n--- #693 vNext L0: exact acceptance is independent of merge/CI --
 }
 console.log("#693 vNext L0 exact acceptance boundary passed");
 
-console.log("\n--- #693 vNext H0 negative witness: superseded is not deletable ---");
+console.log("\n--- #693 vNext H0: supersession does not retire obligations ---");
 {
-  const naiveDropSuperseded = ({ requirements, trackedFiles }) => {
-    const superseded = new Set(requirements.flatMap((requirement) => requirement.supersedes || []));
-    const active = requirements.filter((requirement) => !superseded.has(requirement.id));
-    const justified = [...new Set(active.flatMap((requirement) =>
-      (requirement.artifacts || [])
-        .filter((artifact) => (artifact.relations || []).includes("requires"))
-        .map((artifact) => artifact.path),
-    ))].sort();
-    const tracked = [...new Set(trackedFiles)].sort();
-    return { ok: JSON.stringify(justified) === JSON.stringify(tracked), justified };
-  };
-
-  const candidate = {
+  const missingHistorical = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
     requirements: [
       { id: "ROOT", artifacts: [] },
       {
@@ -464,10 +453,50 @@ console.log("\n--- #693 vNext H0 negative witness: superseded is not deletable -
       },
     ],
     trackedFiles: ["src/new.mts"],
-  };
+  });
+  assert.equal(missingHistorical.ok, false,
+    "superseding OLD must not remove OLD's accepted requires obligations");
+  assert.deepEqual(missingHistorical.supersededRequirements, ["OLD"]);
+  assert.deepEqual(missingHistorical.supersededBy.OLD, ["NEW"]);
+  assert.deepEqual(missingHistorical.requirementExplanations.OLD, ["ROOT", "OLD"]);
+  assert.ok(missingHistorical.reasons.includes("required_artifact_not_tracked:history/old.pdf"));
 
-  const naive = naiveDropSuperseded(candidate);
-  assert.equal(naive.ok, false,
-    "#693 RED: marking OLD superseded must not silently delete its accepted artifact obligations");
+  const preservedHistorical = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "OLD",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "history/old.pdf", relations: ["requires", "documents"] }],
+      },
+      {
+        id: "NEW",
+        derives_from: ["ROOT"],
+        supersedes: ["OLD"],
+        artifacts: [{ path: "src/new.mts", relations: ["requires", "implements"] }],
+      },
+    ],
+    trackedFiles: ["history/old.pdf", "src/new.mts"],
+  });
+  assert.equal(preservedHistorical.ok, true);
+  assert.deepEqual(preservedHistorical.justifiedArtifacts, ["history/old.pdf", "src/new.mts"]);
+
+  const unknownSuperseded = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      { id: "NEW", derives_from: ["ROOT"], supersedes: ["MISSING"], artifacts: [] },
+    ],
+    trackedFiles: [],
+  });
+  assert.equal(unknownSuperseded.ok, false);
+  assert.ok(unknownSuperseded.reasons.includes("unknown_superseded_requirement:NEW:MISSING"));
+
+  assert.throws(() => evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [{ id: "ROOT", supersedes: ["ROOT"], artifacts: [] }],
+    trackedFiles: [],
+  }), /must not supersede itself/);
 }
-
+console.log("#693 vNext H0 supersession/retention boundary passed");
