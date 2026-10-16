@@ -214,6 +214,19 @@ function canonicalParsedAuthority(value: unknown): unknown {
   return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalParsedAuthority(record[key])]));
 }
 
+// Only the declared artifact/relation sets are order-insensitive. Other arrays remain ordered.
+function canonicalRequirementData(root: JsonObject): unknown {
+  const data = { ...root };
+  if (Array.isArray(root.artifacts)) {
+    data.artifacts = root.artifacts.map((raw) => {
+      const artifact = { ...object(raw, "canonicalRequirementData.artifact") };
+      if (Array.isArray(artifact.relations)) artifact.relations = [...artifact.relations].sort();
+      return artifact;
+    }).sort((a, b) => String(a.path).localeCompare(String(b.path)));
+  }
+  return canonicalParsedAuthority(data);
+}
+
 function normalizeSourceRelations(source: RequirementAuthoritySource, snapshot: RequirementAuthoritySnapshot, revision: string): { subject: string; relations: RequirementRelationTuple[]; parsed: JsonObject } {
   const root = object(parseSource(source), source.path);
   const subject = nonEmptyString(root.id, `${source.path}#/id`);
@@ -305,7 +318,7 @@ export function normalizeRequirementAuthority(input: RequirementAuthorityInput):
     seenSubjects.set(normalized.subject, source.path);
     relations.push(...normalized.relations);
     manifest.push({ path: source.path, format: source.format, sha256: sha256(source.content) });
-    semanticSources.push({ path: source.path, format: source.format, parsed: canonicalParsedAuthority(normalized.parsed) });
+    semanticSources.push({ path: source.path, format: source.format, parsed: canonicalRequirementData(normalized.parsed) });
   }
 
   relations.sort((left, right) => compareIdentities(relationIdentity(left), relationIdentity(right)));

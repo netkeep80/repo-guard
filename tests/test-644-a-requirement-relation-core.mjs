@@ -269,6 +269,17 @@ console.log("\n--- transition identity boundaries ---");
   const jsonReordered = source("head", JSON.stringify({ artifacts: [{ relations: ["requires", "implements"], path: "src/a.mts" }], title: "Accepted", id: "R1" }), "json");
   assert.equal(jsonBase.authority_semantic_sha256, jsonReordered.authority_semantic_sha256, "JSON object key ordering is not normative");
   assert.notEqual(jsonBase.authority_sha256, jsonReordered.authority_sha256, "the original JSON source remains raw-byte addressable");
+  const ordered = source("base", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\n  - path: tests/a.mjs\n    relations: [requires, verifies]\n");
+  const reorderedSets = source("head", "id: R1\nartifacts:\n  - path: tests/a.mjs\n    relations: [verifies, requires]\n  - path: src/a.mts\n    relations: [implements, requires]\n");
+  assert.deepEqual(compareRequirementRelationGraphs(ordered, reorderedSets), { add: [], remove: [] });
+  assert.equal(ordered.authority_semantic_sha256, reorderedSets.authority_semantic_sha256,
+    "artifact and relation sets are semantically order-insensitive");
+  assert.notEqual(ordered.authority_sha256, reorderedSets.authority_sha256, "raw source binds original order");
+  const listBase = source("base", "id: R1\npriority: [first, second]\nartifacts: []\n");
+  const listHead = source("head", "id: R1\npriority: [second, first]\nartifacts: []\n");
+  assert.notEqual(listBase.authority_semantic_sha256, listHead.authority_semantic_sha256,
+    "unrecognized arrays are ordered normative data");
+  assert.equal(checkRequirementTransition({ base: listBase, head: listHead }).ok, false);
 }
 
 console.log("\n--- #670 requirement transaction evidence projection ---");
