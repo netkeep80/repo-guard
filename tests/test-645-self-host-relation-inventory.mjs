@@ -262,3 +262,41 @@ assert.equal(unauthorizedTransition.authorized, false);
 assert.equal(unauthorizedTransition.ok, false, "#662 evidence must not self-authorize its relation transition");
 
 console.log("#662 relation-overlap transaction falsifier passed");
+
+console.log("\n--- #693 vNext J0 negative witness: tracked closure is not requirement closure ---");
+{
+  const naiveArtifactOnlyClosure = ({ requirements, trackedFiles }) => {
+    const justified = [...new Set(requirements.flatMap((requirement) =>
+      (requirement.artifacts || [])
+        .filter((artifact) => (artifact.relations || []).includes("requires"))
+        .map((artifact) => artifact.path),
+    ))].sort();
+    const tracked = [...new Set(trackedFiles)].sort();
+    return { ok: JSON.stringify(justified) === JSON.stringify(tracked), justified, tracked };
+  };
+
+  const cycleWithoutRoot = {
+    trustedRootIds: [],
+    requirements: [
+      { id: "R1", derives_from: ["R2"], artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
+      { id: "R2", derives_from: ["R1"], artifacts: [] },
+    ],
+    trackedFiles: ["src/a.mts"],
+  };
+  const naiveCycle = naiveArtifactOnlyClosure(cycleWithoutRoot);
+  assert.equal(naiveCycle.ok, false,
+    "#693 RED: exact tracked-file closure alone must not accept two requirements that only justify each other");
+
+  const orphanRequirement = {
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", derives_from: [], artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
+      { id: "ORPHAN", derives_from: [], artifacts: [] },
+    ],
+    trackedFiles: ["src/a.mts"],
+  };
+  const naiveOrphan = naiveArtifactOnlyClosure(orphanRequirement);
+  assert.equal(naiveOrphan.ok, false,
+    "#693 RED: exact tracked-file closure alone must not accept an orphan canonical requirement");
+}
+
