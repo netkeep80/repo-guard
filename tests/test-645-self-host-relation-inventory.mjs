@@ -824,3 +824,38 @@ console.log("\n--- #693 vNext L1: accepted subject still needs independent CURRE
   assert.deepEqual(postCutoverClosure.supersededBy["V015-HISTORY"], ["VNEXT-CURRENT"]);
 }
 console.log("#693 vNext L1 independent CURRENT cutover passed");
+
+
+console.log("\n--- #698 RED: exact large transition must not require permanent change_profile ---");
+{
+  // Real #2173-class scale, intentionally modeled without a persistent named profile.
+  const observed = {
+    new_files: 108,
+    new_docs: 0,
+    net_added_lines: 17118,
+  };
+  const defaults = {
+    max_new_files: 4,
+    max_new_docs: 0,
+    max_net_added_lines: 800,
+  };
+  const exactOneShotAuthorization = {
+    base_sha: "4".repeat(40),
+    head_sha: "5".repeat(40),
+  };
+
+  assert.equal(exactOneShotAuthorization.base_sha.length, 40);
+  assert.equal(exactOneShotAuthorization.head_sha.length, 40);
+
+  // Deliberately old-style model under falsification: an over-budget transition
+  // can pass only if a persistent change_profile has been added to project policy.
+  const persistentProfilePresent = false;
+  const legacyProfileGate =
+    observed.new_files <= defaults.max_new_files
+    && observed.new_docs <= defaults.max_new_docs
+    && observed.net_added_lines <= defaults.max_net_added_lines
+    || persistentProfilePresent;
+
+  assert.equal(legacyProfileGate, true,
+    "#698 RED: an exact one-shot authorized transition must not require a permanent named change_profile");
+}
