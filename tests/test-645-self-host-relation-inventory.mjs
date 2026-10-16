@@ -345,3 +345,43 @@ console.log("\n--- #693 vNext J0 double justification closure ---");
   assert.deepEqual(unknownParent.orphanRequirements, ["CHILD"]);
 }
 console.log("#693 vNext J0 double justification closure passed");
+
+console.log("\n--- #693 vNext J1: valid closure does not self-authorize authority growth ---");
+{
+  const candidateModel = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "CHILD",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "repo-policy.json", relations: ["requires", "implements"] }],
+      },
+    ],
+    trackedFiles: ["repo-policy.json"],
+  });
+  assert.equal(candidateModel.ok, true, "candidate model is structurally justified from the external root");
+  assert.deepEqual(candidateModel.requirementExplanations.CHILD, ["ROOT", "CHILD"]);
+
+  const acceptedBase = fixtureGraph("base", [
+    { subject: "ROOT", path: "requirements/ROOT.yaml", relations: ["requires"] },
+  ]);
+  const candidateHead = fixtureGraph("head", [
+    { subject: "ROOT", path: "requirements/ROOT.yaml", relations: ["requires"] },
+    { subject: "CHILD", path: "repo-policy.json", relations: ["requires", "implements"] },
+  ]);
+
+  const unauthorized = checkRequirementTransition({
+    base: acceptedBase,
+    head: candidateHead,
+    grant: null,
+    trustedAuthorizer: null,
+  });
+  assert.equal(unauthorized.required, true);
+  assert.equal(unauthorized.authorized, false);
+  assert.equal(unauthorized.ok, false,
+    "a root-reachable candidate requirement must not authorize its own requirement-authority expansion");
+  assert.ok(unauthorized.reasons.includes("requirement_transition_grant_missing"));
+  assert.ok(unauthorized.reasons.includes("requirement_transition_authorizer_untrusted"));
+}
+console.log("#693 vNext J1 anti-self-authorization composition passed");
