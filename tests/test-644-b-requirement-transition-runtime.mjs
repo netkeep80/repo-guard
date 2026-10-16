@@ -204,6 +204,52 @@ console.log("\n--- #644 check-pr self-authorization boundary ---");
   }
 }
 
+
+console.log("\n--- #687 check-pr semantic-only authority transition ---");
+{
+  const rawPolicy = policy(["src/**"]);
+  const baseRequirement = [
+    "id: RG-R1",
+    "title: Accepted text",
+    "artifacts:",
+    "  - path: requirements/r1.yaml",
+    "    role: requirement",
+    "  - path: repo-policy.json",
+    "    role: governance",
+    "",
+  ].join("\n");
+  const headRequirement = baseRequirement.replace("title: Accepted text", "title: Replaced text");
+  const root = initRepo(rawPolicy, { "requirements/r1.yaml": baseRequirement });
+  try {
+    const baseSha = git(root, "rev-parse", "HEAD");
+    writeFileSync(join(root, "requirements/r1.yaml"), headRequirement);
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "candidate changes normative text only");
+    const headSha = git(root, "rev-parse", "HEAD");
+    const baseFiles = git(root, "ls-tree", "-r", "--name-only", baseSha).split("\n").filter(Boolean);
+    const headFiles = git(root, "ls-tree", "-r", "--name-only", headSha).split("\n").filter(Boolean);
+    const transition = authorityGrant(rawPolicy, baseSha, headSha, baseFiles, headFiles,
+      { "requirements/r1.yaml": baseRequirement },
+      { "requirements/r1.yaml": headRequirement });
+    assert.deepEqual(transition.add, []);
+    assert.deepEqual(transition.remove, []);
+    assert.notEqual(transition.base_authority_sha256, transition.expected_head_authority_sha256);
+
+    const noGrant = run(root, "", ["requirements/**"]);
+    const noGrantOutput = `${noGrant.stdout || ""}${noGrant.stderr || ""}`;
+    assert.equal(noGrant.status, 1, noGrantOutput);
+    assert.match(noGrantOutput, /FAIL: requirement-transition/);
+    assert.match(noGrantOutput, /requirement_transition_grant_missing/);
+
+    const approved = run(root, issueGrant(transition), ["requirements/**"]);
+    const approvedOutput = `${approved.stdout || ""}${approved.stderr || ""}`;
+    assert.equal(approved.status, 0, approvedOutput);
+    assert.match(approvedOutput, /PASS: requirement-transition/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 console.log("\n--- #644 check-pr administrative transition evidence boundary ---");
 {
   const rawPolicy = policy(["src/**"]);
@@ -418,6 +464,10 @@ console.log("\n--- #681 MNC-style routine governed YAML trace additions without 
     }
   }
   scenario("MNC code test fixture docs routine", baseline + newEdges, files, true, /PASS: governance-change-authorization/);
+  const editorial = baseline.replace("description: Accepted normative sentence.", "description: Accepted normative sentence. # editorial-only");
+  scenario("MNC routine with editorial source comment", editorial + newEdges, files, true, /PASS: governance-change-authorization/);
+  scenario("governed YAML formatting alone cannot bypass raw path protection", editorial,
+    {}, false, /FAIL: governance-change-authorization/);
   scenario("normative meaning must not auto authorize", baseline.replace("Accepted normative", "Replaced normative") + newEdges,
     files, false, /routine_normative_semantics_changed|FAIL: governance-change-authorization/);
   scenario("standalone self-authored requires edge", baseline + "  - path: garbage.tmp\n    relations: [requires]\n",
