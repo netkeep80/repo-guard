@@ -826,9 +826,9 @@ console.log("\n--- #693 vNext L1: accepted subject still needs independent CURRE
 console.log("#693 vNext L1 independent CURRENT cutover passed");
 
 
-console.log("\n--- #698 RED: exact large transition must not require permanent change_profile ---");
+console.log("\n--- #698 GREEN: exact one-shot large transition authorization, no permanent profile ---");
 {
-  // Real #2173-class scale, intentionally modeled without a persistent named profile.
+  // Real #2173-class scale.
   const observed = {
     new_files: 108,
     new_docs: 0,
@@ -839,23 +839,85 @@ console.log("\n--- #698 RED: exact large transition must not require permanent c
     max_new_docs: 0,
     max_net_added_lines: 800,
   };
-  const exactOneShotAuthorization = {
-    base_sha: "4".repeat(40),
-    head_sha: "5".repeat(40),
-  };
-
-  assert.equal(exactOneShotAuthorization.base_sha.length, 40);
-  assert.equal(exactOneShotAuthorization.head_sha.length, 40);
-
-  // Deliberately old-style model under falsification: an over-budget transition
-  // can pass only if a persistent change_profile has been added to project policy.
-  const persistentProfilePresent = false;
-  const legacyProfileGate =
+  const withinDefaultBudget =
     observed.new_files <= defaults.max_new_files
     && observed.new_docs <= defaults.max_new_docs
-    && observed.net_added_lines <= defaults.max_net_added_lines
-    || persistentProfilePresent;
+    && observed.net_added_lines <= defaults.max_net_added_lines;
+  assert.equal(withinDefaultBudget, false);
 
-  assert.equal(legacyProfileGate, true,
-    "#698 RED: an exact one-shot authorized transition must not require a permanent named change_profile");
+  const baseSha = "4".repeat(40);
+  const headSha = "5".repeat(40);
+  const transitionId = `Transition(${baseSha},${headSha})`;
+  const transitionDigest = createHash("sha256")
+    .update(JSON.stringify({ base_sha: baseSha, head_sha: headSha }))
+    .digest("hex");
+
+  const withoutDecision = evaluateVNextExactAcceptance({
+    subject: { id: transitionId, semantic_sha256: transitionDigest },
+    trustedDecisions: [],
+  });
+  assert.equal(withoutDecision.accepted, false);
+  assert.equal(withinDefaultBudget || withoutDecision.accepted, false,
+    "large transition over ordinary budget needs independent exact authorization");
+
+  const transitionDecision = {
+    decision_id: "D-RESEARCH-2173-LIKE",
+    accepts_subject: transitionId,
+    accepts_semantic_sha256: transitionDigest,
+  };
+  const exactDecision = evaluateVNextExactAcceptance({
+    subject: { id: transitionId, semantic_sha256: transitionDigest },
+    trustedDecisions: [transitionDecision],
+  });
+  assert.equal(exactDecision.accepted, true);
+  assert.equal(withinDefaultBudget || exactDecision.accepted, true,
+    "exact one-shot authorization may satisfy the budget exception without a persistent profile");
+
+  // Any HEAD mutation creates a different exact Transition subject and invalidates the receipt.
+  const nextHeadSha = "6".repeat(40);
+  const changedTransitionId = `Transition(${baseSha},${nextHeadSha})`;
+  const changedTransitionDigest = createHash("sha256")
+    .update(JSON.stringify({ base_sha: baseSha, head_sha: nextHeadSha }))
+    .digest("hex");
+  const staleDecision = evaluateVNextExactAcceptance({
+    subject: { id: changedTransitionId, semantic_sha256: changedTransitionDigest },
+    trustedDecisions: [transitionDecision],
+  });
+  assert.equal(staleDecision.accepted, false,
+    "one-shot transition authorization must not survive an exact HEAD change");
+
+  // The same exact transition receipt must not authorize normative requirement authority growth.
+  const protectedBase = fixtureGraph("base", [
+    { subject: "R", path: "src/a.mts", relations: ["requires", "implements"] },
+  ]);
+  const protectedHead = fixtureGraph("head", [
+    { subject: "R", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R", path: "repo-policy.json", relations: ["requires"] },
+  ]);
+  const normativeTransition = checkRequirementTransition({
+    base: protectedBase,
+    head: protectedHead,
+    grant: null,
+    trustedAuthorizer: null,
+  });
+  assert.equal(normativeTransition.ok, false);
+  assert.equal(exactDecision.accepted && normativeTransition.ok, false,
+    "budget authorization must not waive independent requirement authority");
+
+  // Nor does technical-integration authorization imply scientific/domain acceptance.
+  const scienceDigest = "7".repeat(64);
+  const scienceAcceptance = evaluateVNextExactAcceptance({
+    subject: { id: "SCIENCE-CORPUS", semantic_sha256: scienceDigest },
+    trustedDecisions: [transitionDecision],
+  });
+  assert.equal(scienceAcceptance.accepted, false);
+
+  // Ordinary small work remains ceremony-free.
+  const smallObserved = { new_files: 1, new_docs: 0, net_added_lines: 120 };
+  const smallWithinDefaults =
+    smallObserved.new_files <= defaults.max_new_files
+    && smallObserved.new_docs <= defaults.max_new_docs
+    && smallObserved.net_added_lines <= defaults.max_net_added_lines;
+  assert.equal(smallWithinDefaults, true);
 }
+console.log("#698 exact one-shot research transition boundary passed");
