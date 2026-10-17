@@ -9,7 +9,7 @@ export interface ResourceClosureInput {
   j2: RootedRequirementResult;
   trackedPaths: readonly string[];
   resourceRelations?: readonly ResourceLink[];
-  resolveArtifact: (path: string) => boolean;
+  resolver: { resolve(ref: unknown): { ok: boolean; value?: unknown } };
 }
 export interface ResourceClosureError { code: string; path: string; target?: string; }
 const direct = new Set(["requires","implemented_by","verified_by","documents","generates"]);
@@ -19,6 +19,13 @@ const norm = (path: unknown): string => {
   if (normalized !== path || /[*?\[\]{}]/.test(path) || path.endsWith("/"))
     throw new Error("noncanonical or wildcard resource target");
   return path;
+};
+const exactArtifact = (input: ResourceClosureInput, path: string): boolean => {
+  const resolved=input.resolver.resolve({kind:"artifact",path});
+  if(!resolved.ok) return false;
+  const result=resolved.value as { representation?: {repository?:string;revision?:string;path?:string} } | undefined;
+  return result?.representation?.repository===input.repository &&
+    result.representation.revision===input.revision && result.representation.path===path;
 };
 const obj = (v: unknown): Record<string,unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string,unknown> : null;
@@ -60,7 +67,7 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
         if(!target || target.kind!=="artifact")continue;
         let path:string;
         try {path=norm(target.path)}catch {errors.push({code:"unsafe_resource_target",path:id,target:key});continue}
-        if(!tracked.has(path) || !input.resolveArtifact(path)) {
+        if(!tracked.has(path) || !exactArtifact(input,path)) {
           errors.push({code:"missing_resource_target",path:id,target:path});continue;
         }
         add(path,[...proof,String(relation.predicate)+":"+path],id);
@@ -70,7 +77,7 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
       if(edge.kind!=="generates") {errors.push({code:"unsupported_resource_relation",path:String(edge.from)});continue}
       let from:string,to:string;
       try {from=norm(edge.from);to=norm(edge.to)}catch {errors.push({code:"unsafe_resource_target",path:String(edge.from)});continue}
-      if(!tracked.has(from)||!tracked.has(to) || !input.resolveArtifact(to) || !input.resolveArtifact(from)) {
+      if(!tracked.has(from)||!tracked.has(to) || !exactArtifact(input,to) || !exactArtifact(input,from)) {
         errors.push({code:"missing_resource_target",path:from,target:to});continue;
       }
       if(!links.has(from))links.set(from,[]);
