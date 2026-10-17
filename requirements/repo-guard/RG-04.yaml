@@ -36,6 +36,8 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/runtime/analysis-report.mjs"
     relations: [requires, implements]
+  - path: "dist/runtime/canonical-requirements.mjs"
+    relations: [requires, implements]
   - path: "dist/runtime/pipeline.mjs"
     relations: [requires, implements]
   - path: "dist/runtime/validation.mjs"
@@ -101,6 +103,8 @@ artifacts:
   - path: "src/requirement-relations.mts"
     relations: [requires, implements]
   - path: "src/runtime/analysis-report.mts"
+    relations: [requires, implements]
+  - path: "src/runtime/canonical-requirements.mts"
     relations: [requires, implements]
   - path: "src/runtime/pipeline.mts"
     relations: [requires, implements]
