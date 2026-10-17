@@ -562,8 +562,13 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                 if (applied.has(fingerprint))
                     continue;
                 applied.add(fingerprint);
+                if (v.label === "AUTHORITY" && rule.includeGenerated === true &&
+                    input.trustedAuthorityBase.revision !== input.base.revision && input.trustedAuthorityBase.resourceRelations === undefined)
+                    problems.push("I7:missing_trusted_generation_scope:" + id + ":" + rule.id);
+                const trustedEdges = input.trustedAuthorityBase.resourceRelations ||
+                    (input.trustedAuthorityBase.revision === input.base.revision ? input.base.resourceRelations || [] : []);
                 const allScopes = [
-                    derive(input.trustedAuthorityBase, id, rule, input.base.resourceRelations || []),
+                    derive(input.trustedAuthorityBase, id, rule, trustedEdges),
                     derive(input.base, id, rule, []),
                     derive(input.head, id, rule, []),
                 ];
