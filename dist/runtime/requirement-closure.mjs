@@ -43,7 +43,8 @@ export function evaluateRootedRequirements(input) {
             continue;
         }
         const present = universe.index[subject.requirementId];
-        if (!present || key(present.semantic) !== key(subject)) {
+        const bound = input.rootSubjects?.[subject.requirementId] || present?.semantic;
+        if (!present || !bound || !valid(bound) || bound.requirementId !== subject.requirementId || key(bound) !== key(subject)) {
             errors.push({ code: "missing_or_stale_trusted_root", requirement: subject.requirementId });
             continue;
         }
