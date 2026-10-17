@@ -1642,3 +1642,54 @@ test("#700 SAFETY RED: Requirement-scoped numeric constraints use BASE union HEA
   );
   assert.ok(result.reasons.some((reason) => reason.includes("CONSTRAINT:R1:lines-r1")));
 });
+
+
+test("#700 SAFETY RED: candidate HEAD cannot inject a trusted Requirement root", () => {
+  const base = graph700({
+    roots: ["ROOT"],
+    requirements: [req700("ROOT")],
+  });
+  const head = graph700({
+    roots: ["ROOT", "R-NEW"],
+    requirements: [req700("ROOT"), req700("R-NEW")],
+  });
+  const result = evaluate700({
+    base,
+    head,
+    workIntent: wi700(["ROOT", "R-NEW"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R-NEW"])],
+  });
+  assert.equal(
+    result.ok,
+    false,
+    "exact authorization of a new Requirement must not authorize candidate-controlled promotion to trusted root",
+  );
+  assert.ok(result.reasons.some((reason) => reason.includes("J2:orphan_requirement:R-NEW")));
+});
+
+test("#700 SAFETY RED: trusted provider classification is external to candidate Resource data", () => {
+  const base = graph700({
+    roots: ["R1"],
+    requirements: [req700("R1")],
+    resources: [res700("WF", "workflow", { content: "trusted" })],
+    relations: [rel700("R1", "requires", "WF")],
+  });
+  const head = graph700({
+    roots: base.roots,
+    requirements: base.requirements,
+    resources: [res700("WF", "workflow", { content: "candidate" })],
+    relations: base.relations,
+  });
+  const result = evaluate700({
+    base,
+    head,
+    workIntent: wi700(["R1"]),
+    trustedResourceIds: ["WF"],
+  });
+  assert.equal(
+    result.ok,
+    false,
+    "candidate must not bypass a trusted provider transition merely because trust classification is absent from its Resource object",
+  );
+  assert.ok(result.reasons.some((reason) => reason.includes("TRUST:missing:trust_root:WF")));
+});
