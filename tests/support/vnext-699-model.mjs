@@ -6,7 +6,6 @@ import {
   parseYaml,
   resolveJsonPointer,
 } from "../../dist/document-facts.mjs";
-
 const J3_STATE_RELATIONS_700 = new Set([
   "requires",
   "implemented_by",
@@ -20,7 +19,6 @@ const J3_REQUIREMENT_RELATIONS_700 = new Set([
   "constrains",
   "supersedes",
 ]);
-
 function stable700(value) {
   if (Array.isArray(value)) return "[" + value.map(stable700).join(",") + "]";
   if (value && typeof value === "object") {
@@ -28,11 +26,9 @@ function stable700(value) {
   }
   return JSON.stringify(value);
 }
-
 function relationKey700(relation) {
   return [relation.from, relation.kind, relation.to].join("|");
 }
-
 function graph700({
   roots = [],
   requirements = [],
@@ -48,17 +44,14 @@ function graph700({
     lifecycle: structuredClone(lifecycle),
   };
 }
-
 const req700 = (id, extra = {}) => ({ id, semantic: id, ...extra });
 const res700 = (id, kind = "code", extra = {}) => ({ id, kind, tracked: true, locator: id, content: id, ...extra });
 const rel700 = (from, kind, to) => ({ from, kind, to });
 const wi700 = (addresses, extra = {}) => ({ id: "W", source: "pr", state: "open", addresses: [...addresses], ...extra });
 const receipt700 = (baseSha, headSha, permissions) => ({ baseSha, headSha, permissions: [...permissions] });
-
 function mapById700(items) {
   return new Map(items.map((item) => [item.id, item]));
 }
-
 function j2Closure700(graph, trustedRoots = graph.roots) {
   const requirements = mapById700(graph.requirements);
   const paths = new Map();
@@ -78,7 +71,6 @@ function j2Closure700(graph, trustedRoots = graph.roots) {
   const orphanRequirements = [...requirements.keys()].filter((id) => !paths.has(id)).sort();
   return { ok: orphanRequirements.length === 0, paths, orphanRequirements };
 }
-
 function j1Closure700(graph, j2 = j2Closure700(graph)) {
   const resources = mapById700(graph.resources);
   const reached = new Map();
@@ -114,7 +106,6 @@ function j1Closure700(graph, j2 = j2Closure700(graph)) {
     missingTargets: [...missingTargets].sort(),
   };
 }
-
 function validateHead700(graph, trustedRoots = graph.roots) {
   const j2 = j2Closure700(graph, trustedRoots);
   const j1 = j1Closure700(graph, j2);
@@ -129,7 +120,6 @@ function validateHead700(graph, trustedRoots = graph.roots) {
     ],
   };
 }
-
 function transitionDeltas700(base, head) {
   const deltas = [];
   const baseRequirements = mapById700(base.requirements);
@@ -141,7 +131,6 @@ function transitionDeltas700(base, head) {
     else if (!after) deltas.push({ kind: "requirement_delete", subject: id });
     else if (stable700(before) !== stable700(after)) deltas.push({ kind: "requirement_modify", subject: id });
   }
-
   const baseResources = mapById700(base.resources);
   const headResources = mapById700(head.resources);
   const resourceIds = [...new Set([...baseResources.keys(), ...headResources.keys()])].sort();
@@ -165,7 +154,6 @@ function transitionDeltas700(base, head) {
       deltas.push({ kind: "resource_modify", subject: id });
     }
   }
-
   const baseRelations = new Map(base.relations.map((relation) => [relationKey700(relation), relation]));
   const headRelations = new Map(head.relations.map((relation) => [relationKey700(relation), relation]));
   for (const [key, relation] of [...baseRelations.entries()].sort()) {
@@ -174,7 +162,6 @@ function transitionDeltas700(base, head) {
   for (const [key, relation] of [...headRelations.entries()].sort()) {
     if (!baseRelations.has(key)) deltas.push({ kind: "relation_add", subject: key, relation });
   }
-
   const lifecycleIds = [...new Set([...Object.keys(base.lifecycle), ...Object.keys(head.lifecycle)])].sort();
   for (const id of lifecycleIds) {
     const before = base.lifecycle[id] || {};
@@ -186,14 +173,12 @@ function transitionDeltas700(base, head) {
       }
     }
   }
-
   return deltas.sort((a, b) => {
     const ak = [a.kind, a.subject, a.field || ""].join("|");
     const bk = [b.kind, b.subject, b.field || ""].join("|");
     return ak.localeCompare(bk);
   });
 }
-
 function requirementImpactClosure700(graph, seedIds) {
   const requirements = mapById700(graph.requirements);
   const impacted = new Set([...seedIds].filter((id) => requirements.has(id)));
@@ -216,7 +201,6 @@ function requirementImpactClosure700(graph, seedIds) {
   }
   return impacted;
 }
-
 function reverseImpactResource700(graph, resourceId) {
   const requirements = mapById700(graph.requirements);
   const resources = mapById700(graph.resources);
@@ -238,7 +222,6 @@ function reverseImpactResource700(graph, resourceId) {
   }
   return requirementImpactClosure700(graph, requirementSeeds);
 }
-
 function directRequirementOwners700(graph, resourceId) {
   const requirements = mapById700(graph.requirements);
   const resources = mapById700(graph.resources);
@@ -260,12 +243,10 @@ function directRequirementOwners700(graph, resourceId) {
   }
   return owners;
 }
-
 function directRequirementsForDelta700(delta, graph) {
   const requirements = mapById700(graph.requirements);
   const resources = mapById700(graph.resources);
   const direct = new Set();
-
   if (delta.kind.startsWith("requirement_") || delta.kind === "lifecycle") {
     if (requirements.has(delta.subject)) direct.add(delta.subject);
   } else if (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") {
@@ -280,12 +261,10 @@ function directRequirementsForDelta700(delta, graph) {
   }
   return direct;
 }
-
 function affectedRequirements700(delta, graph) {
   const requirements = mapById700(graph.requirements);
   const resources = mapById700(graph.resources);
   const seeds = new Set();
-
   if (delta.kind.startsWith("requirement_") || delta.kind === "lifecycle") {
     if (requirements.has(delta.subject)) seeds.add(delta.subject);
   } else if (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") {
@@ -296,14 +275,11 @@ function affectedRequirements700(delta, graph) {
       if (resources.has(endpoint)) for (const id of reverseImpactResource700(graph, endpoint)) seeds.add(id);
     }
   }
-
   return requirementImpactClosure700(graph, seeds);
 }
-
 function resourceForDelta700(delta, base, head) {
   return mapById700(head.resources).get(delta.subject) || mapById700(base.resources).get(delta.subject) || null;
 }
-
 function transitionRuleMatches700(requirement, delta, base, head) {
   const rule = requirement.transition;
   if (!rule) return false;
@@ -317,14 +293,12 @@ function transitionRuleMatches700(requirement, delta, base, head) {
   }
   return true;
 }
-
 function exactPermission700(context, permission) {
   return (context.trustedReceipts || []).some((receipt) =>
     receipt.baseSha === context.baseSha
     && receipt.headSha === context.headSha
     && (receipt.permissions.includes("*") || receipt.permissions.includes(permission)));
 }
-
 function applicableRequirements700(delta, base, head) {
   const impacted = new Set([
     ...affectedRequirements700(delta, base),
@@ -335,7 +309,6 @@ function applicableRequirements700(delta, base, head) {
   }
   return impacted;
 }
-
 function causalRequirements700(delta, base, head) {
   const causal = new Set([
     ...directRequirementsForDelta700(delta, base),
@@ -346,7 +319,6 @@ function causalRequirements700(delta, base, head) {
   }
   return causal;
 }
-
 function relationTrustPermissions700(delta, base, head) {
   if (!delta.relation) return [];
   const relation = delta.relation;
@@ -355,25 +327,21 @@ function relationTrustPermissions700(delta, base, head) {
   const fromBase = baseRequirements.get(relation.from);
   const fromHead = headRequirements.get(relation.from);
   const toBase = baseRequirements.get(relation.to);
-
   if (J3_REQUIREMENT_RELATIONS_700.has(relation.kind)) {
     if (delta.kind === "relation_add" && !fromBase && fromHead) {
       return ["requirement:" + relation.from];
     }
     return ["relation:" + relationKey700(relation)];
   }
-
   if (delta.kind === "relation_remove" && relation.kind === "requires" && fromBase) {
     return ["requirement:" + relation.from];
   }
   return [];
 }
-
 function trustPermissions700(delta, base, head, context) {
   const permissions = [];
   const baseRequirements = mapById700(base.requirements);
   const headRequirements = mapById700(head.requirements);
-
   if (delta.kind.startsWith("requirement_")) {
     const requirement = baseRequirements.get(delta.subject) || headRequirements.get(delta.subject);
     if (requirement) permissions.push("requirement:" + delta.subject);
@@ -389,7 +357,6 @@ function trustPermissions700(delta, base, head, context) {
   }
   return [...new Set(permissions)].sort();
 }
-
 function reachableResourcesFromRequirement700(graph, requirementId) {
   const resources = mapById700(graph.resources);
   const reached = new Set();
@@ -407,7 +374,6 @@ function reachableResourcesFromRequirement700(graph, requirementId) {
   }
   return reached;
 }
-
 function exactExecutionPass700(context, resourceId) {
   return (context.executions || []).some((execution) =>
     execution.resourceId === resourceId
@@ -415,7 +381,6 @@ function exactExecutionPass700(context, resourceId) {
     && execution.headSha === context.headSha
     && execution.status === "pass");
 }
-
 function exactDomainPass700(context, requirementId, kind, subject = requirementId) {
   return (context.domainEvidence || []).some((evidence) =>
     evidence.requirementId === requirementId
@@ -425,7 +390,6 @@ function exactDomainPass700(context, requirementId, kind, subject = requirementI
     && evidence.headSha === context.headSha
     && evidence.status === "pass");
 }
-
 function metricValue700(constraint, requirementId, base, head, deltas, context) {
   const scope = new Set([
     ...reachableResourcesFromRequirement700(base, requirementId),
@@ -446,7 +410,6 @@ function metricValue700(constraint, requirementId, base, head, deltas, context) 
   }
   throw new Error("unsupported #700 metric " + constraint.metric);
 }
-
 function evaluate700({
   base,
   head,
@@ -476,7 +439,6 @@ function evaluate700({
   const changedExplanations = [];
   const applicableAll = new Set();
   const affectedAll = new Set();
-
   for (const delta of deltas) {
     const applicable = applicableRequirements700(delta, base, head);
     const affected = new Set([
@@ -485,20 +447,16 @@ function evaluate700({
     ]);
     for (const id of applicable) applicableAll.add(id);
     for (const id of affected) affectedAll.add(id);
-
     const causalCandidates = causalRequirements700(delta, base, head);
     const causes = [...causalCandidates].filter((id) =>
       workIntent.addresses.includes(id)
       && (baseJ2.paths.has(id) || exactPermission700(context, "requirement:" + id))
     ).sort();
-
     if (!causes.length) j3Violations.push("J3:no_cause:" + delta.kind + ":" + delta.subject);
-
     const permissions = trustPermissions700(delta, base, head, context);
     for (const permission of permissions) {
       if (!exactPermission700(context, permission)) trustViolations.push("TRUST:missing:" + permission);
     }
-
     changedExplanations.push({
       delta: delta.kind + ":" + delta.subject + (delta.field ? ":" + delta.field : ""),
       affected: [...affected].sort(),
@@ -508,15 +466,12 @@ function evaluate700({
       trust: permissions,
     });
   }
-
   const relationExists = (from, kind, to) =>
     base.relations.some((r) => r.from === from && r.kind === kind && r.to === to)
     || head.relations.some((r) => r.from === from && r.kind === kind && r.to === to);
-
   for (const id of [...applicableAll].sort()) {
     const requirement = mapById700(base.requirements).get(id) || mapById700(head.requirements).get(id);
     if (!requirement) continue;
-
     for (const verifier of requirement.requiredVerifiers || []) {
       if (!relationExists(id, "verified_by", verifier)) {
         evidenceViolations.push("EVIDENCE:unrelated_verifier:" + id + ":" + verifier);
@@ -524,17 +479,14 @@ function evaluate700({
         evidenceViolations.push("EVIDENCE:verifier_not_passed:" + id + ":" + verifier);
       }
     }
-
     for (const kind of requirement.domainEvidenceOnChange || []) {
       if (!exactDomainPass700(context, id, kind)) {
         evidenceViolations.push("DOMAIN:missing:" + id + ":" + kind);
       }
     }
-
     if (requirement.acknowledgeImpact === true && affectedAll.has(id) && !workIntent.addresses.includes(id)) {
       evidenceViolations.push("IMPACT:unacknowledged:" + id);
     }
-
     for (const constraint of requirement.constraints || []) {
       const actual = metricValue700(constraint, id, base, head, deltas, context);
       const permission = "constraint:" + id + ":" + constraint.id;
@@ -543,7 +495,6 @@ function evaluate700({
       }
     }
   }
-
   const changedResourceIds = new Set(
     deltas
       .filter((delta) => delta.kind.startsWith("resource_") || delta.kind === "dependency_update")
@@ -561,14 +512,12 @@ function evaluate700({
       evidenceViolations.push("DOMAIN:generation_freshness:" + relationKey700(relation));
     }
   }
-
   for (const delta of deltas.filter((item) => item.kind === "dependency_update")) {
     const resource = mapById700(head.resources).get(delta.subject);
     const observed = externalObservations.some((item) =>
       item.resourceId === delta.subject && item.exact === resource?.exact && item.status === "resolved");
     if (!observed) evidenceViolations.push("OBSERVATION:dependency_unresolved:" + delta.subject);
   }
-
   const reasons = [
     ...state.reasons,
     ...new Set(j3Violations),
@@ -576,7 +525,6 @@ function evaluate700({
     ...new Set(evidenceViolations),
     ...new Set(constraintViolations),
   ].sort();
-
   return {
     ok: reasons.length === 0,
     reasons,
@@ -600,7 +548,6 @@ function evaluate700({
     },
   };
 }
-
 function assert700(label, input, expected, includes = []) {
   const result = evaluate700(input);
   assert.equal(result.ok, expected, label + ": " + result.reasons.join(", "));
@@ -609,16 +556,12 @@ function assert700(label, input, expected, includes = []) {
   }
   return result;
 }
-
-
 const EXACT_SHA = /^[0-9a-f]{40}$/i;
 const REQUIREMENT_RELATIONS = new Set(["derives_from", "depends_on", "constrains", "supersedes"]);
 const RESOURCE_RELATIONS = new Set(["requires", "implemented_by", "verified_by", "documents", "generates"]);
-
 function sha256(value) {
   return createHash("sha256").update(typeof value === "string" ? value : stable(value)).digest("hex");
 }
-
 function stable(value) {
   if (Array.isArray(value)) return "[" + value.map(stable).join(",") + "]";
   if (value && typeof value === "object") {
@@ -626,40 +569,33 @@ function stable(value) {
   }
   return JSON.stringify(value);
 }
-
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(label + ": must be object");
   return value;
 }
-
 function exactFields(value, allowed, label) {
   const set = new Set(allowed);
   for (const key of Object.keys(value)) {
     if (!set.has(key)) throw new Error(label + ': unknown field "' + key + '"');
   }
 }
-
 function nonEmpty(value, label) {
   if (typeof value !== "string" || !value.trim()) throw new Error(label + ": must be non-empty string");
   return value.trim();
 }
-
 function safePath(value, label = "path") {
   return normalizeDocumentFact(value, "repository_path", label);
 }
-
 function repositoryId(value, label = "repository") {
   const id = nonEmpty(value, label).toLowerCase();
   if (!/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(id)) throw new Error(label + ": must be owner/repository");
   return id;
 }
-
 function exactRevision(value, label = "revision") {
   const revision = nonEmpty(value, label).toLowerCase();
   if (!EXACT_SHA.test(revision)) throw new Error(label + ": exact 40-hex revision required");
   return revision;
 }
-
 function pointer(value, label = "pointer") {
   if (value === undefined) return "";
   if (typeof value !== "string") throw new Error(label + ": must be string");
@@ -670,11 +606,9 @@ function pointer(value, label = "pointer") {
   }
   return value;
 }
-
 function encodePointerSegment(value) {
   return String(value).replace(/~/g, "~0").replace(/\//g, "~1");
 }
-
 function strictCanonicalParse(format, content) {
   if (format === "yaml") return parseYaml(content);
   if (format === "json") {
@@ -685,13 +619,11 @@ function strictCanonicalParse(format, content) {
   }
   throw new Error("unsupported canonical format " + format);
 }
-
 function canonicalFormat(path) {
   if (path.endsWith(".yaml") || path.endsWith(".yml")) return "yaml";
   if (path.endsWith(".json")) return "json";
   throw new Error(path + ": canonical source extension must be yaml/yml/json");
 }
-
 function snapshot({ repository = "netkeep80/repo-guard", revision = "a".repeat(40), files = {}, trackedFiles = null }) {
   const repo = repositoryId(repository);
   const sha = exactRevision(revision);
@@ -704,7 +636,6 @@ function snapshot({ repository = "netkeep80/repo-guard", revision = "a".repeat(4
   const tracked = (trackedFiles || [...normalized.keys()]).map((path) => safePath(path, "tracked path")).sort();
   return { repository: repo, revision: sha, files: normalized, trackedFiles: [...new Set(tracked)] };
 }
-
 function discoverCanonicalSources(snap) {
   const result = [];
   for (const path of [...snap.files.keys()].sort()) {
@@ -715,7 +646,6 @@ function discoverCanonicalSources(snap) {
   }
   return result;
 }
-
 function normalizeTarget(value, label) {
   const target = object(value, label);
   if (target.kind === "requirement") {
@@ -728,7 +658,6 @@ function normalizeTarget(value, label) {
   }
   throw new Error(label + ': unsupported target kind "' + String(target.kind) + '"');
 }
-
 function parseCanonicalRequirement(source) {
   const root = object(strictCanonicalParse(source.format, source.content), source.path);
   exactFields(root, ["id", "relations"], source.path);
@@ -768,7 +697,6 @@ function parseCanonicalRequirement(source) {
     relations,
   };
 }
-
 function buildSourceIndex(snap) {
   const sources = discoverCanonicalSources(snap);
   const byId = new Map();
@@ -790,7 +718,6 @@ function buildSourceIndex(snap) {
   }
   return { snapshot: snap, sources, byId, byPath };
 }
-
 function eagerClosure(snap, trustedRoots) {
   const index = buildSourceIndex(snap);
   const roots = [...new Set(trustedRoots.map((id) => nonEmpty(id, "trusted root")))].sort();
@@ -801,7 +728,6 @@ function eagerClosure(snap, trustedRoots) {
     reachable.add(root);
     whyRequirement.set(root, [root]);
   }
-
   let changed = true;
   while (changed) {
     changed = false;
@@ -818,11 +744,9 @@ function eagerClosure(snap, trustedRoots) {
       changed = true;
     }
   }
-
   const orphanRequirements = [...index.byId.keys()].filter((id) => !reachable.has(id)).sort();
   const justifiedResources = new Set();
   const whyResource = new Map();
-
   // Canonical source representation is justified by semantic Requirement reachability.
   for (const id of [...reachable].sort()) {
     const requirement = index.byId.get(id);
@@ -836,11 +760,9 @@ function eagerClosure(snap, trustedRoots) {
       if (!previous || stable(candidate) < stable(previous)) whyResource.set(relation.target.path, candidate);
     }
   }
-
   const orphanTrackedResources = snap.trackedFiles
     .filter((path) => !justifiedResources.has(path))
     .sort();
-
   return {
     ok: orphanRequirements.length === 0 && orphanTrackedResources.length === 0,
     index,
@@ -855,7 +777,6 @@ function eagerClosure(snap, trustedRoots) {
     },
   };
 }
-
 function compareSemanticRequirements(base, head) {
   const b = buildSourceIndex(base), h = buildSourceIndex(head);
   const ids = [...new Set([...b.byId.keys(), ...h.byId.keys()])].sort();
@@ -873,7 +794,6 @@ function compareSemanticRequirements(base, head) {
   }
   return delta;
 }
-
 function validateRequirementDeltaAuthority(base, head, authorizedIds = []) {
   const delta = compareSemanticRequirements(base, head);
   const protectedIds = new Set([...delta.add, ...delta.remove, ...delta.modify]);
@@ -881,7 +801,6 @@ function validateRequirementDeltaAuthority(base, head, authorizedIds = []) {
   const missing = [...protectedIds].filter((id) => !authorized.has(id)).sort();
   return { ok: missing.length === 0, missing, delta };
 }
-
 function normalizeResourceRef(value) {
   const ref = object(value, "ResourceRef");
   if (ref.kind === "requirement") {
@@ -908,7 +827,6 @@ function normalizeResourceRef(value) {
   }
   throw new Error('ResourceRef: unsupported kind "' + String(ref.kind) + '"');
 }
-
 function parseDocumentAt(snap, path) {
   const content = snap.files.get(path);
   if (content === undefined) throw new Error('missing exact document "' + path + '"');
@@ -916,7 +834,6 @@ function parseDocumentAt(snap, path) {
   if (path.endsWith(".json")) return strictCanonicalParse("json", content);
   return content;
 }
-
 function exactCoordinateKey(repository, revision, path, ptr = "") {
   return JSON.stringify([
     repositoryId(repository),
@@ -925,7 +842,6 @@ function exactCoordinateKey(repository, revision, path, ptr = "") {
     pointer(ptr),
   ]);
 }
-
 function createResolver({ localSnapshot, externalSnapshots = [], trustedResourcePaths = [] }) {
   const localIndex = buildSourceIndex(localSnapshot);
   const external = new Map();
@@ -936,7 +852,6 @@ function createResolver({ localSnapshot, externalSnapshots = [], trustedResource
   }
   const trusted = new Set(trustedResourcePaths.map((path) => safePath(path, "trusted resource path")));
   const cache = new Map();
-
   const resolve = (rawRef) => {
     const ref = normalizeResourceRef(rawRef);
     if (ref.kind === "requirement") {
@@ -954,7 +869,6 @@ function createResolver({ localSnapshot, externalSnapshots = [], trustedResource
         },
       });
     }
-
     let snap = localSnapshot;
     let path = ref.path;
     let ptr = "";
@@ -966,11 +880,9 @@ function createResolver({ localSnapshot, externalSnapshots = [], trustedResource
     } else if (ref.kind === "document") {
       ptr = ref.pointer;
     }
-
     if (!snap.files.has(path)) throw new Error('missing exact resource "' + path + '"');
     const key = exactCoordinateKey(snap.repository, snap.revision, path, ptr);
     if (cache.has(key)) return structuredClone(cache.get(key));
-
     let selected = parseDocumentAt(snap, path);
     if (ptr !== "") selected = resolveJsonPointer(selected, ptr);
     const value = structuredClone(selected);
@@ -988,10 +900,8 @@ function createResolver({ localSnapshot, externalSnapshots = [], trustedResource
     cache.set(key, result);
     return structuredClone(result);
   };
-
   return { resolve, localIndex, cache };
 }
-
 function pointerStability(ptr) {
   const normalized = pointer(ptr);
   if (normalized === "") return "stable-root";
@@ -1000,7 +910,6 @@ function pointerStability(ptr) {
     ? "positional-unsafe"
     : "stable-keyed";
 }
-
 function semanticSubject(index, id) {
   const requirement = index.byId.get(id);
   if (!requirement) throw new Error("missing semantic subject " + id);
@@ -1011,7 +920,6 @@ function semanticSubject(index, id) {
     semantic_sha256: requirement.semantic_sha256,
   };
 }
-
 function representationSubject(snap, path, ptr = "") {
   const selected = ptr === "" ? parseDocumentAt(snap, safePath(path)) : resolveJsonPointer(parseDocumentAt(snap, safePath(path)), pointer(ptr));
   return {
@@ -1023,11 +931,9 @@ function representationSubject(snap, path, ptr = "") {
     value_sha256: sha256(selected),
   };
 }
-
 function receiptMatches(receipt, subject) {
   return stable(receipt) === stable(subject);
 }
-
 function reverseImpactRequirements(index, artifactPath) {
   const path = safePath(artifactPath);
   const direct = new Set();
@@ -1055,7 +961,6 @@ function reverseImpactRequirements(index, artifactPath) {
   }
   return [...impacted].sort().map((id) => ({ kind: "impact_candidate", requirement_id: id }));
 }
-
 function requirementYaml(id, relations = {}) {
   const relationLines = Object.entries(relations).flatMap(([key, relation]) => {
     const target = relation.target.kind === "requirement"
@@ -1074,8 +979,6 @@ function requirementYaml(id, relations = {}) {
     "",
   ].join("\n");
 }
-
-
 export {
   graph700,
   req700,
