@@ -415,12 +415,16 @@ function authorityPermissions(delta: Delta, input: TransitionClosureInput, prote
   if (delta.kind==="requirement_add"||delta.kind==="requirement_modify"||delta.kind==="requirement_remove") result.add("requirement:"+delta.subject);
   if (delta.kind.startsWith("relation_")) {
     const facts=[delta.beforeRelation,delta.afterRelation,delta.relation].filter(Boolean) as RelationFact[];
-    const predicate=deltaPredicate(delta);
-    const from=facts[0]?.from;
-    if (predicate && from && strongRequirementRelations.has(predicate) && facts.some(f=>f.targetRequirement)) {
-      result.add("requirement:"+from);
+    // Each actual relation transition is evaluated against BOTH exact states.
+    // A strong BASE obligation cannot disappear merely because HEAD supplies a weak trace.
+    // Descriptive changes remain subject to J1/J2/J3, never to a blanket removal grant.
+    for (const fact of facts) {
+      if (fact.origin==="requirement" && (fact.predicate==="requires" || strongRequirementRelations.has(fact.predicate)))
+        result.add("requirement:"+fact.from);
+      if (fact.origin==="resource" && fact.predicate==="generates" &&
+        (delta.kind==="relation_remove" || delta.kind==="relation_replace"))
+        result.add("resource:"+fact.from);
     }
-    if (predicate==="requires" && (delta.kind==="relation_remove"||delta.kind==="relation_replace") && from) result.add("requirement:"+from);
   }
   if (delta.kind==="lifecycle" && delta.field && protectedLifecycleFields.has(delta.field) && (delta.before===true || delta.after===true))
     result.add(`lifecycle:${delta.subject}:${delta.field}`);
