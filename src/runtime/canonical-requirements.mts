@@ -13,7 +13,7 @@ export interface CanonicalSnapshotInput {
   repository: string;
   revision: string;
   paths: readonly string[];
-  readFile: (path: string) => string | Buffer | null | undefined;
+  readFile: (revision: string, path: string) => string | Buffer | null | undefined;
 }
 export interface CanonicalFragmentResult { ok: boolean; value?: JsonValue; identity?: ExactRepresentationSubject; error?: CanonicalError; }
 export interface CanonicalRequirementsResult {
@@ -101,7 +101,7 @@ export function loadCanonicalRequirements(input: CanonicalSnapshotInput): Canoni
     }
     if (!identityValid) continue;
     try {
-      const content = input.readFile(safePath);
+      const content = input.readFile(input.revision, safePath);
       if (content === null || content === undefined) throw new Error("canonical source missing at exact snapshot");
       const value = parseRequirement(Buffer.isBuffer(content) ? content.toString("utf8") : content, safePath);
       const id = (value as Record<string, unknown>).id;
