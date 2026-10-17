@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {loadCanonicalRequirements} from "../dist/runtime/canonical-requirements.mjs";
 import {evaluateRootedRequirements} from "../dist/runtime/requirement-closure.mjs";
+import {createResourceResolver} from "../dist/runtime/resource-resolver.mjs";
 import {evaluateTrackedResourceClosure} from "../dist/runtime/resource-closure.mjs";
 const repository="netkeep80/repo-guard",revision="a".repeat(40);
 const make=(docs,tracked,edges=[])=>{
