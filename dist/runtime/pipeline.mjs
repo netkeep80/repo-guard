@@ -397,3 +397,155 @@ export function runRepoGuardSelfHostShadow(input, options, config, expectedInten
     }, expectedIntentionalDifference);
     return { ...shadow, selfHost: selfHost ?? null };
 }
+/**
+ * I9 generic external-repository replay seam.
+ *
+ * It independently observes exact Git state and, when supplied, evaluates a
+ * provisional migration model through the production J2/J1/J3/I7 machinery.
+ * It deliberately cannot certify consumer authority: authentication remains
+ * outside the pure evaluator. Therefore this function never returns
+ * acceptedAuthorityVerified=true and cannot be used as a cutover gate.
+ */
+export function evaluateRepositoryShadowReplay(input) {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+        throw new Error("I9 invalid repository identity");
+    for (const [label, revision] of [
+        ["authority", input.trustedAuthorityBaseRevision],
+        ["base", input.baseRevision],
+        ["head", input.headRevision],
+    ])
+        if (!exactSha.test(revision))
+            throw new Error(`I9 invalid ${label} revision`);
+    const authorityEntries = listTrackedEntriesAtRef(input.trustedAuthorityBaseRevision, input.repositoryRoot);
+    const baseEntries = input.baseRevision === input.trustedAuthorityBaseRevision
+        ? authorityEntries : listTrackedEntriesAtRef(input.baseRevision, input.repositoryRoot);
+    const headEntries = input.headRevision === input.baseRevision
+        ? baseEntries : input.headRevision === input.trustedAuthorityBaseRevision
+        ? authorityEntries : listTrackedEntriesAtRef(input.headRevision, input.repositoryRoot);
+    const exactDiff = getExactDiffIdentity(input.baseRevision, input.headRevision, input.repositoryRoot);
+    const treeChanges = exactTreeChanges(baseEntries, headEntries);
+    const observation = {
+        repository: input.repository,
+        authorityRevision: input.trustedAuthorityBaseRevision,
+        baseRevision: input.baseRevision,
+        headRevision: input.headRevision,
+        authorityTracked: authorityEntries.length,
+        baseTracked: baseEntries.length,
+        headTracked: headEntries.length,
+        exactDiffIdentity: diffIdentity(exactDiff),
+        treeChanges,
+        source: "existing production Git primitives",
+    };
+    if (!input.model) {
+        return {
+            observation,
+            replay: {
+                classification: "NOT_PROVEN",
+                ok: false,
+                gaps: ["I9:no_accepted_or_provisional_vnext_model"],
+                acceptedAuthorityVerified: false,
+                readyForCutover: false,
+                providerAuthentication: "external to pure evaluator",
+            },
+        };
+    }
+    const roots = input.model.authority.evaluationRoots;
+    const close = (label, revision, entries, state) => {
+        const snapshotMismatch = state.requirements.requirements.some((requirement) => requirement.representation.repository !== input.repository ||
+            requirement.representation.revision !== revision);
+        const j2 = evaluateRootedRequirements({
+            requirements: state.requirements,
+            trustedRoots: roots,
+            rootSubjects: state.rootSubjects,
+        });
+        let j1 = {
+            ok: false,
+            justified: [],
+            unjustified: entries.map((entry) => entry.path),
+            errors: [{ code: "j2_not_rooted", path: "" }],
+            explanations: {},
+            owners: {},
+        };
+        if (!snapshotMismatch && state.requirements.ok && j2.ok) {
+            const resolver = createResourceResolver({
+                repository: input.repository,
+                revision,
+                requirements: state.requirements,
+                readers: {
+                    [input.repository]: (sha, path) => sha === revision ? readFileAtRef(sha, path, input.repositoryRoot) : null,
+                },
+            });
+            j1 = evaluateTrackedResourceClosure({
+                repository: input.repository,
+                revision,
+                requirements: state.requirements,
+                j2,
+                trackedPaths: entries.map((entry) => entry.path),
+                resourceRelations: state.resourceRelations,
+                resolver,
+            });
+        }
+        return { label, revision, requirements: state.requirements, j2, j1, resourceRelations: state.resourceRelations, snapshotMismatch };
+    };
+    const authority = close("authority", input.trustedAuthorityBaseRevision, authorityEntries, input.model.authority);
+    const base = close("base", input.baseRevision, baseEntries, input.model.base);
+    const head = close("head", input.headRevision, headEntries, input.model.head);
+    const transition = evaluateTransitionCauseClosure({
+        repository: input.repository,
+        trustedAuthorityBase: {
+            revision: authority.revision,
+            requirements: authority.requirements,
+            j2: authority.j2,
+            resourceRelations: authority.resourceRelations,
+        },
+        base: {
+            revision: base.revision,
+            requirements: base.requirements,
+            j2: base.j2,
+            j1: base.j1,
+            resourceRelations: base.resourceRelations,
+        },
+        head: {
+            revision: head.revision,
+            requirements: head.requirements,
+            j2: head.j2,
+            j1: head.j1,
+            resourceRelations: head.resourceRelations,
+        },
+        resourceDeltas: resourceDeltasFromParsedDiff(exactDiff),
+        workIntent: input.workIntent || null,
+        trustedReceipts: input.trustedReceipts || [],
+        protectedResources: input.protectedResources || [],
+        evidenceFacts: input.evidenceFacts || [],
+        observationFacts: input.observationFacts || [],
+        trustedEvidenceProviders: input.trustedEvidenceProviders || [],
+    });
+    const gaps = uniqueSorted([
+        ...(authority.snapshotMismatch ? ["I9:authority_snapshot_mismatch"] : []),
+        ...(base.snapshotMismatch ? ["I9:base_snapshot_mismatch"] : []),
+        ...(head.snapshotMismatch ? ["I9:head_snapshot_mismatch"] : []),
+        ...(!authority.j2.ok ? ["I9:authority_j2_not_rooted"] : []),
+        ...(!base.j2.ok ? ["I9:base_j2_not_rooted"] : []),
+        ...(!head.j2.ok ? ["I9:head_j2_not_rooted"] : []),
+        ...(!authority.j1.ok ? ["I9:authority_j1_not_closed"] : []),
+        ...(!base.j1.ok ? ["I9:base_j1_not_closed"] : []),
+        ...(!head.j1.ok ? ["I9:head_j1_not_closed"] : []),
+        ...transition.reasons.map((reason) => "I9:" + reason),
+    ]);
+    return {
+        observation,
+        replay: {
+            classification: "PROVISIONAL_MIGRATION_MODEL",
+            ok: gaps.length === 0,
+            gaps,
+            acceptedAuthorityVerified: false,
+            readyForCutover: false,
+            rootSemantics: "authority-snapshot evaluation roots; never roots created by HEAD",
+            providerAuthentication: "external to pure evaluator",
+            authority: { revision: authority.revision, j2: authority.j2, j1: authority.j1 },
+            base: { revision: base.revision, j2: base.j2, j1: base.j1 },
+            head: { revision: head.revision, j2: head.j2, j1: head.j1 },
+            transition,
+        },
+    };
+}

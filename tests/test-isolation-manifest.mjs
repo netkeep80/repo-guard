@@ -21,7 +21,6 @@ const pureReadOnlyParallel = [
   "test-707-i5-j3-transition-closure.mjs",
   "test-707-i6-relation-strength.mjs",
   "test-707-i7-scoped-constraints.mjs",
-  "test-699-five-consumer-differential.mjs",
   "test-anchor-diagnostics-boundary.mjs",
   "test-anchor-extractors.mjs",
   "test-architectural-constraints.mjs",
@@ -123,6 +122,7 @@ const externalIntegrationParallel = [
 ];
 
 const externalIntegrationSerial = [
+  "test-699-five-consumer-differential.mjs",
   "test-644-b-requirement-transition-runtime.mjs",
   "test-atomic-governance-cutover.mjs",
   "test-c3-10a-external-base-cutover.mjs",

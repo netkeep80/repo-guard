@@ -318,7 +318,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     trustedAuthorityBaseRevision,
     baseRevision,
     headRevision,
-    workIntent: { id: "github:issue:723", source: "github_issue", addresses: ["RG-04", "RG-05"] },
+    workIntent: { id: "github:issue:707:i8-i9", source: "github_issue", addresses: ["RG-04", "RG-05", "RG-08"] },
     protectedResources: protectedBoundary,
   };
   const shadow = pipeline.runRepoGuardSelfHostShadow(policyInput, { quiet: true }, config);
