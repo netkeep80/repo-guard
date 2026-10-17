@@ -204,6 +204,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-707-i6-relation-strength.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-707-i7-scoped-constraints.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-707-i5-j3-transition-closure.mjs"
     relations: [requires, verifies]
   - path: "tests/test-707-i3-j2-closure.mjs"
