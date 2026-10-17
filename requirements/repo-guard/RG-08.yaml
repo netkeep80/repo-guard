@@ -66,6 +66,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-699-five-consumer-differential.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-707-i9-five-consumer-shadow.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-707-i0-shadow.mjs"
     relations: [requires, verifies]
   - path: "tests/test-isolation-manifest.mjs"

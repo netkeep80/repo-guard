@@ -123,6 +123,7 @@ const externalIntegrationParallel = [
 ];
 
 const externalIntegrationSerial = [
+  "test-707-i9-five-consumer-shadow.mjs",
   "test-644-b-requirement-transition-runtime.mjs",
   "test-atomic-governance-cutover.mjs",
   "test-c3-10a-external-base-cutover.mjs",
