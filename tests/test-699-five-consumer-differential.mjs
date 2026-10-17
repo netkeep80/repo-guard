@@ -1112,6 +1112,15 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
     assert.equal(d5Routine.replay.transition.explanations.whyChanged
       .flatMap((x) => x.requiredAuthority).length, 0);
 
+    // Diverged BASE falsifier: production Git observation must use merge-base→HEAD,
+    // not a direct diverged BASE→HEAD tree comparison.
+    git(d5Derived, ["checkout", "-q", "--detach", d5Base]);
+    put(d5Derived, "base-only.txt", "must not appear in merge-base-to-head observation\n");
+    const d5DivergedBase = commitAll(d5Derived, "D5 diverged local base witness");
+    const d5DivergedDiff = productionGit.getExactDiffIdentity(d5DivergedBase, d5Head, d5Derived);
+    assert.equal(d5DivergedDiff.some((x) => x.path === "base-only.txt" || x.previousPath === "base-only.txt"), false);
+    assert.equal(d5DivergedDiff.some((x) => x.path === "src/knowledge-snapshot-v0.mjs"), true);
+
     git(d5Derived, ["checkout", "-q", "--detach", d5Base]);
     put(d5Derived, "requirements/D5-R.yaml", d5Req("src/store.mjs", "changed normative requirement"));
     const d5NormativeHead = commitAll(d5Derived, "D5 derived unauthorized normative change");
@@ -1172,6 +1181,10 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       D5: { source: "five exact canonical Requirement files", status: "PROVISIONAL_MIGRATION_MODEL", gap: "legacy artifacts need accepted typed-relation migration; full tracked closure not yet accepted" },
     };
 
+    const testSourceText = readFileSync(resolve("tests/test-699-five-consumer-differential.mjs"), "utf8");
+    const researchScenarioDefinitions = (testSourceText.match(/test\("#699 /g) || []).length;
+    assert.equal(researchScenarioDefinitions, 53);
+
     const checks = {
       R01: () => assert.equal(Object.values(observed).every((x) => /^[0-9a-f]{40}$/.test(x.current)), true),
       R02: () => assert.equal(Object.keys(observed).length, 5),
@@ -1182,10 +1195,13 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       R06: () => assert.equal(d5Canonical.requirements.every((r) => r.semantic.digest.length === 64 && r.representation.revision === PINS.D5.pin), true),
       R07: () => assert.match(d2Lock.acceptedCommit, /^[0-9a-f]{40}$/),
       R08: () => assert.equal(Object.values(observed).every((x) => x.replay.observation.headRevision === PINS[Object.keys(observed).find((id) => observed[id] === x)].pin), true),
-      R09: () => assert.equal(d5Routine.observation.exactDiffIdentity.every((x) => /^[ADMRT]\t/.test(x)), true),
+      R09: () => {
+        assert.equal(d5DivergedDiff.some((x) => x.path === "base-only.txt" || x.previousPath === "base-only.txt"), false);
+        assert.equal(d5DivergedDiff.some((x) => x.path === "src/knowledge-snapshot-v0.mjs"), true);
+      },
       R10: () => assert.equal(Object.values(observed).every((x) => x.replay.replay.acceptedAuthorityVerified === false), true),
 
-      D01: () => assert.equal(53, 53, "#699 accepted research scenario baseline remains part of this same test file"),
+      D01: () => assert.equal(researchScenarioDefinitions, 53, "#699 existing scenarios remain exactly present"),
       D02: () => { assert.equal(d1Registry.accepted, true); assert.equal(observed.D1.replay.replay.acceptedAuthorityVerified, false); },
       D03: () => assert.ok(d1Registry.requirements.find((r) => r.id === "V15-DOCS-01")?.evidence?.requiredExecutableGates?.length > 0),
       D04: () => { assert.equal(d2Lock.floatingRefsAllowed, false); assert.ok(observed.D2.policy.cochange_groups?.length >= 1); },
