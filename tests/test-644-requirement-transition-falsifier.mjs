@@ -1562,3 +1562,84 @@ test("#700 SAFETY RED: rooted fake Requirement must not self-justify same-HEAD g
     "the same atomic new-Requirement transition becomes live only with exact independent authorization",
   );
 });
+
+
+test("#700 SAFETY RED: candidate cannot label a new canonical Requirement non-normative to bypass exact authority", () => {
+  const base = graph700({
+    roots: ["ROOT"],
+    requirements: [req700("ROOT", { allowDerivedRequirements: true })],
+  });
+  const head = graph700({
+    roots: ["ROOT"],
+    requirements: [
+      base.requirements[0],
+      req700("R-GARBAGE", { normative: false }),
+    ],
+    resources: [res700("GARBAGE", "unknown")],
+    relations: [
+      rel700("R-GARBAGE", "derives_from", "ROOT"),
+      rel700("R-GARBAGE", "requires", "GARBAGE"),
+    ],
+  });
+  assert.equal(
+    evaluate700({ base, head, workIntent: wi700(["ROOT", "R-GARBAGE"]) }).ok,
+    false,
+    "Requirement authority class must not be candidate-controlled metadata",
+  );
+});
+
+test("#700 SAFETY RED: removing an existence requires edge must not be routine weakening", () => {
+  const base = graph700({
+    roots: ["R1", "R2"],
+    requirements: [req700("R1"), req700("R2")],
+    resources: [res700("F")],
+    relations: [
+      rel700("R1", "requires", "F"),
+      rel700("R2", "implemented_by", "F"),
+    ],
+  });
+  const head = graph700({
+    roots: base.roots,
+    requirements: base.requirements,
+    resources: base.resources,
+    relations: [rel700("R2", "implemented_by", "F")],
+  });
+  assert.equal(
+    evaluate700({ base, head, workIntent: wi700(["R1"]) }).ok,
+    false,
+    "candidate must not remove a BASE existence obligation merely because another Requirement still justifies the file",
+  );
+});
+
+test("#700 SAFETY RED: Requirement-scoped numeric constraints use BASE union HEAD scope", () => {
+  const base = graph700({
+    roots: ["R1", "R2"],
+    requirements: [
+      req700("R1", { constraints: [{ id: "lines-r1", metric: "changed_lines", max: 100 }] }),
+      req700("R2"),
+    ],
+    resources: [res700("F", "code", { content: "a" })],
+    relations: [
+      rel700("R1", "implemented_by", "F"),
+      rel700("R2", "implemented_by", "F"),
+    ],
+  });
+  const head = graph700({
+    roots: base.roots,
+    requirements: base.requirements,
+    resources: [res700("F", "code", { content: "b" })],
+    relations: [rel700("R2", "implemented_by", "F")],
+  });
+  const result = evaluate700({
+    base,
+    head,
+    workIntent: wi700(["R1", "R2"]),
+    metrics: { changedLines: { F: 150 } },
+  });
+  assert.equal(
+    result.ok,
+    false,
+    "removing a HEAD trace must not erase a BASE Requirement constraint from the current Transition scope",
+  );
+  assert.ok(result.reasons.some((reason) => reason.includes("CONSTRAINT:R1:lines-r1")));
+});
