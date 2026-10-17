@@ -1182,7 +1182,7 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       R06: () => assert.equal(d5Canonical.requirements.every((r) => r.semantic.digest.length === 64 && r.representation.revision === PINS.D5.pin), true),
       R07: () => assert.match(d2Lock.acceptedCommit, /^[0-9a-f]{40}$/),
       R08: () => assert.equal(Object.values(observed).every((x) => x.replay.observation.headRevision === PINS[Object.keys(observed).find((id) => observed[id] === x)].pin), true),
-      R09: () => assert.equal(d5Routine.replay.observation.exactDiffIdentity.every((x) => /^[ADMRT]\t/.test(x)), true),
+      R09: () => assert.equal(d5Routine.observation.exactDiffIdentity.every((x) => /^[ADMRT]\t/.test(x)), true),
       R10: () => assert.equal(Object.values(observed).every((x) => x.replay.replay.acceptedAuthorityVerified === false), true),
 
       D01: () => assert.equal(53, 53, "#699 accepted research scenario baseline remains part of this same test file"),
