@@ -1735,3 +1735,39 @@ test("#700 SAFETY RED: candidate Resource-kind reclassification cannot erase a B
   );
   assert.ok(result.reasons.some((reason) => reason.includes("DOMAIN:missing:R-MAINT:equivalence")));
 });
+
+
+test("#700 SAFETY RED: stacked PR cannot treat an unmerged parent HEAD as authority BASE", () => {
+  const authorityBase = graph700({
+    roots: ["ROOT"],
+    requirements: [req700("ROOT")],
+  });
+  const localParent = graph700({
+    roots: ["ROOT"],
+    requirements: [req700("ROOT"), req700("R-FAKE")],
+    relations: [rel700("R-FAKE", "derives_from", "ROOT")],
+  });
+  const childHead = graph700({
+    roots: ["ROOT"],
+    requirements: localParent.requirements,
+    resources: [res700("GARBAGE", "unknown")],
+    relations: [
+      ...localParent.relations,
+      rel700("R-FAKE", "implemented_by", "GARBAGE"),
+    ],
+  });
+
+  const result = evaluate700({
+    base: localParent,
+    head: childHead,
+    authorityBase,
+    workIntent: wi700(["ROOT", "R-FAKE"]),
+  });
+
+  assert.equal(
+    result.ok,
+    false,
+    "an unmerged parent branch must not manufacture a Requirement authority baseline for its child PR",
+  );
+  assert.ok(result.reasons.some((reason) => reason.includes("J3:no_cause")));
+});
