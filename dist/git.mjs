@@ -105,7 +105,7 @@ export function listTrackedEntriesAtRef(ref, cwd) {
         if (seen.has(path))
             throw new Error(`duplicate git tree path "${path}"`);
         seen.add(path);
-        entries.push({ mode, type, object, path });
+        entries.push({ mode: mode, type: type, object: object, path: path });
     }
     return entries.sort((a, b) => a.path.localeCompare(b.path, "en"));
 }

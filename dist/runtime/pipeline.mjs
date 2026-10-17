@@ -1,4 +1,3 @@
-import { buildPolicyFacts } from "../facts/input.mjs";
 import { normalizeDocumentFact } from "../document-facts.mjs";
 import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef } from "../git.mjs";
 import { loadCanonicalRequirements } from "./canonical-requirements.mjs";
@@ -6,14 +5,13 @@ import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";
 import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff } from "./transition-closure.mjs";
+import { buildPolicyFacts } from "../facts/input.mjs";
 import { runPolicyChecks } from "../checks/orchestrator.mjs";
 import { buildStateObligationPlan } from "../checks/state-obligation-plan.mjs";
 import { compileChangeProfiles } from "../policy-compiler.mjs";
 import { buildAnchorDiagnostics } from "../reporting/anchor-diagnostics.mjs";
 import { createAnalysisCollector } from "./analysis-report.mjs";
 import { createAnalysisTextPresenter, renderDiffAnalysis, renderEnforcementMode } from "../reporting/renderers.mjs";
-const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-
 const selfHostRootSource = "docs/product-requirements.md";
 const legacyPredicates = Object.freeze({
     requires: "requires", implements: "implemented_by", verifies: "verified_by", documents: "documents",
@@ -252,6 +250,7 @@ export function evaluateRepoGuardSelfHost(input) {
     };
 }
 
+const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 export function evaluatePolicyPipeline(input, options, reporter) {
     const quiet = options.quiet || false, origin = options.policyOrigin || "shared", evidence = { policyOrigin: origin, enforcementMode: input.enforcement.mode };
     if (!quiet && options.printEnforcement !== false)
@@ -330,7 +329,6 @@ export function runPolicyPipelineShadow(input, options, candidate, expectedInten
         },
     };
 }
-
 export function runRepoGuardSelfHostShadow(input, options, config, expectedIntentionalDifference = false) {
     let selfHost;
     const shadow = runPolicyPipelineShadow(input, options, (facts) => {
