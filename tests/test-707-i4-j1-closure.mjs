@@ -10,8 +10,10 @@ const make=(docs,tracked,edges=[])=>{
   readFile:(_,path)=>JSON.stringify(docs.find(x=>path==="requirements/"+x.id+".json"))});
  const root=requirements.index.ROOT?.semantic;
  const j2=evaluateRootedRequirements({requirements,trustedRoots:root?[root]:[]});
- return evaluateTrackedResourceClosure({requirements,j2,repository,revision,trackedPaths:tracked,resourceRelations:edges,
-  resolveArtifact:(path)=>tracked.includes(path)});
+ const resolver=createResourceResolver({repository,revision,requirements,readers:{
+  [repository]:(sha,path)=>sha===revision && tracked.includes(path)?"snapshot:"+path:null
+ }});
+ return evaluateTrackedResourceClosure({requirements,j2,repository,revision,trackedPaths:tracked,resourceRelations:edges,resolver});
 };
 const requirement=(id,targets=[])=>({id,relations:Object.fromEntries(targets.map((path,i)=>["edge"+i,{predicate:"requires",target:{kind:"artifact",path}}]))});
 const doc=requirement("ROOT",["src/a.ts"]);
