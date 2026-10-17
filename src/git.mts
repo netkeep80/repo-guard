@@ -1,5 +1,5 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
-import { parseMachineDiff, type ParsedDiffFile } from "./diff/parser.mjs";
+import { parseMachineDiff, parseNameStatusZ, type ParsedDiffFile } from "./diff/parser.mjs";
 
 interface ChildProcessFailure {
   stderr?: { toString?: () => string } | null;
@@ -29,6 +29,13 @@ export interface BasePolicyReadResult {
 export interface GitDiffObservation {
   diffText: string;
   files: ParsedDiffFile[];
+}
+
+export interface GitTreeEntry {
+  mode: string;
+  type: "blob" | "commit";
+  object: string;
+  path: string;
 }
 
 export interface PullRequestObservationInput {
@@ -156,9 +163,23 @@ export function resolveRemoteBaseRef(baseRef: unknown, cwd: string, remote = "or
   return sha;
 }
 
+export function listTrackedEntriesAtRef(ref: string, cwd: string): GitTreeEntry[] {
+  const output = runGit(["ls-tree", "-r", "-z", "--full-tree", ref], { cwd });
+  const entries: GitTreeEntry[] = [];
+  const seen = new Set<string>();
+  for (const record of output.split("\0").filter(Boolean)) {
+    const match = record.match(/^([0-7]{6}) (blob|commit) ([0-9a-f]{40})\t(.+)$/s);
+    if (!match) throw new Error("malformed git ls-tree record");
+    const [, mode, type, object, path] = match;
+    if (seen.has(path!)) throw new Error(`duplicate git tree path "${path}"`);
+    seen.add(path!);
+    entries.push({ mode: mode!, type: type! as "blob" | "commit", object: object!, path: path! });
+  }
+  return entries.sort((a, b) => a.path.localeCompare(b.path, "en"));
+}
+
 export function listTrackedFilesAtRef(ref: string, cwd: string): string[] {
-  const output = runGit(["ls-tree", "-r", "-z", "--name-only", ref], { cwd });
-  return output.split("\0").filter(Boolean);
+  return listTrackedEntriesAtRef(ref, cwd).map((entry) => entry.path);
 }
 
 export function deleteRemoteBranchWithLease(input: ExactRemoteBranchDeletionInput): string {
@@ -264,6 +285,14 @@ export function getDiffObservation(base: string | null | undefined, head: string
   const diffText = runGit(diffArgs(...operands), { cwd });
   const nameStatusZ = runGit(["diff", "--name-status", "-z", ...operands], { cwd });
   return { diffText, files: parseMachineDiff(diffText, nameStatusZ) };
+}
+
+export function getExactDiffIdentity(base: string, head: string, cwd: string): ParsedDiffFile[] {
+  if (!base || !head) throw new Error("exact Git diff identity requires BASE and HEAD");
+  const mergeBase = runGit(["merge-base", base, head], { cwd }).trim();
+  if (!mergeBase) throw new Error("exact Git diff identity requires a merge base");
+  const output = runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", mergeBase, head], { cwd });
+  return parseNameStatusZ(output);
 }
 
 export function readFileAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): string | null {

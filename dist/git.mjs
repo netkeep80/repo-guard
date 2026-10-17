@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { parseMachineDiff } from "./diff/parser.mjs";
+import { parseMachineDiff, parseNameStatusZ } from "./diff/parser.mjs";
 const DEFAULT_GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const MAX_GIT_DIAGNOSTIC_CHARS = 4096;
 function boundedDiagnostic(value) {
@@ -93,9 +93,24 @@ export function resolveRemoteBaseRef(baseRef, cwd, remote = "origin") {
     }
     return sha;
 }
+export function listTrackedEntriesAtRef(ref, cwd) {
+    const output = runGit(["ls-tree", "-r", "-z", "--full-tree", ref], { cwd });
+    const entries = [];
+    const seen = new Set();
+    for (const record of output.split("\0").filter(Boolean)) {
+        const match = record.match(/^([0-7]{6}) (blob|commit) ([0-9a-f]{40})\t(.+)$/s);
+        if (!match)
+            throw new Error("malformed git ls-tree record");
+        const [, mode, type, object, path] = match;
+        if (seen.has(path))
+            throw new Error(`duplicate git tree path "${path}"`);
+        seen.add(path);
+        entries.push({ mode: mode, type: type, object: object, path: path });
+    }
+    return entries.sort((a, b) => a.path.localeCompare(b.path, "en"));
+}
 export function listTrackedFilesAtRef(ref, cwd) {
-    const output = runGit(["ls-tree", "-r", "-z", "--name-only", ref], { cwd });
-    return output.split("\0").filter(Boolean);
+    return listTrackedEntriesAtRef(ref, cwd).map((entry) => entry.path);
 }
 export function deleteRemoteBranchWithLease(input) {
     const branch = input.branch;
@@ -199,6 +214,15 @@ export function getDiffObservation(base, head, cwd) {
     const diffText = runGit(diffArgs(...operands), { cwd });
     const nameStatusZ = runGit(["diff", "--name-status", "-z", ...operands], { cwd });
     return { diffText, files: parseMachineDiff(diffText, nameStatusZ) };
+}
+export function getExactDiffIdentity(base, head, cwd) {
+    if (!base || !head)
+        throw new Error("exact Git diff identity requires BASE and HEAD");
+    const mergeBase = runGit(["merge-base", base, head], { cwd }).trim();
+    if (!mergeBase)
+        throw new Error("exact Git diff identity requires a merge base");
+    const output = runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", mergeBase, head], { cwd });
+    return parseNameStatusZ(output);
 }
 export function readFileAtRef(ref, path, cwd) {
     if (!ref || !path)

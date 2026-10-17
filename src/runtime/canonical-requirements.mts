@@ -34,7 +34,8 @@ function canonical(value: JsonValue): JsonValue {
     return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
   throw new Error("non-JSON or non-finite canonical Requirement semantic value");
 }
-const digest = (value: JsonValue): string => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+export const canonicalSemanticDigest = (value: JsonValue): string =>
+  createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 
 export function strictCanonicalJson(raw: string): JsonValue {
   // JSON.parse alone loses duplicate-key evidence. Preserve its exact value semantics.
@@ -116,7 +117,7 @@ export function loadCanonicalRequirements(input: CanonicalSnapshotInput): Canoni
       }
       items.push({
         id, value,
-        semantic: semanticRequirementSubject(input.repository, id, digest(value)),
+        semantic: semanticRequirementSubject(input.repository, id, canonicalSemanticDigest(value)),
         source: { kind: "requirement_source", path: safePath },
         representation: exactRepresentationSubject(input.repository, input.revision, safePath),
       });

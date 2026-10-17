@@ -3,6 +3,7 @@ import type { CanonicalRequirementsResult, SemanticRequirementSubject } from "./
 export interface RootedRequirementInput {
   requirements: CanonicalRequirementsResult;
   trustedRoots: readonly SemanticRequirementSubject[];
+  rootSubjects?: Readonly<Record<string, SemanticRequirementSubject>>;
 }
 export interface ClosureError { code: string; requirement: string; target?: string; }
 export interface RootedRequirementResult {
@@ -46,7 +47,8 @@ export function evaluateRootedRequirements(input: RootedRequirementInput): Roote
   for(const subject of roots) {
     if (!valid(subject)) {errors.push({code:"invalid_trusted_root",requirement:""});continue}
     const present=universe.index[subject.requirementId];
-    if(!present || key(present.semantic)!==key(subject)) {
+    const bound=input.rootSubjects?.[subject.requirementId] || present?.semantic;
+    if(!present || !bound || !valid(bound) || bound.requirementId!==subject.requirementId || key(bound)!==key(subject)) {
       errors.push({code:"missing_or_stale_trusted_root",requirement:subject.requirementId});continue;
     }
     rooted.add(subject.requirementId);paths.set(subject.requirementId,[subject.requirementId]);
