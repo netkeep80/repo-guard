@@ -62,6 +62,12 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-compression-rules.mjs"
     relations: [requires, verifies]
+  - path: "tests/support/vnext-699-model.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-699-five-consumer-differential.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-707-i0-shadow.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-isolation-manifest.mjs"
     relations: [requires, verifies]
   - path: "tests/test-p1-1-policy-normalization.mjs"
