@@ -509,24 +509,29 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
       assert.notEqual(stackedBase, trustedAuthorityBaseRevision);
     });
 
+    resetClone();
     const protectedPath = "src/runtime/pipeline.mts";
+    writeFileSync(resolve(repoClone, protectedPath), readFileSync(resolve(repoClone, protectedPath), "utf8") + "\n// I8 protected transition fixture\n");
+    const protectedHead = commitClone("protected resource transition");
     const staleReceipt = {
       authorityBaseRevision: trustedAuthorityBaseRevision,
-      baseRevision,
+      baseRevision: trustedAuthorityBaseRevision,
       headRevision: "f".repeat(40),
       permissions: ["resource:" + protectedPath],
     };
-    const stale = pipeline.evaluateRepoGuardSelfHost({
-      ...actualInput, protectedResources: [...protectedBoundary, protectedPath], trustedReceipts: [staleReceipt],
+    const stale = cloneEval(trustedAuthorityBaseRevision, protectedHead, {
+      protectedResources: [...protectedBoundary, protectedPath],
+      trustedReceipts: [staleReceipt],
     });
     const exactReceipt = {
       authorityBaseRevision: trustedAuthorityBaseRevision,
-      baseRevision,
-      headRevision,
+      baseRevision: trustedAuthorityBaseRevision,
+      headRevision: protectedHead,
       permissions: ["resource:" + protectedPath],
     };
-    const exactAuthorized = pipeline.evaluateRepoGuardSelfHost({
-      ...actualInput, protectedResources: [...protectedBoundary, protectedPath], trustedReceipts: [exactReceipt],
+    const exactAuthorized = cloneEval(trustedAuthorityBaseRevision, protectedHead, {
+      protectedResources: [...protectedBoundary, protectedPath],
+      trustedReceipts: [exactReceipt],
     });
     sh(20, () => {
       assert.equal(stale.ok, false);
