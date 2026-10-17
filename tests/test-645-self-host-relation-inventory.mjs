@@ -278,7 +278,7 @@ console.log("\n--- #723 I8 RED: real canonical legacy inventory is not yet proje
   const canonical = loadCanonicalRequirements({
     repository: "netkeep80/repo-guard",
     revision,
-    paths: exactTracked,
+    paths: requirementPaths,
     readFile: (sha, path) => readFileAtRef(sha, path, root),
   });
   assert.equal(canonical.ok, true, JSON.stringify(canonical.errors));
