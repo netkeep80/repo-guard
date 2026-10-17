@@ -33,7 +33,7 @@ export interface TransitionEvidenceFact {
 }
 export interface TransitionObservationFact {
   authorityBaseRevision: string; baseRevision: string; headRevision: string;
-  path: string; metric: "changed_lines"; value: number;
+  path: string; metric: "changed_lines"; value: number; providerId: string;
 }
 export interface TransitionCauseRule {
   authorityRevision: string;
@@ -526,6 +526,7 @@ function evaluateScopedObligations(input: TransitionClosureInput, deltas: Delta[
         { label: "HEAD", state: input.head },
     ];
     const ids = sorted(new Set(versions.flatMap(v => Object.keys(v.state.requirements.index))));
+    const providers = new Set(input.trustedEvidenceProviders || []);
     const observation = input.observationFacts || [];
     const observationMap = new Map<string, number>();
     for (const o of observation) {
@@ -534,6 +535,7 @@ function evaluateScopedObligations(input: TransitionClosureInput, deltas: Delta[
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
                 o.authorityBaseRevision !== input.trustedAuthorityBase.revision || o.baseRevision !== input.base.revision ||
                 o.headRevision !== input.head.revision || o.metric !== "changed_lines" ||
+                typeof o.providerId !== "string" || !providers.has(o.providerId) ||
                 !Number.isSafeInteger(o.value) || o.value < 0) {
                 problems.push("I7:invalid_observation:" + path);
                 continue;
@@ -545,7 +547,6 @@ function evaluateScopedObligations(input: TransitionClosureInput, deltas: Delta[
             problems.push("I7:invalid_observation_path");
         }
     }
-    const providers = new Set(input.trustedEvidenceProviders || []);
     for (const id of ids) {
         const applied = new Set<string>();
         for (const v of versions) {
@@ -616,9 +617,14 @@ function evaluateScopedObligations(input: TransitionClosureInput, deltas: Delta[
                         problems.push("I7:missing_evidence:" + id + ":" + rule.id + ":" + spec.key);
                     }
                 }
-                explanations.push({ requirementId: id, constraintId: rule.id, basis: v.label, metric: rule.metric || null,
+                explanations.push({ requirementId: id, constraintId: rule.id, basis: v.label,
+                    rootedProof: input.trustedAuthorityBase.j2.explanations[id] || input.base.j2.explanations[id] || input.head.j2.explanations[id] || [],
+                    exactTransition: { authorityBaseRevision: input.trustedAuthorityBase.revision, baseRevision: input.base.revision, headRevision: input.head.revision }, metric: rule.metric || null,
                     max: rule.max === undefined ? null : rule.max, scope, scopeProofs: Object.fromEntries([...proof.entries()].sort(([a], [b]) => a.localeCompare(b))),
-                    touched, observed, requiredEvidence: rule.evidence || null,
+                    touched, observed, observationSources: touched.filter(path => observationMap.has("changed_lines\0" + path)).map(path => ({
+                        path, metric: "changed_lines", value: observationMap.get("changed_lines\0" + path),
+                        providerId: observation.find(o => o.path === path && o.metric === "changed_lines")?.providerId || null })),
+                    requiredEvidence: rule.evidence || null,
                     requiredAuthority: { requirementId: id, constraintId: rule.id, permission: token }, verdict });
             }
         }
