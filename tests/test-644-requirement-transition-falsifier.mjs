@@ -1155,7 +1155,7 @@ test("#700 S12 merged proposed research remains distinct from ACCEPTED and CURRE
   });
   assert700("S12", {
     base, head,
-    workIntent: wi700(["R-RESEARCH-ROOT"]),
+    workIntent: wi700(["R-RESEARCH-ROOT", "R-PROPOSED"]),
     trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R-PROPOSED"])],
   }, true);
   assert.equal(head.lifecycle["R-PROPOSED"].accepted, false);
