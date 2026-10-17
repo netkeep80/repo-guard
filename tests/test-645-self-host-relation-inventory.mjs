@@ -337,7 +337,10 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   const actualInput = { ...config, observedTrackedPaths: exactTracked, observedDiffFiles: exactDiff };
 
   sh(1, () => assert.deepEqual(shadow.selfHost.authority.rootIds, expectedIds));
-  sh(2, () => assert.equal(shadow.selfHost.projection.semanticIdentityPreserved, true));
+  sh(2, () => {
+    assert.equal(shadow.selfHost.projection.semanticDigestMatchesValue, true);
+    assert.equal(shadow.selfHost.projection.normativeAuthoritySeparated, true);
+  });
   sh(3, () => assert.deepEqual(shadow.selfHost.head.rooted, expectedIds));
   sh(4, () => {
     assert.equal(shadow.selfHost.authority.revision, trustedAuthorityBaseRevision);
@@ -641,7 +644,8 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     const garbage = cloneEval(trustedAuthorityBaseRevision, garbageHead);
     sh(31, () => {
       assert.equal(garbage.ok, false);
-      assert.ok(reasonHas(garbage, "head_j2_not_rooted"));
+      assert.ok(reasonHas(garbage, "missing_authority:requirement:RG-08"));
+      assert.equal(garbage.head.rooted.includes("RG-08"), true, "relation self-authorization must not masquerade as a normative J2 root change");
     });
 
     resetClone();
@@ -685,7 +689,8 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     const relationRemoval = cloneEval(trustedAuthorityBaseRevision, relationRemovalHead);
     sh(35, () => {
       assert.equal(relationRemoval.ok, false);
-      assert.ok(reasonHas(relationRemoval, "head_j2_not_rooted"));
+      assert.ok(reasonHas(relationRemoval, "missing_authority:requirement:RG-04") || reasonHas(relationRemoval, "head_j1_not_closed"));
+      assert.equal(relationRemoval.head.rooted.includes("RG-04"), true, "relation removal must not rewrite normative J2 identity");
     });
 
     resetClone();
