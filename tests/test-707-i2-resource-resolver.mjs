@@ -67,3 +67,43 @@ test("R32-R38 reader dispatch rejects mismatch, working-tree fallback and positi
  assert.equal(ok(r,{kind:"document",path:"docs/d.json",pointer:"/relations/one"},{durable:true}).value.id,"V1");
  assert.equal(red(r,{kind:"external_document",repository:external,revision:B,path:"docs/x.json",pointer:"/value"},{expectedRevision:A}),"inconsistent_snapshot");
 });
+
+test("I2 exact resolver executes via non-authoritative I0 shadow without changing legacy report", async()=>{
+ const {runPolicyPipeline,runPolicyPipelineShadow}=await import("../dist/runtime/pipeline.mjs");
+ const input={
+  mode:"check-diff",repositoryRoot:"/tmp/i2-exact",repositoryIdentity:repo,
+  policy:{policy_format_version:"0.3.0",repository_kind:"tooling",
+    paths:{forbidden:[],governance_paths:[],canonical_docs:[],operational_paths:[]},
+    diff_rules:{max_new_files:10,max_new_docs:10,max_net_added_lines:100},
+    content_rules:[],cochange_rules:[]},
+  changeIntent:null,changeIntentSource:"none",diffText:"",
+  enforcement:{ok:true,mode:"blocking",source:"test",requested:"blocking"},
+  trackedFiles:["requirements/R1.json","docs/d.json"],
+  readFile:()=>null,readFileAtRef:(revision,path)=>readers[repo](revision,path),
+ };
+ const original=runPolicyPipeline(input,{quiet:true});
+ const result=runPolicyPipelineShadow(input,{quiet:true},facts=>{
+  const index=loadCanonicalRequirements({
+   repository:facts.repositoryIdentity,revision:A,paths:["requirements/R1.json"],
+   readFile:(revision,path)=>facts.readFileAtRef(revision,path),
+  });
+  const resolver=createResourceResolver({repository:repo,revision:A,requirements:index,
+   readers:{[repo]:(revision,path)=>facts.readFileAtRef(revision,path)}});
+  const a=resolver.resolve({kind:"requirement",id:"R1"});
+  const b=resolver.resolve({kind:"document",path:"docs/d.json",pointer:"/id"});
+  return {ok:a.ok&&b.ok,reasons:a.ok&&b.ok?[]:["EXACT_RESOLUTION_FAILURE"]};
+ });
+ assert.deepEqual(result.legacy,original);
+ assert.equal(result.comparison.candidate.ok,true);
+ assert.equal(result.comparison.identical,original.ok===true);
+});
+test("I2 R34-R35 keyed fragments survive insertion while positional path remains non-durable",()=>{
+ const r=build();
+ assert.equal(red(r,{kind:"document",path:"docs/d.json",pointer:"/relations/0"},{durable:true}),"non_durable_pointer");
+ assert.equal(ok(r,{kind:"document",path:"docs/d.json",pointer:"/relations/one"},{durable:true}).value.id,"V1");
+ const rewritten=new Map(data);
+ rewritten.set(repo+"@"+A+"/docs/d.json",'{"id":"D","relations":{"other":{"id":"V0"},"one":{"id":"V1"}}}');
+ const moved=build({readers:{...readers,[repo]:(revision,path)=>rewritten.get(repo+"@"+revision+"/"+path)??null}});
+ assert.deepEqual(ok(moved,{kind:"document",path:"docs/d.json",pointer:"/relations/one"},{durable:true}).value,
+                  ok(r,{kind:"document",path:"docs/d.json",pointer:"/relations/one"},{durable:true}).value);
+});
