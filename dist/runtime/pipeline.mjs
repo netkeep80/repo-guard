@@ -40,7 +40,7 @@ export function projectRepoGuardLegacyRequirements(raw, implicitSourcePaths = Ob
             projectionErrors.push({ code: "invalid_canonical_source", path: item.source.path, message: "I8 legacy projection requires exact id + artifacts shape" });
             continue;
         }
-        const relations = Object.create(null);
+        const relations = {};
         const seen = new Set();
         for (let artifactIndex = 0; artifactIndex < artifacts.length; artifactIndex++) {
             const artifact = object(artifacts[artifactIndex]);
