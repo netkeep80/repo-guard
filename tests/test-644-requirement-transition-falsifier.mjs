@@ -4,6 +4,7 @@ import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
 import {
   checkRequirementTransition,
+  checkRoutineRequirementTransition,
   compareRequirementRelationGraphs,
   normalizeRequirementAuthority,
 } from "../dist/requirement-relations.mjs";
@@ -208,4 +209,57 @@ test("#644 witness: relation-only requirement administration currently demands d
   });
   assert.equal(authorized.ok, true, "exact trusted authority transition must satisfy the administrative evidence obligation");
   assert.deepEqual(authorized.satisfiedTransactionConstraintKeys, ["trace:changed-requirements-need-evidence"]);
+});
+
+
+test("#700 RED: routine implementation replacement must not require additive-only relation delta", () => {
+  const baseRequirement = [
+    "id: RG-REPLACE-01",
+    "artifacts:",
+    "  - path: src/old.mts",
+    "    relations: [requires, implements]",
+    "",
+  ].join("\n");
+  const headRequirement = [
+    "id: RG-REPLACE-01",
+    "artifacts:",
+    "  - path: src/new.mts",
+    "    relations: [requires, implements]",
+    "",
+  ].join("\n");
+
+  const base = normalizeRequirementAuthority({
+    snapshot: "base",
+    revision: "a".repeat(40),
+    sources: [{ path: "requirements/replace.yaml", format: "yaml", content: baseRequirement }],
+  });
+  const head = normalizeRequirementAuthority({
+    snapshot: "head",
+    revision: "b".repeat(40),
+    sources: [{ path: "requirements/replace.yaml", format: "yaml", content: headRequirement }],
+  });
+
+  const routine = checkRoutineRequirementTransition({
+    base,
+    head,
+    changedFiles: [
+      { path: "requirements/replace.yaml", addedLines: [], deletedLines: [], status: "modified" },
+      { path: "src/old.mts", addedLines: [], deletedLines: [], status: "deleted" },
+      { path: "src/new.mts", addedLines: [], deletedLines: [], status: "added" },
+    ],
+    headTrackedFiles: ["requirements/replace.yaml", "src/new.mts"],
+    readFileAtRef: (revision, path) => {
+      assert.equal(path, "requirements/replace.yaml");
+      return revision === base.revision ? baseRequirement : headRequirement;
+    },
+    governancePaths: [],
+    forbiddenPaths: [],
+    closedRepository: true,
+  });
+
+  assert.equal(
+    routine.ok,
+    true,
+    "#700 RED: replacing an implementation and its descriptive trace relation must have a finite routine path",
+  );
 });
