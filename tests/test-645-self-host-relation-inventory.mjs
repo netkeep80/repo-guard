@@ -755,6 +755,11 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
       execFixture.cleanup();
     }
 
+    sh(25, () => {
+      assert.equal(stale.ok, false);
+      assert.ok(reasonHas(stale, "missing_authority:resource:" + protectedPath));
+    });
+
     const thrown = pipeline.runPolicyPipelineShadow(policyInput, { quiet: true }, () => { throw new Error("I8 candidate failed"); });
     sh(26, () => {
       assert.deepEqual(thrown.legacy, shadow.legacy);
