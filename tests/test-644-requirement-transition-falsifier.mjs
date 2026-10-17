@@ -655,6 +655,7 @@ function metricValue700(constraint, requirementId, base, head, deltas, context) 
 function evaluate700({
   base,
   head,
+  authorityBase = null,
   baseSha = "a".repeat(40),
   headSha = "b".repeat(40),
   workIntent = wi700([]),
@@ -667,10 +668,11 @@ function evaluate700({
   trustedRequirementRoots = null,
   trustedResourceIds = [],
 }) {
-  const roots = trustedRequirementRoots || base.roots;
+  const trustedBase = authorityBase || base;
+  const roots = trustedRequirementRoots || trustedBase.roots;
   const context = { baseSha, headSha, workIntent, trustedReceipts, executions, domainEvidence, externalObservations, metrics, legacyGlobalBudget, trustedResourceIds };
   const state = validateHead700(head, roots);
-  const baseJ2 = j2Closure700(base, roots);
+  const baseJ2 = j2Closure700(trustedBase, roots);
   const deltas = transitionDeltas700(base, head);
   const j3Violations = [];
   const trustViolations = [];
@@ -1770,4 +1772,18 @@ test("#700 SAFETY RED: stacked PR cannot treat an unmerged parent HEAD as author
     "an unmerged parent branch must not manufacture a Requirement authority baseline for its child PR",
   );
   assert.ok(result.reasons.some((reason) => reason.includes("J3:no_cause")));
+
+  const rebasedAfterParentMerge = evaluate700({
+    base: localParent,
+    head: childHead,
+    authorityBase: localParent,
+    baseSha: "c".repeat(40),
+    headSha: "d".repeat(40),
+    workIntent: wi700(["R-FAKE"]),
+  });
+  assert.equal(
+    rebasedAfterParentMerge.ok,
+    true,
+    "stacked child remains live after its parent becomes the trusted authority baseline (or after equivalent trusted rebase)",
+  );
 });
