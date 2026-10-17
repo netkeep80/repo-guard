@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -509,24 +509,29 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
       assert.notEqual(stackedBase, trustedAuthorityBaseRevision);
     });
 
+    resetClone();
     const protectedPath = "src/runtime/pipeline.mts";
+    writeFileSync(resolve(repoClone, protectedPath), readFileSync(resolve(repoClone, protectedPath), "utf8") + "\n// I8 protected transition fixture\n");
+    const protectedHead = commitClone("protected resource transition");
     const staleReceipt = {
       authorityBaseRevision: trustedAuthorityBaseRevision,
-      baseRevision,
+      baseRevision: trustedAuthorityBaseRevision,
       headRevision: "f".repeat(40),
       permissions: ["resource:" + protectedPath],
     };
-    const stale = pipeline.evaluateRepoGuardSelfHost({
-      ...actualInput, protectedResources: [...protectedBoundary, protectedPath], trustedReceipts: [staleReceipt],
+    const stale = cloneEval(trustedAuthorityBaseRevision, protectedHead, {
+      protectedResources: [...protectedBoundary, protectedPath],
+      trustedReceipts: [staleReceipt],
     });
     const exactReceipt = {
       authorityBaseRevision: trustedAuthorityBaseRevision,
-      baseRevision,
-      headRevision,
+      baseRevision: trustedAuthorityBaseRevision,
+      headRevision: protectedHead,
       permissions: ["resource:" + protectedPath],
     };
-    const exactAuthorized = pipeline.evaluateRepoGuardSelfHost({
-      ...actualInput, protectedResources: [...protectedBoundary, protectedPath], trustedReceipts: [exactReceipt],
+    const exactAuthorized = cloneEval(trustedAuthorityBaseRevision, protectedHead, {
+      protectedResources: [...protectedBoundary, protectedPath],
+      trustedReceipts: [exactReceipt],
     });
     sh(20, () => {
       assert.equal(stale.ok, false);
@@ -539,80 +544,217 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
       assert.equal(shadow.selfHost.trustBoundary.trustedAuthorityBaseRevision, trustedAuthorityBaseRevision);
     });
 
-    const A = "a".repeat(40), B = "b".repeat(40);
-    const makeEvidenceState = (revisionValue, evidenceSpec) => {
-      const value = {
+    const makeEvidenceGitFixture = (evidenceSpec) => {
+      const dir = mkdtempSync(join(tmpdir(), "repo-guard-i8-evidence-"));
+      gitText(dir, ["init", "-q"]);
+      gitText(dir, ["config", "user.email", "i8-evidence@example.invalid"]);
+      gitText(dir, ["config", "user.name", "I8 Evidence"]);
+      mkdirSync(resolve(dir, "requirements"), { recursive: true });
+      mkdirSync(resolve(dir, "src"), { recursive: true });
+      mkdirSync(resolve(dir, "tests"), { recursive: true });
+
+      const requirementValue = {
         id: "R",
         relations: {
           impl: { predicate: "requires", target: { kind: "artifact", path: "src/x" } },
-          verifier: { predicate: "verified_by", target: { kind: "artifact", path: "tests/v" } },
+          verifier: { predicate: "verified_by", target: { kind: "artifact", path: "tests/v.mjs" } },
         },
         constraints: [{ id: "c", relations: ["requires"], metric: "changed_lines", max: 10, evidence: evidenceSpec }],
       };
-      const raw = JSON.stringify(value);
-      const requirements = canonicalRuntime.loadCanonicalRequirements({
-        repository: "fixture/evidence", revision: revisionValue, paths: ["requirements/R.json"],
-        readFile: (_sha, filePath) => filePath === "requirements/R.json" ? raw : null,
+      writeFileSync(resolve(dir, "requirements/R.json"), JSON.stringify(requirementValue, null, 2) + "\n");
+      writeFileSync(resolve(dir, "src/x"), "base\n");
+      writeFileSync(resolve(dir, "tests/v.mjs"), [
+        'import { readFileSync } from "node:fs";',
+        'const value = readFileSync("src/x", "utf8");',
+        'if (value !== "head\\n") process.exit(7);',
+        'console.log("DOMAIN_OK:" + value.trim());',
+        "",
+      ].join("\n"));
+      gitText(dir, ["add", "-A"]);
+      gitText(dir, ["commit", "-q", "-m", "evidence base"]);
+      const base = gitText(dir, ["rev-parse", "HEAD"]);
+
+      writeFileSync(resolve(dir, "src/x"), "head\n");
+      gitText(dir, ["add", "-A"]);
+      gitText(dir, ["commit", "-q", "-m", "evidence head"]);
+      const head = gitText(dir, ["rev-parse", "HEAD"]);
+
+      for (const sha of [base, head]) {
+        assert.match(sha, /^[0-9a-f]{40}$/);
+        assert.doesNotThrow(() => gitText(dir, ["cat-file", "-e", sha + "^{commit}"]));
+      }
+
+      const loadRequirements = (sha) => canonicalRuntime.loadCanonicalRequirements({
+        repository: "fixture/evidence",
+        revision: sha,
+        paths: ["requirements/R.json"],
+        readFile: (revisionValue, filePath) => gitRuntime.readFileAtRef(revisionValue, filePath, dir),
       });
-      const j2 = requirementRuntime.evaluateRootedRequirements({ requirements, trustedRoots: [requirements.index.R.semantic] });
-      const files = new Set(["requirements/R.json", "src/x", "tests/v"]);
-      const resolver = resolverRuntime.createResourceResolver({
-        repository: "fixture/evidence", revision: revisionValue, requirements,
-        readers: { "fixture/evidence": (_sha, filePath) => files.has(filePath) ? Buffer.from("x") : null },
-      });
-      const j1 = resourceRuntime.evaluateTrackedResourceClosure({
-        repository: "fixture/evidence", revision: revisionValue, requirements, j2, trackedPaths: [...files], resolver,
-      });
-      return { revision: revisionValue, requirements, j2, j1 };
+      const baseRequirements = loadRequirements(base);
+      const headRequirements = loadRequirements(head);
+      assert.equal(baseRequirements.ok, true, JSON.stringify(baseRequirements.errors));
+      assert.equal(headRequirements.ok, true, JSON.stringify(headRequirements.errors));
+      assert.equal(baseRequirements.index.R.semantic.digest, headRequirements.index.R.semantic.digest);
+
+      const trustedRoot = baseRequirements.index.R.semantic;
+      const makeState = (sha, requirements) => {
+        const j2 = requirementRuntime.evaluateRootedRequirements({ requirements, trustedRoots: [trustedRoot] });
+        const trackedPaths = gitRuntime.listTrackedFilesAtRef(sha, dir);
+        const resolver = resolverRuntime.createResourceResolver({
+          repository: "fixture/evidence",
+          revision: sha,
+          requirements,
+          readers: {
+            "fixture/evidence": (revisionValue, filePath) => {
+              try { return gitRuntime.readFileAtRef(revisionValue, filePath, dir); }
+              catch { return null; }
+            },
+          },
+        });
+        const j1 = resourceRuntime.evaluateTrackedResourceClosure({
+          repository: "fixture/evidence", revision: sha, requirements, j2, trackedPaths, resolver,
+        });
+        assert.equal(j2.ok, true, JSON.stringify(j2));
+        assert.equal(j1.ok, true, JSON.stringify(j1));
+        return { revision: sha, requirements, j2, j1 };
+      };
+      const baseState = makeState(base, baseRequirements);
+      const headState = makeState(head, headRequirements);
+      const diffFiles = gitRuntime.getExactDiffIdentity(base, head, dir);
+      const resourceDeltas = transitionRuntime.resourceDeltasFromParsedDiff(diffFiles);
+      assert.deepEqual(resourceDeltas, [{ kind: "modify", path: "src/x" }]);
+
+      const numstat = gitText(dir, ["diff", "--numstat", base + "..." + head, "--", "src/x"]);
+      const [addedRaw, deletedRaw, observedPath] = numstat.split(/\s+/);
+      assert.equal(observedPath, "src/x");
+      const added = Number(addedRaw), deleted = Number(deletedRaw);
+      assert.ok(Number.isSafeInteger(added) && Number.isSafeInteger(deleted));
+      const changedLines = added + deleted;
+
+      const verifierRun = spawnSync(process.execPath, ["tests/v.mjs"], { cwd: dir, encoding: "utf8" });
+      assert.equal(verifierRun.status, 0, String(verifierRun.stdout) + "\n" + String(verifierRun.stderr));
+      assert.match(String(verifierRun.stdout), /DOMAIN_OK:head/);
+
+      return {
+        dir, base, head, baseState, headState, resourceDeltas, changedLines, verifierRun,
+        cleanup: () => rmSync(dir, { recursive: true, force: true }),
+      };
     };
-    const domainBase = makeEvidenceState(A, { kind: "domain", key: "domain:k", providerId: "trusted-domain" });
-    const domainHead = makeEvidenceState(B, { kind: "domain", key: "domain:k", providerId: "trusted-domain" });
+
+    const domainFixture = makeEvidenceGitFixture({
+      kind: "domain", key: "domain:k", providerId: "domain-process",
+    });
+    const execFixture = makeEvidenceGitFixture({
+      kind: "execution", key: "exec:k", providerId: "exec-process", verifierPath: "tests/v.mjs",
+    });
     const domainCommon = {
-      repository: "fixture/evidence", base: domainBase, head: domainHead,
-      trustedAuthorityBase: { revision: A, requirements: domainBase.requirements, j2: domainBase.j2 },
-      resourceDeltas: [{ kind: "modify", path: "src/x" }],
+      repository: "fixture/evidence",
+      base: domainFixture.baseState,
+      head: domainFixture.headState,
+      trustedAuthorityBase: {
+        revision: domainFixture.base,
+        requirements: domainFixture.baseState.requirements,
+        j2: domainFixture.baseState.j2,
+      },
+      resourceDeltas: domainFixture.resourceDeltas,
       workIntent: { id: "evidence", addresses: ["R"] },
-      trustedEvidenceProviders: ["trusted-domain"],
+      trustedEvidenceProviders: ["git-observation", "domain-process"],
     };
     const exactObservation = {
-      authorityBaseRevision: A, baseRevision: A, headRevision: B,
-      path: "src/x", metric: "changed_lines", value: 1, providerId: "trusted-domain",
+      authorityBaseRevision: domainFixture.base,
+      baseRevision: domainFixture.base,
+      headRevision: domainFixture.head,
+      path: "src/x",
+      metric: "changed_lines",
+      value: domainFixture.changedLines,
+      providerId: "git-observation",
     };
     const exactDomain = {
-      authorityBaseRevision: A, baseRevision: A, headRevision: B,
-      key: "domain:k", status: "pass", providerId: "trusted-domain", requirementId: "R", subjectPaths: ["src/x"],
+      authorityBaseRevision: domainFixture.base,
+      baseRevision: domainFixture.base,
+      headRevision: domainFixture.head,
+      key: "domain:k",
+      status: domainFixture.verifierRun.status === 0 ? "pass" : "fail",
+      providerId: "domain-process",
+      requirementId: "R",
+      subjectPaths: ["src/x"],
     };
-    const noObservation = transitionRuntime.evaluateTransitionCauseClosure({ ...domainCommon, evidenceFacts: [exactDomain] });
-    sh(22, () => {
-      assert.equal(noObservation.ok, false);
-      assert.ok(noObservation.reasons.some((reason) => reason.includes("I7:missing_observation")));
-    });
+    try {
+      const noObservation = transitionRuntime.evaluateTransitionCauseClosure({
+        ...domainCommon, evidenceFacts: [exactDomain],
+      });
+      sh(22, () => {
+        assert.equal(noObservation.ok, false);
+        assert.ok(noObservation.reasons.some((reason) => reason.includes("I7:missing_observation")));
+      });
 
-    const execBase = makeEvidenceState(A, { kind: "execution", key: "exec:k", providerId: "trusted-exec", verifierPath: "tests/v" });
-    const execHead = makeEvidenceState(B, { kind: "execution", key: "exec:k", providerId: "trusted-exec", verifierPath: "tests/v" });
-    const missingExec = transitionRuntime.evaluateTransitionCauseClosure({
-      repository: "fixture/evidence", base: execBase, head: execHead,
-      trustedAuthorityBase: { revision: A, requirements: execBase.requirements, j2: execBase.j2 },
-      resourceDeltas: [{ kind: "modify", path: "src/x" }], workIntent: { id: "exec", addresses: ["R"] },
-      trustedEvidenceProviders: ["trusted-exec"],
-      observationFacts: [{ ...exactObservation, providerId: "trusted-exec" }],
-    });
-    sh(23, () => {
-      assert.equal(missingExec.ok, false);
-      assert.ok(missingExec.reasons.some((reason) => reason.includes("I7:missing_evidence")));
-    });
+      const missingExec = transitionRuntime.evaluateTransitionCauseClosure({
+        repository: "fixture/evidence",
+        base: execFixture.baseState,
+        head: execFixture.headState,
+        trustedAuthorityBase: {
+          revision: execFixture.base,
+          requirements: execFixture.baseState.requirements,
+          j2: execFixture.baseState.j2,
+        },
+        resourceDeltas: execFixture.resourceDeltas,
+        workIntent: { id: "exec", addresses: ["R"] },
+        trustedEvidenceProviders: ["git-observation", "exec-process"],
+        observationFacts: [{
+          authorityBaseRevision: execFixture.base,
+          baseRevision: execFixture.base,
+          headRevision: execFixture.head,
+          path: "src/x",
+          metric: "changed_lines",
+          value: execFixture.changedLines,
+          providerId: "git-observation",
+        }],
+      });
+      sh(23, () => {
+        assert.equal(execFixture.verifierRun.status, 0, "external verifier fixture itself must be executable");
+        assert.equal(missingExec.ok, false);
+        assert.ok(missingExec.reasons.some((reason) => reason.includes("I7:missing_evidence")));
+      });
 
-    const wrongSubject = transitionRuntime.evaluateTransitionCauseClosure({
-      ...domainCommon, observationFacts: [exactObservation], evidenceFacts: [{ ...exactDomain, subjectPaths: [] }],
-    });
-    const domainPass = transitionRuntime.evaluateTransitionCauseClosure({
-      ...domainCommon, observationFacts: [exactObservation], evidenceFacts: [exactDomain],
-    });
-    sh(24, () => {
-      assert.equal(wrongSubject.ok, false);
-      assert.ok(wrongSubject.reasons.some((reason) => reason.includes("I7:missing_evidence")));
-      assert.equal(domainPass.ok, true, domainPass.reasons.join(" | "));
-    });
+      const wrongSubject = transitionRuntime.evaluateTransitionCauseClosure({
+        ...domainCommon,
+        observationFacts: [exactObservation],
+        evidenceFacts: [{ ...exactDomain, subjectPaths: [] }],
+      });
+      const domainPass = transitionRuntime.evaluateTransitionCauseClosure({
+        ...domainCommon,
+        observationFacts: [exactObservation],
+        evidenceFacts: [exactDomain],
+      });
+      sh(24, () => {
+        assert.equal(wrongSubject.ok, false);
+        assert.ok(wrongSubject.reasons.some((reason) => reason.includes("I7:missing_evidence")));
+        assert.equal(domainPass.ok, true, domainPass.reasons.join(" | "));
+      });
+      console.log(JSON.stringify({
+        event: "I8_REAL_EVIDENCE",
+        domain: {
+          base: domainFixture.base,
+          head: domainFixture.head,
+          resourceDeltas: domainFixture.resourceDeltas,
+          observation: { path: "src/x", metric: "changed_lines", value: domainFixture.changedLines, providerId: "git-observation" },
+          verifier: { providerId: "domain-process", exitCode: domainFixture.verifierRun.status, stdout: String(domainFixture.verifierRun.stdout).trim() },
+          evaluatorVerdict: domainPass.ok,
+        },
+        executionTraceOnly: {
+          base: execFixture.base,
+          head: execFixture.head,
+          verifierProcessExitCode: execFixture.verifierRun.status,
+          evidenceFactSupplied: false,
+          evaluatorVerdict: missingExec.ok,
+        },
+        providerAuthentication: "external to pure evaluator",
+      }));
+    } finally {
+      domainFixture.cleanup();
+      execFixture.cleanup();
+    }
+
     sh(25, () => {
       assert.equal(stale.ok, false);
       assert.ok(reasonHas(stale, "missing_authority:resource:" + protectedPath));
