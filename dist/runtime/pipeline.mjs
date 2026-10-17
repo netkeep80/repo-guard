@@ -397,8 +397,6 @@ export function runRepoGuardSelfHostShadow(input, options, config, expectedInten
     }, expectedIntentionalDifference);
     return { ...shadow, selfHost: selfHost ?? null };
 }
-
-
 /**
  * I9 generic external-repository replay seam.
  *
@@ -423,7 +421,7 @@ export function evaluateRepositoryShadowReplay(input) {
         ? authorityEntries : listTrackedEntriesAtRef(input.baseRevision, input.repositoryRoot);
     const headEntries = input.headRevision === input.baseRevision
         ? baseEntries : input.headRevision === input.trustedAuthorityBaseRevision
-            ? authorityEntries : listTrackedEntriesAtRef(input.headRevision, input.repositoryRoot);
+        ? authorityEntries : listTrackedEntriesAtRef(input.headRevision, input.repositoryRoot);
     const exactDiff = getExactDiffIdentity(input.baseRevision, input.headRevision, input.repositoryRoot);
     const treeChanges = exactTreeChanges(baseEntries, headEntries);
     const observation = {
