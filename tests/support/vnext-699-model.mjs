@@ -599,7 +599,6 @@ function exactRevision(value, label = "revision") {
 function pointer(value, label = "pointer") {
   if (value === undefined) return "";
   if (typeof value !== "string") throw new Error(label + ": must be string");
-  // Reuse accepted pointer syntax validator without requiring a target.
   if (value !== "" && !value.startsWith("/")) throw new Error(label + ": malformed JSON Pointer");
   for (const raw of value === "" ? [] : value.slice(1).split("/")) {
     if (/~(?:[^01]|$)/.test(raw)) throw new Error(label + ": malformed JSON Pointer escape");
@@ -612,8 +611,6 @@ function encodePointerSegment(value) {
 function strictCanonicalParse(format, content) {
   if (format === "yaml") return parseYaml(content);
   if (format === "json") {
-    // JSON.parse enforces JSON grammar; YAML's unique-key parser supplies the
-    // fail-closed duplicate-key property missing from raw JSON.parse.
     parseJson(content);
     return parseYaml(content);
   }
@@ -747,7 +744,6 @@ function eagerClosure(snap, trustedRoots) {
   const orphanRequirements = [...index.byId.keys()].filter((id) => !reachable.has(id)).sort();
   const justifiedResources = new Set();
   const whyResource = new Map();
-  // Canonical source representation is justified by semantic Requirement reachability.
   for (const id of [...reachable].sort()) {
     const requirement = index.byId.get(id);
     justifiedResources.add(requirement.source_path);
