@@ -449,7 +449,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
     const root = (state, id) => obj(state.requirements.index[id]?.value);
     const parseRules = (state, label, id) => {
         const raw = root(state, id)?.constraints;
-        if (raw === undefined) return [];
+        if (raw === undefined)
+            return [];
         if (!Array.isArray(raw)) {
             problems.push("I7:invalid_constraints:" + label + ":" + id);
             return [];
@@ -487,11 +488,13 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
         };
         for (const name of Object.keys(direct || {}).sort()) {
             const rel = obj(direct[name]), target = obj(rel?.target);
-            if (!rel || !target || target.kind !== "artifact" || !rule.relations.includes(rel.predicate)) continue;
+            if (!rel || !target || target.kind !== "artifact" || !rule.relations.includes(rel.predicate))
+                continue;
             try {
                 const path = normPath(target.path);
                 put(path, [id, String(rel.predicate) + ":" + path]);
-            } catch {
+            }
+            catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);
             }
         }
@@ -502,13 +505,16 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
             while (change) {
                 change = false;
                 for (const edge of edges) {
-                    if (edge.kind !== "generates" || !paths.has(edge.from)) continue;
+                    if (edge.kind !== "generates" || !paths.has(edge.from))
+                        continue;
                     try {
                         const to = normPath(edge.to), from = normPath(edge.from);
                         const prior = paths.get(to);
                         put(to, [...paths.get(from), "generates:" + to]);
-                        if (prior !== paths.get(to)) change = true;
-                    } catch {
+                        if (prior !== paths.get(to))
+                            change = true;
+                    }
+                    catch {
                         problems.push("I7:invalid_generation_scope:" + id);
                     }
                 }
@@ -535,9 +541,12 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                 continue;
             }
             const key = o.metric + "\0" + path;
-            if (observationMap.has(key)) problems.push("I7:duplicate_observation:" + path);
-            else observationMap.set(key, o.value);
-        } catch {
+            if (observationMap.has(key))
+                problems.push("I7:duplicate_observation:" + path);
+            else
+                observationMap.set(key, o.value);
+        }
+        catch {
             problems.push("I7:invalid_observation_path");
         }
     }
@@ -545,10 +554,12 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
     for (const id of ids) {
         const applied = new Set();
         for (const v of versions) {
-            if (!v.state.j2.rooted.includes(id)) continue;
+            if (!v.state.j2.rooted.includes(id))
+                continue;
             for (const rule of parseRules(v.state, v.label, id)) {
                 const fingerprint = stable(rule);
-                if (applied.has(fingerprint)) continue;
+                if (applied.has(fingerprint))
+                    continue;
                 applied.add(fingerprint);
                 const allScopes = [
                     derive(input.trustedAuthorityBase, id, rule, input.base.resourceRelations || []),
@@ -556,8 +567,10 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                     derive(input.head, id, rule, []),
                 ];
                 const proof = new Map();
-                for (const scope of allScopes) for (const [path, chain] of scope)
-                    if (!proof.has(path) || chain.length < proof.get(path).length) proof.set(path, chain);
+                for (const scope of allScopes)
+                    for (const [path, chain] of scope)
+                        if (!proof.has(path) || chain.length < proof.get(path).length)
+                            proof.set(path, chain);
                 const scope = sorted(proof.keys());
                 const selected = deltas.filter(d => d.kind.startsWith("resource_") &&
                     deltaPaths(d).some(path => proof.has(path)));
@@ -566,21 +579,28 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                 let observed = null, verdict = selected.length ? "PASS" : "NOT_APPLICABLE";
                 if (selected.length && rule.metric === "changed_resources") {
                     observed = selected.length;
-                } else if (selected.length && rule.metric === "changed_lines") {
+                }
+                else if (selected.length && rule.metric === "changed_lines") {
                     let sum = 0, complete = true;
                     for (const path of touched) {
                         const number = observationMap.get("changed_lines\0" + path);
                         if (number === undefined) {
                             problems.push("I7:missing_observation:" + id + ":" + rule.id + ":" + path);
                             complete = false;
-                        } else sum += number;
+                        }
+                        else
+                            sum += number;
                     }
-                    if (complete && Number.isSafeInteger(sum)) observed = sum;
-                    else if (complete) problems.push("I7:observation_overflow:" + id + ":" + rule.id);
-                    if (observed === null) verdict = "RED";
+                    if (complete && Number.isSafeInteger(sum))
+                        observed = sum;
+                    else if (complete)
+                        problems.push("I7:observation_overflow:" + id + ":" + rule.id);
+                    if (observed === null)
+                        verdict = "RED";
                 }
                 if (observed !== null && observed > rule.max) {
-                    if (granted(input, receipts, token)) verdict = "WAIVED";
+                    if (granted(input, receipts, token))
+                        verdict = "WAIVED";
                     else {
                         verdict = "RED";
                         problems.push("I7:constraint_exceeded:" + id + ":" + rule.id + ":" + observed + ">" + rule.max);
@@ -621,7 +641,6 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
     }
     return { reasons: sorted(problems), constraints: explanations };
 }
-
 export function evaluateTransitionCauseClosure(input) {
     const reasons = [];
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
