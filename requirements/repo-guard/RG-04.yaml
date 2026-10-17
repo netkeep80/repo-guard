@@ -180,6 +180,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-707-i0-shadow.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-707-i1-canonical-loader.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-policy-compiler-boundary.mjs"
     relations: [requires, verifies]
   - path: "tests/test-rule-registry.mjs"
