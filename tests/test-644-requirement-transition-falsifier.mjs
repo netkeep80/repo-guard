@@ -497,6 +497,48 @@ function reverseImpactResource700(graph, resourceId) {
   return requirementImpactClosure700(graph, requirementSeeds);
 }
 
+function directRequirementOwners700(graph, resourceId) {
+  const requirements = mapById700(graph.requirements);
+  const resources = mapById700(graph.resources);
+  if (!resources.has(resourceId)) return new Set();
+  const queue = [resourceId];
+  const seenResources = new Set(queue);
+  const owners = new Set();
+  const relations = graph.relations.filter((relation) => J3_STATE_RELATIONS_700.has(relation.kind));
+  while (queue.length) {
+    const node = queue.shift();
+    for (const relation of relations) {
+      if (relation.to !== node) continue;
+      if (requirements.has(relation.from)) owners.add(relation.from);
+      else if (resources.has(relation.from) && !seenResources.has(relation.from)) {
+        seenResources.add(relation.from);
+        queue.push(relation.from);
+      }
+    }
+  }
+  return owners;
+}
+
+function directRequirementsForDelta700(delta, graph) {
+  const requirements = mapById700(graph.requirements);
+  const resources = mapById700(graph.resources);
+  const direct = new Set();
+
+  if (delta.kind.startsWith("requirement_") || delta.kind === "lifecycle") {
+    if (requirements.has(delta.subject)) direct.add(delta.subject);
+  } else if (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") {
+    for (const id of directRequirementOwners700(graph, delta.subject)) direct.add(id);
+  } else if (delta.kind.startsWith("relation_") && delta.relation) {
+    for (const endpoint of [delta.relation.from, delta.relation.to]) {
+      if (requirements.has(endpoint)) direct.add(endpoint);
+      if (resources.has(endpoint)) {
+        for (const id of directRequirementOwners700(graph, endpoint)) direct.add(id);
+      }
+    }
+  }
+  return direct;
+}
+
 function affectedRequirements700(delta, graph) {
   const requirements = mapById700(graph.requirements);
   const resources = mapById700(graph.resources);
@@ -550,6 +592,17 @@ function applicableRequirements700(delta, base, head) {
     if (transitionRuleMatches700(requirement, delta, base, head)) impacted.add(requirement.id);
   }
   return impacted;
+}
+
+function causalRequirements700(delta, base, head) {
+  const causal = new Set([
+    ...directRequirementsForDelta700(delta, base),
+    ...directRequirementsForDelta700(delta, head),
+  ]);
+  for (const requirement of base.requirements) {
+    if (transitionRuleMatches700(requirement, delta, base, head)) causal.add(requirement.id);
+  }
+  return causal;
 }
 
 function relationTrustPermissions700(delta, base, head) {
@@ -691,7 +744,8 @@ function evaluate700({
     for (const id of applicable) applicableAll.add(id);
     for (const id of affected) affectedAll.add(id);
 
-    const causes = [...applicable].filter((id) =>
+    const causalCandidates = causalRequirements700(delta, base, head);
+    const causes = [...causalCandidates].filter((id) =>
       workIntent.addresses.includes(id)
       && (baseJ2.paths.has(id) || exactPermission700(context, "requirement:" + id))
     ).sort();
@@ -707,6 +761,7 @@ function evaluate700({
       delta: delta.kind + ":" + delta.subject + (delta.field ? ":" + delta.field : ""),
       affected: [...affected].sort(),
       applicable: [...applicable].sort(),
+      causalCandidates: [...causalCandidates].sort(),
       causes,
       trust: permissions,
     });
