@@ -262,3 +262,53 @@ assert.equal(unauthorizedTransition.authorized, false);
 assert.equal(unauthorizedTransition.ok, false, "#662 evidence must not self-authorize its relation transition");
 
 console.log("#662 relation-overlap transaction falsifier passed");
+
+
+console.log("\n--- #723 I8 RED: real canonical legacy inventory is not yet projected into vNext J1 ---");
+{
+  const { loadCanonicalRequirements } = await import("../dist/runtime/canonical-requirements.mjs");
+  const { evaluateRootedRequirements } = await import("../dist/runtime/requirement-closure.mjs");
+  const { createResourceResolver } = await import("../dist/runtime/resource-resolver.mjs");
+  const { evaluateTrackedResourceClosure } = await import("../dist/runtime/resource-closure.mjs");
+  const { listTrackedFilesAtRef, readFileAtRef } = await import("../dist/git.mjs");
+
+  const exactTracked = listTrackedFilesAtRef(revision, root).sort();
+  assert.deepEqual(exactTracked, tracked, "#723 exact ls-tree observation must equal legacy ls-files baseline");
+
+  const canonical = loadCanonicalRequirements({
+    repository: "netkeep80/repo-guard",
+    revision,
+    paths: exactTracked,
+    readFile: (sha, path) => readFileAtRef(sha, path, root),
+  });
+  assert.equal(canonical.ok, true, JSON.stringify(canonical.errors));
+
+  // RED-only witness: current HEAD semantic subjects are used only to expose
+  // the missing representation bridge. They are NOT an accepted I8 trust source.
+  const redOnlyRoots = canonical.requirements.map((item) => item.semantic);
+  const j2 = evaluateRootedRequirements({ requirements: canonical, trustedRoots: redOnlyRoots });
+  assert.equal(j2.ok, true, JSON.stringify(j2));
+
+  const resolver = createResourceResolver({
+    repository: "netkeep80/repo-guard",
+    revision,
+    requirements: canonical,
+    readers: {
+      "netkeep80/repo-guard": (sha, resourcePath) => readFileAtRef(sha, resourcePath, root),
+    },
+  });
+  const j1 = evaluateTrackedResourceClosure({
+    repository: "netkeep80/repo-guard",
+    revision,
+    requirements: canonical,
+    j2,
+    trackedPaths: exactTracked,
+    resolver,
+  });
+
+  assert.equal(
+    j1.ok,
+    true,
+    `#723 I8 RED: real canonical legacy inventory is not yet projected into vNext J1: unjustified=${j1.unjustified.length}; ${j1.unjustified.slice(0, 12).join(", ")}`,
+  );
+}
