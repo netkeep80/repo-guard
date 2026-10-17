@@ -911,6 +911,15 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
     assert.equal(d3Package.version, d3PackageLock.version);
     assert.equal(d3Package.version, d3PackageLock.packages[""].version);
 
+    const d2RepoGuardWorkflow = productionGit.readFileAtRef(
+      PINS.D2.pin, ".github/workflows/repo-guard.yml", observed.D2.cwd);
+    const d5RepoGuardWorkflow = productionGit.readFileAtRef(
+      PINS.D5.pin, ".github/workflows/repo-guard.yml", observed.D5.cwd);
+    assert.equal(observed.D2.policy.enforcement.mode, "advisory");
+    assert.equal(observed.D5.policy.enforcement.mode, "advisory");
+    assert.match(d2RepoGuardWorkflow, /enforcement:\s*blocking/);
+    assert.match(d5RepoGuardWorkflow, /enforcement:\s*blocking/);
+
     const d4Policy = observed.D4.policy;
     assert.deepEqual(d4Policy.surfaces.trusted_approver, ["src/core/proofApproval.ts"]);
     assert.ok(d4Policy.change_profiles.feature.forbid_surfaces.includes("trusted_approver"));
@@ -1248,6 +1257,39 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
     const researchScenarioDefinitions = (testSourceText.match(/test\("#699 /g) || []).length;
     assert.equal(researchScenarioDefinitions, 53);
 
+    const legacyBlockingInput = {
+      mode: "check-diff",
+      repositoryRoot: root,
+      policy: {
+        policy_format_version: "0.3.0",
+        repository_kind: "tooling",
+        paths: { forbidden: ["secret/**"], governance_paths: [], canonical_docs: [], operational_paths: [] },
+        diff_rules: { max_new_files: 10, max_new_docs: 10, max_net_added_lines: 100 },
+        content_rules: [],
+        cochange_rules: [],
+      },
+      changeIntent: null,
+      changeIntentSource: "none",
+      enforcement: { ok: true, mode: "blocking", source: "i9-a10", requested: "blocking" },
+      diffText: [
+        "diff --git a/secret/x.txt b/secret/x.txt",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/secret/x.txt",
+        "+blocked",
+      ].join("\n"),
+      trackedFiles: ["secret/x.txt"],
+    };
+    const candidateFailureShadow = productionPipeline.runPolicyPipelineShadow(
+      legacyBlockingInput,
+      { quiet: true },
+      () => { throw new Error("I9 candidate failure"); },
+    );
+    assert.equal(candidateFailureShadow.legacy.exitCode !== 0, true);
+    assert.equal(candidateFailureShadow.comparison.legacy.blocking, true);
+    assert.equal(candidateFailureShadow.comparison.candidate.ok, false);
+    assert.match(candidateFailureShadow.comparison.candidate.reasons[0], /^SHADOW_EXECUTION_ERROR:/);
+
     const checks = {
       R01: () => assert.equal(Object.values(observed).every((x) => /^[0-9a-f]{40}$/.test(x.current)), true),
       R02: () => assert.equal(Object.keys(observed).length, 5),
@@ -1287,8 +1329,17 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
         head: graph700({ roots:["R"], requirements:[req700("R")], resources:[res700("F","code",{content:"x"})], relations:[rel700("R","implemented_by","F")] }),
         workIntent: wi700([]),
       }).ok, false),
-      A09: () => { assert.equal(observed.D2.policy.enforcement.mode, "advisory"); assert.equal(observed.D5.policy.enforcement.mode, "advisory"); },
-      A10: () => assert.equal(typeof productionPipeline.runPolicyPipelineShadow, "function"),
+      A09: () => {
+        assert.equal(observed.D2.policy.enforcement.mode, "advisory");
+        assert.equal(observed.D5.policy.enforcement.mode, "advisory");
+        assert.match(d2RepoGuardWorkflow, /enforcement:\s*blocking/);
+        assert.match(d5RepoGuardWorkflow, /enforcement:\s*blocking/);
+      },
+      A10: () => {
+        assert.equal(candidateFailureShadow.legacy.exitCode !== 0, true);
+        assert.equal(candidateFailureShadow.comparison.legacy.blocking, true);
+        assert.equal(candidateFailureShadow.comparison.candidate.ok, false);
+      },
 
       M01: () => assert.deepEqual(Object.keys(migration).sort(), ["D1","D2","D3","D4","D5"]),
       M02: () => {
