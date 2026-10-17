@@ -59,7 +59,8 @@ export function createResourceResolver(context) {
                 ref = strictRef(rawRef);
             }
             catch (e) {
-                return error("invalid_ref", "", e.message);
+                const message = e.message;
+                return error(/repository path|noncanonical|invalid_repository_path/.test(message) ? "unsafe_path" : /invalid external repository or revision/.test(message) ? "invalid_revision" : "invalid_ref", "", message);
             }
             const subject = JSON.stringify(ref);
             if (ref.kind === "requirement") {
