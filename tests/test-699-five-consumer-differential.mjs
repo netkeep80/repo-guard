@@ -838,7 +838,43 @@ test("#699 X6 closed-PR merge-ref failure #705 is classified control-plane, not 
   assert.equal(defect.layer, "control-plane");
 });
 
-test("#699 X7 complexity compression metrics are explicit and do not hide external TRUST/DOMAIN/OBSERVATION", () => {
+test("#699 X7 candidate normative:false cannot suppress BASE authority without exact TRUST", () => {
+  const base = graph700({
+    roots: ["R"],
+    requirements: [req700("R", { constraints: [{ id: "lines", metric: "changed_lines", max: 10 }] })],
+    resources: [res700("F", "code", { content: "a" })],
+    relations: [rel700("R", "implemented_by", "F")],
+  });
+  const head = graph700({
+    roots: ["R"],
+    requirements: [req700("R", { normative: false, constraints: [{ id: "lines", metric: "changed_lines", max: 10 }] })],
+    resources: [res700("F", "code", { content: "b" })],
+    relations: base.relations,
+  });
+  assertRed(evaluate700({
+    base, head, workIntent: wi700(["R"]), metrics: { changedLines: { F: 100 } },
+  }), "TRUST:missing:requirement:R", "candidate cannot self-declare non-normative");
+});
+
+test("#699 X8 candidate cannot delete BASE constrains relation to remove a live constraint", () => {
+  const base = graph700({
+    roots: ["R-GUARD", "R-FEATURE"],
+    requirements: [req700("R-GUARD"), req700("R-FEATURE")],
+    resources: [],
+    relations: [rel700("R-GUARD", "constrains", "R-FEATURE")],
+  });
+  const head = graph700({
+    roots: base.roots,
+    requirements: base.requirements,
+    resources: [],
+    relations: [],
+  });
+  assertRed(evaluate700({
+    base, head, workIntent: wi700(["R-GUARD"]),
+  }), "TRUST:missing:relation:R-GUARD|constrains|R-FEATURE", "BASE constraint relation cannot self-delete");
+});
+
+test("#699 X9 complexity compression metrics are explicit and do not hide external TRUST/DOMAIN/OBSERVATION", () => {
   const legacy = {
     publicTopLevelMechanisms: 18,
     governancePathDeclarations: 50,
