@@ -14,6 +14,7 @@ const pureReadOnlyParallel = [
   "test-647-control-plane-doctor.mjs",
   "test-647-merged-residue-planner.mjs",
   "test-707-i0-shadow.mjs",
+  "test-707-i1-canonical-loader.mjs",
   "test-699-five-consumer-differential.mjs",
   "test-anchor-diagnostics-boundary.mjs",
   "test-anchor-extractors.mjs",
