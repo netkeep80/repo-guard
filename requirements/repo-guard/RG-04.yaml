@@ -36,6 +36,8 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/runtime/analysis-report.mjs"
     relations: [requires, implements]
+  - path: "dist/runtime/resource-resolver.mjs"
+    relations: [requires, implements]
   - path: "dist/runtime/canonical-requirements.mjs"
     relations: [requires, implements]
   - path: "dist/runtime/pipeline.mjs"
@@ -103,6 +105,8 @@ artifacts:
   - path: "src/requirement-relations.mts"
     relations: [requires, implements]
   - path: "src/runtime/analysis-report.mts"
+    relations: [requires, implements]
+  - path: "src/runtime/resource-resolver.mts"
     relations: [requires, implements]
   - path: "src/runtime/canonical-requirements.mts"
     relations: [requires, implements]
@@ -183,6 +187,8 @@ artifacts:
   - path: "tests/test-pipeline.mjs"
     relations: [requires, verifies]
   - path: "tests/test-707-i0-shadow.mjs"
+    relations: [requires, verifies]
+  - path: "tests/test-707-i2-resource-resolver.mjs"
     relations: [requires, verifies]
   - path: "tests/test-707-i1-canonical-loader.mjs"
     relations: [requires, verifies]
