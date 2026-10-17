@@ -28,6 +28,7 @@ export function evaluatePolicyPipeline(input, options, reporter) {
         console.log(`State obligation plan: replaced ${replacedStateConstraintKeys.length} exact BASE state constraint(s): ${replacedStateConstraintKeys.join(", ")}`);
     const anchorDiagnostics = buildAnchorDiagnostics(facts);
     runPolicyChecks(facts, { report }, { anchorDiagnostics, excludeFamilies: options.excludeRuleFamilies, executionPhase: options.executionPhase, replacedStateConstraintKeys, satisfiedTransactionConstraintKeys });
+    options.shadowObservation?.(facts);
     return {
         command: input.mode,
         repositoryRoot: facts.repositoryRoot,
@@ -42,4 +43,44 @@ export function evaluatePolicyPipeline(input, options, reporter) {
 export function runPolicyPipeline(input, options = {}) {
     const reporter = createAnalysisCollector(input.enforcement, { presenter: options.quiet ? null : createAnalysisTextPresenter() });
     return reporter.finish(evaluatePolicyPipeline(input, options, reporter));
+}
+/**
+ * I0-only non-authoritative shadow seam. Both evaluations receive the same
+ * normalized observation, produced once by the existing pipeline.
+ * The legacy report is completed before invoking candidate code.
+ * No CLI, policy or production enforcement path calls this by default.
+ */
+export function runPolicyPipelineShadow(input, options, candidate, expectedIntentionalDifference = false) {
+    let observed;
+    const reporter = createAnalysisCollector(input.enforcement, { presenter: options.quiet ? null : createAnalysisTextPresenter() });
+    const metadata = evaluatePolicyPipeline(input, { ...options, shadowObservation: (facts) => { observed = facts; } }, reporter);
+    const legacy = reporter.finish(metadata);
+    if (!observed)
+        throw new Error("I0: exact normalized observation was not captured");
+    const legacyVerdict = { ok: legacy.ok, blocking: legacy.exitCode !== 0 };
+    let candidateVerdict;
+    try {
+        const result = candidate(observed);
+        if (typeof result?.ok !== "boolean")
+            throw new Error("shadow candidate omitted boolean verdict");
+        candidateVerdict = { ok: result.ok, reasons: [...new Set(result.reasons || [])].sort() };
+    }
+    catch (error) {
+        candidateVerdict = { ok: false, reasons: ["SHADOW_EXECUTION_ERROR:" + (error instanceof Error ? error.message : String(error))] };
+    }
+    const identical = legacyVerdict.ok === candidateVerdict.ok;
+    const classification = identical
+        ? "EQUIVALENT"
+        : expectedIntentionalDifference
+            ? "EXPECTED_INTENTIONAL_DIFFERENCE"
+            : "UNEXPECTED_DIFFERENCE";
+    return {
+        legacy,
+        comparison: {
+            legacy: legacyVerdict,
+            candidate: candidateVerdict,
+            identical,
+            classification,
+        },
+    };
 }
