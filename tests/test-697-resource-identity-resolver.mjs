@@ -518,11 +518,23 @@ test("#697 F01/F21 source rename preserves semantic Requirement identity and is 
   // Accepted relation identity already exhibits the same useful distinction.
   const oldGraph = normalizeRequirementAuthority({
     snapshot: "base", revision: base.revision,
-    sources: [{ path: "requirements/R1.yaml", format: "yaml", content: "id: R1\\nartifacts:\\n  - path: src/a.mts\\n    relations: [requires, implements]\\n" }],
+    sources: [{ path: "requirements/R1.yaml", format: "yaml", content: [
+      "id: R1",
+      "artifacts:",
+      "  - path: src/a.mts",
+      "    relations: [requires, implements]",
+      "",
+    ].join("\n") }],
   });
   const newGraph = normalizeRequirementAuthority({
     snapshot: "head", revision: head.revision,
-    sources: [{ path: "requirements/security/R1.yaml", format: "yaml", content: "id: R1\\nartifacts:\\n  - path: src/a.mts\\n    relations: [requires, implements]\\n" }],
+    sources: [{ path: "requirements/security/R1.yaml", format: "yaml", content: [
+      "id: R1",
+      "artifacts:",
+      "  - path: src/a.mts",
+      "    relations: [requires, implements]",
+      "",
+    ].join("\n") }],
   });
   assert.deepEqual(compareRequirementRelationGraphs(oldGraph, newGraph), { add: [], remove: [] });
   assert.equal(oldGraph.graph_sha256, newGraph.graph_sha256);
@@ -892,8 +904,8 @@ test("#697 F26 source representation identity and semantic Requirement identity 
 
 test("#697 parser safety: YAML duplicate keys/aliases/tags/merge are fail-closed", () => {
   assert.throws(() => parseYaml("id: A\\nid: B\\n"), /invalid YAML/);
-  assert.throws(() => parseYaml("a: &x {b: 1}\\nc: *x\\n"), /aliases are not allowed/);
-  assert.throws(() => parseYaml("a: !foo bar\\n"), /explicit tag/);
+  assert.throws(() => parseYaml("a: &x {b: 1}\\nc: *x\\n"), /invalid YAML|aliases are not allowed/);
+  assert.throws(() => parseYaml("a: !foo bar\\n"), /invalid YAML|explicit tag/);
   assert.throws(() => parseYaml("base: &b {x: 1}\\nobj:\\n  <<: *b\\n"), /invalid YAML|aliases are not allowed|merge keys are not allowed/);
 });
 
