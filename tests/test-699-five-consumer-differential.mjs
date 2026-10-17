@@ -943,6 +943,62 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       assert.equal(requirement.representation.revision, PINS.D5.pin);
     }
 
+    // D5 real-tree migration gap: deterministically lower only exact legacy artifact
+    // relations into existing vNext predicates. This is test-only PROVISIONAL data,
+    // not accepted consumer authority and never introduces wildcard/infra exemptions.
+    const relationMap = { requires: "requires", implements: "implemented_by", verifies: "verified_by", documents: "documents" };
+    const d5ProjectedItems = d5Canonical.requirements.map((requirement) => {
+      const artifacts = Array.isArray(requirement.value.artifacts) ? requirement.value.artifacts : [];
+      const relations = {};
+      let ordinal = 0;
+      for (const artifact of artifacts) {
+        if (!artifact || typeof artifact !== "object" || typeof artifact.path !== "string") continue;
+        assert.equal(/[*?\[\]{}]/.test(artifact.path), false, "D5 provisional projection forbids wildcard targets");
+        const kinds = Array.isArray(artifact.relations) ? artifact.relations : [];
+        for (const legacy of kinds) {
+          const predicate = relationMap[legacy];
+          if (!predicate) continue;
+          relations["r" + String(ordinal++).padStart(4, "0")] = {
+            predicate,
+            target: { kind: "artifact", path: artifact.path },
+          };
+        }
+      }
+      const value = { id: requirement.id, relations };
+      return {
+        ...requirement,
+        value,
+        semantic: canonical.semanticRequirementSubject(
+          PINS.D5.repo, requirement.id, canonical.canonicalSemanticDigest(value)),
+      };
+    });
+    const d5ProjectedIndex = Object.fromEntries(d5ProjectedItems.map((x) => [x.id, x]));
+    const d5Projected = {
+      ...d5Canonical,
+      requirements: d5ProjectedItems,
+      index: d5ProjectedIndex,
+    };
+    const d5ProjectedRoots = d5ProjectedItems.map((x) => x.semantic);
+    const d5RealTreeReplay = productionPipeline.evaluateRepositoryShadowReplay({
+      repository: PINS.D5.repo,
+      repositoryRoot: observed.D5.cwd,
+      trustedAuthorityBaseRevision: PINS.D5.pin,
+      baseRevision: PINS.D5.pin,
+      headRevision: PINS.D5.pin,
+      model: {
+        authority: { requirements: d5Projected, evaluationRoots: d5ProjectedRoots },
+        base: { requirements: d5Projected },
+        head: { requirements: d5Projected },
+      },
+      workIntent: { id: "i9-d5-real-tree-gap", addresses: d5ProjectedItems.map((x) => x.id) },
+    });
+    assert.equal(d5RealTreeReplay.replay.classification, "PROVISIONAL_MIGRATION_MODEL");
+    assert.equal(d5RealTreeReplay.replay.acceptedAuthorityVerified, false);
+    assert.equal(d5RealTreeReplay.replay.authority.j2.rooted.length, 5);
+    assert.ok(d5RealTreeReplay.replay.head.j1.justified.length > 0);
+    assert.ok(d5RealTreeReplay.replay.head.j1.unjustified.length > 0);
+    assert.equal(d5RealTreeReplay.replay.ok, false);
+
     // D4: adversarial derived fixture seeded with exact consumer source bytes.
     // This is NOT a historical consumer transition and is never labelled accepted authority.
     const d4Derived = join(root, "D4-derived");
@@ -1178,7 +1234,14 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       D2: { source: "VERSION + upstream locks/contracts", status: "NOT_PROVEN", gap: "no consumer vNext Requirement roots" },
       D3: { source: "package metadata + policy", status: "NOT_PROVEN", gap: "no consumer vNext Requirement roots" },
       D4: { source: "trusted_approver policy + proofApproval source", status: "PROVISIONAL_MIGRATION_MODEL", gap: "derived fixture proves semantics, not accepted consumer authority" },
-      D5: { source: "five exact canonical Requirement files", status: "PROVISIONAL_MIGRATION_MODEL", gap: "legacy artifacts need accepted typed-relation migration; full tracked closure not yet accepted" },
+      D5: {
+        source: "five exact canonical Requirement files",
+        status: "PROVISIONAL_MIGRATION_MODEL",
+        gap: "legacy artifacts need accepted typed-relation migration; real-tree provisional J1 remains incomplete",
+        realTreeJ2Rooted: d5RealTreeReplay.replay.authority.j2.rooted.length,
+        realTreeJ1Justified: d5RealTreeReplay.replay.head.j1.justified.length,
+        realTreeJ1Unjustified: d5RealTreeReplay.replay.head.j1.unjustified.length,
+      },
     };
 
     const testSourceText = readFileSync(resolve("tests/test-699-five-consumer-differential.mjs"), "utf8");
@@ -1228,7 +1291,12 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       A10: () => assert.equal(typeof productionPipeline.runPolicyPipelineShadow, "function"),
 
       M01: () => assert.deepEqual(Object.keys(migration).sort(), ["D1","D2","D3","D4","D5"]),
-      M02: () => assert.equal(Object.values(migration).every((x) => typeof x.gap === "string" && x.gap.length > 0), true),
+      M02: () => {
+        assert.equal(Object.values(migration).every((x) => typeof x.gap === "string" && x.gap.length > 0), true);
+        assert.equal(migration.D5.realTreeJ2Rooted, 5);
+        assert.ok(migration.D5.realTreeJ1Justified > 0);
+        assert.ok(migration.D5.realTreeJ1Unjustified > 0);
+      },
       M03: () => assert.equal(JSON.stringify(migration).includes("*"), false),
       M04: () => assert.equal(JSON.stringify(migration).includes("self-requires"), false),
       M05: () => assert.equal(Object.values(migration).every((x) => !Array.isArray(x.paths)), true),
@@ -1256,7 +1324,15 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       historical,
       provisionalProductionReplay: {
         D4: { negativeWithoutTrust: !d4NoTrust.replay.ok, exactDomainGreen: d4Green.replay.ok, classification: d4Green.replay.classification, acceptedAuthorityVerified: false },
-        D5: { routineReplacementGreen: d5Routine.replay.ok, normativeChangeRed: !d5Normative.replay.ok, classification: d5Routine.replay.classification, acceptedAuthorityVerified: false },
+        D5: {
+          routineReplacementGreen: d5Routine.replay.ok,
+          normativeChangeRed: !d5Normative.replay.ok,
+          realTreeJ2Rooted: d5RealTreeReplay.replay.authority.j2.rooted.length,
+          realTreeJ1Justified: d5RealTreeReplay.replay.head.j1.justified.length,
+          realTreeJ1Unjustified: d5RealTreeReplay.replay.head.j1.unjustified.length,
+          classification: d5Routine.replay.classification,
+          acceptedAuthorityVerified: false,
+        },
       },
       migration,
       ceremony,
