@@ -467,7 +467,7 @@ function evaluateScopedObligations(input: TransitionClosureInput, deltas: Delta[
                 (rule.includeGenerated !== undefined && typeof rule.includeGenerated !== "boolean") ||
                 (rule.metric !== undefined && !["changed_lines", "changed_resources"].includes(String(rule.metric))) ||
                 (rule.metric === undefined && rule.max !== undefined) ||
-                (rule.metric !== undefined && (!Number.isSafeInteger(rule.max) || rule.max < 0)) ||
+                (rule.metric !== undefined && (typeof rule.max !== "number" || !Number.isSafeInteger(rule.max) || rule.max < 0)) ||
                 (rule.metric === undefined && rule.evidence === undefined) ||
                 (rule.evidence !== undefined && (!evidence || !["execution", "domain"].includes(String(evidence.kind)) ||
                     typeof evidence.key !== "string" || !evidence.key || typeof evidence.providerId !== "string" ||
