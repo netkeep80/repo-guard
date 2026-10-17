@@ -87,7 +87,7 @@ export function loadCanonicalRequirements(input) {
         if (!identityValid)
             continue;
         try {
-            const content = input.readFile(safePath);
+            const content = input.readFile(input.revision, safePath);
             if (content === null || content === undefined)
                 throw new Error("canonical source missing at exact snapshot");
             const value = parseRequirement(Buffer.isBuffer(content) ? content.toString("utf8") : content, safePath);
