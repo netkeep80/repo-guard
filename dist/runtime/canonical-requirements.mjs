@@ -2,8 +2,17 @@ import { createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { normalizeDocumentFact, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
 const fail = (code, path, message, otherPath) => ({ code, path, message, ...(otherPath ? { otherPath } : {}) });
-const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value !== null && typeof value === "object"
-    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+function canonical(value) {
+    if (value === null || typeof value === "string" || typeof value === "boolean")
+        return value;
+    if (typeof value === "number" && Number.isFinite(value))
+        return value;
+    if (Array.isArray(value))
+        return value.map(canonical);
+    if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype)
+        return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+    throw new Error("non-JSON or non-finite canonical Requirement semantic value");
+}
 const digest = (value) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 export function strictCanonicalJson(raw) {
     // JSON.parse alone loses duplicate-key evidence. Preserve its exact value semantics.
