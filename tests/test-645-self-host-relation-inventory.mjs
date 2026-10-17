@@ -647,40 +647,39 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     const execFixture = makeEvidenceGitFixture({
       kind: "execution", key: "exec:k", providerId: "exec-process", verifierPath: "tests/v.mjs",
     });
+    const domainCommon = {
+      repository: "fixture/evidence",
+      base: domainFixture.baseState,
+      head: domainFixture.headState,
+      trustedAuthorityBase: {
+        revision: domainFixture.base,
+        requirements: domainFixture.baseState.requirements,
+        j2: domainFixture.baseState.j2,
+      },
+      resourceDeltas: domainFixture.resourceDeltas,
+      workIntent: { id: "evidence", addresses: ["R"] },
+      trustedEvidenceProviders: ["git-observation", "domain-process"],
+    };
+    const exactObservation = {
+      authorityBaseRevision: domainFixture.base,
+      baseRevision: domainFixture.base,
+      headRevision: domainFixture.head,
+      path: "src/x",
+      metric: "changed_lines",
+      value: domainFixture.changedLines,
+      providerId: "git-observation",
+    };
+    const exactDomain = {
+      authorityBaseRevision: domainFixture.base,
+      baseRevision: domainFixture.base,
+      headRevision: domainFixture.head,
+      key: "domain:k",
+      status: domainFixture.verifierRun.status === 0 ? "pass" : "fail",
+      providerId: "domain-process",
+      requirementId: "R",
+      subjectPaths: ["src/x"],
+    };
     try {
-      const domainCommon = {
-        repository: "fixture/evidence",
-        base: domainFixture.baseState,
-        head: domainFixture.headState,
-        trustedAuthorityBase: {
-          revision: domainFixture.base,
-          requirements: domainFixture.baseState.requirements,
-          j2: domainFixture.baseState.j2,
-        },
-        resourceDeltas: domainFixture.resourceDeltas,
-        workIntent: { id: "evidence", addresses: ["R"] },
-        trustedEvidenceProviders: ["git-observation", "domain-process"],
-      };
-      const exactObservation = {
-        authorityBaseRevision: domainFixture.base,
-        baseRevision: domainFixture.base,
-        headRevision: domainFixture.head,
-        path: "src/x",
-        metric: "changed_lines",
-        value: domainFixture.changedLines,
-        providerId: "git-observation",
-      };
-      const exactDomain = {
-        authorityBaseRevision: domainFixture.base,
-        baseRevision: domainFixture.base,
-        headRevision: domainFixture.head,
-        key: "domain:k",
-        status: domainFixture.verifierRun.status === 0 ? "pass" : "fail",
-        providerId: "domain-process",
-        requirementId: "R",
-        subjectPaths: ["src/x"],
-      };
-
       const noObservation = transitionRuntime.evaluateTransitionCauseClosure({
         ...domainCommon, evidenceFacts: [exactDomain],
       });
