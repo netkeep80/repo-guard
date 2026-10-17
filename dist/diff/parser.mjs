@@ -30,7 +30,7 @@ export function parseNameStatusZ(output) {
             files.push({ path: secondPath, previousPath: firstPath, addedLines: [], deletedLines: [], status: statusFromGit(code) });
             continue;
         }
-        files.push({ path: firstPath, addedLines: [], deletedLines: [], status: statusFromGit(code) });
+        files.push({ path: firstPath, ...(code === "T" ? { gitStatus: "T" } : {}), addedLines: [], deletedLines: [], status: statusFromGit(code) });
     }
     return files;
 }

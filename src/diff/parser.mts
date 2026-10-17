@@ -3,6 +3,8 @@ export type DiffFileStatus = "modified" | "added" | "deleted";
 export interface ParsedDiffFile {
   path: string;
   previousPath?: string;
+  /** Exact machine identity needed only when generic status would lose a Git type-change fact. */
+  gitStatus?: "T";
   addedLines: string[];
   deletedLines: string[];
   status: DiffFileStatus;
@@ -34,7 +36,7 @@ export function parseNameStatusZ(output: string): ParsedDiffFile[] {
       files.push({ path: secondPath, previousPath: firstPath, addedLines: [], deletedLines: [], status: statusFromGit(code) });
       continue;
     }
-    files.push({ path: firstPath, addedLines: [], deletedLines: [], status: statusFromGit(code) });
+    files.push({ path: firstPath, ...(code === "T" ? { gitStatus: "T" as const } : {}), addedLines: [], deletedLines: [], status: statusFromGit(code) });
   }
   return files;
 }
