@@ -307,7 +307,7 @@ function graph700({
   };
 }
 
-const req700 = (id, extra = {}) => ({ id, semantic: id, ...extra });
+const req700 = (id, extra = {}) => ({ id, semantic: id, normative: true, ...extra });
 const res700 = (id, kind = "code", extra = {}) => ({ id, kind, tracked: true, locator: id, content: id, ...extra });
 const rel700 = (from, kind, to) => ({ from, kind, to });
 const wi700 = (addresses, extra = {}) => ({ id: "W", source: "pr", state: "open", addresses: [...addresses], ...extra });
@@ -558,10 +558,14 @@ function relationTrustPermissions700(delta, base, head) {
   const toBase = baseRequirements.get(relation.to);
 
   if (J3_REQUIREMENT_RELATIONS_700.has(relation.kind)) {
+    if (delta.kind === "relation_add" && !fromBase && fromHead?.normative !== false) {
+      return ["requirement:" + relation.from];
+    }
     if (
       delta.kind === "relation_add"
       && relation.kind === "derives_from"
-      && !baseRequirements.has(relation.from)
+      && !fromBase
+      && fromHead?.normative === false
       && toBase?.allowDerivedRequirements === true
     ) return [];
     return ["relation:" + relationKey700(relation)];
@@ -582,7 +586,7 @@ function trustPermissions700(delta, base, head) {
 
   if (delta.kind.startsWith("requirement_")) {
     const requirement = baseRequirements.get(delta.subject) || headRequirements.get(delta.subject);
-    if (requirement?.protected) permissions.push("requirement:" + delta.subject);
+    if (requirement?.normative !== false) permissions.push("requirement:" + delta.subject);
   }
   if (delta.kind.startsWith("relation_")) permissions.push(...relationTrustPermissions700(delta, base, head));
   if (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") {
@@ -821,7 +825,11 @@ test("#700 S01 new Requirement + implementation is atomic without self-authoriza
       rel700("R-NEW", "implemented_by", "F-NEW"),
     ],
   });
-  const result = assert700("S01", { base, head, workIntent: wi700(["ROOT", "R-NEW"]) }, true);
+  const result = assert700("S01", {
+    base, head,
+    workIntent: wi700(["ROOT", "R-NEW"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R-NEW"])],
+  }, true);
   assert.ok(result.explanations.whyResource["F-NEW"].includes("R-NEW"));
 });
 
@@ -842,7 +850,11 @@ test("#700 S02 new Requirement may be satisfied by existing implementation with 
       rel700("R-NEW", "implemented_by", "F"),
     ],
   });
-  const result = assert700("S02", { base, head, workIntent: wi700(["ROOT", "R-NEW"]) }, true);
+  const result = assert700("S02", {
+    base, head,
+    workIntent: wi700(["ROOT", "R-NEW"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R-NEW"])],
+  }, true);
   assert.equal(result.deltas.some((delta) => delta.kind.startsWith("resource_")), false);
 });
 
@@ -923,7 +935,11 @@ test("#700 S06 removing a Requirement does not delete shared implementation stil
     resources: [res700("F")],
     relations: [rel700("R2", "implemented_by", "F")],
   });
-  const result = assert700("S06", { base, head, workIntent: wi700(["R1"]) }, true);
+  const result = assert700("S06", {
+    base, head,
+    workIntent: wi700(["R1"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R1"])],
+  }, true);
   assert.equal(result.deltas.some((delta) => delta.kind === "resource_delete"), false);
 });
 
@@ -1072,7 +1088,7 @@ test("#700 S12 merged proposed research remains distinct from ACCEPTED and CURRE
   });
   const head = graph700({
     roots: base.roots,
-    requirements: [base.requirements[0], req700("R-PROPOSED")],
+    requirements: [base.requirements[0], req700("R-PROPOSED", { normative: false })],
     resources: [res700("EXP", "experiment")],
     relations: [
       rel700("R-PROPOSED", "derives_from", "R-RESEARCH-ROOT"),
@@ -1445,7 +1461,11 @@ test("#700 R32 Requirement change does not mechanically force all linked resourc
     resources: base.resources,
     relations: base.relations,
   });
-  const result = assert700("R32 target", { base, head, workIntent: wi700(["R1"]) }, true);
+  const result = assert700("R32 target", {
+    base, head,
+    workIntent: wi700(["R1"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R1"])],
+  }, true);
   assert.equal(result.deltas.filter((delta) => delta.kind.startsWith("resource_")).length, 0);
 });
 
@@ -1524,9 +1544,21 @@ test("#700 SAFETY RED: rooted fake Requirement must not self-justify same-HEAD g
     workIntent: wi700(["ROOT", "R-GARBAGE"]),
   });
 
+  assert.equal(result.ok, false);
+  assert.ok(
+    result.reasons.includes("TRUST:missing:requirement:R-GARBAGE"),
+    "rooted HEAD state and candidate WorkIntent must not replace exact TRUST for a new normative Requirement",
+  );
+
+  const exactAuthorized = evaluate700({
+    base,
+    head,
+    workIntent: wi700(["ROOT", "R-GARBAGE"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R-GARBAGE"])],
+  });
   assert.equal(
-    result.ok,
-    false,
-    "#700 SAFETY RED: HEAD-created rooted Requirement must not become authority for its own introduction and garbage",
+    exactAuthorized.ok,
+    true,
+    "the same atomic new-Requirement transition becomes live only with exact independent authorization",
   );
 });
