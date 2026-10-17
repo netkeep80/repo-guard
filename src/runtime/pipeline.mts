@@ -2,7 +2,7 @@ import type { RepositoryFactsInput } from "../facts/input.mjs";
 import type { ParsedDiffFile } from "../diff/parser.mjs";
 import { normalizeDocumentFact } from "../document-facts.mjs";
 import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef } from "../git.mjs";
-import { loadCanonicalRequirements, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
+import { canonicalSemanticDigest, loadCanonicalRequirements, semanticRequirementSubject, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";
@@ -57,6 +57,7 @@ const sameStrings = (a: readonly string[], b: readonly string[]): boolean =>
 export function projectRepoGuardLegacyRequirements(
   raw: CanonicalRequirementsResult,
   implicitSourcePaths: Readonly<Record<string, string>> = Object.fromEntries(raw.requirements.map((item) => [item.id, item.source.path])),
+  authoritySubjects: Readonly<Record<string, SemanticRequirementSubject>> = Object.fromEntries(raw.requirements.map((item) => [item.id, item.semantic])),
 ) {
   const projectionErrors: CanonicalError[] = [];
   const facts: RepoGuardProjectionFact[] = [];
@@ -106,7 +107,21 @@ export function projectRepoGuardLegacyRequirements(
         });
       }
     }
-    projected.push({ ...item, value: { id: item.id, relations } as CanonicalRequirement["value"] });
+    const authoritySubject = authoritySubjects[item.id];
+    if (!authoritySubject || authoritySubject.repository !== item.semantic.repository || authoritySubject.requirementId !== item.id) {
+      projectionErrors.push({ code: "invalid_canonical_source", path: item.source.path, message: `I8 missing or mismatched normative authority subject for ${item.id}` });
+      continue;
+    }
+    const value = {
+      id: item.id,
+      authority: { source: selfHostRootSource, digest: authoritySubject.digest },
+      relations,
+    } as CanonicalRequirement["value"];
+    projected.push({
+      ...item,
+      value,
+      semantic: semanticRequirementSubject(item.semantic.repository, item.id, canonicalSemanticDigest(value)),
+    });
   }
   const errors = [...raw.errors, ...projectionErrors].sort((a, b) =>
     a.path.localeCompare(b.path, "en") || a.code.localeCompare(b.code, "en") || a.message.localeCompare(b.message, "en"));
@@ -119,6 +134,32 @@ export function projectRepoGuardLegacyRequirements(
     resolveFragment: raw.resolveFragment,
   };
   return { requirements: result, facts: facts.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), errors: projectionErrors };
+}
+
+function acceptedRootAuthority(repository: string, revision: string, repositoryRoot: string) {
+  const raw = readFileAtRef(revision, selfHostRootSource, repositoryRoot);
+  if (raw === null) throw new Error("I8 accepted root source missing");
+  const sections = new Map<string, string[]>();
+  let current: string | null = null;
+  for (const line of raw.split(/\r?\n/)) {
+    const match = line.match(/^###\s+(RG-[0-9]{2})\s+—/);
+    if (match) {
+      current = match[1]!;
+      if (sections.has(current)) throw new Error(`I8 accepted root source has duplicate ${current} heading`);
+      sections.set(current, [line]);
+      continue;
+    }
+    if (current && /^#{1,3}\s+/.test(line)) current = null;
+    if (current) sections.get(current)!.push(line);
+  }
+  const ids = [...sections.keys()].sort((a, b) => a.localeCompare(b, "en"));
+  if (!ids.length) throw new Error("I8 accepted root source has no RG headings");
+  const subjects: Record<string, SemanticRequirementSubject> = Object.create(null);
+  for (const id of ids) {
+    const value = { id, source: selfHostRootSource, text: sections.get(id)!.join("\n") } as CanonicalRequirement["value"];
+    subjects[id] = semanticRequirementSubject(repository, id, canonicalSemanticDigest(value));
+  }
+  return { ids, subjects };
 }
 
 function loadRepoGuardProjection(
@@ -135,24 +176,16 @@ function loadRepoGuardProjection(
     repository, revision, paths: canonicalPaths,
     readFile: (sha, path) => readFileAtRef(sha, path, repositoryRoot),
   });
-  const projection = projectRepoGuardLegacyRequirements(raw, implicitSourcePaths);
-  return { entries, raw, ...projection };
-}
-
-function acceptedRootIds(revision: string, repositoryRoot: string): string[] {
-  const raw = readFileAtRef(revision, selfHostRootSource, repositoryRoot);
-  if (raw === null) throw new Error("I8 accepted root source missing");
-  const matches = [...raw.matchAll(/^###\s+(RG-[0-9]{2})\s+—/gm)].map((match) => match[1]!);
-  const unique = uniqueSorted(matches);
-  if (!matches.length || unique.length !== matches.length) throw new Error("I8 accepted root source has missing or duplicate RG headings");
-  return unique;
+  const rootAuthority = acceptedRootAuthority(repository, revision, repositoryRoot);
+  const projection = projectRepoGuardLegacyRequirements(raw, implicitSourcePaths, rootAuthority.subjects);
+  return { entries, raw, rootIds: rootAuthority.ids, rootSubjects: rootAuthority.subjects, ...projection };
 }
 
 function closeRepoGuardProjection(
   repository: string, revision: string, repositoryRoot: string,
   loaded: ReturnType<typeof loadRepoGuardProjection>, trustedRoots: readonly SemanticRequirementSubject[],
 ) {
-  const j2 = evaluateRootedRequirements({ requirements: loaded.requirements, trustedRoots });
+  const j2 = evaluateRootedRequirements({ requirements: loaded.requirements, trustedRoots, rootSubjects: loaded.rootSubjects });
   let j1 = {
     ok: false, justified: [] as string[], unjustified: loaded.entries.map((entry) => entry.path),
     errors: [{ code: "j2_not_rooted", path: "" }], explanations: {} as Record<string, string[]>,
@@ -203,13 +236,10 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
 
   const authorityLoaded = loadRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot);
   const acceptedSourcePaths = Object.fromEntries(authorityLoaded.raw.requirements.map((item) => [item.id, item.source.path]));
-  const rootIds = acceptedRootIds(input.trustedAuthorityBaseRevision, input.repositoryRoot);
+  const rootIds = authorityLoaded.rootIds;
   const authorityIds = Object.keys(authorityLoaded.requirements.index).sort();
   if (!sameStrings(rootIds, authorityIds)) reasons.push("I8:accepted_root_set_mismatch");
-  const trustedRoots = rootIds.flatMap((id) => {
-    const requirement = authorityLoaded.requirements.index[id];
-    return requirement ? [requirement.semantic] : [];
-  });
+  const trustedRoots = rootIds.flatMap((id) => authorityLoaded.rootSubjects[id] ? [authorityLoaded.rootSubjects[id]!] : []);
   if (trustedRoots.length !== rootIds.length) reasons.push("I8:accepted_root_identity_missing");
 
   const authority = closeRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot, authorityLoaded, trustedRoots);
@@ -220,9 +250,25 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
     loadRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot, acceptedSourcePaths);
   const base = input.baseRevision === authority.revision ? authority :
     closeRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, baseLoaded, trustedRoots);
+  const exactPermission = (permission: string): boolean => (input.trustedReceipts || []).some((receipt) =>
+    receipt.authorityBaseRevision === input.trustedAuthorityBaseRevision &&
+    receipt.baseRevision === input.baseRevision &&
+    receipt.headRevision === input.headRevision &&
+    Array.isArray(receipt.permissions) &&
+    receipt.permissions.every((item) => typeof item === "string" && item.length > 0 && item !== "*") &&
+    receipt.permissions.includes(permission));
+  const subjectKey = (subject: SemanticRequirementSubject): string =>
+    [subject.repository, subject.requirementId, subject.digest].join("\0");
+  const headTrustedRoots = rootIds.flatMap((id) => {
+    const accepted = authorityLoaded.rootSubjects[id];
+    const proposed = headLoaded.rootSubjects[id];
+    if (!accepted) return [];
+    if (proposed && subjectKey(proposed) !== subjectKey(accepted) && exactPermission("requirement:" + id)) return [proposed];
+    return [accepted];
+  });
   const head = input.headRevision === authority.revision ? authority :
     input.headRevision === base.revision ? base :
-    closeRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot, headLoaded, trustedRoots);
+    closeRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot, headLoaded, headTrustedRoots);
 
   for (const [label, loaded, state] of [["authority", authorityLoaded, authority], ["base", baseLoaded, base], ["head", headLoaded, head]] as const) {
     if (loaded.errors.length) reasons.push(`I8:${label}_projection_invalid`);
@@ -270,10 +316,13 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
     base: { revision: base.revision, rooted: base.j2.rooted, unrooted: base.j2.unrooted, tracked: base.entries.length, justified: base.j1.justified.length, unjustified: base.j1.unjustified },
     head: { revision: head.revision, rooted: head.j2.rooted, unrooted: head.j2.unrooted, tracked: head.entries.length, justified: head.j1.justified.length, unjustified: head.j1.unjustified },
     projection: {
-      semanticIdentityPreserved: headLoaded.raw.requirements.every((item) =>
-        headLoaded.requirements.index[item.id]?.semantic.repository === item.semantic.repository &&
-        headLoaded.requirements.index[item.id]?.semantic.requirementId === item.semantic.requirementId &&
-        headLoaded.requirements.index[item.id]?.semantic.digest === item.semantic.digest),
+      semanticDigestMatchesValue: headLoaded.requirements.requirements.every((item) =>
+        item.semantic.digest === canonicalSemanticDigest(item.value)),
+      normativeAuthoritySeparated: rootIds.every((id) =>
+        !!headLoaded.rootSubjects[id] && headLoaded.rootSubjects[id]!.requirementId === id),
+      sourceSemanticDigests: Object.fromEntries(headLoaded.raw.requirements.map((item) => [item.id, item.semantic.digest])),
+      projectedSemanticDigests: Object.fromEntries(headLoaded.requirements.requirements.map((item) => [item.id, item.semantic.digest])),
+      normativeAuthorityDigests: Object.fromEntries(rootIds.map((id) => [id, headLoaded.rootSubjects[id]?.digest || null])),
       facts: head.projectionFacts,
     },
     observation: {
@@ -285,7 +334,7 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
     },
     trustBoundary: {
       trustedAuthorityBaseRevision: input.trustedAuthorityBaseRevision,
-      rootIdentitySource: "accepted exact product requirements + exact canonical semantic subjects",
+      rootIdentitySource: "exact RG normative section subjects from accepted product requirements; relation representation identity is separate",
       providerAuthentication: "external to pure evaluator",
       protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
       trustedEvidenceProviders: uniqueSorted(input.trustedEvidenceProviders || []),
@@ -389,6 +438,5 @@ export function runRepoGuardSelfHostShadow(
     });
     return { ok: selfHost.ok, reasons: selfHost.reasons };
   }, expectedIntentionalDifference);
-  if (!selfHost) throw new Error("I8: self-host shadow did not execute");
-  return { ...shadow, selfHost };
+  return { ...shadow, selfHost: selfHost ?? null };
 }
