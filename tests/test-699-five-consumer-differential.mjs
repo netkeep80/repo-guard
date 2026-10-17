@@ -818,3 +818,11 @@ test("#699 X9 complexity compression metrics are explicit and do not hide extern
   assert.equal(candidate.permanentOneOffProfiles, 0);
   assert.deepEqual(candidate.independentBoundaries, ["OBSERVATION", "DOMAIN", "TRUST"]);
 });
+
+
+// #726 I9 RED: production must expose a generic exact external-repository replay seam.
+{
+  const productionPipeline = await import("../dist/runtime/pipeline.mjs");
+  assert.equal(typeof productionPipeline.evaluateRepositoryShadowReplay, "function",
+    "I9 requires generic production replay without consumer-specific core semantics");
+}
