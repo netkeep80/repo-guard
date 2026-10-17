@@ -61,3 +61,55 @@ test("I1 F20-F22 F26 identity subject classes are authority-neutral", () => {
   assert.throws(()=>exactRepresentationSubject(repo,"main","requirements/R1.json"),/revision/i);
   assert.equal(semanticRequirementSubject(repo,"R1",s.digest).kind,"semantic_requirement");
 });
+
+test("I1 F21 stable keyed fragment identity survives unrelated sibling insertion", () => {
+  const before = load([item("requirements/R1.json",'{"id":"R1","relations":{"verified":{"id":"V1"}}}')]);
+  const after = load([item("requirements/R1.json",'{"id":"R1","relations":{"other":{"id":"V0"},"verified":{"id":"V1"}}}')]);
+  const first = before.resolveFragment("R1", "/relations/verified", { durable: true });
+  const second = after.resolveFragment("R1", "/relations/verified", { durable: true });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.deepEqual(first.value, second.value);
+  assert.equal(first.identity.pointer, second.identity.pointer);
+});
+
+test("I1 uses I0 shadow on existing normalized facts without altering v3 blocking report", async () => {
+  const input = {
+    mode: "check-diff", repositoryRoot: "/tmp/rg-i1-snapshot", repositoryIdentity: repo,
+    policy: {
+      policy_format_version: "0.3.0", repository_kind: "tooling",
+      paths: { forbidden: [], governance_paths: [], canonical_docs: [], operational_paths: [] },
+      diff_rules: { max_new_files: 8, max_new_docs: 8, max_net_added_lines: 100 },
+      content_rules: [], cochange_rules: [],
+    },
+    changeIntent: null, changeIntentSource: "none",
+    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
+    diffText: "", trackedFiles: ["requirements/R1.json"],
+    readFile: () => '{"id":"R1"}',
+    readFileAtRef: (revision, path) => revision === sha && path === "requirements/R1.json" ? '{"id":"R1"}' : null,
+  };
+  const { runPolicyPipeline } = await import("../dist/runtime/pipeline.mjs");
+  const baseline = runPolicyPipeline(input, { quiet: true });
+  const shadow = runPolicyPipelineShadow(input, { quiet: true }, (facts) => {
+    const result = loadCanonicalRequirements({
+      repository: facts.repositoryIdentity,
+      revision: sha,
+      paths: facts.trackedFiles,
+      readFile: path => facts.readFileAtRef(sha, path),
+    });
+    return { ok: result.ok, reasons: result.errors.map(e => e.code) };
+  });
+  assert.deepEqual(shadow.legacy, baseline);
+  assert.equal(shadow.comparison.candidate.ok, true);
+  assert.equal(shadow.comparison.classification, baseline.ok ? "EQUIVALENT" : "UNEXPECTED_DIFFERENCE");
+  const malformed = runPolicyPipelineShadow(input, { quiet: true }, (facts) => {
+    const result = loadCanonicalRequirements({
+      repository: facts.repositoryIdentity, revision: sha, paths: facts.trackedFiles,
+      readFile: () => '{"id":"R1","id":"R2"}',
+    });
+    return { ok: result.ok, reasons: result.errors.map(e => e.code) };
+  });
+  assert.deepEqual(malformed.legacy, baseline);
+  assert.equal(malformed.comparison.candidate.ok, false);
+  assert.ok(malformed.comparison.candidate.reasons.includes("duplicate_json_key"));
+});
