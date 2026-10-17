@@ -307,7 +307,7 @@ function graph700({
   };
 }
 
-const req700 = (id, extra = {}) => ({ id, semantic: id, normative: true, ...extra });
+const req700 = (id, extra = {}) => ({ id, semantic: id, ...extra });
 const res700 = (id, kind = "code", extra = {}) => ({ id, kind, tracked: true, locator: id, content: id, ...extra });
 const rel700 = (from, kind, to) => ({ from, kind, to });
 const wi700 = (addresses, extra = {}) => ({ id: "W", source: "pr", state: "open", addresses: [...addresses], ...extra });
@@ -558,20 +558,13 @@ function relationTrustPermissions700(delta, base, head) {
   const toBase = baseRequirements.get(relation.to);
 
   if (J3_REQUIREMENT_RELATIONS_700.has(relation.kind)) {
-    if (delta.kind === "relation_add" && !fromBase && fromHead?.normative !== false) {
+    if (delta.kind === "relation_add" && !fromBase && fromHead) {
       return ["requirement:" + relation.from];
     }
-    if (
-      delta.kind === "relation_add"
-      && relation.kind === "derives_from"
-      && !fromBase
-      && fromHead?.normative === false
-      && toBase?.allowDerivedRequirements === true
-    ) return [];
     return ["relation:" + relationKey700(relation)];
   }
 
-  if (delta.kind === "relation_remove" && relation.kind === "requires" && (fromBase?.protected || fromHead?.protected)) {
+  if (delta.kind === "relation_remove" && relation.kind === "requires" && fromBase) {
     return ["requirement:" + relation.from];
   }
   return [];
@@ -586,7 +579,7 @@ function trustPermissions700(delta, base, head) {
 
   if (delta.kind.startsWith("requirement_")) {
     const requirement = baseRequirements.get(delta.subject) || headRequirements.get(delta.subject);
-    if (requirement?.normative !== false) permissions.push("requirement:" + delta.subject);
+    if (requirement) permissions.push("requirement:" + delta.subject);
   }
   if (delta.kind.startsWith("relation_")) permissions.push(...relationTrustPermissions700(delta, base, head));
   if (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") {
@@ -637,8 +630,10 @@ function exactDomainPass700(context, requirementId, kind, subject = requirementI
 }
 
 function metricValue700(constraint, requirementId, base, head, deltas, context) {
-  const scopeGraph = mapById700(head.requirements).has(requirementId) ? head : base;
-  const scope = reachableResourcesFromRequirement700(scopeGraph, requirementId);
+  const scope = new Set([
+    ...reachableResourcesFromRequirement700(base, requirementId),
+    ...reachableResourcesFromRequirement700(head, requirementId),
+  ]);
   if (constraint.metric === "changed_lines") {
     return deltas
       .filter((delta) => (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") && scope.has(delta.subject))
@@ -1088,7 +1083,7 @@ test("#700 S12 merged proposed research remains distinct from ACCEPTED and CURRE
   });
   const head = graph700({
     roots: base.roots,
-    requirements: [base.requirements[0], req700("R-PROPOSED", { normative: false })],
+    requirements: [base.requirements[0], req700("R-PROPOSED")],
     resources: [res700("EXP", "experiment")],
     relations: [
       rel700("R-PROPOSED", "derives_from", "R-RESEARCH-ROOT"),
@@ -1096,7 +1091,11 @@ test("#700 S12 merged proposed research remains distinct from ACCEPTED and CURRE
     ],
     lifecycle: { "R-PROPOSED": { merged: true, accepted: false, current: false } },
   });
-  assert700("S12", { base, head, workIntent: wi700(["R-RESEARCH-ROOT"]) }, true);
+  assert700("S12", {
+    base, head,
+    workIntent: wi700(["R-RESEARCH-ROOT"]),
+    trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["requirement:R-PROPOSED"])],
+  }, true);
   assert.equal(head.lifecycle["R-PROPOSED"].accepted, false);
   assert.equal(head.lifecycle["R-PROPOSED"].current, false);
 });
