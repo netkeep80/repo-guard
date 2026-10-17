@@ -1698,3 +1698,36 @@ test("#700 SAFETY RED: trusted provider classification is external to candidate 
   );
   assert.ok(result.reasons.some((reason) => reason.includes("TRUST:missing:trust_root:WF")));
 });
+
+
+test("#700 SAFETY RED: candidate Resource-kind reclassification cannot erase a BASE transition obligation", () => {
+  const base = graph700({
+    roots: ["R-PRODUCT", "R-MAINT"],
+    requirements: [
+      req700("R-PRODUCT"),
+      req700("R-MAINT", {
+        transition: { deltaKinds: ["resource_modify", "resource_type_change"], resourceKinds: ["code"] },
+        domainEvidenceOnChange: ["equivalence"],
+      }),
+    ],
+    resources: [res700("F", "code", { content: "before" })],
+    relations: [rel700("R-PRODUCT", "implemented_by", "F")],
+  });
+  const head = graph700({
+    roots: base.roots,
+    requirements: base.requirements,
+    resources: [res700("F", "doc", { content: "after" })],
+    relations: base.relations,
+  });
+  const result = evaluate700({
+    base,
+    head,
+    workIntent: wi700(["R-PRODUCT", "R-MAINT"]),
+  });
+  assert.equal(
+    result.ok,
+    false,
+    "HEAD reclassification must not make a BASE code-change equivalence obligation disappear",
+  );
+  assert.ok(result.reasons.some((reason) => reason.includes("DOMAIN:missing:R-MAINT:equivalence")));
+});
