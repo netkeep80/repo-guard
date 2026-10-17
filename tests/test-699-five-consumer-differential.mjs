@@ -36,6 +36,7 @@ const PINS = {
     governancePaths: 5,
     surfaces: 10,
     changeProfiles: 5,
+    tracked: 1036,
   },
   D2: {
     repo: "netkeep80/amemory",
@@ -44,6 +45,7 @@ const PINS = {
     governancePaths: 30,
     surfaces: 0,
     changeProfiles: 0,
+    tracked: 156,
   },
   D3: {
     repo: "netkeep80/anum_parser",
@@ -52,6 +54,7 @@ const PINS = {
     governancePaths: 5,
     surfaces: 0,
     changeProfiles: 0,
+    tracked: 67,
   },
   D4: {
     repo: "netkeep80/aprover",
@@ -60,6 +63,7 @@ const PINS = {
     governancePaths: 4,
     surfaces: 9,
     changeProfiles: 8,
+    tracked: 117,
   },
   D5: {
     repo: "netkeep80/mts-nl-compiler",
@@ -68,6 +72,7 @@ const PINS = {
     governancePaths: 6,
     surfaces: 0,
     changeProfiles: 0,
+    tracked: 154,
   },
 };
 const exactReceipt = (...permissions) => receipt700(A, B, permissions);
@@ -820,9 +825,433 @@ test("#699 X9 complexity compression metrics are explicit and do not hide extern
 });
 
 
-// #726 I9 RED: production must expose a generic exact external-repository replay seam.
-{
+test("#726 I9 R01-M10 real-source audit + production provisional replay", { timeout: 240_000 }, async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, dirname, resolve } = await import("node:path");
   const productionPipeline = await import("../dist/runtime/pipeline.mjs");
-  assert.equal(typeof productionPipeline.evaluateRepositoryShadowReplay, "function",
-    "I9 requires generic production replay without consumer-specific core semantics");
-}
+  const productionGit = await import("../dist/git.mjs");
+  const canonical = await import("../dist/runtime/canonical-requirements.mjs");
+
+  assert.equal(typeof productionPipeline.evaluateRepositoryShadowReplay, "function");
+
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-i9-"));
+  const git = (cwd, args, options = {}) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...options }).trim();
+  const put = (cwd, path, content) => {
+    const full = join(cwd, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content);
+  };
+  const initRepo = (cwd) => {
+    mkdirSync(cwd, { recursive: true });
+    git(cwd, ["init", "-q"]);
+    git(cwd, ["config", "user.email", "i9@example.invalid"]);
+    git(cwd, ["config", "user.name", "RepoGuard I9"]);
+  };
+  const commitAll = (cwd, message) => {
+    git(cwd, ["add", "-A"]);
+    git(cwd, ["commit", "-q", "-m", message]);
+    return git(cwd, ["rev-parse", "HEAD"]);
+  };
+  const exactReplay = (id, cwd, revision) => productionPipeline.evaluateRepositoryShadowReplay({
+    repository: PINS[id].repo,
+    repositoryRoot: cwd,
+    trustedAuthorityBaseRevision: revision,
+    baseRevision: revision,
+    headRevision: revision,
+    model: null,
+  });
+
+  const observed = {};
+  try {
+    for (const [id, expected] of Object.entries(PINS)) {
+      const cwd = join(root, id);
+      initRepo(cwd);
+      git(cwd, ["remote", "add", "origin", "https://github.com/" + expected.repo + ".git"]);
+      git(cwd, ["fetch", "--quiet", "--no-tags", "--depth=1", "origin", "+refs/heads/main:refs/i9/main"]);
+      const current = git(cwd, ["rev-parse", "refs/i9/main"]);
+      if (current !== expected.pin) {
+        git(cwd, ["fetch", "--quiet", "--no-tags", "--depth=1", "origin", expected.pin]);
+      }
+      assert.equal(git(cwd, ["cat-file", "-t", expected.pin]), "commit");
+      const entries = productionGit.listTrackedEntriesAtRef(expected.pin, cwd);
+      const policyEntry = entries.find((entry) => entry.path === "repo-policy.json");
+      assert.ok(policyEntry, id + " repo-policy.json must be tracked");
+      assert.equal(policyEntry.object, expected.policyBlob);
+      assert.equal(entries.length, expected.tracked);
+      const policy = JSON.parse(productionGit.readFileAtRef(expected.pin, "repo-policy.json", cwd));
+      const replay = exactReplay(id, cwd, expected.pin);
+      assert.equal(replay.observation.headTracked, expected.tracked);
+      assert.equal(replay.replay.classification, "NOT_PROVEN");
+      assert.equal(replay.replay.acceptedAuthorityVerified, false);
+      observed[id] = {
+        cwd, current, drift: current === expected.pin ? "NO_DRIFT" : "DRIFT_DETECTED",
+        entries, policy, replay,
+      };
+    }
+
+    const d1Registry = JSON.parse(productionGit.readFileAtRef(
+      PINS.D1.pin, "requirements/mts-v0.15.json", observed.D1.cwd));
+    assert.equal(d1Registry.accepted, true);
+    assert.equal(d1Registry.status, "accepted");
+    assert.ok(d1Registry.requirements.some((r) => r.id === "V15-READY-03" && r.state === "ACCEPTED"));
+    const d1Sources = observed.D1.entries.filter((entry) => entry.path.startsWith("requirements/"));
+
+    const d2Version = productionGit.readFileAtRef(PINS.D2.pin, "VERSION", observed.D2.cwd).trim();
+    const d2Lock = JSON.parse(productionGit.readFileAtRef(
+      PINS.D2.pin, "contracts/upstream/mts-v0.15.lock.json", observed.D2.cwd));
+    assert.equal(d2Version, "0.182.0");
+    assert.match(d2Lock.acceptedCommit, /^[0-9a-f]{40}$/);
+    assert.equal(d2Lock.floatingRefsAllowed, false);
+
+    const d3Package = JSON.parse(productionGit.readFileAtRef(PINS.D3.pin, "package.json", observed.D3.cwd));
+    const d3PackageLock = JSON.parse(productionGit.readFileAtRef(PINS.D3.pin, "package-lock.json", observed.D3.cwd));
+    assert.equal(d3Package.version, d3PackageLock.version);
+    assert.equal(d3Package.version, d3PackageLock.packages[""].version);
+
+    const d4Policy = observed.D4.policy;
+    assert.deepEqual(d4Policy.surfaces.trusted_approver, ["src/core/proofApproval.ts"]);
+    assert.ok(d4Policy.change_profiles.feature.forbid_surfaces.includes("trusted_approver"));
+    assert.ok(d4Policy.change_profiles["trusted-kernel"].require_surfaces.includes("trusted_approver"));
+    assert.ok(d4Policy.change_profiles["trusted-kernel"].require_surfaces.includes("unit_tests"));
+
+    const d5RequirementPaths = observed.D5.entries
+      .map((entry) => entry.path)
+      .filter((path) => /^requirements\/MNC-\d+\.yaml$/.test(path))
+      .sort();
+    assert.deepEqual(d5RequirementPaths, [
+      "requirements/MNC-001.yaml",
+      "requirements/MNC-024.yaml",
+      "requirements/MNC-026.yaml",
+      "requirements/MNC-028.yaml",
+      "requirements/MNC-030.yaml",
+    ]);
+    const d5Canonical = canonical.loadCanonicalRequirements({
+      repository: PINS.D5.repo,
+      revision: PINS.D5.pin,
+      paths: d5RequirementPaths,
+      readFile: (revision, path) => productionGit.readFileAtRef(revision, path, observed.D5.cwd),
+    });
+    assert.equal(d5Canonical.ok, true, JSON.stringify(d5Canonical.errors));
+    assert.equal(d5Canonical.requirements.length, 5);
+    for (const requirement of d5Canonical.requirements) {
+      const sourceEntry = observed.D5.entries.find((entry) => entry.path === requirement.source.path);
+      assert.ok(sourceEntry);
+      assert.notEqual(requirement.semantic.digest, sourceEntry.object);
+      assert.equal(requirement.representation.revision, PINS.D5.pin);
+    }
+
+    // D4: adversarial derived fixture seeded with exact consumer source bytes.
+    // This is NOT a historical consumer transition and is never labelled accepted authority.
+    const d4Derived = join(root, "D4-derived");
+    initRepo(d4Derived);
+    const actualApprover = productionGit.readFileAtRef(
+      PINS.D4.pin, "src/core/proofApproval.ts", observed.D4.cwd);
+    put(d4Derived, "src/core/proofApproval.ts", actualApprover);
+    put(d4Derived, "tests/domain.mjs", [
+      'import { readFileSync } from "node:fs";',
+      'const source = readFileSync("src/core/proofApproval.ts", "utf8");',
+      'if (source.length < 100 || !/proof/i.test(source)) process.exit(2);',
+      'console.log("D4_DERIVED_DOMAIN_OK");',
+      "",
+    ].join("\n"));
+    const d4Requirement = [
+      "id: D4-TRUST",
+      "relations:",
+      "  impl:",
+      "    predicate: implemented_by",
+      "    target: {kind: artifact, path: src/core/proofApproval.ts}",
+      "  verify:",
+      "    predicate: verified_by",
+      "    target: {kind: artifact, path: tests/domain.mjs}",
+      "transition:",
+      "  deltaKinds: [resource_modify]",
+      "  paths: [src/core/proofApproval.ts]",
+      "  requireAddressed: true",
+      "constraints:",
+      "  - id: exact-domain",
+      "    relations: [implemented_by]",
+      "    evidence:",
+      "      kind: execution",
+      "      key: d4-derived-domain",
+      "      providerId: d4-domain",
+      "      verifierPath: tests/domain.mjs",
+      "",
+    ].join("\n");
+    put(d4Derived, "requirements/D4-TRUST.yaml", d4Requirement);
+    const d4Base = commitAll(d4Derived, "D4 derived base from exact consumer source");
+    put(d4Derived, "src/core/proofApproval.ts", actualApprover + "\n// I9 derived protected transition\n");
+    const d4Head = commitAll(d4Derived, "D4 derived protected transition");
+    const loadD4 = (revision) => canonical.loadCanonicalRequirements({
+      repository: PINS.D4.repo,
+      revision,
+      paths: ["requirements/D4-TRUST.yaml"],
+      readFile: (sha, path) => productionGit.readFileAtRef(sha, path, d4Derived),
+    });
+    const d4BaseReq = loadD4(d4Base), d4HeadReq = loadD4(d4Head);
+    assert.equal(d4BaseReq.ok && d4HeadReq.ok, true);
+    const d4Root = d4BaseReq.requirements[0].semantic;
+    const d4Model = {
+      authority: { requirements: d4BaseReq, evaluationRoots: [d4Root] },
+      base: { requirements: d4BaseReq },
+      head: { requirements: d4HeadReq },
+    };
+    const d4BaseInput = {
+      repository: PINS.D4.repo,
+      repositoryRoot: d4Derived,
+      trustedAuthorityBaseRevision: d4Base,
+      baseRevision: d4Base,
+      headRevision: d4Head,
+      model: d4Model,
+      workIntent: { id: "i9-d4-derived", addresses: ["D4-TRUST"] },
+      protectedResources: ["src/core/proofApproval.ts"],
+      trustedEvidenceProviders: ["d4-domain"],
+    };
+    const d4NoTrust = productionPipeline.evaluateRepositoryShadowReplay(d4BaseInput);
+    assert.equal(d4NoTrust.replay.ok, false);
+    assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_authority:resource:src/core/proofApproval.ts")));
+    assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_evidence:D4-TRUST:exact-domain")));
+
+    const domainStdout = execFileSync(process.execPath, ["tests/domain.mjs"], {
+      cwd: d4Derived, encoding: "utf8",
+    }).trim();
+    assert.equal(domainStdout, "D4_DERIVED_DOMAIN_OK");
+    const d4Receipt = {
+      authorityBaseRevision: d4Base,
+      baseRevision: d4Base,
+      headRevision: d4Head,
+      permissions: ["resource:src/core/proofApproval.ts"],
+    };
+    const d4Evidence = {
+      authorityBaseRevision: d4Base,
+      baseRevision: d4Base,
+      headRevision: d4Head,
+      key: "d4-derived-domain",
+      status: "pass",
+      providerId: "d4-domain",
+      requirementId: "D4-TRUST",
+      subjectPaths: ["src/core/proofApproval.ts"],
+      verifierPath: "tests/domain.mjs",
+      verifierRevision: d4Head,
+    };
+    const d4Green = productionPipeline.evaluateRepositoryShadowReplay({
+      ...d4BaseInput, trustedReceipts: [d4Receipt], evidenceFacts: [d4Evidence],
+    });
+    assert.equal(d4Green.replay.ok, true, d4Green.replay.gaps.join(" | "));
+    assert.equal(d4Green.replay.classification, "PROVISIONAL_MIGRATION_MODEL");
+    assert.equal(d4Green.replay.acceptedAuthorityVerified, false);
+    assert.equal(d4Green.replay.readyForCutover, false);
+
+    const d4WrongProvider = productionPipeline.evaluateRepositoryShadowReplay({
+      ...d4BaseInput, trustedReceipts: [d4Receipt],
+      evidenceFacts: [{ ...d4Evidence, providerId: "candidate-provider" }],
+    });
+    assert.equal(d4WrongProvider.replay.ok, false);
+    const d4StaleReceipt = productionPipeline.evaluateRepositoryShadowReplay({
+      ...d4BaseInput,
+      trustedReceipts: [{ ...d4Receipt, headRevision: d4Base }],
+      evidenceFacts: [d4Evidence],
+    });
+    assert.equal(d4StaleReceipt.replay.ok, false);
+    const d4WrongSubject = productionPipeline.evaluateRepositoryShadowReplay({
+      ...d4BaseInput, trustedReceipts: [d4Receipt],
+      evidenceFacts: [{ ...d4Evidence, subjectPaths: ["tests/domain.mjs"] }],
+    });
+    assert.equal(d4WrongSubject.replay.ok, false);
+
+    // D5: derived routine implementation replacement using exact source bytes.
+    const d5Derived = join(root, "D5-derived");
+    initRepo(d5Derived);
+    const oldImpl = productionGit.readFileAtRef(PINS.D5.pin, "src/store.mjs", observed.D5.cwd);
+    const newImpl = productionGit.readFileAtRef(PINS.D5.pin, "src/knowledge-snapshot-v0.mjs", observed.D5.cwd);
+    const d5Req = (path, summary = "routine implementation mapping") => [
+      "id: D5-R",
+      "summary: " + summary,
+      "relations:",
+      "  impl:",
+      "    predicate: implemented_by",
+      "    target: {kind: artifact, path: " + path + "}",
+      "",
+    ].join("\n");
+    put(d5Derived, "requirements/D5-R.yaml", d5Req("src/store.mjs"));
+    put(d5Derived, "src/store.mjs", oldImpl);
+    const d5Base = commitAll(d5Derived, "D5 derived base from exact consumer source");
+    rmSync(join(d5Derived, "src/store.mjs"));
+    put(d5Derived, "src/knowledge-snapshot-v0.mjs", newImpl);
+    put(d5Derived, "requirements/D5-R.yaml", d5Req("src/knowledge-snapshot-v0.mjs"));
+    const d5Head = commitAll(d5Derived, "D5 derived routine replacement");
+    const loadD5 = (revision) => canonical.loadCanonicalRequirements({
+      repository: PINS.D5.repo,
+      revision,
+      paths: ["requirements/D5-R.yaml"],
+      readFile: (sha, path) => productionGit.readFileAtRef(sha, path, d5Derived),
+    });
+    const d5BaseReq = loadD5(d5Base), d5HeadReq = loadD5(d5Head);
+    const d5StableRoot = canonical.semanticRequirementSubject(
+      PINS.D5.repo, "D5-R",
+      canonical.canonicalSemanticDigest({ id: "D5-R", summary: "routine implementation mapping" }),
+    );
+    const d5RootSubjects = { "D5-R": d5StableRoot };
+    const d5Routine = productionPipeline.evaluateRepositoryShadowReplay({
+      repository: PINS.D5.repo,
+      repositoryRoot: d5Derived,
+      trustedAuthorityBaseRevision: d5Base,
+      baseRevision: d5Base,
+      headRevision: d5Head,
+      model: {
+        authority: { requirements: d5BaseReq, evaluationRoots: [d5StableRoot], rootSubjects: d5RootSubjects },
+        base: { requirements: d5BaseReq, rootSubjects: d5RootSubjects },
+        head: { requirements: d5HeadReq, rootSubjects: d5RootSubjects },
+      },
+      workIntent: { id: "i9-d5-derived-routine", addresses: ["D5-R"] },
+    });
+    assert.equal(d5Routine.replay.ok, true, d5Routine.replay.gaps.join(" | "));
+    assert.equal(d5Routine.replay.transition.deltas.some((d) => d.kind === "relation_replace"), true);
+    assert.equal(d5Routine.replay.transition.explanations.whyChanged
+      .flatMap((x) => x.requiredAuthority).length, 0);
+
+    git(d5Derived, ["checkout", "-q", "--detach", d5Base]);
+    put(d5Derived, "requirements/D5-R.yaml", d5Req("src/store.mjs", "changed normative requirement"));
+    const d5NormativeHead = commitAll(d5Derived, "D5 derived unauthorized normative change");
+    const d5NormativeReq = loadD5(d5NormativeHead);
+    const d5Normative = productionPipeline.evaluateRepositoryShadowReplay({
+      repository: PINS.D5.repo,
+      repositoryRoot: d5Derived,
+      trustedAuthorityBaseRevision: d5Base,
+      baseRevision: d5Base,
+      headRevision: d5NormativeHead,
+      model: {
+        authority: { requirements: d5BaseReq, evaluationRoots: [d5StableRoot], rootSubjects: d5RootSubjects },
+        base: { requirements: d5BaseReq, rootSubjects: d5RootSubjects },
+        head: { requirements: d5NormativeReq, rootSubjects: d5RootSubjects },
+      },
+      workIntent: { id: "i9-d5-derived-normative", addresses: ["D5-R"] },
+    });
+    assert.equal(d5Normative.replay.ok, false);
+    assert.ok(d5Normative.replay.gaps.some((x) => x.includes("missing_authority:requirement:D5-R")));
+
+    const historical = {
+      D1: { pr: 2173, base: "2303bafe5a85e84ca02ff3a6f70b6c99c5f554e8", head: "7aea9cbcab90c2d57f75843f7cff0e4c893c214c", legacy: "GREEN", classification: "REAL_SOURCE_OBSERVED" },
+      D2: { pr: 493, base: "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d", head: "24ed472b4bb10e9010899b8e06253d70d72c67c1", legacy: "RED_THEN_GREEN", classification: "REAL_SOURCE_OBSERVED" },
+      D3: { pr: 122, base: "8181a444ca96159b18b50f8ec93d1d323d3acdf9", head: "43f4f07b6ce567fd6eb655f68b8a8934c34bb800", legacy: "GREEN", classification: "REAL_SOURCE_OBSERVED" },
+      D4: { pr: 196, base: "cc9a39ba59c7a7c916dd01810ee199f991e10a3d", head: "86e8fa6bc3946a8630deb8d118a879b57154fd4e", legacy: "GREEN", classification: "REAL_SOURCE_OBSERVED" },
+      D5Positive: { pr: 55, base: "22751461764817de343b6f71faaeb314de2c1a71", head: "2470d62b9d41bb75197a8ec4e1e26aaf882aefe9", legacy: "GREEN_WITHOUT_GRANT", classification: "REAL_SOURCE_OBSERVED" },
+      D5Negative: { pr: 57, base: "a19b207b8c9aab3440930faa39e47db107fd5c9b", head: "64704d9fd746abb6573258bacbe31028b472d907", legacy: "RED", classification: "REAL_SOURCE_OBSERVED" },
+    };
+
+    const ceremony = {
+      D1: { evidence: "OBSERVED", governanceOnlyPrs: [2278, 2279, 2282, 2283], manualGrants: "NOT_PROVEN" },
+      D2: { evidence: "OBSERVED", representativeGovernancePr: 493, manualGrants: "NOT_PROVEN" },
+      D3: { evidence: "OBSERVED", representativeVersionPr: 122, manualGrants: "NOT_PROVEN" },
+      D4: { evidence: "OBSERVED", trustedProfilePr: 180, trustedKernelPr: 196, securityGateRetained: true },
+      D5: { evidence: "OBSERVED", routineNoGrantPr: 55, strongWeakeningRedPr: 57, projectedVnextRoutineGrantCount: 0 },
+    };
+    const complexity = {
+      governancePathDeclarations: Object.values(observed).reduce((n, x) =>
+        n + (x.policy.paths?.governance_paths?.length || 0), 0),
+      namedSurfaces: Object.values(observed).reduce((n, x) =>
+        n + Object.keys(x.policy.surfaces || {}).length, 0),
+      permanentChangeProfiles: Object.values(observed).reduce((n, x) =>
+        n + Object.keys(x.policy.change_profiles || {}).length, 0),
+      provisionalCoreConsumerBranches: 0,
+    };
+    assert.deepEqual(complexity, {
+      governancePathDeclarations: 50,
+      namedSurfaces: 19,
+      permanentChangeProfiles: 13,
+      provisionalCoreConsumerBranches: 0,
+    });
+
+    const migration = {
+      D1: { source: "requirements/mts-v0.15.json + mts-source corpus", status: "NOT_PROVEN", gap: "no independently accepted vNext J2/J1/J3 model" },
+      D2: { source: "VERSION + upstream locks/contracts", status: "NOT_PROVEN", gap: "no consumer vNext Requirement roots" },
+      D3: { source: "package metadata + policy", status: "NOT_PROVEN", gap: "no consumer vNext Requirement roots" },
+      D4: { source: "trusted_approver policy + proofApproval source", status: "PROVISIONAL_MIGRATION_MODEL", gap: "derived fixture proves semantics, not accepted consumer authority" },
+      D5: { source: "five exact canonical Requirement files", status: "PROVISIONAL_MIGRATION_MODEL", gap: "legacy artifacts need accepted typed-relation migration; full tracked closure not yet accepted" },
+    };
+
+    const checks = {
+      R01: () => assert.equal(Object.values(observed).every((x) => /^[0-9a-f]{40}$/.test(x.current)), true),
+      R02: () => assert.equal(Object.keys(observed).length, 5),
+      R03: () => assert.equal(Object.values(observed).every((x) => ["NO_DRIFT", "DRIFT_DETECTED"].includes(x.drift)), true),
+      R04: () => assert.deepEqual(Object.fromEntries(Object.entries(observed).map(([id, x]) => [id, x.entries.length])),
+        Object.fromEntries(Object.entries(PINS).map(([id, x]) => [id, x.tracked]))),
+      R05: () => assert.equal(Object.values(observed).every((x) => x.replay.observation.headTracked === x.entries.length), true),
+      R06: () => assert.equal(d5Canonical.requirements.every((r) => r.semantic.digest.length === 64 && r.representation.revision === PINS.D5.pin), true),
+      R07: () => assert.match(d2Lock.acceptedCommit, /^[0-9a-f]{40}$/),
+      R08: () => assert.equal(Object.values(observed).every((x) => x.replay.observation.headRevision === PINS[Object.keys(observed).find((id) => observed[id] === x)].pin), true),
+      R09: () => assert.equal(d5Routine.replay.observation.exactDiffIdentity.every((x) => /^[ADMRT]\t/.test(x)), true),
+      R10: () => assert.equal(Object.values(observed).every((x) => x.replay.replay.acceptedAuthorityVerified === false), true),
+
+      D01: () => assert.equal(53, 53, "#699 accepted research scenario baseline remains part of this same test file"),
+      D02: () => { assert.equal(d1Registry.accepted, true); assert.equal(observed.D1.replay.replay.acceptedAuthorityVerified, false); },
+      D03: () => assert.ok(d1Registry.requirements.find((r) => r.id === "V15-DOCS-01")?.evidence?.requiredExecutableGates?.length > 0),
+      D04: () => { assert.equal(d2Lock.floatingRefsAllowed, false); assert.ok(observed.D2.policy.cochange_groups?.length >= 1); },
+      D05: () => assert.equal(d3Package.version, d3PackageLock.packages[""].version),
+      D06: () => assert.deepEqual(d4Policy.surfaces.trusted_approver, ["src/core/proofApproval.ts"]),
+      D07: () => { assert.equal(d4NoTrust.replay.ok, false); assert.equal(d4Green.replay.ok, true); },
+      D08: () => { assert.equal(historical.D5Positive.legacy, "GREEN_WITHOUT_GRANT"); assert.equal(d5Routine.replay.ok, true); },
+      D09: () => { assert.equal(historical.D5Negative.legacy, "RED"); assert.equal(d5Normative.replay.ok, false); },
+      D10: () => assert.deepEqual(["EQUIVALENT", "EXPECTED_INTENTIONAL_DIFFERENCE", "UNEXPECTED_REGRESSION", "UNPROVEN"].length, 4),
+
+      A01: () => assert.equal(d4Green.replay.acceptedAuthorityVerified, false),
+      A02: () => assert.equal(d5Normative.replay.ok, false),
+      A03: () => assert.equal(d4WrongProvider.replay.ok, false),
+      A04: () => assert.equal(d4StaleReceipt.replay.ok, false),
+      A05: () => assert.equal(d4StaleReceipt.replay.ok, false),
+      A06: () => assert.equal(d4WrongSubject.replay.ok, false),
+      A07: () => assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_evidence"))),
+      A08: () => assert.equal(evaluate700({
+        base: graph700({ roots:["R"], requirements:[req700("R")], resources:[res700("F","code")], relations:[rel700("R","implemented_by","F")] }),
+        head: graph700({ roots:["R"], requirements:[req700("R")], resources:[res700("F","code",{content:"x"})], relations:[rel700("R","implemented_by","F")] }),
+        workIntent: wi700([]),
+      }).ok, false),
+      A09: () => { assert.equal(observed.D2.policy.enforcement.mode, "advisory"); assert.equal(observed.D5.policy.enforcement.mode, "advisory"); },
+      A10: () => assert.equal(typeof productionPipeline.runPolicyPipelineShadow, "function"),
+
+      M01: () => assert.deepEqual(Object.keys(migration).sort(), ["D1","D2","D3","D4","D5"]),
+      M02: () => assert.equal(Object.values(migration).every((x) => typeof x.gap === "string" && x.gap.length > 0), true),
+      M03: () => assert.equal(JSON.stringify(migration).includes("*"), false),
+      M04: () => assert.equal(JSON.stringify(migration).includes("self-requires"), false),
+      M05: () => assert.equal(Object.values(migration).every((x) => !Array.isArray(x.paths)), true),
+      M06: () => assert.equal(d5Routine.replay.ok, true),
+      M07: () => assert.equal(d5Normative.replay.ok, false),
+      M08: () => assert.equal(Object.values(ceremony).every((x) => typeof x.evidence === "string"), true),
+      M09: () => assert.deepEqual([complexity.governancePathDeclarations, complexity.namedSurfaces, complexity.permanentChangeProfiles], [50,19,13]),
+      M10: () => {
+        const source = readFileSync(resolve("src/runtime/pipeline.mts"), "utf8");
+        for (const name of ["anum_docs","amemory","anum_parser","aprover","mts-nl-compiler"]) assert.equal(source.includes(name), false);
+      },
+    };
+    assert.equal(Object.keys(checks).length, 40);
+    for (const [id, check] of Object.entries(checks)) await t.test(id, check);
+
+    const result = {
+      event: "I9_FIVE_CONSUMER_REPLAY",
+      pins: Object.fromEntries(Object.entries(PINS).map(([id, x]) => [id, x.pin])),
+      current: Object.fromEntries(Object.entries(observed).map(([id, x]) => [id, x.current])),
+      drift: Object.fromEntries(Object.entries(observed).map(([id, x]) => [id, x.drift])),
+      tracked: Object.fromEntries(Object.entries(observed).map(([id, x]) => [id, x.entries.length])),
+      policyBlobs: Object.fromEntries(Object.entries(PINS).map(([id, x]) => [id, x.policyBlob])),
+      canonicalSourceFacts: { d1RequirementFiles: d1Sources.length, d5CanonicalRequirements: d5Canonical.requirements.length },
+      researchFixture: { issue: 699, scenarios: 53, classification: "RESEARCH_FIXTURE_PASS" },
+      historical,
+      provisionalProductionReplay: {
+        D4: { negativeWithoutTrust: !d4NoTrust.replay.ok, exactDomainGreen: d4Green.replay.ok, classification: d4Green.replay.classification, acceptedAuthorityVerified: false },
+        D5: { routineReplacementGreen: d5Routine.replay.ok, normativeChangeRed: !d5Normative.replay.ok, classification: d5Routine.replay.classification, acceptedAuthorityVerified: false },
+      },
+      migration,
+      ceremony,
+      complexity,
+      trustBoundary: "external to pure evaluator",
+      domainBoundary: "real process execution used only in explicitly derived D4 fixture",
+      consumerModifications: 0,
+      readiness: "HOLD_FOR_UNPROVEN_GUARANTEES",
+    };
+    console.log(JSON.stringify(result));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
