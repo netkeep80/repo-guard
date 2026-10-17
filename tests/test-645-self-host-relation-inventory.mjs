@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
 import { checkRequirementTransition, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
@@ -264,51 +265,472 @@ assert.equal(unauthorizedTransition.ok, false, "#662 evidence must not self-auth
 console.log("#662 relation-overlap transaction falsifier passed");
 
 
-console.log("\n--- #723 I8 RED: real canonical legacy inventory is not yet projected into vNext J1 ---");
+console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
 {
-  const { loadCanonicalRequirements } = await import("../dist/runtime/canonical-requirements.mjs");
-  const { evaluateRootedRequirements } = await import("../dist/runtime/requirement-closure.mjs");
-  const { createResourceResolver } = await import("../dist/runtime/resource-resolver.mjs");
-  const { evaluateTrackedResourceClosure } = await import("../dist/runtime/resource-closure.mjs");
-  const { listTrackedFilesAtRef, readFileAtRef } = await import("../dist/git.mjs");
+  const pipeline = await import("../dist/runtime/pipeline.mjs");
+  const gitRuntime = await import("../dist/git.mjs");
+  const canonicalRuntime = await import("../dist/runtime/canonical-requirements.mjs");
+  const requirementRuntime = await import("../dist/runtime/requirement-closure.mjs");
+  const resolverRuntime = await import("../dist/runtime/resource-resolver.mjs");
+  const resourceRuntime = await import("../dist/runtime/resource-closure.mjs");
+  const transitionRuntime = await import("../dist/runtime/transition-closure.mjs");
 
-  const exactTracked = listTrackedFilesAtRef(revision, root).sort();
-  assert.deepEqual(exactTracked, tracked, "#723 exact ls-tree observation must equal legacy ls-files baseline");
+  const repository = "netkeep80/repo-guard";
+  const gitText = (cwd, args, options = {}) => execFileSync("git", args, { cwd, encoding: "utf8", ...options }).trim();
+  const event = process.env.GITHUB_EVENT_PATH ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")) : null;
+  const headRevision = event?.pull_request?.head?.sha || gitText(root, ["rev-parse", "HEAD"]);
+  let trustedAuthorityBaseRevision;
+  if (event?.pull_request) trustedAuthorityBaseRevision = gitText(root, ["rev-parse", "refs/remotes/origin/main"]);
+  else {
+    try { trustedAuthorityBaseRevision = gitText(root, ["rev-parse", headRevision + "^1"]); }
+    catch { trustedAuthorityBaseRevision = headRevision; }
+  }
+  const baseRevision = gitText(root, ["merge-base", trustedAuthorityBaseRevision, headRevision]);
+  for (const sha of [trustedAuthorityBaseRevision, baseRevision, headRevision]) assert.match(sha, /^[0-9a-f]{40}$/);
 
-  const canonical = loadCanonicalRequirements({
-    repository: "netkeep80/repo-guard",
-    revision,
-    paths: requirementPaths,
-    readFile: (sha, path) => readFileAtRef(sha, path, root),
+  const exactTracked = gitRuntime.listTrackedFilesAtRef(headRevision, root).sort();
+  const exactDiff = gitRuntime.getExactDiffIdentity(baseRevision, headRevision, root);
+  const diffText = gitRuntime.runGit(["-c", "core.quotepath=false", "diff", baseRevision, headRevision], { cwd: root });
+  const basePolicy = JSON.parse(gitRuntime.readFileAtRef(baseRevision, "repo-policy.json", root));
+  const headPolicy = JSON.parse(gitRuntime.readFileAtRef(headRevision, "repo-policy.json", root));
+  const policyInput = {
+    mode: "check-diff",
+    repositoryRoot: root,
+    repositoryIdentity: repository,
+    policy: headPolicy,
+    basePolicy,
+    headPolicy,
+    baseRef: baseRevision,
+    headRef: headRevision,
+    enforcement: { ok: true, mode: "blocking", source: "i8-self-host-test", requested: "blocking" },
+    diffText,
+    diffFiles: exactDiff,
+    trackedFiles: exactTracked,
+    changeIntent: null,
+    changeIntentSource: "github_issue:#723",
+    readFile: (filePath) => gitRuntime.readFileAtRef(headRevision, filePath, root),
+    readFileAtRef: (sha, filePath) => gitRuntime.readFileAtRef(sha, filePath, root),
+  };
+  const protectedBoundary = ["docs/product-requirements.md", ".github/workflows/trusted-enforcement.yml"];
+  const config = {
+    repository,
+    repositoryRoot: root,
+    trustedAuthorityBaseRevision,
+    baseRevision,
+    headRevision,
+    workIntent: { id: "github:issue:723", source: "github_issue", addresses: ["RG-04", "RG-05"] },
+    protectedResources: protectedBoundary,
+  };
+  const shadow = pipeline.runRepoGuardSelfHostShadow(policyInput, { quiet: true }, config);
+  assert.equal(shadow.selfHost.ok, true, shadow.selfHost.reasons.join(" | "));
+  assert.equal(shadow.legacy.ok, true, JSON.stringify(shadow.legacy));
+  assert.equal(shadow.comparison.classification, "EQUIVALENT");
+
+  const passed = [];
+  const sh = (number, fn) => {
+    fn();
+    const id = "SH" + String(number).padStart(2, "0");
+    passed.push(id);
+    console.log("PASS: #723 " + id);
+  };
+  const reasonHas = (result, fragment) => result.reasons.some((reason) => reason.includes(fragment));
+  const actualInput = { ...config, observedTrackedPaths: exactTracked, observedDiffFiles: exactDiff };
+
+  sh(1, () => assert.deepEqual(shadow.selfHost.authority.rootIds, expectedIds));
+  sh(2, () => assert.equal(shadow.selfHost.projection.semanticIdentityPreserved, true));
+  sh(3, () => assert.deepEqual(shadow.selfHost.head.rooted, expectedIds));
+  sh(4, () => {
+    assert.equal(shadow.selfHost.authority.revision, trustedAuthorityBaseRevision);
+    if (event?.pull_request) assert.notEqual(shadow.selfHost.authority.revision, headRevision);
   });
-  assert.equal(canonical.ok, true, JSON.stringify(canonical.errors));
-
-  // RED-only witness: current HEAD semantic subjects are used only to expose
-  // the missing representation bridge. They are NOT an accepted I8 trust source.
-  const redOnlyRoots = canonical.requirements.map((item) => item.semantic);
-  const j2 = evaluateRootedRequirements({ requirements: canonical, trustedRoots: redOnlyRoots });
-  assert.equal(j2.ok, true, JSON.stringify(j2));
-
-  const resolver = createResourceResolver({
-    repository: "netkeep80/repo-guard",
-    revision,
-    requirements: canonical,
-    readers: {
-      "netkeep80/repo-guard": (sha, resourcePath) => readFileAtRef(sha, resourcePath, root),
-    },
+  sh(5, () => {
+    assert.equal(shadow.selfHost.observation.trackedComplete, true);
+    assert.equal(shadow.selfHost.observation.exactTrackedCount, exactTracked.length);
   });
-  const j1 = evaluateTrackedResourceClosure({
-    repository: "netkeep80/repo-guard",
-    revision,
-    requirements: canonical,
-    j2,
-    trackedPaths: exactTracked,
-    resolver,
+  sh(6, () => {
+    assert.equal(shadow.selfHost.head.justified, exactTracked.length);
+    assert.deepEqual(shadow.selfHost.head.unjustified, []);
   });
 
-  assert.equal(
-    j1.ok,
-    true,
-    `#723 I8 RED: real canonical legacy inventory is not yet projected into vNext J1: unjustified=${j1.unjustified.length}; ${j1.unjustified.slice(0, 12).join(", ")}`,
-  );
+  const rawHead = canonicalRuntime.loadCanonicalRequirements({
+    repository, revision: headRevision, paths: requirementPaths,
+    readFile: (sha, filePath) => gitRuntime.readFileAtRef(sha, filePath, root),
+  });
+  const projectedHead = pipeline.projectRepoGuardLegacyRequirements(rawHead);
+  sh(7, () => {
+    const items = projectedHead.requirements.requirements.map((item) => {
+      const value = item.value;
+      const relations = Object.fromEntries(Object.entries(value.relations || {}).filter((entry) => {
+        const relation = entry[1];
+        return relation?.target?.kind !== "artifact" || relation.target.path !== item.source.path;
+      }));
+      return { ...item, value: { ...value, relations } };
+    });
+    const index = Object.fromEntries(items.map((item) => [item.id, item]));
+    const noSelf = { ...projectedHead.requirements, requirements: items, index };
+    const j2 = requirementRuntime.evaluateRootedRequirements({ requirements: noSelf, trustedRoots: shadow.selfHost.authority.trustedRoots });
+    const exactSet = new Set(exactTracked);
+    const resolver = resolverRuntime.createResourceResolver({
+      repository, revision: headRevision, requirements: noSelf,
+      readers: { [repository]: (sha, filePath) => sha === headRevision && exactSet.has(filePath) ? Buffer.alloc(0) : null },
+    });
+    const j1 = resourceRuntime.evaluateTrackedResourceClosure({
+      repository, revision: headRevision, requirements: noSelf, j2, trackedPaths: exactTracked, resolver,
+    });
+    assert.equal(j1.ok, true, JSON.stringify(j1.errors));
+  });
+  sh(8, () => {
+    const multi = [...reverse.values()].filter((relations) =>
+      new Set(relations.filter((relation) => relation.relation === "requires").map((relation) => relation.subject)).size > 1);
+    assert.ok(multi.length >= 11);
+  });
+  sh(9, () => {
+    const distPaths = exactTracked.filter((filePath) => filePath.startsWith("dist/"));
+    for (const filePath of distPaths) {
+      const facts = shadow.selfHost.projection.facts.filter((fact) => fact.path === filePath);
+      assert.ok(facts.some((fact) => fact.predicate === "requires"));
+      assert.ok(facts.some((fact) => fact.predicate === "implemented_by"));
+    }
+  });
+  sh(10, () => {
+    const incomplete = pipeline.evaluateRepoGuardSelfHost({ ...actualInput, observedTrackedPaths: exactTracked.slice(1) });
+    assert.equal(incomplete.ok, false);
+    assert.ok(reasonHas(incomplete, "tracked_tree_observation_mismatch"));
+  });
+
+  const gitFixture = mkdtempSync(join(tmpdir(), "repo-guard-i8-git-"));
+  try {
+    gitText(gitFixture, ["init", "-q"]);
+    gitText(gitFixture, ["config", "user.email", "i8@example.invalid"]);
+    gitText(gitFixture, ["config", "user.name", "I8"]);
+    for (const pair of [
+      ["delete.txt", "delete\n"], ["modify.txt", "before\n"], ["rename-old.txt", "rename\n"],
+      ["type.txt", "regular\n"], ["mode.txt", "mode\n"],
+    ]) writeFileSync(resolve(gitFixture, pair[0]), pair[1]);
+    writeFileSync(resolve(gitFixture, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+    gitText(gitFixture, ["add", "-A"]);
+    gitText(gitFixture, ["commit", "-q", "-m", "base"]);
+    const gitBase = gitText(gitFixture, ["rev-parse", "HEAD"]);
+    writeFileSync(resolve(gitFixture, "add.txt"), "add\n");
+    writeFileSync(resolve(gitFixture, "modify.txt"), "after\n");
+    unlinkSync(resolve(gitFixture, "delete.txt"));
+    gitText(gitFixture, ["mv", "rename-old.txt", "rename-new.txt"]);
+    writeFileSync(resolve(gitFixture, "binary.bin"), Buffer.from([0, 9, 8, 7]));
+    gitText(gitFixture, ["add", "-A"]);
+    gitText(gitFixture, ["update-index", "--chmod=+x", "mode.txt"]);
+    const linkBlob = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: gitFixture, input: "target", encoding: "utf8" }).trim();
+    gitText(gitFixture, ["update-index", "--add", "--cacheinfo", "120000," + linkBlob + ",type.txt"]);
+    gitText(gitFixture, ["commit", "-q", "-m", "head"]);
+    const gitHead = gitText(gitFixture, ["rev-parse", "HEAD"]);
+    const fixtureDiff = gitRuntime.getExactDiffIdentity(gitBase, gitHead, gitFixture);
+    const fixtureHeadEntries = gitRuntime.listTrackedEntriesAtRef(gitHead, gitFixture);
+    sh(11, () => assert.ok(fixtureDiff.some((file) => file.status === "added" && file.path === "add.txt")));
+    sh(12, () => {
+      assert.ok(fixtureDiff.some((file) => file.status === "modified" && file.path === "modify.txt"));
+      assert.ok(fixtureDiff.some((file) => file.status === "modified" && file.path === "binary.bin"));
+    });
+    sh(13, () => {
+      assert.ok(fixtureDiff.some((file) => file.status === "deleted" && file.path === "delete.txt"));
+      assert.ok(fixtureDiff.some((file) => file.previousPath === "rename-old.txt" && file.path === "rename-new.txt"));
+    });
+    sh(14, () => {
+      assert.ok(fixtureDiff.some((file) => file.gitStatus === "T" && file.path === "type.txt"));
+      assert.equal(fixtureHeadEntries.find((entry) => entry.path === "mode.txt")?.mode, "100755");
+      assert.equal(fixtureHeadEntries.find((entry) => entry.path === "type.txt")?.mode, "120000");
+    });
+  } finally {
+    rmSync(gitFixture, { recursive: true, force: true });
+  }
+
+  sh(15, () => {
+    assert.ok(shadow.selfHost.transition.deltas.some((delta) => delta.kind.startsWith("resource_")));
+    assert.equal(shadow.selfHost.transition.deltas.some((delta) => delta.kind.startsWith("requirement_")), false);
+  });
+  sh(16, () => {
+    for (const explanation of shadow.selfHost.transition.explanations.whyChanged)
+      assert.ok(explanation.causes.length > 0, JSON.stringify(explanation));
+  });
+  sh(17, () => {
+    const noCause = pipeline.evaluateRepoGuardSelfHost({ ...actualInput, workIntent: { id: "none", addresses: [] } });
+    assert.equal(noCause.ok, false);
+    assert.ok(reasonHas(noCause, "J3:no_cause"));
+  });
+  sh(18, () => {
+    assert.equal(unauthorizedTransition.ok, false);
+    assert.equal(unauthorizedTransition.authorized, false);
+  });
+
+  const repoClone = mkdtempSync(join(tmpdir(), "repo-guard-i8-self-"));
+  const resetClone = () => {
+    gitText(repoClone, ["reset", "--hard", trustedAuthorityBaseRevision]);
+    gitText(repoClone, ["clean", "-fdx"]);
+  };
+  const commitClone = (message) => {
+    gitText(repoClone, ["add", "-A"]);
+    gitText(repoClone, ["commit", "-q", "-m", message]);
+    return gitText(repoClone, ["rev-parse", "HEAD"]);
+  };
+  const cloneEval = (base, head, options = {}) => pipeline.evaluateRepoGuardSelfHost({
+    repository, repositoryRoot: repoClone,
+    trustedAuthorityBaseRevision, baseRevision: base, headRevision: head,
+    observedTrackedPaths: gitRuntime.listTrackedFilesAtRef(head, repoClone),
+    observedDiffFiles: gitRuntime.getExactDiffIdentity(base, head, repoClone),
+    workIntent: { id: "github:issue:723:adversarial", source: "github_issue", addresses: expectedIds },
+    protectedResources: protectedBoundary,
+    ...options,
+  });
+  try {
+    execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", root, repoClone], { encoding: "utf8" });
+    gitText(repoClone, ["config", "user.email", "i8@example.invalid"]);
+    gitText(repoClone, ["config", "user.name", "I8"]);
+    resetClone();
+    writeFileSync(resolve(repoClone, "README.md"), readFileSync(resolve(repoClone, "README.md"), "utf8") + "\nI8 stacked base\n");
+    const stackedBase = commitClone("stack base");
+    writeFileSync(resolve(repoClone, "README.md"), readFileSync(resolve(repoClone, "README.md"), "utf8") + "I8 stacked head\n");
+    const stackedHead = commitClone("stack head");
+    const stacked = cloneEval(stackedBase, stackedHead);
+    sh(19, () => {
+      assert.equal(stacked.ok, true, stacked.reasons.join(" | "));
+      assert.equal(stacked.trustBoundary.trustedAuthorityBaseRevision, trustedAuthorityBaseRevision);
+      assert.notEqual(stackedBase, trustedAuthorityBaseRevision);
+    });
+
+    const protectedPath = "src/runtime/pipeline.mts";
+    const staleReceipt = {
+      authorityBaseRevision: trustedAuthorityBaseRevision,
+      baseRevision,
+      headRevision: "f".repeat(40),
+      permissions: ["resource:" + protectedPath],
+    };
+    const stale = pipeline.evaluateRepoGuardSelfHost({
+      ...actualInput, protectedResources: [...protectedBoundary, protectedPath], trustedReceipts: [staleReceipt],
+    });
+    const exactReceipt = {
+      authorityBaseRevision: trustedAuthorityBaseRevision,
+      baseRevision,
+      headRevision,
+      permissions: ["resource:" + protectedPath],
+    };
+    const exactAuthorized = pipeline.evaluateRepoGuardSelfHost({
+      ...actualInput, protectedResources: [...protectedBoundary, protectedPath], trustedReceipts: [exactReceipt],
+    });
+    sh(20, () => {
+      assert.equal(stale.ok, false);
+      assert.ok(reasonHas(stale, "missing_authority:resource:" + protectedPath));
+      assert.equal(exactAuthorized.ok, true, exactAuthorized.reasons.join(" | "));
+    });
+    sh(21, () => {
+      assert.equal(shadow.selfHost.observation.trackedComplete, true);
+      assert.deepEqual(shadow.selfHost.observation.exactDiffIdentity, shadow.selfHost.observation.observedDiffIdentity);
+      assert.equal(shadow.selfHost.trustBoundary.trustedAuthorityBaseRevision, trustedAuthorityBaseRevision);
+    });
+
+    const A = "a".repeat(40), B = "b".repeat(40);
+    const makeEvidenceState = (revisionValue, evidenceSpec) => {
+      const value = {
+        id: "R",
+        relations: {
+          impl: { predicate: "requires", target: { kind: "artifact", path: "src/x" } },
+          verifier: { predicate: "verified_by", target: { kind: "artifact", path: "tests/v" } },
+        },
+        constraints: [{ id: "c", relations: ["requires"], metric: "changed_lines", max: 10, evidence: evidenceSpec }],
+      };
+      const raw = JSON.stringify(value);
+      const requirements = canonicalRuntime.loadCanonicalRequirements({
+        repository: "fixture/evidence", revision: revisionValue, paths: ["requirements/R.json"],
+        readFile: (_sha, filePath) => filePath === "requirements/R.json" ? raw : null,
+      });
+      const j2 = requirementRuntime.evaluateRootedRequirements({ requirements, trustedRoots: [requirements.index.R.semantic] });
+      const files = new Set(["requirements/R.json", "src/x", "tests/v"]);
+      const resolver = resolverRuntime.createResourceResolver({
+        repository: "fixture/evidence", revision: revisionValue, requirements,
+        readers: { "fixture/evidence": (_sha, filePath) => files.has(filePath) ? Buffer.from("x") : null },
+      });
+      const j1 = resourceRuntime.evaluateTrackedResourceClosure({
+        repository: "fixture/evidence", revision: revisionValue, requirements, j2, trackedPaths: [...files], resolver,
+      });
+      return { revision: revisionValue, requirements, j2, j1 };
+    };
+    const domainBase = makeEvidenceState(A, { kind: "domain", key: "domain:k", providerId: "trusted-domain" });
+    const domainHead = makeEvidenceState(B, { kind: "domain", key: "domain:k", providerId: "trusted-domain" });
+    const domainCommon = {
+      repository: "fixture/evidence", base: domainBase, head: domainHead,
+      trustedAuthorityBase: { revision: A, requirements: domainBase.requirements, j2: domainBase.j2 },
+      resourceDeltas: [{ kind: "modify", path: "src/x" }],
+      workIntent: { id: "evidence", addresses: ["R"] },
+      trustedEvidenceProviders: ["trusted-domain"],
+    };
+    const exactObservation = {
+      authorityBaseRevision: A, baseRevision: A, headRevision: B,
+      path: "src/x", metric: "changed_lines", value: 1, providerId: "trusted-domain",
+    };
+    const exactDomain = {
+      authorityBaseRevision: A, baseRevision: A, headRevision: B,
+      key: "domain:k", status: "pass", providerId: "trusted-domain", requirementId: "R", subjectPaths: ["src/x"],
+    };
+    const noObservation = transitionRuntime.evaluateTransitionCauseClosure({ ...domainCommon, evidenceFacts: [exactDomain] });
+    sh(22, () => {
+      assert.equal(noObservation.ok, false);
+      assert.ok(noObservation.reasons.some((reason) => reason.includes("I7:missing_observation")));
+    });
+
+    const execBase = makeEvidenceState(A, { kind: "execution", key: "exec:k", providerId: "trusted-exec", verifierPath: "tests/v" });
+    const execHead = makeEvidenceState(B, { kind: "execution", key: "exec:k", providerId: "trusted-exec", verifierPath: "tests/v" });
+    const missingExec = transitionRuntime.evaluateTransitionCauseClosure({
+      repository: "fixture/evidence", base: execBase, head: execHead,
+      trustedAuthorityBase: { revision: A, requirements: execBase.requirements, j2: execBase.j2 },
+      resourceDeltas: [{ kind: "modify", path: "src/x" }], workIntent: { id: "exec", addresses: ["R"] },
+      trustedEvidenceProviders: ["trusted-exec"],
+      observationFacts: [{ ...exactObservation, providerId: "trusted-exec" }],
+    });
+    sh(23, () => {
+      assert.equal(missingExec.ok, false);
+      assert.ok(missingExec.reasons.some((reason) => reason.includes("I7:missing_evidence")));
+    });
+
+    const wrongSubject = transitionRuntime.evaluateTransitionCauseClosure({
+      ...domainCommon, observationFacts: [exactObservation], evidenceFacts: [{ ...exactDomain, subjectPaths: [] }],
+    });
+    const domainPass = transitionRuntime.evaluateTransitionCauseClosure({
+      ...domainCommon, observationFacts: [exactObservation], evidenceFacts: [exactDomain],
+    });
+    sh(24, () => {
+      assert.equal(wrongSubject.ok, false);
+      assert.ok(wrongSubject.reasons.some((reason) => reason.includes("I7:missing_evidence")));
+      assert.equal(domainPass.ok, true, domainPass.reasons.join(" | "));
+    });
+    sh(25, () => {
+      assert.equal(stale.ok, false);
+      assert.ok(reasonHas(stale, "missing_authority:resource:" + protectedPath));
+    });
+
+    const thrown = pipeline.runPolicyPipelineShadow(policyInput, { quiet: true }, () => { throw new Error("I8 candidate failed"); });
+    sh(26, () => {
+      assert.deepEqual(thrown.legacy, shadow.legacy);
+      assert.match(thrown.comparison.candidate.reasons[0], /^SHADOW_EXECUTION_ERROR:/);
+    });
+    sh(27, () => {
+      assert.equal("vnext" in headPolicy, false);
+      assert.equal("shadow" in headPolicy, false);
+      assert.ok(shadow.selfHost);
+    });
+    const opposite = () => ({ ok: !shadow.legacy.ok, reasons: ["I8_DIFFERENTIAL_WITNESS"] });
+    const expectedDifference = pipeline.runPolicyPipelineShadow(policyInput, { quiet: true }, opposite, true);
+    const unexpectedDifference = pipeline.runPolicyPipelineShadow(policyInput, { quiet: true }, opposite, false);
+    sh(28, () => assert.equal(expectedDifference.comparison.classification, "EXPECTED_INTENTIONAL_DIFFERENCE"));
+    sh(29, () => assert.equal(unexpectedDifference.comparison.classification, "UNEXPECTED_DIFFERENCE"));
+    sh(30, () => assert.deepEqual(pipeline.evaluateRepoGuardSelfHost(actualInput), shadow.selfHost));
+
+    resetClone();
+    writeFileSync(resolve(repoClone, "i8-garbage.txt"), "candidate garbage\n");
+    writeFileSync(resolve(repoClone, "requirements/repo-guard/RG-08.yaml"),
+      readFileSync(resolve(repoClone, "requirements/repo-guard/RG-08.yaml"), "utf8") +
+      "\n  - path: \"i8-garbage.txt\"\n    relations: [requires, documents]\n");
+    const garbageHead = commitClone("adversarial self justification");
+    const garbage = cloneEval(trustedAuthorityBaseRevision, garbageHead);
+    sh(31, () => {
+      assert.equal(garbage.ok, false);
+      assert.ok(reasonHas(garbage, "head_j2_not_rooted"));
+    });
+
+    resetClone();
+    const productPath = resolve(repoClone, "docs/product-requirements.md");
+    writeFileSync(productPath, readFileSync(productPath, "utf8").replace(/^### RG-01 .*$/m, "### RG-01 — candidate may self-approve (adversarial)"));
+    const weakenedHead = commitClone("adversarial weaken governing source");
+    const weakened = cloneEval(trustedAuthorityBaseRevision, weakenedHead);
+    sh(32, () => {
+      assert.equal(weakened.ok, false);
+      assert.ok(reasonHas(weakened, "missing_authority:resource:docs/product-requirements.md"));
+    });
+
+    resetClone();
+    const rg01 = resolve(repoClone, "requirements/repo-guard/RG-01.yaml");
+    writeFileSync(rg01, readFileSync(rg01, "utf8").replace(/^id:\s*RG-01$/m, "id: RG-99"));
+    const rootSwapHead = commitClone("adversarial root substitution");
+    const rootSwap = cloneEval(trustedAuthorityBaseRevision, rootSwapHead);
+    sh(33, () => {
+      assert.equal(rootSwap.ok, false);
+      assert.ok(reasonHas(rootSwap, "head_j2_not_rooted") || reasonHas(rootSwap, "accepted_root"));
+    });
+
+    resetClone();
+    const trustedWorkflow = resolve(repoClone, ".github/workflows/trusted-enforcement.yml");
+    writeFileSync(trustedWorkflow, readFileSync(trustedWorkflow, "utf8") + "\n# adversarial provider substitution\n");
+    const providerHead = commitClone("adversarial provider substitution");
+    const providerSwap = cloneEval(trustedAuthorityBaseRevision, providerHead);
+    sh(34, () => {
+      assert.equal(providerSwap.ok, false);
+      assert.ok(reasonHas(providerSwap, "missing_authority:resource:.github/workflows/trusted-enforcement.yml"));
+      const wrongProvider = transitionRuntime.evaluateTransitionCauseClosure({
+        ...domainCommon, observationFacts: [exactObservation], evidenceFacts: [{ ...exactDomain, providerId: "candidate-provider" }],
+      });
+      assert.equal(wrongProvider.ok, false);
+    });
+
+    resetClone();
+    const rg04 = resolve(repoClone, "requirements/repo-guard/RG-04.yaml");
+    writeFileSync(rg04, readFileSync(rg04, "utf8").replace(/\n  - path: "[^"]+"\n    relations: \[[^\]]+\]/, ""));
+    const relationRemovalHead = commitClone("adversarial remove scope relation");
+    const relationRemoval = cloneEval(trustedAuthorityBaseRevision, relationRemovalHead);
+    sh(35, () => {
+      assert.equal(relationRemoval.ok, false);
+      assert.ok(reasonHas(relationRemoval, "head_j2_not_rooted"));
+    });
+
+    resetClone();
+    const historicalPath = "docs/architecture-compression-3-baseline.md";
+    unlinkSync(resolve(repoClone, historicalPath));
+    const historicalHead = commitClone("adversarial delete historical resource");
+    const historical = cloneEval(trustedAuthorityBaseRevision, historicalHead);
+    sh(36, () => {
+      assert.equal(historical.ok, false);
+      assert.ok(reasonHas(historical, "head_j1_not_closed"));
+    });
+
+    sh(37, () => {
+      const omitted = pipeline.evaluateRepoGuardSelfHost({ ...actualInput, observedDiffFiles: exactDiff.slice(1) });
+      assert.equal(omitted.ok, false);
+      assert.ok(reasonHas(omitted, "git_diff_observation_mismatch") || reasonHas(omitted, "resource_delta_observation_mismatch"));
+    });
+    sh(38, () => {
+      const missingDomain = transitionRuntime.evaluateTransitionCauseClosure({ ...domainCommon, observationFacts: [exactObservation] });
+      assert.equal(missingDomain.ok, false);
+      assert.ok(missingDomain.reasons.some((reason) => reason.includes("I7:missing_evidence")));
+    });
+
+    resetClone();
+    writeFileSync(resolve(repoClone, "dist/git.mjs"), readFileSync(resolve(repoClone, "dist/git.mjs"), "utf8") + "\n// stale I8 dist\n");
+    const staleDistHead = commitClone("adversarial stale dist");
+    assert.match(staleDistHead, /^[0-9a-f]{40}$/);
+    const nodeModules = resolve(repoClone, "node_modules");
+    symlinkSync(resolve(root, "node_modules"), nodeModules, process.platform === "win32" ? "junction" : "dir");
+    const staleDist = spawnSync(process.execPath, [resolve(repoClone, "scripts/check-dist.mjs")], { cwd: repoClone, encoding: "utf8" });
+    sh(39, () => {
+      assert.notEqual(staleDist.status, 0);
+      assert.match(String(staleDist.stdout) + "\n" + String(staleDist.stderr), /Generated dist is stale/);
+    });
+
+    const legacyOnly = pipeline.runPolicyPipeline(policyInput, { quiet: true });
+    sh(40, () => {
+      assert.deepEqual(legacyOnly, shadow.legacy);
+      assert.deepEqual(thrown.legacy, legacyOnly);
+    });
+  } finally {
+    rmSync(repoClone, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(passed, Array.from({ length: 40 }, (_value, index) => "SH" + String(index + 1).padStart(2, "0")));
+  console.log(JSON.stringify({
+    event: "I8_REAL_SELF_HOST",
+    authority: trustedAuthorityBaseRevision,
+    base: baseRevision,
+    head: headRevision,
+    tracked: shadow.selfHost.head.tracked,
+    justified: shadow.selfHost.head.justified,
+    rooted: shadow.selfHost.head.rooted.length,
+    deltas: shadow.selfHost.transition.deltas.length,
+    differential: shadow.comparison.classification,
+    scenarios: passed.length,
+    trustProviderAuthentication: shadow.selfHost.trustBoundary.providerAuthentication,
+  }));
 }
