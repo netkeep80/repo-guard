@@ -97,11 +97,11 @@ test("I6 G10 unrelated owned resources not forced into artificial cochange",()=>
  const r=evaluate(base,head,{workIntent:intent("R1"),resourceDeltas:[{kind:"delete",path:"src/a.ts"},{kind:"add",path:"src/new.ts"}]});
  green(r,"G10");assert.equal(r.deltas.some(d=>d.subject==="src/b.ts"&&d.kind.startsWith("resource_")),false);
 });
-test("I6 R01 blanket removal cannot become routine even with another owner",()=>{
+test("I6 R01 blanket removal without independent causal WorkIntent is RED",()=>{
  const bNodes=[root(),normal("src/shared.ts"),node("R2",{parent,other:art("implemented_by","src/shared.ts")})];
  const hNodes=[root(),node("R1",{parent}),node("R2",{parent,other:art("implemented_by","src/shared.ts")})];
  const b=state(A,bNodes,paths(bNodes,"src/shared.ts")),h=state(B,hNodes,paths(hNodes,"src/shared.ts"));
- red(evaluate(b,h,{workIntent:intent("R1")}),"missing_authority:requirement:R1","R01");
+ red(evaluate(b,h,{}),"J3:no_cause:relation_remove","R01");
 });
 test("I6 R02 deleted requires obligation needs TRUST despite surviving alternative trace",()=>{
  const {base,head}=built(node("R1",{parent,need:art("requires","src/stable.ts"),impl:art("implemented_by","src/stable.ts")}),
