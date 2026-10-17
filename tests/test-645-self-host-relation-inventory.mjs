@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { checkRequirementTransition, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { checkRequirementTransition, evaluateVNextExactAcceptance, evaluateVNextGenerationFreshness, evaluateVNextJustificationClosure, evaluateVNextRequirementVerificationCoverage, lowerVNextGenerationRelation, normalizeRequirementAuthority } from "../dist/requirement-relations.mjs";
+import { projectionModelIdentity } from "../dist/projection-model.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const expectedIds = [
@@ -262,3 +264,660 @@ assert.equal(unauthorizedTransition.authorized, false);
 assert.equal(unauthorizedTransition.ok, false, "#662 evidence must not self-authorize its relation transition");
 
 console.log("#662 relation-overlap transaction falsifier passed");
+
+console.log("\n--- #693 vNext J0 double justification closure ---");
+{
+  const cycleWithoutRoot = evaluateVNextJustificationClosure({
+    trustedRootIds: [],
+    requirements: [
+      { id: "R1", derives_from: ["R2"], artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
+      { id: "R2", derives_from: ["R1"], artifacts: [] },
+    ],
+    trackedFiles: ["src/a.mts"],
+  });
+  assert.equal(cycleWithoutRoot.ok, false);
+  assert.deepEqual(cycleWithoutRoot.orphanRequirements, ["R1", "R2"]);
+  assert.ok(cycleWithoutRoot.reasons.includes("orphan_requirement:R1"));
+  assert.ok(cycleWithoutRoot.reasons.includes("orphan_requirement:R2"));
+
+  const orphanRequirement = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", derives_from: [], artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
+      { id: "ORPHAN", derives_from: [], artifacts: [] },
+    ],
+    trackedFiles: ["src/a.mts"],
+  });
+  assert.equal(orphanRequirement.ok, false);
+  assert.deepEqual(orphanRequirement.orphanRequirements, ["ORPHAN"]);
+
+  const valid = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", derives_from: [], artifacts: [] },
+      {
+        id: "FEATURE",
+        derives_from: ["ROOT"],
+        artifacts: [
+          { path: "src/a.mts", relations: ["requires", "implements"] },
+          { path: "tests/a.mjs", relations: ["requires", "verifies"] },
+        ],
+      },
+    ],
+    trackedFiles: ["tests/a.mjs", "src/a.mts"],
+  });
+  assert.equal(valid.ok, true);
+  assert.deepEqual(valid.reachableRequirements, ["FEATURE", "ROOT"]);
+  assert.deepEqual(valid.justifiedArtifacts, ["src/a.mts", "tests/a.mjs"]);
+  assert.deepEqual(valid.requirementExplanations.FEATURE, ["ROOT", "FEATURE"]);
+  assert.deepEqual(valid.artifactExplanations["src/a.mts"], [["ROOT", "FEATURE", "requires:src/a.mts"]]);
+  assert.deepEqual(valid.requirementDependents.ROOT, ["FEATURE"]);
+
+  const orphanInfrastructure = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [{ path: "src/a.mts", relations: ["requires"] }] },
+    ],
+    trackedFiles: ["src/a.mts", ".github/workflows/ci.yml"],
+  });
+  assert.equal(orphanInfrastructure.ok, false);
+  assert.deepEqual(orphanInfrastructure.orphanTrackedArtifacts, [".github/workflows/ci.yml"]);
+  assert.ok(orphanInfrastructure.reasons.includes("orphan_tracked_artifact:.github/workflows/ci.yml"));
+
+  const missingRequired = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [{ path: "docs/required.md", relations: ["requires"] }] },
+    ],
+    trackedFiles: [],
+  });
+  assert.equal(missingRequired.ok, false);
+  assert.deepEqual(missingRequired.missingRequiredArtifacts, ["docs/required.md"]);
+
+  const unknownParent = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      { id: "CHILD", derives_from: ["MISSING"], artifacts: [] },
+    ],
+    trackedFiles: [],
+  });
+  assert.equal(unknownParent.ok, false);
+  assert.ok(unknownParent.reasons.includes("unknown_requirement_parent:CHILD:MISSING"));
+  assert.deepEqual(unknownParent.orphanRequirements, ["CHILD"]);
+}
+console.log("#693 vNext J0 double justification closure passed");
+
+console.log("\n--- #693 vNext J1: valid closure does not self-authorize authority growth ---");
+{
+  const candidateModel = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "CHILD",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "repo-policy.json", relations: ["requires", "implements"] }],
+      },
+    ],
+    trackedFiles: ["repo-policy.json"],
+  });
+  assert.equal(candidateModel.ok, true, "candidate model is structurally justified from the external root");
+  assert.deepEqual(candidateModel.requirementExplanations.CHILD, ["ROOT", "CHILD"]);
+
+  const acceptedBase = fixtureGraph("base", [
+    { subject: "ROOT", path: "requirements/ROOT.yaml", relations: ["requires"] },
+  ]);
+  const candidateHead = fixtureGraph("head", [
+    { subject: "ROOT", path: "requirements/ROOT.yaml", relations: ["requires"] },
+    { subject: "CHILD", path: "repo-policy.json", relations: ["requires", "implements"] },
+  ]);
+
+  const unauthorized = checkRequirementTransition({
+    base: acceptedBase,
+    head: candidateHead,
+    grant: null,
+    trustedAuthorizer: null,
+  });
+  assert.equal(unauthorized.required, true);
+  assert.equal(unauthorized.authorized, false);
+  assert.equal(unauthorized.ok, false,
+    "a root-reachable candidate requirement must not authorize its own requirement-authority expansion");
+  assert.ok(unauthorized.reasons.includes("requirement_transition_grant_missing"));
+  assert.ok(unauthorized.reasons.includes("requirement_transition_authorizer_untrusted"));
+}
+console.log("#693 vNext J1 anti-self-authorization composition passed");
+
+console.log("\n--- #693 vNext L0: exact acceptance is independent of merge/CI ---");
+{
+  const acceptedDigest = "1".repeat(64);
+  const mutatedDigest = "2".repeat(64);
+  const observedResearch = { merged: true, technically_green: true };
+
+  const mergedOnly = evaluateVNextExactAcceptance({
+    subject: { id: "MTS-v0.16-T09", semantic_sha256: acceptedDigest },
+    trustedDecisions: [],
+  });
+  assert.equal(observedResearch.merged, true);
+  assert.equal(observedResearch.technically_green, true);
+  assert.equal(mergedOnly.accepted, false,
+    "repository integration and technical GREEN must not imply external acceptance");
+
+  const exact = evaluateVNextExactAcceptance({
+    subject: { id: "MTS-v0.16-T09", semantic_sha256: acceptedDigest },
+    trustedDecisions: [
+      { decision_id: "D-EXACT-1", accepts_subject: "MTS-v0.16-T09", accepts_semantic_sha256: acceptedDigest },
+      { decision_id: "D-OTHER", accepts_subject: "OTHER", accepts_semantic_sha256: acceptedDigest },
+      { decision_id: "D-EXACT-2", accepts_subject: "MTS-v0.16-T09", accepts_semantic_sha256: acceptedDigest },
+    ],
+  });
+  assert.equal(exact.accepted, true);
+  assert.deepEqual(exact.matching_decisions, ["D-EXACT-1", "D-EXACT-2"]);
+  assert.deepEqual(exact.stale_decisions, []);
+
+  const stale = evaluateVNextExactAcceptance({
+    subject: { id: "MTS-v0.16-T09", semantic_sha256: mutatedDigest },
+    trustedDecisions: [
+      { decision_id: "D-OLD", accepts_subject: "MTS-v0.16-T09", accepts_semantic_sha256: acceptedDigest },
+    ],
+  });
+  assert.equal(stale.accepted, false,
+    "material subject mutation must invalidate an exact acceptance decision");
+  assert.deepEqual(stale.matching_decisions, []);
+  assert.deepEqual(stale.stale_decisions, ["D-OLD"]);
+
+  assert.throws(() => evaluateVNextExactAcceptance({
+    subject: { id: "X", semantic_sha256: acceptedDigest },
+    trustedDecisions: [
+      { decision_id: "D", accepts_subject: "X", accepts_semantic_sha256: acceptedDigest },
+      { decision_id: "D", accepts_subject: "X", accepts_semantic_sha256: acceptedDigest },
+    ],
+  }), /duplicate decision id/);
+}
+console.log("#693 vNext L0 exact acceptance boundary passed");
+
+console.log("\n--- #693 vNext H0: supersession does not retire obligations ---");
+{
+  const missingHistorical = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "OLD",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "history/old.pdf", relations: ["requires", "documents"] }],
+      },
+      {
+        id: "NEW",
+        derives_from: ["ROOT"],
+        supersedes: ["OLD"],
+        artifacts: [{ path: "src/new.mts", relations: ["requires", "implements"] }],
+      },
+    ],
+    trackedFiles: ["src/new.mts"],
+  });
+  assert.equal(missingHistorical.ok, false,
+    "superseding OLD must not remove OLD's accepted requires obligations");
+  assert.deepEqual(missingHistorical.supersededRequirements, ["OLD"]);
+  assert.deepEqual(missingHistorical.supersededBy.OLD, ["NEW"]);
+  assert.deepEqual(missingHistorical.requirementExplanations.OLD, ["ROOT", "OLD"]);
+  assert.ok(missingHistorical.reasons.includes("required_artifact_not_tracked:history/old.pdf"));
+
+  const preservedHistorical = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "OLD",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "history/old.pdf", relations: ["requires", "documents"] }],
+      },
+      {
+        id: "NEW",
+        derives_from: ["ROOT"],
+        supersedes: ["OLD"],
+        artifacts: [{ path: "src/new.mts", relations: ["requires", "implements"] }],
+      },
+    ],
+    trackedFiles: ["history/old.pdf", "src/new.mts"],
+  });
+  assert.equal(preservedHistorical.ok, true);
+  assert.deepEqual(preservedHistorical.justifiedArtifacts, ["history/old.pdf", "src/new.mts"]);
+
+  const unknownSuperseded = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      { id: "NEW", derives_from: ["ROOT"], supersedes: ["MISSING"], artifacts: [] },
+    ],
+    trackedFiles: [],
+  });
+  assert.equal(unknownSuperseded.ok, false);
+  assert.ok(unknownSuperseded.reasons.includes("unknown_superseded_requirement:NEW:MISSING"));
+
+  assert.throws(() => evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [{ id: "ROOT", supersedes: ["ROOT"], artifacts: [] }],
+    trackedFiles: [],
+  }), /must not supersede itself/);
+}
+console.log("#693 vNext H0 supersession/retention boundary passed");
+
+console.log("\n--- #695 vNext transition: every changed implementation requirement needs verification coverage ---");
+{
+  const partialGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-B", path: "src/b.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const partial = evaluateVNextRequirementVerificationCoverage({
+    base: partialGraph,
+    head: partialGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "src/b.mts", status: "modified", addedLines: ["b"], deletedLines: ["b0"] },
+      { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(partial.ok, false);
+  assert.deepEqual(partial.implementation_requirements, ["R-A", "R-B"]);
+  assert.deepEqual(partial.verification_requirements, ["R-A"]);
+  assert.deepEqual(partial.missing_verification_requirements, ["R-B"]);
+
+  const relatedGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const relatedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: relatedGraph,
+    head: relatedGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(relatedCoverage.ok, true);
+  assert.deepEqual(relatedCoverage.missing_verification_requirements, []);
+
+  const unrelatedGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-B", path: "tests/b.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const unrelatedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: unrelatedGraph,
+    head: unrelatedGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "tests/b.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(unrelatedCoverage.ok, false);
+  assert.deepEqual(unrelatedCoverage.missing_verification_requirements, ["R-A"]);
+
+  const crossGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R-B", path: "src/b.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/cross.mjs", relations: ["requires", "verifies"] },
+    { subject: "R-B", path: "tests/cross.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const crossCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: crossGraph,
+    head: crossGraph,
+    changedFiles: [
+      { path: "src/a.mts", status: "modified", addedLines: ["a"], deletedLines: ["a0"] },
+      { path: "src/b.mts", status: "modified", addedLines: ["b"], deletedLines: ["b0"] },
+      { path: "tests/cross.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(crossCoverage.ok, true);
+
+  const deletedBase = fixtureGraph("base", [
+    { subject: "R-A", path: "src/old.mts", relations: ["requires", "implements"] },
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const deletedHead = fixtureGraph("head", [
+    { subject: "R-A", path: "tests/a.mjs", relations: ["requires", "verifies"] },
+  ]);
+  const deletedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: deletedBase,
+    head: deletedHead,
+    changedFiles: [
+      { path: "src/old.mts", status: "deleted", addedLines: [], deletedLines: ["old"] },
+      { path: "tests/a.mjs", status: "modified", addedLines: ["test"], deletedLines: ["test0"] },
+    ],
+  });
+  assert.equal(deletedCoverage.ok, true);
+  assert.deepEqual(deletedCoverage.implementation_requirements, ["R-A"]);
+
+  const generatedGraph = fixtureGraph("head", [
+    { subject: "R-A", path: "dist/a.mjs", relations: ["requires", "implements"] },
+  ]);
+  const generatedCoverage = evaluateVNextRequirementVerificationCoverage({
+    base: generatedGraph,
+    head: generatedGraph,
+    changedFiles: [{ path: "dist/a.mjs", status: "modified", addedLines: ["x"], deletedLines: ["y"] }],
+  });
+  assert.equal(generatedCoverage.ok, true);
+  assert.deepEqual(generatedCoverage.implementation_requirements, []);
+}
+console.log("#695 vNext full verification-coverage boundary passed");
+
+console.log("\n--- #696 vNext projection: generation relation justifies target and reuses freshness lowering ---");
+{
+  const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+  const sourceV1 = "claim: alpha\n";
+  const sourceV2 = "claim: beta\n";
+  const targetV1 = "# Generated\nalpha\n";
+
+  const noProjection = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "GEN",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "model/source.txt", relations: ["requires"] }],
+      },
+    ],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(noProjection.ok, false);
+  assert.deepEqual(noProjection.orphanTrackedArtifacts, ["derived/output.md"],
+    "generated target without a generation relation must remain an orphan tracked artifact");
+
+  const relation = {
+    relation: "generates",
+    owner_requirement: "GEN",
+    projection_id: "projection.demo",
+    sources: [{ id: "source", path: "model/source.txt" }],
+    target: "derived/output.md",
+    generator_contract: "demo-generator/v1",
+    required_evidence: ["generator-ci"],
+  };
+
+  const closure = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "GEN",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "model/source.txt", relations: ["requires"] }],
+      },
+    ],
+    generationRelations: [relation],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(closure.ok, true);
+  assert.deepEqual(closure.generatedArtifacts, ["derived/output.md"]);
+  assert.deepEqual(
+    closure.artifactExplanations["derived/output.md"],
+    [["ROOT", "GEN", "generates:projection.demo:derived/output.md"]],
+  );
+
+  const model = lowerVNextGenerationRelation(relation);
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: "projection.demo",
+    model_identity: projectionModelIdentity(model),
+    source_identities: [
+      { source_id: "source", algorithm: "sha256", digest: sha256(sourceV1) },
+    ],
+    generator: {
+      contract_id: "demo-generator/v1",
+      tool_identity: "demo-generator@0123456789abcdef",
+    },
+    configuration_digest: sha256("profile:v1\n"),
+    output_identity: { algorithm: "sha256", digest: sha256(targetV1) },
+    evidence: [{ class: "generator-ci", ref: "ci:generator:123" }],
+  };
+  const files = new Map([
+    ["model/source.txt", sourceV1],
+    ["derived/output.md", targetV1],
+    ["notes/unrelated.txt", "unchanged\n"],
+  ]);
+  const facts = {
+    readFile: (path) => {
+      if (!files.has(path)) throw new Error(`missing fixture file: ${path}`);
+      return files.get(path);
+    },
+  };
+
+  const currentProjection = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts,
+  });
+  assert.equal(currentProjection.ok, true);
+  assert.equal(currentProjection.relation_results.length, 2,
+    "one source + one generated target lower to two existing finite identity relations");
+
+  const staleSource = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts: {
+      readFile: (path) => path === "model/source.txt" ? sourceV2 : facts.readFile(path),
+    },
+  });
+  assert.equal(staleSource.ok, false);
+  assert.ok(staleSource.reasons.some((reason) => /source:source/.test(reason)));
+
+  const changedTarget = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts: {
+      readFile: (path) => path === "derived/output.md" ? "# manual edit\n" : facts.readFile(path),
+    },
+  });
+  assert.equal(changedTarget.ok, false);
+  assert.ok(changedTarget.reasons.some((reason) => /target/.test(reason)));
+
+  const unrelated = evaluateVNextGenerationFreshness({
+    relation,
+    buildRecord: build,
+    facts: {
+      readFile: (path) => path === "notes/unrelated.txt" ? "changed unrelated\n" : facts.readFile(path),
+    },
+  });
+  assert.equal(unrelated.ok, true);
+
+  const unjustifiedSource = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      { id: "GEN", derives_from: ["ROOT"], artifacts: [] },
+    ],
+    generationRelations: [relation],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(unjustifiedSource.ok, false);
+  assert.ok(unjustifiedSource.reasons.includes(
+    "projection_source_not_justified:projection.demo:model/source.txt",
+  ));
+
+  const unreachableOwner = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [{ path: "model/source.txt", relations: ["requires"] }] },
+      { id: "GEN", artifacts: [] },
+    ],
+    generationRelations: [relation],
+    trackedFiles: ["derived/output.md", "model/source.txt"],
+  });
+  assert.equal(unreachableOwner.ok, false);
+  assert.ok(unreachableOwner.reasons.includes("orphan_requirement:GEN"));
+  assert.ok(unreachableOwner.reasons.includes("unreachable_generation_owner:projection.demo:GEN"));
+}
+console.log("#696 vNext generation/freshness boundary passed");
+
+console.log("\n--- #693 vNext L1: accepted subject still needs independent CURRENT cutover ---");
+{
+  const digest = "3".repeat(64);
+  const exactAcceptance = evaluateVNextExactAcceptance({
+    subject: { id: "VERSION-vNEXT", semantic_sha256: digest },
+    trustedDecisions: [
+      { decision_id: "D-VNEXT", accepts_subject: "VERSION-vNEXT", accepts_semantic_sha256: digest },
+    ],
+  });
+  assert.equal(exactAcceptance.accepted, true);
+
+  const cutoverBase = fixtureGraph("base", [
+    { subject: "CURRENT", path: "versions/v0.15.json", relations: ["requires"] },
+    { subject: "HISTORY", path: "history/v0.15.json", relations: ["requires", "documents"] },
+  ]);
+  const cutoverHead = fixtureGraph("head", [
+    { subject: "CURRENT", path: "versions/vNEXT.json", relations: ["requires"] },
+    { subject: "HISTORY", path: "history/v0.15.json", relations: ["requires", "documents"] },
+  ]);
+
+  const unauthorizedCutover = checkRequirementTransition({
+    base: cutoverBase,
+    head: cutoverHead,
+    grant: null,
+    trustedAuthorizer: null,
+  });
+  assert.equal(unauthorizedCutover.required, true);
+  assert.equal(unauthorizedCutover.ok, false,
+    "exact acceptance must not self-authorize the CURRENT relation transition");
+  assert.equal(exactAcceptance.accepted && unauthorizedCutover.ok, false,
+    "AUTHOR_ACCEPTED and CURRENT remain independent predicates");
+
+  const exactGrant = {
+    base_authority_sha256: cutoverBase.authority_sha256,
+    expected_head_authority_sha256: cutoverHead.authority_sha256,
+    add: unauthorizedCutover.actual_delta.add,
+    remove: unauthorizedCutover.actual_delta.remove,
+  };
+  const authorizedCutover = checkRequirementTransition({
+    base: cutoverBase,
+    head: cutoverHead,
+    grant: exactGrant,
+    trustedAuthorizer: { trusted: true, source: "repository_permission" },
+  });
+  assert.equal(authorizedCutover.ok, true);
+  assert.equal(exactAcceptance.accepted && authorizedCutover.ok, true,
+    "CURRENT may be established only by exact acceptance composed with independently authorized cutover");
+
+  const postCutoverClosure = evaluateVNextJustificationClosure({
+    trustedRootIds: ["ROOT"],
+    requirements: [
+      { id: "ROOT", artifacts: [] },
+      {
+        id: "V015-HISTORY",
+        derives_from: ["ROOT"],
+        artifacts: [{ path: "history/v0.15.json", relations: ["requires", "documents"] }],
+      },
+      {
+        id: "VNEXT-CURRENT",
+        derives_from: ["ROOT"],
+        supersedes: ["V015-HISTORY"],
+        artifacts: [{ path: "versions/vNEXT.json", relations: ["requires"] }],
+      },
+    ],
+    trackedFiles: ["history/v0.15.json", "versions/vNEXT.json"],
+  });
+  assert.equal(postCutoverClosure.ok, true);
+  assert.ok(postCutoverClosure.reachableRequirements.includes("V015-HISTORY"),
+    "historical predecessor remains root-justified after CURRENT cutover");
+  assert.ok(postCutoverClosure.justifiedArtifacts.includes("history/v0.15.json"),
+    "predecessor evidence remains justified after supersession/cutover");
+  assert.deepEqual(postCutoverClosure.supersededBy["V015-HISTORY"], ["VNEXT-CURRENT"]);
+}
+console.log("#693 vNext L1 independent CURRENT cutover passed");
+
+
+console.log("\n--- #698 GREEN: exact one-shot large transition authorization, no permanent profile ---");
+{
+  // Real #2173-class scale.
+  const observed = {
+    new_files: 108,
+    new_docs: 0,
+    net_added_lines: 17118,
+  };
+  const defaults = {
+    max_new_files: 4,
+    max_new_docs: 0,
+    max_net_added_lines: 800,
+  };
+  const withinDefaultBudget =
+    observed.new_files <= defaults.max_new_files
+    && observed.new_docs <= defaults.max_new_docs
+    && observed.net_added_lines <= defaults.max_net_added_lines;
+  assert.equal(withinDefaultBudget, false);
+
+  const baseSha = "4".repeat(40);
+  const headSha = "5".repeat(40);
+  const transitionId = `Transition(${baseSha},${headSha})`;
+  const transitionDigest = createHash("sha256")
+    .update(JSON.stringify({ base_sha: baseSha, head_sha: headSha }))
+    .digest("hex");
+
+  const withoutDecision = evaluateVNextExactAcceptance({
+    subject: { id: transitionId, semantic_sha256: transitionDigest },
+    trustedDecisions: [],
+  });
+  assert.equal(withoutDecision.accepted, false);
+  assert.equal(withinDefaultBudget || withoutDecision.accepted, false,
+    "large transition over ordinary budget needs independent exact authorization");
+
+  const transitionDecision = {
+    decision_id: "D-RESEARCH-2173-LIKE",
+    accepts_subject: transitionId,
+    accepts_semantic_sha256: transitionDigest,
+  };
+  const exactDecision = evaluateVNextExactAcceptance({
+    subject: { id: transitionId, semantic_sha256: transitionDigest },
+    trustedDecisions: [transitionDecision],
+  });
+  assert.equal(exactDecision.accepted, true);
+  assert.equal(withinDefaultBudget || exactDecision.accepted, true,
+    "exact one-shot authorization may satisfy the budget exception without a persistent profile");
+
+  // Any HEAD mutation creates a different exact Transition subject and invalidates the receipt.
+  const nextHeadSha = "6".repeat(40);
+  const changedTransitionId = `Transition(${baseSha},${nextHeadSha})`;
+  const changedTransitionDigest = createHash("sha256")
+    .update(JSON.stringify({ base_sha: baseSha, head_sha: nextHeadSha }))
+    .digest("hex");
+  const staleDecision = evaluateVNextExactAcceptance({
+    subject: { id: changedTransitionId, semantic_sha256: changedTransitionDigest },
+    trustedDecisions: [transitionDecision],
+  });
+  assert.equal(staleDecision.accepted, false,
+    "one-shot transition authorization must not survive an exact HEAD change");
+
+  // The same exact transition receipt must not authorize normative requirement authority growth.
+  const protectedBase = fixtureGraph("base", [
+    { subject: "R", path: "src/a.mts", relations: ["requires", "implements"] },
+  ]);
+  const protectedHead = fixtureGraph("head", [
+    { subject: "R", path: "src/a.mts", relations: ["requires", "implements"] },
+    { subject: "R", path: "repo-policy.json", relations: ["requires"] },
+  ]);
+  const normativeTransition = checkRequirementTransition({
+    base: protectedBase,
+    head: protectedHead,
+    grant: null,
+    trustedAuthorizer: null,
+  });
+  assert.equal(normativeTransition.ok, false);
+  assert.equal(exactDecision.accepted && normativeTransition.ok, false,
+    "budget authorization must not waive independent requirement authority");
+
+  // Nor does technical-integration authorization imply scientific/domain acceptance.
+  const scienceDigest = "7".repeat(64);
+  const scienceAcceptance = evaluateVNextExactAcceptance({
+    subject: { id: "SCIENCE-CORPUS", semantic_sha256: scienceDigest },
+    trustedDecisions: [transitionDecision],
+  });
+  assert.equal(scienceAcceptance.accepted, false);
+
+  // Ordinary small work remains ceremony-free.
+  const smallObserved = { new_files: 1, new_docs: 0, net_added_lines: 120 };
+  const smallWithinDefaults =
+    smallObserved.new_files <= defaults.max_new_files
+    && smallObserved.new_docs <= defaults.max_new_docs
+    && smallObserved.net_added_lines <= defaults.max_net_added_lines;
+  assert.equal(smallWithinDefaults, true);
+}
+console.log("#698 exact one-shot research transition boundary passed");

@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { ParsedDiffFile } from "./diff/parser.mjs";
 import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
+import { compareSets, evaluatePrimitiveRelation, type RelationEvaluationFacts } from "./checks/relation-kernel.mjs";
+import { normalizeProjectionModel, type ProjectionModel } from "./projection-model.mjs";
+import { lowerProjectionVerification } from "./projection-lowering.mjs";
 import { matchesAny } from "./utils/path-patterns.mjs";
 
 export const REQUIREMENT_RELATION_KINDS = [
@@ -110,6 +113,80 @@ export interface RequirementTransactionEvidenceProjection {
   overlap_requirements: string[];
 }
 
+export interface VNextRequirementArtifact {
+  path: string;
+  relations: readonly RequirementRelationKind[];
+}
+
+export interface VNextRequirementNode {
+  id: string;
+  derives_from?: readonly string[];
+  supersedes?: readonly string[];
+  artifacts?: readonly VNextRequirementArtifact[];
+}
+
+export interface VNextGenerationSource {
+  id: string;
+  path: string;
+}
+
+export interface VNextGenerationRelation {
+  relation: "generates";
+  owner_requirement: string;
+  projection_id: string;
+  sources: readonly VNextGenerationSource[];
+  target: string;
+  generator_contract: string;
+  required_evidence?: readonly string[];
+}
+
+export interface VNextJustificationClosureInput {
+  trustedRootIds: readonly string[];
+  requirements: readonly VNextRequirementNode[];
+  generationRelations?: readonly VNextGenerationRelation[];
+  trackedFiles: readonly string[];
+}
+
+export interface VNextJustificationClosureVerdict {
+  ok: boolean;
+  reasons: string[];
+  reachableRequirements: string[];
+  orphanRequirements: string[];
+  justifiedArtifacts: string[];
+  orphanTrackedArtifacts: string[];
+  missingRequiredArtifacts: string[];
+  requirementExplanations: Record<string, string[]>;
+  artifactExplanations: Record<string, string[][]>;
+  requirementDependents: Record<string, string[]>;
+  supersededRequirements: string[];
+  supersededBy: Record<string, string[]>;
+  generatedArtifacts: string[];
+}
+
+export interface VNextSubjectIdentity {
+  id: string;
+  semantic_sha256: string;
+}
+
+export interface VNextTrustedAcceptanceDecision {
+  decision_id: string;
+  accepts_subject: string;
+  accepts_semantic_sha256: string;
+}
+
+export interface VNextExactAcceptanceVerdict {
+  accepted: boolean;
+  matching_decisions: string[];
+  stale_decisions: string[];
+}
+
+export interface VNextGenerationFreshnessVerdict {
+  ok: boolean;
+  reasons: string[];
+  projection_id: string;
+  relation_results: Array<{ relation_id: string; ok: boolean }>;
+}
+
 type JsonObject = Record<string, unknown>;
 const RELATION_KINDS = new Set<string>(REQUIREMENT_RELATION_KINDS);
 const EXACT_COMMIT_SHA = /^[0-9a-f]{40}$/i;
@@ -167,6 +244,328 @@ function relationKind(value: unknown, label: string): RequirementRelationKind {
   const relation = nonEmptyString(value, label);
   if (!RELATION_KINDS.has(relation)) return fail(label, `unknown relation "${relation}"`);
   return relation as RequirementRelationKind;
+}
+
+function uniqueStrings(value: unknown, label: string): string[] {
+  const values = array(value, label).map((item, index) => nonEmptyString(item, `${label}[${index}]`));
+  const unique = new Set(values);
+  if (unique.size !== values.length) fail(label, "must not contain duplicates");
+  return [...unique].sort();
+}
+
+function normalizeVNextGenerationRelation(raw: unknown, label = "VNextGenerationRelation"): VNextGenerationRelation {
+  const value = object(raw, label);
+  exactFields(value, [
+    "relation",
+    "owner_requirement",
+    "projection_id",
+    "sources",
+    "target",
+    "generator_contract",
+    "required_evidence",
+  ], label);
+  if (value.relation !== "generates") fail(`${label}.relation`, 'must be "generates"');
+  const owner = nonEmptyString(value.owner_requirement, `${label}.owner_requirement`);
+  const projectionId = nonEmptyString(value.projection_id, `${label}.projection_id`);
+  const sources = array(value.sources, `${label}.sources`).map((rawSource, index) => {
+    const sourceLabel = `${label}.sources[${index}]`;
+    const source = object(rawSource, sourceLabel);
+    exactFields(source, ["id", "path"], sourceLabel);
+    return {
+      id: nonEmptyString(source.id, `${sourceLabel}.id`),
+      path: repositoryPath(source.path, `${sourceLabel}.path`),
+    };
+  }).sort((a, b) => a.id.localeCompare(b.id));
+  if (!sources.length) fail(`${label}.sources`, "must contain at least one source");
+  if (new Set(sources.map((item) => item.id)).size !== sources.length) fail(`${label}.sources`, "duplicate source id");
+  if (new Set(sources.map((item) => item.path)).size !== sources.length) fail(`${label}.sources`, "duplicate source path");
+  const requiredEvidence = value.required_evidence === undefined
+    ? []
+    : uniqueStrings(value.required_evidence, `${label}.required_evidence`);
+  return {
+    relation: "generates",
+    owner_requirement: owner,
+    projection_id: projectionId,
+    sources,
+    target: repositoryPath(value.target, `${label}.target`),
+    generator_contract: nonEmptyString(value.generator_contract, `${label}.generator_contract`),
+    required_evidence: requiredEvidence,
+  };
+}
+
+export function lowerVNextGenerationRelation(raw: unknown): ProjectionModel {
+  const relation = normalizeVNextGenerationRelation(raw);
+  return normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: relation.projection_id,
+    sources: relation.sources.map((source) => ({
+      id: source.id,
+      kind: "repository_content",
+      path: source.path,
+      algorithm: "sha256",
+    })),
+    target: {
+      path: relation.target,
+      ownership: "generated",
+    },
+    generator: {
+      contract_id: relation.generator_contract,
+    },
+    required_evidence: relation.required_evidence || [],
+  });
+}
+
+export function evaluateVNextGenerationFreshness(input: {
+  relation: unknown;
+  buildRecord: unknown;
+  facts: RelationEvaluationFacts;
+}): VNextGenerationFreshnessVerdict {
+  const relation = normalizeVNextGenerationRelation(input?.relation);
+  const model = lowerVNextGenerationRelation(relation);
+  const lowered = lowerProjectionVerification(model, input?.buildRecord);
+  const relationResults = lowered.map((primitive) => {
+    const result = evaluatePrimitiveRelation(input.facts, primitive) as { ok?: unknown };
+    return { relation_id: primitive.relation_id, ok: Boolean(result.ok) };
+  });
+  const reasons = relationResults.filter((result) => !result.ok)
+    .map((result) => `projection_identity_mismatch:${result.relation_id}`)
+    .sort();
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    projection_id: relation.projection_id,
+    relation_results: relationResults,
+  };
+}
+
+export function evaluateVNextJustificationClosure(input: VNextJustificationClosureInput): VNextJustificationClosureVerdict {
+  const trustedRootIds = uniqueStrings(input?.trustedRootIds, "VNextJustification.trustedRootIds");
+  if (!Array.isArray(input?.requirements)) fail("VNextJustification.requirements", "must be an array");
+  if (input?.generationRelations !== undefined && !Array.isArray(input.generationRelations)) {
+    fail("VNextJustification.generationRelations", "must be an array");
+  }
+  const generationRelations = (input?.generationRelations || [])
+    .map((relation, index) => normalizeVNextGenerationRelation(relation, `VNextJustification.generationRelations[${index}]`));
+  const trackedFiles = normalizeDocumentFact(input?.trackedFiles, "repository_path_set", "VNextJustification.trackedFiles") as string[];
+
+  const requirements = input.requirements.map((raw, index) => {
+    const label = `VNextJustification.requirements[${index}]`;
+    const value = object(raw, label);
+    exactFields(value, ["id", "derives_from", "supersedes", "artifacts"], label);
+    const id = nonEmptyString(value.id, `${label}.id`);
+    const derivesFrom = value.derives_from === undefined ? [] : uniqueStrings(value.derives_from, `${label}.derives_from`);
+    const supersedes = value.supersedes === undefined ? [] : uniqueStrings(value.supersedes, `${label}.supersedes`);
+    if (supersedes.includes(id)) fail(`${label}.supersedes`, "requirement must not supersede itself");
+    const artifacts = value.artifacts === undefined ? [] : array(value.artifacts, `${label}.artifacts`).map((rawArtifact, artifactIndex) => {
+      const artifactLabel = `${label}.artifacts[${artifactIndex}]`;
+      const artifact = object(rawArtifact, artifactLabel);
+      exactFields(artifact, ["path", "relations"], artifactLabel);
+      const path = repositoryPath(artifact.path, `${artifactLabel}.path`);
+      const relations = array(artifact.relations, `${artifactLabel}.relations`).map((rawRelation, relationIndex) =>
+        relationKind(rawRelation, `${artifactLabel}.relations[${relationIndex}]`));
+      if (!relations.length) fail(`${artifactLabel}.relations`, "must contain at least one relation");
+      if (new Set(relations).size !== relations.length) fail(`${artifactLabel}.relations`, "must not contain duplicates");
+      return { path, relations: [...relations].sort() };
+    });
+    const artifactPaths = artifacts.map((artifact) => artifact.path);
+    if (new Set(artifactPaths).size !== artifactPaths.length) fail(`${label}.artifacts`, "must not contain duplicate paths");
+    return { id, derivesFrom, supersedes, artifacts };
+  });
+
+  const byId = new Map<string, typeof requirements[number]>();
+  for (const requirement of requirements) {
+    if (byId.has(requirement.id)) fail("VNextJustification.requirements", `duplicate requirement id "${requirement.id}"`);
+    byId.set(requirement.id, requirement);
+  }
+
+  const reasons: string[] = [];
+  const seenProjectionIds = new Set<string>();
+  for (const relation of generationRelations) {
+    if (seenProjectionIds.has(relation.projection_id)) {
+      fail("VNextJustification.generationRelations", `duplicate projection id "${relation.projection_id}"`);
+    }
+    seenProjectionIds.add(relation.projection_id);
+    if (!byId.has(relation.owner_requirement)) {
+      reasons.push(`unknown_generation_owner:${relation.projection_id}:${relation.owner_requirement}`);
+    }
+  }
+  const children = new Map<string, string[]>();
+  const dependents = new Map<string, Set<string>>();
+  const supersededBy = new Map<string, Set<string>>();
+  const superseded = new Set<string>();
+  for (const requirement of requirements) {
+    for (const predecessor of requirement.supersedes) {
+      if (!byId.has(predecessor)) {
+        reasons.push(`unknown_superseded_requirement:${requirement.id}:${predecessor}`);
+        continue;
+      }
+      superseded.add(predecessor);
+      const successors = supersededBy.get(predecessor) || new Set<string>();
+      successors.add(requirement.id);
+      supersededBy.set(predecessor, successors);
+    }
+    for (const parent of requirement.derivesFrom) {
+      if (!byId.has(parent)) {
+        reasons.push(`unknown_requirement_parent:${requirement.id}:${parent}`);
+        continue;
+      }
+      const childList = children.get(parent) || [];
+      childList.push(requirement.id);
+      children.set(parent, childList);
+      const reverse = dependents.get(parent) || new Set<string>();
+      reverse.add(requirement.id);
+      dependents.set(parent, reverse);
+    }
+  }
+  for (const values of children.values()) values.sort();
+
+  const reachable = new Set<string>();
+  const explanations = new Map<string, string[]>();
+  const queue: string[] = [];
+  for (const root of trustedRootIds) {
+    if (!byId.has(root)) {
+      reasons.push(`trusted_root_missing:${root}`);
+      continue;
+    }
+    if (!reachable.has(root)) {
+      reachable.add(root);
+      explanations.set(root, [root]);
+      queue.push(root);
+    }
+  }
+  queue.sort();
+
+  while (queue.length) {
+    const parent = queue.shift()!;
+    for (const child of children.get(parent) || []) {
+      if (reachable.has(child)) continue;
+      reachable.add(child);
+      explanations.set(child, [...(explanations.get(parent) || [parent]), child]);
+      queue.push(child);
+    }
+    queue.sort();
+  }
+
+  const allRequirementIds = [...byId.keys()].sort();
+  const reachableRequirements = [...reachable].sort();
+  const requirementComparison = compareSets(allRequirementIds, reachableRequirements, "equal");
+  const orphanRequirements = [...requirementComparison.missing].sort();
+  for (const id of orphanRequirements) reasons.push(`orphan_requirement:${id}`);
+
+  const justified = new Set<string>();
+  const artifactExplanations = new Map<string, string[][]>();
+  for (const requirementId of reachableRequirements) {
+    const requirement = byId.get(requirementId)!;
+    for (const artifact of requirement.artifacts) {
+      if (!artifact.relations.includes("requires")) continue;
+      justified.add(artifact.path);
+      const paths = artifactExplanations.get(artifact.path) || [];
+      paths.push([...(explanations.get(requirementId) || [requirementId]), `requires:${artifact.path}`]);
+      artifactExplanations.set(artifact.path, paths);
+    }
+  }
+  const generatedArtifacts = new Set<string>();
+  for (const relation of generationRelations) {
+    if (!reachable.has(relation.owner_requirement)) {
+      if (byId.has(relation.owner_requirement)) {
+        reasons.push(`unreachable_generation_owner:${relation.projection_id}:${relation.owner_requirement}`);
+      }
+      continue;
+    }
+    justified.add(relation.target);
+    generatedArtifacts.add(relation.target);
+    const paths = artifactExplanations.get(relation.target) || [];
+    paths.push([
+      ...(explanations.get(relation.owner_requirement) || [relation.owner_requirement]),
+      `generates:${relation.projection_id}:${relation.target}`,
+    ]);
+    artifactExplanations.set(relation.target, paths);
+  }
+  for (const relation of generationRelations) {
+    if (!reachable.has(relation.owner_requirement)) continue;
+    for (const source of relation.sources) {
+      if (!justified.has(source.path)) {
+        reasons.push(`projection_source_not_justified:${relation.projection_id}:${source.path}`);
+      }
+    }
+  }
+
+  const justifiedArtifacts = [...justified].sort();
+  const artifactComparison = compareSets(trackedFiles, justifiedArtifacts, "equal");
+  const orphanTrackedArtifacts = [...artifactComparison.missing].sort();
+  const missingRequiredArtifacts = [...artifactComparison.extra].sort();
+  for (const path of orphanTrackedArtifacts) reasons.push(`orphan_tracked_artifact:${path}`);
+  for (const path of missingRequiredArtifacts) reasons.push(`required_artifact_not_tracked:${path}`);
+
+  const requirementExplanations = Object.fromEntries(
+    [...explanations.entries()].sort(([a], [b]) => a.localeCompare(b)),
+  );
+  const artifactExplanationObject = Object.fromEntries(
+    [...artifactExplanations.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([path, paths]) => [path, paths.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]),
+  );
+  const requirementDependents = Object.fromEntries(
+    [...dependents.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, values]) => [id, [...values].sort()]),
+  );
+  const supersededByObject = Object.fromEntries(
+    [...supersededBy.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, values]) => [id, [...values].sort()]),
+  );
+  const uniqueReasons = [...new Set(reasons)].sort();
+  return {
+    ok: uniqueReasons.length === 0,
+    reasons: uniqueReasons,
+    reachableRequirements,
+    orphanRequirements,
+    justifiedArtifacts,
+    orphanTrackedArtifacts,
+    missingRequiredArtifacts,
+    requirementExplanations,
+    artifactExplanations: artifactExplanationObject,
+    requirementDependents,
+    supersededRequirements: [...superseded].sort(),
+    supersededBy: supersededByObject,
+    generatedArtifacts: [...generatedArtifacts].sort(),
+  };
+}
+
+export function evaluateVNextExactAcceptance(input: {
+  subject: VNextSubjectIdentity;
+  trustedDecisions: readonly VNextTrustedAcceptanceDecision[];
+}): VNextExactAcceptanceVerdict {
+  const subjectValue = object(input?.subject, "VNextAcceptance.subject");
+  exactFields(subjectValue, ["id", "semantic_sha256"], "VNextAcceptance.subject");
+  const subjectId = nonEmptyString(subjectValue.id, "VNextAcceptance.subject.id");
+  const subjectDigest = sha256Value(subjectValue.semantic_sha256, "VNextAcceptance.subject.semantic_sha256");
+  if (!Array.isArray(input?.trustedDecisions)) fail("VNextAcceptance.trustedDecisions", "must be an array");
+
+  const seenDecisionIds = new Set<string>();
+  const matching: string[] = [];
+  const stale: string[] = [];
+  for (const [index, raw] of input.trustedDecisions.entries()) {
+    const label = `VNextAcceptance.trustedDecisions[${index}]`;
+    const decision = object(raw, label);
+    exactFields(decision, ["decision_id", "accepts_subject", "accepts_semantic_sha256"], label);
+    const decisionId = nonEmptyString(decision.decision_id, `${label}.decision_id`);
+    if (seenDecisionIds.has(decisionId)) fail(`${label}.decision_id`, `duplicate decision id "${decisionId}"`);
+    seenDecisionIds.add(decisionId);
+    const acceptedSubject = nonEmptyString(decision.accepts_subject, `${label}.accepts_subject`);
+    const acceptedDigest = sha256Value(decision.accepts_semantic_sha256, `${label}.accepts_semantic_sha256`);
+    if (acceptedSubject !== subjectId) continue;
+    if (acceptedDigest === subjectDigest) matching.push(decisionId);
+    else stale.push(decisionId);
+  }
+  matching.sort();
+  stale.sort();
+  return {
+    accepted: matching.length > 0,
+    matching_decisions: matching,
+    stale_decisions: stale,
+  };
 }
 
 function relationIdentity(value: Pick<RequirementRelationTuple, "subject" | "relation" | "object">): RequirementRelationIdentity {
@@ -395,6 +794,24 @@ export function projectRequirementTransactionEvidence(input: {
     implementation_requirements: implementationRequirements,
     verification_requirements: verificationRequirements,
     overlap_requirements: implementationRequirements.filter((subject) => verificationSet.has(subject)),
+  };
+}
+
+export function evaluateVNextRequirementVerificationCoverage(input: {
+  base: RequirementRelationGraph;
+  head: RequirementRelationGraph;
+  changedFiles: readonly ParsedDiffFile[];
+}): RequirementTransactionEvidenceProjection & { ok: boolean; missing_verification_requirements: string[] } {
+  const projection = projectRequirementTransactionEvidence(input);
+  const coverage = compareSets(
+    projection.implementation_requirements,
+    projection.verification_requirements,
+    "left_subset",
+  );
+  return {
+    ...projection,
+    ok: coverage.ok,
+    missing_verification_requirements: [...coverage.missing].sort(),
   };
 }
 
