@@ -383,7 +383,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
         workIntent: { id: "source-rename", source: "github_issue", addresses: ["RG-08"] },
       });
       assert.equal(renameResult.ok, true, renameResult.reasons.join(" | "));
-      assert.ok(renameResult.transition.deltas.some((delta) => delta.kind === "requirement_relocate" && delta.requirementId === "RG-08"));
+      assert.ok(renameResult.transition.deltas.some((delta) => delta.kind === "requirement_relocate" && delta.subject === "RG-08"));
       assert.ok(renameResult.transition.deltas.some((delta) => delta.kind === "resource_rename" && delta.beforePath === oldPath && delta.afterPath === newPath));
       assert.equal(renameResult.head.justified, renameResult.head.tracked);
     } finally {
