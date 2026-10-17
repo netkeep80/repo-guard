@@ -289,7 +289,9 @@ export function getDiffObservation(base: string | null | undefined, head: string
 
 export function getExactDiffIdentity(base: string, head: string, cwd: string): ParsedDiffFile[] {
   if (!base || !head) throw new Error("exact Git diff identity requires BASE and HEAD");
-  const output = runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", base, head], { cwd });
+  const mergeBase = runGit(["merge-base", base, head], { cwd }).trim();
+  if (!mergeBase) throw new Error("exact Git diff identity requires a merge base");
+  const output = runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", mergeBase, head], { cwd });
   return parseNameStatusZ(output);
 }
 
