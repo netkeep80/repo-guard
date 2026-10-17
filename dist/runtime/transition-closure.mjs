@@ -639,7 +639,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                     max: rule.max === undefined ? null : rule.max, scope, scopeProofs: Object.fromEntries([...proof.entries()].sort(([a], [b]) => a.localeCompare(b))),
                     touched, observed, observationSources: touched.filter(path => observationMap.has("changed_lines\0" + path)).map(path => ({
                         path, metric: "changed_lines", value: observationMap.get("changed_lines\0" + path),
-                        providerId: observation.find(o => o.path === path && o.metric === "changed_lines")?.providerId || null })),
+                        providerId: observation.find(o => o.path === path && o.metric === "changed_lines")?.providerId || null
+                    })),
                     requiredEvidence: rule.evidence || null,
                     requiredAuthority: { requirementId: id, constraintId: rule.id, permission: token }, verdict });
             }
