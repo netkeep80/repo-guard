@@ -54,6 +54,8 @@ artifacts:
     relations: [requires, verifies]
   - path: "tests/test-hybrid-owned-block-identity.mjs"
     relations: [requires, verifies]
+  - path: "tests/test-697-resource-identity-resolver.mjs"
+    relations: [requires, verifies]
   - path: "tests/test-mddb-structural-model.mjs"
     relations: [requires, verifies]
   - path: "tests/test-projection-analysis.mjs"
