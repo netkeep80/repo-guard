@@ -54,7 +54,10 @@ const exactResourcePath = (value: unknown): string => {
 const sameStrings = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((value, index) => value === b[index]);
 
-export function projectRepoGuardLegacyRequirements(raw: CanonicalRequirementsResult) {
+export function projectRepoGuardLegacyRequirements(
+  raw: CanonicalRequirementsResult,
+  implicitSourcePaths: Readonly<Record<string, string>> = Object.fromEntries(raw.requirements.map((item) => [item.id, item.source.path])),
+) {
   const projectionErrors: CanonicalError[] = [];
   const facts: RepoGuardProjectionFact[] = [];
   const projected: CanonicalRequirement[] = [];
@@ -93,6 +96,8 @@ export function projectRepoGuardLegacyRequirements(raw: CanonicalRequirementsRes
           continue;
         }
         seen.add(identity);
+        const implicitSourcePath = implicitSourcePaths[item.id] || item.source.path;
+        if (legacy === "requires" && path === implicitSourcePath) continue;
         const label = `legacy_${String(artifactIndex).padStart(4, "0")}_${String(relationIndex).padStart(2, "0")}`;
         relations[label] = { predicate, target: { kind: "artifact", path } };
         facts.push({
@@ -116,7 +121,12 @@ export function projectRepoGuardLegacyRequirements(raw: CanonicalRequirementsRes
   return { requirements: result, facts: facts.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), errors: projectionErrors };
 }
 
-function loadRepoGuardProjection(repository: string, revision: string, repositoryRoot: string) {
+function loadRepoGuardProjection(
+  repository: string,
+  revision: string,
+  repositoryRoot: string,
+  implicitSourcePaths?: Readonly<Record<string, string>>,
+) {
   if (!exactSha.test(revision)) throw new Error("I8 exact revision must be 40 lowercase hex");
   const entries = listTrackedEntriesAtRef(revision, repositoryRoot);
   const canonicalPaths = entries.map((entry) => entry.path)
@@ -125,7 +135,7 @@ function loadRepoGuardProjection(repository: string, revision: string, repositor
     repository, revision, paths: canonicalPaths,
     readFile: (sha, path) => readFileAtRef(sha, path, repositoryRoot),
   });
-  const projection = projectRepoGuardLegacyRequirements(raw);
+  const projection = projectRepoGuardLegacyRequirements(raw, implicitSourcePaths);
   return { entries, raw, ...projection };
 }
 
@@ -192,6 +202,7 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
     if (!exactSha.test(revision)) reasons.push(`I8:invalid_${label}_revision`);
 
   const authorityLoaded = loadRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot);
+  const acceptedSourcePaths = Object.fromEntries(authorityLoaded.raw.requirements.map((item) => [item.id, item.source.path]));
   const rootIds = acceptedRootIds(input.trustedAuthorityBaseRevision, input.repositoryRoot);
   const authorityIds = Object.keys(authorityLoaded.requirements.index).sort();
   if (!sameStrings(rootIds, authorityIds)) reasons.push("I8:accepted_root_set_mismatch");
@@ -203,9 +214,10 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
 
   const authority = closeRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot, authorityLoaded, trustedRoots);
   const baseLoaded = input.baseRevision === input.trustedAuthorityBaseRevision ? authorityLoaded :
-    loadRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot);
+    loadRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, acceptedSourcePaths);
   const headLoaded = input.headRevision === input.trustedAuthorityBaseRevision ? authorityLoaded :
-    input.headRevision === input.baseRevision ? baseLoaded : loadRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot);
+    input.headRevision === input.baseRevision ? baseLoaded :
+    loadRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot, acceptedSourcePaths);
   const base = input.baseRevision === authority.revision ? authority :
     closeRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, baseLoaded, trustedRoots);
   const head = input.headRevision === authority.revision ? authority :

@@ -28,7 +28,7 @@ const exactResourcePath = (value) => {
     return value;
 };
 const sameStrings = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
-export function projectRepoGuardLegacyRequirements(raw) {
+export function projectRepoGuardLegacyRequirements(raw, implicitSourcePaths = Object.fromEntries(raw.requirements.map((item) => [item.id, item.source.path]))) {
     const projectionErrors = [];
     const facts = [];
     const projected = [];
@@ -69,6 +69,9 @@ export function projectRepoGuardLegacyRequirements(raw) {
                     continue;
                 }
                 seen.add(identity);
+                const implicitSourcePath = implicitSourcePaths[item.id] || item.source.path;
+                if (legacy === "requires" && path === implicitSourcePath)
+                    continue;
                 const label = `legacy_${String(artifactIndex).padStart(4, "0")}_${String(relationIndex).padStart(2, "0")}`;
                 relations[label] = { predicate, target: { kind: "artifact", path } };
                 facts.push({
@@ -91,7 +94,7 @@ export function projectRepoGuardLegacyRequirements(raw) {
     };
     return { requirements: result, facts: facts.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), errors: projectionErrors };
 }
-function loadRepoGuardProjection(repository, revision, repositoryRoot) {
+function loadRepoGuardProjection(repository, revision, repositoryRoot, implicitSourcePaths) {
     if (!exactSha.test(revision))
         throw new Error("I8 exact revision must be 40 lowercase hex");
     const entries = listTrackedEntriesAtRef(revision, repositoryRoot);
@@ -101,7 +104,7 @@ function loadRepoGuardProjection(repository, revision, repositoryRoot) {
         repository, revision, paths: canonicalPaths,
         readFile: (sha, path) => readFileAtRef(sha, path, repositoryRoot),
     });
-    const projection = projectRepoGuardLegacyRequirements(raw);
+    const projection = projectRepoGuardLegacyRequirements(raw, implicitSourcePaths);
     return { entries, raw, ...projection };
 }
 function acceptedRootIds(revision, repositoryRoot) {
@@ -163,6 +166,7 @@ export function evaluateRepoGuardSelfHost(input) {
         if (!exactSha.test(revision))
             reasons.push(`I8:invalid_${label}_revision`);
     const authorityLoaded = loadRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot);
+    const acceptedSourcePaths = Object.fromEntries(authorityLoaded.raw.requirements.map((item) => [item.id, item.source.path]));
     const rootIds = acceptedRootIds(input.trustedAuthorityBaseRevision, input.repositoryRoot);
     const authorityIds = Object.keys(authorityLoaded.requirements.index).sort();
     if (!sameStrings(rootIds, authorityIds))
@@ -175,9 +179,10 @@ export function evaluateRepoGuardSelfHost(input) {
         reasons.push("I8:accepted_root_identity_missing");
     const authority = closeRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot, authorityLoaded, trustedRoots);
     const baseLoaded = input.baseRevision === input.trustedAuthorityBaseRevision ? authorityLoaded :
-        loadRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot);
+        loadRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, acceptedSourcePaths);
     const headLoaded = input.headRevision === input.trustedAuthorityBaseRevision ? authorityLoaded :
-        input.headRevision === input.baseRevision ? baseLoaded : loadRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot);
+        input.headRevision === input.baseRevision ? baseLoaded :
+            loadRepoGuardProjection(input.repository, input.headRevision, input.repositoryRoot, acceptedSourcePaths);
     const base = input.baseRevision === authority.revision ? authority :
         closeRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, baseLoaded, trustedRoots);
     const head = input.headRevision === authority.revision ? authority :

@@ -358,26 +358,37 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   });
   const projectedHead = pipeline.projectRepoGuardLegacyRequirements(rawHead);
   sh(7, () => {
-    const items = projectedHead.requirements.requirements.map((item) => {
-      const value = item.value;
-      const relations = Object.fromEntries(Object.entries(value.relations || {}).filter((entry) => {
-        const relation = entry[1];
-        return relation?.target?.kind !== "artifact" || relation.target.path !== item.source.path;
-      }));
-      return { ...item, value: { ...value, relations } };
-    });
-    const index = Object.fromEntries(items.map((item) => [item.id, item]));
-    const noSelf = { ...projectedHead.requirements, requirements: items, index };
-    const j2 = requirementRuntime.evaluateRootedRequirements({ requirements: noSelf, trustedRoots: shadow.selfHost.authority.trustedRoots });
-    const exactSet = new Set(exactTracked);
-    const resolver = resolverRuntime.createResourceResolver({
-      repository, revision: headRevision, requirements: noSelf,
-      readers: { [repository]: (sha, filePath) => sha === headRevision && exactSet.has(filePath) ? Buffer.alloc(0) : null },
-    });
-    const j1 = resourceRuntime.evaluateTrackedResourceClosure({
-      repository, revision: headRevision, requirements: noSelf, j2, trackedPaths: exactTracked, resolver,
-    });
-    assert.equal(j1.ok, true, JSON.stringify(j1.errors));
+    for (const item of projectedHead.requirements.requirements) {
+      const selfRequires = Object.values(item.value.relations || {}).filter((relation) =>
+        relation?.predicate === "requires" && relation?.target?.kind === "artifact" && relation.target.path === item.source.path);
+      assert.deepEqual(selfRequires, [], item.id + ": canonical source must use implicit J2 justification, not self-requires");
+    }
+
+    const renameClone = mkdtempSync(join(tmpdir(), "repo-guard-i8-source-rename-"));
+    try {
+      execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", root, renameClone], { encoding: "utf8" });
+      gitText(renameClone, ["config", "user.email", "i8@example.invalid"]);
+      gitText(renameClone, ["config", "user.name", "I8"]);
+      gitText(renameClone, ["checkout", "-q", trustedAuthorityBaseRevision]);
+      const oldPath = "requirements/repo-guard/RG-08.yaml";
+      const newPath = "requirements/repo-guard/RG-08-renamed.yaml";
+      gitText(renameClone, ["mv", oldPath, newPath]);
+      gitText(renameClone, ["commit", "-q", "-m", "representation-only requirement source rename"]);
+      const renameHead = gitText(renameClone, ["rev-parse", "HEAD"]);
+      const renameResult = pipeline.evaluateRepoGuardSelfHost({
+        repository, repositoryRoot: renameClone,
+        trustedAuthorityBaseRevision, baseRevision: trustedAuthorityBaseRevision, headRevision: renameHead,
+        observedTrackedPaths: gitRuntime.listTrackedFilesAtRef(renameHead, renameClone),
+        observedDiffFiles: gitRuntime.getExactDiffIdentity(trustedAuthorityBaseRevision, renameHead, renameClone),
+        workIntent: { id: "source-rename", source: "github_issue", addresses: ["RG-08"] },
+      });
+      assert.equal(renameResult.ok, true, renameResult.reasons.join(" | "));
+      assert.ok(renameResult.transition.deltas.some((delta) => delta.kind === "requirement_relocate" && delta.requirementId === "RG-08"));
+      assert.ok(renameResult.transition.deltas.some((delta) => delta.kind === "resource_rename" && delta.beforePath === oldPath && delta.afterPath === newPath));
+      assert.equal(renameResult.head.justified, renameResult.head.tracked);
+    } finally {
+      rmSync(renameClone, { recursive: true, force: true });
+    }
   });
   sh(8, () => {
     const multi = [...reverse.values()].filter((relations) =>
@@ -732,5 +743,8 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     differential: shadow.comparison.classification,
     scenarios: passed.length,
     trustProviderAuthentication: shadow.selfHost.trustBoundary.providerAuthentication,
+    trustedRoots: shadow.selfHost.authority.trustedRoots,
+    transitionDeltas: shadow.selfHost.transition.deltas,
+    transitionExplanations: shadow.selfHost.transition.explanations,
   }));
 }
