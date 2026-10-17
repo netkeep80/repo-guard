@@ -60,7 +60,7 @@ export function createResourceResolver(context) {
             }
             catch (e) {
                 const message = e.message;
-                return error(/repository path|noncanonical|invalid_repository_path/.test(message) ? "unsafe_path" : /invalid external repository or revision/.test(message) ? "invalid_revision" : "invalid_ref", "", message);
+                return error(/path|noncanonical/i.test(message) ? "unsafe_path" : /invalid external repository or revision/.test(message) ? "invalid_revision" : "invalid_ref", "", message);
             }
             const subject = JSON.stringify(ref);
             if (ref.kind === "requirement") {
