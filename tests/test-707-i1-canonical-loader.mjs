@@ -7,7 +7,7 @@ const sha = "a".repeat(40), repo = "netkeep80/repo-guard";
 const item = (path, text) => [path, text];
 const load = (files, extra = {}) => loadCanonicalRequirements({
   repository: repo, revision: sha, paths: files.map(x => x[0]),
-  readFile: (path) => files.find(x => x[0] === path)?.[1] ?? null, ...extra,
+  readFile: (revision, path) => { assert.equal(revision, sha); return files.find(x => x[0] === path)?.[1] ?? null; }, ...extra,
 });
 test("#704 RED: generic JSON last-key-wins must not extend to canonical Requirements", () => {
   assert.deepEqual(parseJson('{"id":"R1","id":"R2"}'), { id: "R2" });
@@ -95,7 +95,7 @@ test("I1 uses I0 shadow on existing normalized facts without altering v3 blockin
       repository: facts.repositoryIdentity,
       revision: sha,
       paths: facts.trackedFiles,
-      readFile: path => facts.readFileAtRef(sha, path),
+      readFile: (revision, path) => facts.readFileAtRef(revision, path),
     });
     return { ok: result.ok, reasons: result.errors.map(e => e.code) };
   });
