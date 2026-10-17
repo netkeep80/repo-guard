@@ -1078,6 +1078,12 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
     assert.equal(d4NoTrust.replay.ok, false);
     assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_authority:resource:src/core/proofApproval.ts")));
     assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_evidence:D4-TRUST:exact-domain")));
+    const d4NoIntent = productionPipeline.evaluateRepositoryShadowReplay({
+      ...d4BaseInput,
+      workIntent: { id: "i9-d4-no-intent", addresses: [] },
+    });
+    assert.equal(d4NoIntent.replay.ok, false);
+    assert.ok(d4NoIntent.replay.gaps.some((x) => x.includes("J3:no_cause")));
 
     const domainStdout = execFileSync(process.execPath, ["tests/domain.mjs"], {
       cwd: d4Derived, encoding: "utf8",
@@ -1215,6 +1221,68 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       D5Negative: { pr: 57, base: "a19b207b8c9aab3440930faa39e47db107fd5c9b", head: "64704d9fd746abb6573258bacbe31028b472d907", legacy: "RED", classification: "REAL_SOURCE_OBSERVED" },
     };
 
+    const differences = [
+      {
+        id: "D1-global-budget-vs-requirement-owned-scope",
+        legacy: "global diff budget/change profile can block large scientific integration",
+        vnext: "constraint applies only when owned by an applicable Requirement",
+        classification: "EXPECTED_INTENTIONAL_DIFFERENCE",
+        basis: "#691/#699 accepted differential",
+      },
+      {
+        id: "D4-trusted-approver",
+        legacy: "trusted-kernel transition requires protected profile and matching unit test",
+        vnext: "protected Resource requires independent TRUST plus exact applicable DOMAIN evidence",
+        classification: "EQUIVALENT",
+        basis: "real #196 + derived production replay",
+      },
+      {
+        id: "D5-routine-relation-replacement",
+        legacy: "#55 current v3.2.4 routine relation addition/replacement path is GREEN without grant",
+        vnext: "routine implemented_by replacement is GREEN with no authority receipt",
+        classification: "EQUIVALENT",
+        basis: "real #55 + derived production replay",
+      },
+      {
+        id: "D5-closed-repository",
+        legacy: "closed_repository=false permits tracked files outside requirement closure",
+        vnext: "full J1 tracked-tree justification is mandatory",
+        classification: "EXPECTED_INTENTIONAL_DIFFERENCE",
+        basis: "#691/#699 accepted universal J1 model",
+      },
+      {
+        id: "consumer-vnext-authority",
+        legacy: "consumer-specific accepted legacy authority exists where observed",
+        vnext: "no independently accepted complete consumer vNext authority model yet",
+        classification: "UNPROVEN",
+        basis: "real-source audit",
+      },
+    ];
+    assert.equal(differences.some((x) => x.classification === "UNEXPECTED_REGRESSION"), false);
+
+    const legacyMechanisms = {
+      packs: "DERIVED",
+      anchors: "DERIVED",
+      trace_rules: "DERIVED",
+      document_relations: "DERIVED",
+      evidence_bindings: "DOMAIN",
+      change_profiles: "TRUST",
+      surfaces: "DERIVED",
+      new_file_classes: "DERIVED",
+      cochange_rules: "DERIVED",
+      pr_immutable: "TRUST",
+      governance_paths: "TRUST",
+      closed_repository: "LEGACY",
+      content_rules: "DOMAIN",
+      size_rules: "OBSERVATION",
+      diff_rules: "OBSERVATION",
+      release_rules: "TRUST",
+    };
+    assert.deepEqual(
+      [...new Set(Object.values(legacyMechanisms))].sort(),
+      ["DERIVED", "DOMAIN", "LEGACY", "OBSERVATION", "TRUST"],
+    );
+
     const ceremony = {
       D1: { evidence: "OBSERVED", governanceOnlyPrs: [2278, 2279, 2282, 2283], manualGrants: "NOT_PROVEN" },
       D2: { evidence: "OBSERVED", representativeGovernancePr: 493, manualGrants: "NOT_PROVEN" },
@@ -1315,7 +1383,13 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       D07: () => { assert.equal(d4NoTrust.replay.ok, false); assert.equal(d4Green.replay.ok, true); },
       D08: () => { assert.equal(historical.D5Positive.legacy, "GREEN_WITHOUT_GRANT"); assert.equal(d5Routine.replay.ok, true); },
       D09: () => { assert.equal(historical.D5Negative.legacy, "RED"); assert.equal(d5Normative.replay.ok, false); },
-      D10: () => assert.deepEqual(["EQUIVALENT", "EXPECTED_INTENTIONAL_DIFFERENCE", "UNEXPECTED_REGRESSION", "UNPROVEN"].length, 4),
+      D10: () => {
+        const allowed = new Set(["EQUIVALENT", "EXPECTED_INTENTIONAL_DIFFERENCE", "UNEXPECTED_REGRESSION", "UNPROVEN"]);
+        assert.equal(differences.every((x) => allowed.has(x.classification)), true);
+        assert.equal(differences.some((x) => x.classification === "UNEXPECTED_REGRESSION"), false);
+        assert.ok(differences.some((x) => x.classification === "EXPECTED_INTENTIONAL_DIFFERENCE"));
+        assert.ok(differences.some((x) => x.classification === "UNPROVEN"));
+      },
 
       A01: () => assert.equal(d4Green.replay.acceptedAuthorityVerified, false),
       A02: () => assert.equal(d5Normative.replay.ok, false),
@@ -1324,11 +1398,10 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       A05: () => assert.equal(d4StaleReceipt.replay.ok, false),
       A06: () => assert.equal(d4WrongSubject.replay.ok, false),
       A07: () => assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_evidence"))),
-      A08: () => assert.equal(evaluate700({
-        base: graph700({ roots:["R"], requirements:[req700("R")], resources:[res700("F","code")], relations:[rel700("R","implemented_by","F")] }),
-        head: graph700({ roots:["R"], requirements:[req700("R")], resources:[res700("F","code",{content:"x"})], relations:[rel700("R","implemented_by","F")] }),
-        workIntent: wi700([]),
-      }).ok, false),
+      A08: () => {
+        assert.equal(d4NoIntent.replay.ok, false);
+        assert.ok(d4NoIntent.replay.gaps.some((x) => x.includes("J3:no_cause")));
+      },
       A09: () => {
         assert.equal(observed.D2.policy.enforcement.mode, "advisory");
         assert.equal(observed.D5.policy.enforcement.mode, "advisory");
@@ -1386,6 +1459,8 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
         },
       },
       migration,
+      differences,
+      legacyMechanisms,
       ceremony,
       complexity,
       trustBoundary: "external to pure evaluator",
