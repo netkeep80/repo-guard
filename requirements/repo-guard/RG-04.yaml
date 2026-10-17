@@ -38,6 +38,8 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/runtime/resource-closure.mjs"
     relations: [requires, implements]
+  - path: "dist/runtime/transition-closure.mjs"
+    relations: [requires, implements]
   - path: "dist/runtime/requirement-closure.mjs"
     relations: [requires, implements]
   - path: "dist/runtime/resource-resolver.mjs"
@@ -111,6 +113,8 @@ artifacts:
   - path: "src/runtime/analysis-report.mts"
     relations: [requires, implements]
   - path: "src/runtime/resource-closure.mts"
+    relations: [requires, implements]
+  - path: "src/runtime/transition-closure.mts"
     relations: [requires, implements]
   - path: "src/runtime/requirement-closure.mts"
     relations: [requires, implements]
