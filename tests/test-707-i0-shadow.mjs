@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
-
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
@@ -29,7 +28,6 @@ const legacy = () => runPolicyPipeline(input, opts);
 function compare(candidate, expected = false) {
   return runPolicyPipelineShadow(input, opts, candidate, expected);
 }
-
 test("#707 I0 same normalized observation, identical legacy report, no candidate control over verdict", () => {
   const plain = legacy();
   let count = 0;
@@ -49,7 +47,6 @@ test("#707 I0 same normalized observation, identical legacy report, no candidate
     classification: "EQUIVALENT",
   });
 });
-
 test("#707 I0 unexpected and explicitly expected differences are machine-comparable, not merge-gating", () => {
   const plain = legacy();
   const opposite = () => ({ ok: !plain.ok, reasons: ["INTENTIONAL_RESEARCH_DIFFERENCE"] });
@@ -61,7 +58,6 @@ test("#707 I0 unexpected and explicitly expected differences are machine-compara
   assert.deepEqual(unexpected.legacy, plain);
   assert.equal(unexpected.comparison.identical, false);
 });
-
 test("#707 I0 candidate throw/invalid response cannot change existing enforced outcome", () => {
   const plain = legacy();
   const thrown = compare(() => { throw new Error("candidate failure"); });
@@ -71,7 +67,6 @@ test("#707 I0 candidate throw/invalid response cannot change existing enforced o
   assert.match(thrown.comparison.candidate.reasons[0], /^SHADOW_EXECUTION_ERROR:/);
   assert.match(invalid.comparison.candidate.reasons[0], /^SHADOW_EXECUTION_ERROR:/);
 });
-
 test("#707 I0 no public policy field, schema or CLI toggle is required", () => {
   assert.equal("shadow" in input.policy, false);
   assert.equal("vnext" in input.policy, false);
