@@ -540,6 +540,14 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     });
 
     const A = "a".repeat(40), B = "b".repeat(40);
+    assert.doesNotThrow(
+      () => gitText(root, ["cat-file", "-e", A + "^{commit}"]),
+      "#723 corrective RED: SH22-SH24 evidence BASE must be a real Git commit, not a synthetic revision",
+    );
+    assert.doesNotThrow(
+      () => gitText(root, ["cat-file", "-e", B + "^{commit}"]),
+      "#723 corrective RED: SH22-SH24 evidence HEAD must be a real Git commit, not a synthetic revision",
+    );
     const makeEvidenceState = (revisionValue, evidenceSpec) => {
       const value = {
         id: "R",
