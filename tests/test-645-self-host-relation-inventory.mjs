@@ -726,6 +726,174 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
       assert.deepEqual(legacyOnly, shadow.legacy);
       assert.deepEqual(thrown.legacy, legacyOnly);
     });
+
+    // #723 independent audit falsifiers F-01..F-04.
+    // Keep these outside SH01-SH40: they are acceptance regressions discovered
+    // by an independent read-only audit after the first 40/40 GREEN claim.
+    const auditFailures = [];
+    const auditCheck = (id, condition, detail) => {
+      if (!condition) auditFailures.push(id + ": " + detail);
+    };
+
+    resetClone();
+    const auditProductPath = resolve(repoClone, "docs/product-requirements.md");
+    const auditProduct = readFileSync(auditProductPath, "utf8");
+    const normativeBefore = "**\`MUST\`:** намерение изменения не выдаёт разрешение менять правила управления.";
+    assert.ok(auditProduct.includes(normativeBefore), "F-01 fixture must target RG-01 normative body, not its heading");
+    writeFileSync(auditProductPath, auditProduct.replace(
+      normativeBefore,
+      "**\`MUST\`:** намерение изменения не выдаёт разрешение менять правила управления без независимой санкции.",
+    ));
+    const normativeHead = commitClone("F-01 normative RG-01 body change");
+    const normativeUnauthorized = cloneEval(trustedAuthorityBaseRevision, normativeHead, { protectedResources: [] });
+    auditCheck(
+      "F-01-authoritative-text-binding",
+      !normativeUnauthorized.head.rooted.includes("RG-01"),
+      "RG-01 remained J2-rooted after normative body changed with unchanged heading",
+    );
+    const normativeReceipt = {
+      authorityBaseRevision: trustedAuthorityBaseRevision,
+      baseRevision: trustedAuthorityBaseRevision,
+      headRevision: normativeHead,
+      permissions: ["requirement:RG-01", "resource:docs/product-requirements.md"],
+    };
+    const normativeAuthorized = cloneEval(trustedAuthorityBaseRevision, normativeHead, {
+      protectedResources: [],
+      trustedReceipts: [normativeReceipt],
+    });
+    auditCheck(
+      "F-01-authorized-transition",
+      normativeAuthorized.ok,
+      "exact independent normative authorization did not produce GREEN: " + normativeAuthorized.reasons.join(" | "),
+    );
+    auditCheck(
+      "F-01-requirement-delta",
+      normativeAuthorized.transition.deltas.some((delta) => delta.kind === "requirement_modify" && delta.subject === "RG-01"),
+      "normative RG-01 body change was not represented as RequirementDelta",
+    );
+
+    resetClone();
+    const auditRg01Path = resolve(repoClone, "requirements/repo-guard/RG-01.yaml");
+    writeFileSync(auditRg01Path, readFileSync(auditRg01Path, "utf8") +
+      "\n  - path: \"README.md\"\n    relations: [documents]\n");
+    const descriptiveHead = commitClone("F-02 routine descriptive relation");
+    const descriptive = cloneEval(trustedAuthorityBaseRevision, descriptiveHead, { protectedResources: [] });
+    auditCheck(
+      "F-02-routine-relation-root",
+      descriptive.ok,
+      "routine descriptive trace update changed normative root identity: " + descriptive.reasons.join(" | "),
+    );
+    auditCheck(
+      "F-02-no-normative-delta",
+      !descriptive.transition.deltas.some((delta) => delta.kind === "requirement_modify" && delta.subject === "RG-01"),
+      "routine descriptive trace update became RequirementDelta",
+    );
+
+    const currentRaw = canonicalRuntime.loadCanonicalRequirements({
+      repository,
+      revision: headRevision,
+      paths: exactTracked,
+      readFile: (sha, path) => gitRuntime.readFileAtRef(sha, path, root),
+    });
+    const currentProjected = pipeline.projectRepoGuardLegacyRequirements(currentRaw);
+    if (typeof canonicalRuntime.canonicalSemanticDigest !== "function") {
+      auditFailures.push("F-02-digest-invariant: canonicalSemanticDigest is not exported for independent invariant verification");
+    } else {
+      for (const item of currentProjected.requirements.requirements) {
+        auditCheck(
+          "F-02-digest-invariant-" + item.id,
+          item.semantic.digest === canonicalRuntime.canonicalSemanticDigest(item.value),
+          item.id + " semantic.digest != H(projected.value)",
+        );
+      }
+    }
+
+    const diffFixture = mkdtempSync(join(tmpdir(), "repo-guard-i8-diff-contract-"));
+    try {
+      gitText(diffFixture, ["init", "-q"]);
+      gitText(diffFixture, ["config", "user.email", "i8@example.invalid"]);
+      gitText(diffFixture, ["config", "user.name", "I8"]);
+      writeFileSync(resolve(diffFixture, "a.txt"), "a\n");
+      gitText(diffFixture, ["add", "-A"]);
+      gitText(diffFixture, ["commit", "-q", "-m", "common"]);
+      const common = gitText(diffFixture, ["rev-parse", "HEAD"]);
+
+      gitText(diffFixture, ["checkout", "-q", "-b", "head", common]);
+      writeFileSync(resolve(diffFixture, "b.txt"), "b\n");
+      gitText(diffFixture, ["add", "-A"]);
+      gitText(diffFixture, ["commit", "-q", "-m", "head"]);
+      const divergentHead = gitText(diffFixture, ["rev-parse", "HEAD"]);
+
+      gitText(diffFixture, ["checkout", "-q", "-b", "base", common]);
+      writeFileSync(resolve(diffFixture, "c.txt"), "c\n");
+      gitText(diffFixture, ["add", "-A"]);
+      gitText(diffFixture, ["commit", "-q", "-m", "base"]);
+      const divergentBase = gitText(diffFixture, ["rev-parse", "HEAD"]);
+
+      const legacyDiverged = gitRuntime.getDiffObservation(divergentBase, divergentHead, diffFixture).files;
+      const exactDiverged = gitRuntime.getExactDiffIdentity(divergentBase, divergentHead, diffFixture);
+      const identity = (files) => files.map((file) =>
+        JSON.stringify([file.status, file.gitStatus || "", file.previousPath || "", file.path])).sort();
+      auditCheck(
+        "F-03-diverged-base-contract",
+        JSON.stringify(identity(legacyDiverged)) === JSON.stringify(identity(exactDiverged)),
+        "shared v3 BASE...HEAD identity differs from I8 exact identity",
+      );
+
+      const fastForward = gitRuntime.getExactDiffIdentity(common, divergentHead, diffFixture);
+      const fastForwardLegacy = gitRuntime.getDiffObservation(common, divergentHead, diffFixture).files;
+      auditCheck(
+        "F-03-fast-forward",
+        JSON.stringify(identity(fastForwardLegacy)) === JSON.stringify(identity(fastForward)),
+        "fast-forward diff contracts disagree",
+      );
+
+      gitText(diffFixture, ["checkout", "-q", "-B", "rename", common]);
+      gitText(diffFixture, ["mv", "a.txt", "renamed.txt"]);
+      gitText(diffFixture, ["commit", "-q", "-am", "rename"]);
+      const renameHead = gitText(diffFixture, ["rev-parse", "HEAD"]);
+      const renameLegacy = gitRuntime.getDiffObservation(common, renameHead, diffFixture).files;
+      const renameExact = gitRuntime.getExactDiffIdentity(common, renameHead, diffFixture);
+      auditCheck(
+        "F-03-rename",
+        JSON.stringify(identity(renameLegacy)) === JSON.stringify(identity(renameExact)),
+        "rename diff contracts disagree",
+      );
+    } finally {
+      rmSync(diffFixture, { recursive: true, force: true });
+    }
+
+    let resilientShadow = null;
+    let resilientError = null;
+    try {
+      resilientShadow = pipeline.runRepoGuardSelfHostShadow(
+        policyInput,
+        { quiet: true },
+        { ...config, trustedAuthorityBaseRevision: "0".repeat(40) },
+      );
+    } catch (error) {
+      resilientError = error;
+    }
+    auditCheck(
+      "F-04-wrapper-does-not-throw",
+      resilientError === null,
+      resilientError ? String(resilientError.message || resilientError) : "unexpected throw",
+    );
+    if (resilientShadow) {
+      auditCheck(
+        "F-04-legacy-preserved",
+        JSON.stringify(resilientShadow.legacy) === JSON.stringify(legacyOnly),
+        "candidate exception path lost or changed completed legacy verdict",
+      );
+      auditCheck(
+        "F-04-candidate-red",
+        resilientShadow.comparison.candidate.ok === false &&
+          resilientShadow.comparison.candidate.reasons.some((reason) => reason.startsWith("SHADOW_EXECUTION_ERROR:")),
+        "candidate exception was not represented as explicit shadow RED",
+      );
+    }
+
+    assert.deepEqual(auditFailures, [], "#723 independent audit regressions must be GREEN");
   } finally {
     rmSync(repoClone, { recursive: true, force: true });
   }
