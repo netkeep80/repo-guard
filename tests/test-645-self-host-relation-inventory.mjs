@@ -637,7 +637,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     const productPath = resolve(repoClone, "docs/product-requirements.md");
     writeFileSync(productPath, readFileSync(productPath, "utf8").replace(/^### RG-01 .*$/m, "### RG-01 — candidate may self-approve (adversarial)"));
     const weakenedHead = commitClone("adversarial weaken governing source");
-    const weakened = cloneEval(trustedAuthorityBaseRevision, weakenedHead);
+    const weakened = cloneEval(trustedAuthorityBaseRevision, weakenedHead, { protectedResources: [] });
     sh(32, () => {
       assert.equal(weakened.ok, false);
       assert.ok(reasonHas(weakened, "missing_authority:resource:docs/product-requirements.md"));
@@ -657,7 +657,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     const trustedWorkflow = resolve(repoClone, ".github/workflows/trusted-enforcement.yml");
     writeFileSync(trustedWorkflow, readFileSync(trustedWorkflow, "utf8") + "\n# adversarial provider substitution\n");
     const providerHead = commitClone("adversarial provider substitution");
-    const providerSwap = cloneEval(trustedAuthorityBaseRevision, providerHead);
+    const providerSwap = cloneEval(trustedAuthorityBaseRevision, providerHead, { protectedResources: [] });
     sh(34, () => {
       assert.equal(providerSwap.ok, false);
       assert.ok(reasonHas(providerSwap, "missing_authority:resource:.github/workflows/trusted-enforcement.yml"));
