@@ -13,6 +13,7 @@ const pureReadOnlyParallel = [
   "test-647-control-plane-graph.mjs",
   "test-647-control-plane-doctor.mjs",
   "test-647-merged-residue-planner.mjs",
+  "test-697-resource-identity-resolver.mjs",
   "test-anchor-diagnostics-boundary.mjs",
   "test-anchor-extractors.mjs",
   "test-architectural-constraints.mjs",
