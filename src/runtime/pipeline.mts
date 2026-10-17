@@ -47,7 +47,7 @@ const uniqueSorted = (values: Iterable<string>): string[] => [...new Set(values)
 const exactResourcePath = (value: unknown): string => {
   if (typeof value !== "string") throw new Error("resource path must be a string");
   const normalized = normalizeDocumentFact(value, "repository_path");
-  if (normalized !== value || /[*?\\[\\]{}]/.test(value) || value.endsWith("/")) throw new Error("noncanonical or wildcard resource path");
+  if (normalized !== value || /[*?\[\]{}]/.test(value) || value.endsWith("/")) throw new Error("noncanonical or wildcard resource path");
   return value;
 };
 const sameStrings = (a: readonly string[], b: readonly string[]): boolean =>
@@ -119,7 +119,7 @@ function loadRepoGuardProjection(repository: string, revision: string, repositor
   if (!exactSha.test(revision)) throw new Error("I8 exact revision must be 40 lowercase hex");
   const entries = listTrackedEntriesAtRef(revision, repositoryRoot);
   const canonicalPaths = entries.map((entry) => entry.path)
-    .filter((path) => path.startsWith("requirements/") && /\\.(?:yaml|yml|json)$/.test(path));
+    .filter((path) => path.startsWith("requirements/") && /\.(?:yaml|yml|json)$/.test(path));
   const raw = loadCanonicalRequirements({
     repository, revision, paths: canonicalPaths,
     readFile: (sha, path) => readFileAtRef(sha, path, repositoryRoot),
@@ -131,7 +131,7 @@ function loadRepoGuardProjection(repository: string, revision: string, repositor
 function acceptedRootIds(revision: string, repositoryRoot: string): string[] {
   const raw = readFileAtRef(revision, selfHostRootSource, repositoryRoot);
   if (raw === null) throw new Error("I8 accepted root source missing");
-  const matches = [...raw.matchAll(/^###\\s+(RG-[0-9]{2})\\s+—/gm)].map((match) => match[1]!);
+  const matches = [...raw.matchAll(/^###\s+(RG-[0-9]{2})\s+—/gm)].map((match) => match[1]!);
   const unique = uniqueSorted(matches);
   if (!matches.length || unique.length !== matches.length) throw new Error("I8 accepted root source has missing or duplicate RG headings");
   return unique;
@@ -148,9 +148,10 @@ function closeRepoGuardProjection(
     owners: {} as Record<string, string[]>,
   };
   if (loaded.requirements.ok && j2.ok) {
+    const exactPaths = new Set(loaded.entries.map((entry) => entry.path));
     const resolver = createResourceResolver({
       repository, revision, requirements: loaded.requirements,
-      readers: { [repository]: (sha, path) => readFileAtRef(sha, path, repositoryRoot) },
+      readers: { [repository]: (sha, path) => sha === revision && exactPaths.has(path) ? Buffer.alloc(0) : null },
     });
     j1 = evaluateTrackedResourceClosure({
       repository, revision, requirements: loaded.requirements, j2,
@@ -185,7 +186,7 @@ function exactTreeChanges(baseEntries: ReturnType<typeof listTrackedEntriesAtRef
 
 export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
   const reasons: string[] = [];
-  if (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(input.repository)) reasons.push("I8:invalid_repository");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository)) reasons.push("I8:invalid_repository");
   for (const [label, revision] of [["authority", input.trustedAuthorityBaseRevision], ["base", input.baseRevision], ["head", input.headRevision]] as const)
     if (!exactSha.test(revision)) reasons.push(`I8:invalid_${label}_revision`);
 

@@ -123,9 +123,10 @@ function closeRepoGuardProjection(repository, revision, repositoryRoot, loaded, 
         owners: {},
     };
     if (loaded.requirements.ok && j2.ok) {
+        const exactPaths = new Set(loaded.entries.map((entry) => entry.path));
         const resolver = createResourceResolver({
             repository, revision, requirements: loaded.requirements,
-            readers: { [repository]: (sha, path) => readFileAtRef(sha, path, repositoryRoot) },
+            readers: { [repository]: (sha, path) => sha === revision && exactPaths.has(path) ? Buffer.alloc(0) : null },
         });
         j1 = evaluateTrackedResourceClosure({
             repository, revision, requirements: loaded.requirements, j2,
