@@ -19,6 +19,7 @@ const pureReadOnlyParallel = [
   "test-707-i3-j2-closure.mjs",
   "test-707-i4-j1-closure.mjs",
   "test-707-i5-j3-transition-closure.mjs",
+  "test-707-i6-relation-strength.mjs",
   "test-699-five-consumer-differential.mjs",
   "test-anchor-diagnostics-boundary.mjs",
   "test-anchor-extractors.mjs",
