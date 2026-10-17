@@ -225,7 +225,16 @@ console.log("\n--- transition identity boundaries ---");
   const head = graph("head", HEAD, [["requirements/r1.json", req("R1", [artifact("requirements/r1.json")], { title: "new" })]]);
   assert.deepEqual(compareRequirementRelationGraphs(base, head), { add: [], remove: [] });
   assert.notEqual(base.authority_sha256, head.authority_sha256, "authority digest must bind non-relation source content too");
-  assert.equal(checkRequirementTransition({ base, head, trustedAuthorizer: trusted }).ok, true, "content-only requirement edits remain owned by ordinary evidence semantics");
+  const missingGrant = checkRequirementTransition({ base, head, trustedAuthorizer: trusted });
+  assert.equal(missingGrant.ok, false, "content-only normative authority edit must not self-authorize");
+  assert.equal(missingGrant.required, true);
+  assert.ok(missingGrant.reasons.includes("requirement_transition_grant_missing"));
+  const exact = checkRequirementTransition({ base, head, grant: grant(base, head), trustedAuthorizer: trusted });
+  assert.equal(exact.ok, true, "exact trusted grant with empty relation delta authorizes changed normative content");
+  const untrusted = checkRequirementTransition({
+    base, head, grant: grant(base, head), trustedAuthorizer: { trusted: false, source: "repository_permission" },
+  });
+  assert.equal(untrusted.ok, false, "valid grant bytes are insufficient without an independent authorizer");
   const spurious = {
     base_authority_sha256: base.authority_sha256,
     expected_head_authority_sha256: head.authority_sha256,
@@ -234,7 +243,79 @@ console.log("\n--- transition identity boundaries ---");
   };
   const verdict = checkRequirementTransition({ base, head, grant: spurious, trustedAuthorizer: trusted });
   assert.equal(verdict.ok, false);
-  assert.ok(verdict.reasons.includes("requirement_transition_grant_without_relation_delta"));
+  assert.ok(verdict.reasons.includes("requirement_transition_added_relations_mismatch"));
+}
+
+{
+  const source = (snapshot, content, format = "yaml") => normalizeRequirementAuthority({
+    snapshot, revision: snapshot === "base" ? BASE : HEAD,
+    sources: [{ path: format === "yaml" ? "requirements/r1.yaml" : "requirements/r1.json", format, content }],
+  });
+  const yamlBase = source("base", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\ntitle: Accepted\n");
+  const yamlFormatted = source("head", "# comment, no normative effect\ntitle: Accepted\nartifacts:\n  - relations: [requires, implements]\n    path: src/a.mts\nid: R1\n");
+  assert.notEqual(yamlBase.authority_sha256, yamlFormatted.authority_sha256, "raw SHA binds exact source bytes");
+  assert.equal(yamlBase.authority_semantic_sha256, yamlFormatted.authority_semantic_sha256, "YAML comments and mapping order are not normative");
+  const formatOnly = checkRequirementTransition({ base: yamlBase, head: yamlFormatted });
+  assert.equal(formatOnly.ok, true, "formatting-only edit does not require a semantic transition grant");
+  assert.equal(formatOnly.required, false);
+  const changed = source("head", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\ntitle: Replaced\n");
+  assert.deepEqual(compareRequirementRelationGraphs(yamlBase, changed), { add: [], remove: [] });
+  assert.notEqual(yamlBase.authority_semantic_sha256, changed.authority_semantic_sha256);
+  assert.equal(checkRequirementTransition({ base: yamlBase, head: changed }).ok, false, "changed normative title is denied without grant");
+  const metaChanged = source("head", "id: R1\nartifacts:\n  - path: src/a.mts\n    role: authority\n    relations: [requires, implements]\ntitle: Accepted\n");
+  assert.deepEqual(compareRequirementRelationGraphs(yamlBase, metaChanged), { add: [], remove: [] });
+  assert.equal(checkRequirementTransition({ base: yamlBase, head: metaChanged }).ok, false, "artifact metadata is normative even if graph is unchanged");
+  const jsonBase = source("base", JSON.stringify({ id: "R1", title: "Accepted", artifacts: [{ path: "src/a.mts", relations: ["requires", "implements"] }] }), "json");
+  const jsonReordered = source("head", JSON.stringify({ artifacts: [{ relations: ["requires", "implements"], path: "src/a.mts" }], title: "Accepted", id: "R1" }), "json");
+  assert.equal(jsonBase.authority_semantic_sha256, jsonReordered.authority_semantic_sha256, "JSON object key ordering is not normative");
+  assert.notEqual(jsonBase.authority_sha256, jsonReordered.authority_sha256, "the original JSON source remains raw-byte addressable");
+  const ordered = source("base", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\n  - path: tests/a.mjs\n    relations: [requires, verifies]\n");
+  const reorderedSets = source("head", "id: R1\nartifacts:\n  - path: tests/a.mjs\n    relations: [verifies, requires]\n  - path: src/a.mts\n    relations: [implements, requires]\n");
+  assert.deepEqual(compareRequirementRelationGraphs(ordered, reorderedSets), { add: [], remove: [] });
+  assert.equal(ordered.authority_semantic_sha256, reorderedSets.authority_semantic_sha256,
+    "artifact and relation sets are semantically order-insensitive");
+  assert.notEqual(ordered.authority_sha256, reorderedSets.authority_sha256, "raw source binds original order");
+  const listBase = source("base", "id: R1\npriority: [first, second]\nartifacts: []\n");
+  const listHead = source("head", "id: R1\npriority: [second, first]\nartifacts: []\n");
+  assert.notEqual(listBase.authority_semantic_sha256, listHead.authority_semantic_sha256,
+    "unrecognized arrays are ordered normative data");
+  assert.equal(checkRequirementTransition({ base: listBase, head: listHead }).ok, false);
+
+  assert.throws(
+    () => source("head", '{"id":"R1","title":"first","title":"second","artifacts":[]}', "json"),
+    /invalid YAML|unique|duplicate/i,
+    "duplicate JSON keys must fail closed instead of inheriting JSON.parse last-wins semantics",
+  );
+  for (const scalar of [".nan", ".inf", "-.inf"]) {
+    assert.throws(
+      () => source("head", `id: R1\nscore: ${scalar}\nartifacts: []\n`),
+      /non-finite numbers are not allowed/,
+      `YAML ${scalar} must not collide with null through JSON.stringify`,
+    );
+  }
+  assert.throws(
+    () => source("head", "id: R1\nscore: 9007199254740993\nartifacts: []\n"),
+    /unsafe integers are not allowed/,
+    "unsafe YAML integers must not be rounded before semantic hashing",
+  );
+  assert.throws(
+    () => source("head", '{"id":"R1","score":9007199254740993,"artifacts":[]}', "json"),
+    /unsafe integers are not allowed/,
+    "unsafe JSON integers must not be rounded before semantic hashing",
+  );
+
+  const canonicalPathBase = source("base", "id: R1\nartifacts:\n  - path: ./src/a.mts\n    relations: [requires, implements]\n");
+  const canonicalPathHead = source("head", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\n");
+  assert.deepEqual(compareRequirementRelationGraphs(canonicalPathBase, canonicalPathHead), { add: [], remove: [] },
+    "repository-path spelling aliases normalize to the same relation graph");
+  assert.equal(canonicalPathBase.authority_semantic_sha256, canonicalPathHead.authority_semantic_sha256,
+    "semantic authority identity must use the same canonical repository-path spelling as the relation graph");
+
+  const normalizedTokensBase = source("base", 'id: " R1 "\nartifacts:\n  - path: src/a.mts\n    relations: [" requires ", " implements "]\n');
+  const normalizedTokensHead = source("head", "id: R1\nartifacts:\n  - path: src/a.mts\n    relations: [requires, implements]\n");
+  assert.deepEqual(compareRequirementRelationGraphs(normalizedTokensBase, normalizedTokensHead), { add: [], remove: [] });
+  assert.equal(normalizedTokensBase.authority_semantic_sha256, normalizedTokensHead.authority_semantic_sha256,
+    "semantic authority identity must reuse normalized requirement id and relation-kind tokens");
 }
 
 console.log("\n--- #670 requirement transaction evidence projection ---");

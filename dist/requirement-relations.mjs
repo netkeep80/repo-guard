@@ -92,12 +92,53 @@ function normalizeAuthorityScope(values) {
     return [...byGlob.entries()].map(([glob, format]) => ({ glob, format })).sort((left, right) => left.glob.localeCompare(right.glob) || left.format.localeCompare(right.format));
 }
 function parseSource(source) {
-    if (source.format === "json")
-        return parseJson(source.content);
+    if (source.format === "json") {
+        const parsed = parseJson(source.content);
+        // JSON is a YAML 1.2 subset; reuse the existing strict structural parser to reject
+        // duplicate mapping keys instead of adding a second JSON authority parser.
+        parseYaml(source.content);
+        return parsed;
+    }
     if (source.format === "yaml")
         return parseYaml(source.content);
     const exhaustive = source.format;
     return fail(source.path, `unsupported format "${String(exhaustive)}"`);
+}
+// Canonicalize parsed data, not source formatting; exact source bytes remain separately hashed.
+function canonicalParsedAuthority(value, label) {
+    if (typeof value === "number") {
+        if (!Number.isFinite(value))
+            fail(label, "non-finite numbers are not allowed in requirement authority");
+        if (Number.isInteger(value) && !Number.isSafeInteger(value))
+            fail(label, "unsafe integers are not allowed in requirement authority");
+        return value;
+    }
+    if (Array.isArray(value))
+        return value.map((item, index) => canonicalParsedAuthority(item, `${label}/${index}`));
+    if (!value || typeof value !== "object")
+        return value;
+    const record = value;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalParsedAuthority(record[key], `${label}/${key}`)]));
+}
+// Only the declared artifact/relation sets are order-insensitive. Other arrays remain ordered.
+function canonicalRequirementData(root, sourcePath) {
+    const data = {
+        ...root,
+        id: nonEmptyString(root.id, `${sourcePath}#/id`),
+    };
+    if (Array.isArray(root.artifacts)) {
+        data.artifacts = root.artifacts.map((raw, artifactIndex) => {
+            const artifact = { ...object(raw, `${sourcePath}#/artifacts/${artifactIndex}`) };
+            artifact.path = repositoryPath(artifact.path, `${sourcePath}#/artifacts/${artifactIndex}/path`);
+            if (Array.isArray(artifact.relations)) {
+                artifact.relations = artifact.relations
+                    .map((value, relationIndex) => relationKind(value, `${sourcePath}#/artifacts/${artifactIndex}/relations/${relationIndex}`))
+                    .sort();
+            }
+            return artifact;
+        }).sort((a, b) => String(a.path).localeCompare(String(b.path)));
+    }
+    return canonicalParsedAuthority(data, `${sourcePath}#`);
 }
 function normalizeSourceRelations(source, snapshot, revision) {
     const root = object(parseSource(source), source.path);
@@ -159,7 +200,7 @@ function normalizeSourceRelations(source, snapshot, revision) {
             fail(`${source.path}#${artifactPointer}/relations`, `artifact "${path}" must explicitly include "requires"`);
         }
     }
-    return { subject, relations };
+    return { subject, relations, parsed: root };
 }
 export function normalizeRequirementAuthority(input) {
     const snapshot = input?.snapshot;
@@ -182,6 +223,7 @@ export function normalizeRequirementAuthority(input) {
     const seenSubjects = new Map();
     const relations = [];
     const manifest = [];
+    const semanticSources = [];
     for (const source of sources) {
         if (seenSourcePaths.has(source.path))
             fail(source.path, "duplicate authority source path");
@@ -193,6 +235,7 @@ export function normalizeRequirementAuthority(input) {
         seenSubjects.set(normalized.subject, source.path);
         relations.push(...normalized.relations);
         manifest.push({ path: source.path, format: source.format, sha256: sha256(source.content) });
+        semanticSources.push({ path: source.path, format: source.format, parsed: canonicalRequirementData(normalized.parsed, source.path) });
     }
     relations.sort((left, right) => compareIdentities(relationIdentity(left), relationIdentity(right)));
     const identities = relations.map(relationIdentity);
@@ -204,6 +247,7 @@ export function normalizeRequirementAuthority(input) {
         authority_scope_sha256: authorityScopeSha256,
         authority_manifest: manifest,
         authority_sha256: sha256(JSON.stringify({ scope, manifest })),
+        authority_semantic_sha256: sha256(JSON.stringify({ scope, semanticSources })),
         graph_sha256: sha256(JSON.stringify(identities)),
         relations,
     };
@@ -405,7 +449,10 @@ function sameIdentities(left, right) {
 export function checkRequirementTransition(input) {
     const actual = compareRequirementRelationGraphs(input.base, input.head);
     const authorityScopeChanged = input.base.authority_scope_sha256 !== input.head.authority_scope_sha256;
-    const required = authorityScopeChanged || actual.add.length > 0 || actual.remove.length > 0;
+    // Parsed normative changes require authority; formatting alone does not expand scope.
+    // Separate BASE-owned byte protection still applies to governance and immutable paths.
+    const authoritySemanticChanged = input.base.authority_semantic_sha256 !== input.head.authority_semantic_sha256;
+    const required = authoritySemanticChanged || authorityScopeChanged || actual.add.length > 0 || actual.remove.length > 0;
     const reasons = [];
     if (!required) {
         if (input.grant !== undefined && input.grant !== null)
