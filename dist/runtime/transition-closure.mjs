@@ -532,6 +532,10 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
     const observation = input.observationFacts || [];
     const observationMap = new Map();
     for (const o of observation) {
+        if (!o || typeof o !== "object") {
+            problems.push("I7:invalid_observation_fact");
+            continue;
+        }
         try {
             const path = normPath(o.path);
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
@@ -626,7 +630,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                         f.providerId === spec.providerId && providers.has(spec.providerId) &&
                         f.authorityBaseRevision === input.trustedAuthorityBase.revision &&
                         f.baseRevision === input.base.revision && f.headRevision === input.head.revision &&
-                        Array.isArray(f.subjectPaths) && stable(sorted(f.subjectPaths)) === stable(touched) &&
+                        Array.isArray(f.subjectPaths) && f.subjectPaths.every(path => typeof path === "string") &&
+                        stable(sorted(f.subjectPaths)) === stable(touched) &&
                         (spec.kind !== "execution" || (f.verifierPath === spec.verifierPath && f.verifierRevision === input.head.revision)));
                     const statuses = new Set(compatible.map(f => f.status));
                     if (statuses.size > 1) {
