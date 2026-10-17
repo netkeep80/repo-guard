@@ -414,7 +414,9 @@ function transitionDeltas700(base, head) {
       continue;
     }
     if (before.locator !== after.locator) deltas.push({ kind: "resource_rename", subject: id });
-    if (before.type !== after.type) deltas.push({ kind: "resource_type_change", subject: id });
+    if (before.type !== after.type || before.kind !== after.kind) {
+      deltas.push({ kind: "resource_type_change", subject: id });
+    }
     if (before.kind === "external_dependency" && before.exact !== after.exact) {
       deltas.push({ kind: "dependency_update", subject: id });
     } else if (before.content !== after.content) {
@@ -524,8 +526,10 @@ function transitionRuleMatches700(requirement, delta, base, head) {
   if (Array.isArray(rule.deltaKinds) && !rule.deltaKinds.includes(delta.kind)) return false;
   if (Array.isArray(rule.relationKinds) && delta.relation && !rule.relationKinds.includes(delta.relation.kind)) return false;
   if (Array.isArray(rule.resourceKinds)) {
-    const resource = resourceForDelta700(delta, base, head);
-    if (!resource || !rule.resourceKinds.includes(resource.kind)) return false;
+    const baseResource = mapById700(base.resources).get(delta.subject);
+    const headResource = mapById700(head.resources).get(delta.subject);
+    const kinds = [baseResource?.kind, headResource?.kind].filter(Boolean);
+    if (!kinds.some((kind) => rule.resourceKinds.includes(kind))) return false;
   }
   return true;
 }
