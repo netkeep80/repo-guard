@@ -317,10 +317,10 @@ function mapById700(items) {
   return new Map(items.map((item) => [item.id, item]));
 }
 
-function j2Closure700(graph) {
+function j2Closure700(graph, trustedRoots = graph.roots) {
   const requirements = mapById700(graph.requirements);
   const paths = new Map();
-  for (const root of [...graph.roots].sort()) {
+  for (const root of [...trustedRoots].sort()) {
     if (requirements.has(root)) paths.set(root, [root]);
   }
   let changed = true;
@@ -373,8 +373,8 @@ function j1Closure700(graph, j2 = j2Closure700(graph)) {
   };
 }
 
-function validateHead700(graph) {
-  const j2 = j2Closure700(graph);
+function validateHead700(graph, trustedRoots = graph.roots) {
+  const j2 = j2Closure700(graph, trustedRoots);
   const j1 = j1Closure700(graph, j2);
   return {
     ok: j2.ok && j1.ok,
@@ -570,21 +570,19 @@ function relationTrustPermissions700(delta, base, head) {
   return [];
 }
 
-function trustPermissions700(delta, base, head) {
+function trustPermissions700(delta, base, head, context) {
   const permissions = [];
   const baseRequirements = mapById700(base.requirements);
   const headRequirements = mapById700(head.requirements);
-  const baseResources = mapById700(base.resources);
-  const headResources = mapById700(head.resources);
 
   if (delta.kind.startsWith("requirement_")) {
     const requirement = baseRequirements.get(delta.subject) || headRequirements.get(delta.subject);
     if (requirement) permissions.push("requirement:" + delta.subject);
   }
   if (delta.kind.startsWith("relation_")) permissions.push(...relationTrustPermissions700(delta, base, head));
-  if (delta.kind.startsWith("resource_") || delta.kind === "dependency_update") {
-    const resource = baseResources.get(delta.subject) || headResources.get(delta.subject);
-    if (resource?.trustRoot) permissions.push("trust_root:" + delta.subject);
+  if ((delta.kind.startsWith("resource_") || delta.kind === "dependency_update")
+    && context.trustedResourceIds.includes(delta.subject)) {
+    permissions.push("trust_root:" + delta.subject);
   }
   if (delta.kind === "lifecycle" && ["accepted", "current", "published"].includes(delta.field)
     && (delta.before === true || delta.after === true)) {
@@ -662,10 +660,13 @@ function evaluate700({
   externalObservations = [],
   metrics = {},
   legacyGlobalBudget = null,
+  trustedRequirementRoots = null,
+  trustedResourceIds = [],
 }) {
-  const context = { baseSha, headSha, workIntent, trustedReceipts, executions, domainEvidence, externalObservations, metrics, legacyGlobalBudget };
-  const state = validateHead700(head);
-  const baseJ2 = j2Closure700(base);
+  const roots = trustedRequirementRoots || base.roots;
+  const context = { baseSha, headSha, workIntent, trustedReceipts, executions, domainEvidence, externalObservations, metrics, legacyGlobalBudget, trustedResourceIds };
+  const state = validateHead700(head, roots);
+  const baseJ2 = j2Closure700(base, roots);
   const deltas = transitionDeltas700(base, head);
   const j3Violations = [];
   const trustViolations = [];
@@ -691,7 +692,7 @@ function evaluate700({
 
     if (!causes.length) j3Violations.push("J3:no_cause:" + delta.kind + ":" + delta.subject);
 
-    const permissions = trustPermissions700(delta, base, head);
+    const permissions = trustPermissions700(delta, base, head, context);
     for (const permission of permissions) {
       if (!exactPermission700(context, permission)) trustViolations.push("TRUST:missing:" + permission);
     }
@@ -1327,7 +1328,7 @@ test("#700 R24 candidate cannot remove governing Requirement to authorize its ow
   const base = graph700({
     roots: ["ROOT"],
     requirements: [req700("ROOT", { allowDerivedRequirements: true }), req700("R-GOV", { protected: true })],
-    resources: [res700("WORKFLOW", "workflow", { trustRoot: true, content: "safe" })],
+    resources: [res700("WORKFLOW", "workflow", { content: "safe" })],
     relations: [
       rel700("R-GOV", "derives_from", "ROOT"),
       rel700("R-GOV", "requires", "WORKFLOW"),
@@ -1336,13 +1337,15 @@ test("#700 R24 candidate cannot remove governing Requirement to authorize its ow
   const head = graph700({
     roots: ["ROOT"],
     requirements: [req700("ROOT", { allowDerivedRequirements: true }), req700("R-ALLOW")],
-    resources: [res700("WORKFLOW", "workflow", { trustRoot: true, content: "candidate" })],
+    resources: [res700("WORKFLOW", "workflow", { content: "candidate" })],
     relations: [
       rel700("R-ALLOW", "derives_from", "ROOT"),
       rel700("R-ALLOW", "requires", "WORKFLOW"),
     ],
   });
-  assert700("R24", { base, head, workIntent: wi700(["R-ALLOW"]) }, false, ["TRUST:missing:requirement:R-GOV", "TRUST:missing:trust_root:WORKFLOW"]);
+  assert700("R24", {
+    base, head, workIntent: wi700(["R-ALLOW"]), trustedResourceIds: ["WORKFLOW"],
+  }, false, ["TRUST:missing:requirement:R-GOV", "TRUST:missing:trust_root:WORKFLOW"]);
 });
 
 test("#700 R25 candidate cannot self-mark ACCEPTED/CURRENT", () => {
@@ -1355,16 +1358,18 @@ test("#700 R26 candidate cannot change trusted provider/workflow identity throug
   const base = graph700({
     roots: ["R1"],
     requirements: [req700("R1")],
-    resources: [res700("TRUST-WORKFLOW", "workflow", { trustRoot: true, content: "trusted" })],
+    resources: [res700("TRUST-WORKFLOW", "workflow", { content: "trusted" })],
     relations: [rel700("R1", "requires", "TRUST-WORKFLOW")],
   });
   const head = graph700({
     roots: ["R1"],
     requirements: [req700("R1")],
-    resources: [res700("TRUST-WORKFLOW", "workflow", { trustRoot: true, content: "candidate" })],
+    resources: [res700("TRUST-WORKFLOW", "workflow", { content: "candidate" })],
     relations: [rel700("R1", "requires", "TRUST-WORKFLOW"), rel700("R1", "documents", "TRUST-WORKFLOW")],
   });
-  assert700("R26", { base, head, workIntent: wi700(["R1"]) }, false, ["TRUST:missing:trust_root:TRUST-WORKFLOW"]);
+  assert700("R26", {
+    base, head, workIntent: wi700(["R1"]), trustedResourceIds: ["TRUST-WORKFLOW"],
+  }, false, ["TRUST:missing:trust_root:TRUST-WORKFLOW"]);
 });
 
 test("#700 R27 stale exact authorization cannot be replayed after rebase", () => {
