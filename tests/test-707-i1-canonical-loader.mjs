@@ -113,3 +113,8 @@ test("I1 uses I0 shadow on existing normalized facts without altering v3 blockin
   assert.equal(malformed.comparison.candidate.ok, false);
   assert.ok(malformed.comparison.candidate.reasons.includes("duplicate_json_key"));
 });
+
+test("I1 semantic canonicalizer rejects non-finite or host-only values before SHA256", () => {
+  assert.equal(load([item("requirements/R1.json",'{"id":"R1","overflow":1e999}')]).ok, false);
+  assert.equal(load([item("requirements/R1.yaml","id: R1\nvalue: .nan\n")]).ok, false);
+});
