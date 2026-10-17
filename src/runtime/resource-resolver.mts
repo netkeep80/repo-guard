@@ -59,7 +59,7 @@ export function createResourceResolver(context: ResolverContext) {
     resolve(rawRef: unknown, options: { durable?: boolean; expectedRevision?: string } = {}): ResolveResult {
       let ref: ResourceRef;
       try { ref = strictRef(rawRef); }
-      catch (e) { const message = (e as Error).message; return error(/repository path|noncanonical|invalid_repository_path/.test(message) ? "unsafe_path" : /invalid external repository or revision/.test(message) ? "invalid_revision" : "invalid_ref", "", message); }
+      catch (e) { const message = (e as Error).message; return error(/path|noncanonical/i.test(message) ? "unsafe_path" : /invalid external repository or revision/.test(message) ? "invalid_revision" : "invalid_ref", "", message); }
       const subject = JSON.stringify(ref);
       if (ref.kind === "requirement") {
         const found = context.requirements.index[ref.id];
