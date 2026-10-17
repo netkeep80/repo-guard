@@ -1498,3 +1498,35 @@ test("#700 D9 exact one-shot constraint waiver is Transition-bound and does not 
     trustedReceipts: [receipt700("a".repeat(40), "b".repeat(40), ["constraint:R1:lines"])],
   }, false, ["CONSTRAINT:R1:lines"]);
 });
+
+
+test("#700 SAFETY RED: rooted fake Requirement must not self-justify same-HEAD garbage", () => {
+  const base = graph700({
+    roots: ["ROOT"],
+    requirements: [req700("ROOT", { allowDerivedRequirements: true })],
+  });
+  const head = graph700({
+    roots: ["ROOT"],
+    requirements: [
+      req700("ROOT", { allowDerivedRequirements: true }),
+      req700("R-GARBAGE"),
+    ],
+    resources: [res700("GARBAGE", "unknown")],
+    relations: [
+      rel700("R-GARBAGE", "derives_from", "ROOT"),
+      rel700("R-GARBAGE", "requires", "GARBAGE"),
+    ],
+  });
+
+  const result = evaluate700({
+    base,
+    head,
+    workIntent: wi700(["ROOT", "R-GARBAGE"]),
+  });
+
+  assert.equal(
+    result.ok,
+    false,
+    "#700 SAFETY RED: HEAD-created rooted Requirement must not become authority for its own introduction and garbage",
+  );
+});
