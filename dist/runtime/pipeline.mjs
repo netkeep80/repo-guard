@@ -13,6 +13,7 @@ import { buildAnchorDiagnostics } from "../reporting/anchor-diagnostics.mjs";
 import { createAnalysisCollector } from "./analysis-report.mjs";
 import { createAnalysisTextPresenter, renderDiffAnalysis, renderEnforcementMode } from "../reporting/renderers.mjs";
 const selfHostRootSource = "docs/product-requirements.md";
+const selfHostProtectedResources = Object.freeze([selfHostRootSource, ".github/workflows/trusted-enforcement.yml"]);
 const legacyPredicates = Object.freeze({
     requires: "requires", implements: "implemented_by", verifies: "verified_by", documents: "documents",
 });
@@ -212,7 +213,7 @@ export function evaluateRepoGuardSelfHost(input) {
         resourceDeltas: resourceDeltasFromParsedDiff(input.observedDiffFiles),
         workIntent: input.workIntent || null,
         trustedReceipts: input.trustedReceipts || [],
-        protectedResources: input.protectedResources || [],
+        protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
         evidenceFacts: input.evidenceFacts || [],
         observationFacts: input.observationFacts || [],
         trustedEvidenceProviders: input.trustedEvidenceProviders || [],
@@ -244,12 +245,12 @@ export function evaluateRepoGuardSelfHost(input) {
             trustedAuthorityBaseRevision: input.trustedAuthorityBaseRevision,
             rootIdentitySource: "accepted exact product requirements + exact canonical semantic subjects",
             providerAuthentication: "external to pure evaluator",
+            protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
             trustedEvidenceProviders: uniqueSorted(input.trustedEvidenceProviders || []),
         },
         transition,
     };
 }
-
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 export function evaluatePolicyPipeline(input, options, reporter) {
     const quiet = options.quiet || false, origin = options.policyOrigin || "shared", evidence = { policyOrigin: origin, enforcementMode: input.enforcement.mode };

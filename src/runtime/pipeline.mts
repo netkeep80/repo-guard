@@ -39,6 +39,7 @@ export interface RepoGuardSelfHostInput {
 export interface RepoGuardSelfHostConfig extends Omit<RepoGuardSelfHostInput, "observedTrackedPaths" | "observedDiffFiles"> {}
 
 const selfHostRootSource = "docs/product-requirements.md";
+const selfHostProtectedResources = Object.freeze([selfHostRootSource, ".github/workflows/trusted-enforcement.yml"]);
 const legacyPredicates: Readonly<Record<string, string>> = Object.freeze({
   requires: "requires", implements: "implemented_by", verifies: "verified_by", documents: "documents",
 });
@@ -241,7 +242,7 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
     resourceDeltas: resourceDeltasFromParsedDiff(input.observedDiffFiles),
     workIntent: input.workIntent || null,
     trustedReceipts: input.trustedReceipts || [],
-    protectedResources: input.protectedResources || [],
+    protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
     evidenceFacts: input.evidenceFacts || [],
     observationFacts: input.observationFacts || [],
     trustedEvidenceProviders: input.trustedEvidenceProviders || [],
@@ -274,6 +275,7 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
       trustedAuthorityBaseRevision: input.trustedAuthorityBaseRevision,
       rootIdentitySource: "accepted exact product requirements + exact canonical semantic subjects",
       providerAuthentication: "external to pure evaluator",
+      protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
       trustedEvidenceProviders: uniqueSorted(input.trustedEvidenceProviders || []),
     },
     transition,
