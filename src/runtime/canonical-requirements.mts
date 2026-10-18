@@ -281,28 +281,30 @@ function nativeExactFields(value: Record<string, unknown>, allowed: readonly str
 
 function nativeRequirementId(value: unknown, label = "RequirementId"): string {
   if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(value))
-    nativeFailure("malformed_requirement_id", "invalid " + label);
-  return value;
+    return nativeFailure("malformed_requirement_id", "invalid " + label);
+  return value as string;
 }
 
 function nativePath(value: unknown, label: string): string {
-  if (typeof value !== "string") nativeFailure("invalid_resource_ref", label + " path must be a string");
+  if (typeof value !== "string") return nativeFailure("invalid_resource_ref", label + " path must be a string");
+  const path = value as string;
   try {
-    const normalized = normalizeDocumentFact(value, "repository_path");
-    if (normalized !== value) nativeFailure("invalid_resource_ref", label + " path is noncanonical");
-    return normalized;
+    const normalized = normalizeDocumentFact(path, "repository_path");
+    if (normalized !== path) return nativeFailure("invalid_resource_ref", label + " path is noncanonical");
+    return normalized as string;
   } catch (error) {
     if (error instanceof NativeContractFailure) throw error;
-    nativeFailure("invalid_resource_ref", label + " path is invalid: " + (error as Error).message);
+    return nativeFailure("invalid_resource_ref", label + " path is invalid: " + (error as Error).message);
   }
 }
 
 function nativePointer(value: unknown, label: string): string {
   if (value === undefined) return "";
   if (typeof value !== "string" || (value !== "" && (!value.startsWith("/") || /~(?:[^01]|$)/.test(value))))
-    nativeFailure("invalid_resource_ref", label + " pointer is malformed");
-  if (!durablePointer(value)) nativeFailure("invalid_resource_ref", label + " pointer is positional and not durable");
-  return value;
+    return nativeFailure("invalid_resource_ref", label + " pointer is malformed");
+  const pointer = value as string;
+  if (!durablePointer(pointer)) return nativeFailure("invalid_resource_ref", label + " pointer is positional and not durable");
+  return pointer;
 }
 
 function nativeResourceRef(value: unknown, label: string): NativeResourceRef {
@@ -323,18 +325,20 @@ function nativeResourceRef(value: unknown, label: string): NativeResourceRef {
   if (kind === "external_document") {
     nativeExactFields(input, ["kind", "repository", "revision", "path", "pointer"], label);
     if (typeof input.repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
-      nativeFailure("invalid_resource_ref", label + " repository is invalid");
+      return nativeFailure("invalid_resource_ref", label + " repository is invalid");
     if (typeof input.revision !== "string" || !/^[0-9a-f]{40}$/.test(input.revision))
-      nativeFailure("floating_external_revision", label + " revision must be an exact immutable SHA");
+      return nativeFailure("floating_external_revision", label + " revision must be an exact immutable SHA");
+    const repository = input.repository as string;
+    const revision = input.revision as string;
     return {
       kind,
-      repository: input.repository,
-      revision: input.revision,
+      repository,
+      revision,
       path: nativePath(input.path, label),
       pointer: nativePointer(input.pointer, label),
     };
   }
-  nativeFailure("invalid_resource_ref", label + " has unknown ResourceRef kind");
+  return nativeFailure("invalid_resource_ref", label + " has unknown ResourceRef kind");
 }
 
 function nativeRefKey(value: NativeResourceRef): string {
@@ -360,17 +364,19 @@ function nativeRelationDomain(source: NativeResourceRef, predicate: NativeRelati
 
 function nativeRelations(value: unknown, requirementId: string): NativeRelationFact[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value)) nativeFailure("invalid_relation", "relations must be an array");
+  if (!Array.isArray(value)) return nativeFailure("invalid_relation", "relations must be an array");
+  const declarations = value as unknown[];
   const facts: NativeRelationFact[] = [];
   const seen = new Set<string>();
-  for (let index = 0; index < value.length; index += 1) {
-    const declaration = nativeObject(value[index], "relations[" + index + "]");
+  for (let index = 0; index < declarations.length; index += 1) {
+    const declaration = nativeObject(declarations[index], "relations[" + index + "]");
     nativeExactFields(declaration, ["source", "predicates", "target"], "relations[" + index + "]");
     if (!Array.isArray(declaration.predicates) || declaration.predicates.length === 0)
-      nativeFailure("invalid_relation", "relations[" + index + "].predicates must be a non-empty array");
+      return nativeFailure("invalid_relation", "relations[" + index + "].predicates must be a non-empty array");
+    const predicateValues = declaration.predicates as unknown[];
     const predicates: NativeRelationPredicate[] = [];
     const local = new Set<string>();
-    for (const raw of declaration.predicates) {
+    for (const raw of predicateValues) {
       if (typeof raw !== "string" || !nativePredicates.has(raw as NativeRelationPredicate))
         nativeFailure("unknown_predicate", "unknown native relation predicate " + String(raw));
       if (local.has(raw)) nativeFailure("duplicate_relation", "duplicate predicate " + raw + " in one relation declaration");
@@ -417,10 +423,11 @@ function nativeConstraintScope(value: unknown, label: string): NativeConstraintS
   const input = nativeObject(value, label);
   nativeExactFields(input, ["relations", "include_generated"], label);
   if (!Array.isArray(input.relations) || input.relations.length === 0)
-    nativeFailure("invalid_constraint", label + ".relations must be a non-empty array");
+    return nativeFailure("invalid_constraint", label + ".relations must be a non-empty array");
+  const relationValues = input.relations as unknown[];
   const relations: NativeRelationPredicate[] = [];
   const seen = new Set<string>();
-  for (const raw of input.relations) {
+  for (const raw of relationValues) {
     if (typeof raw !== "string" || !nativePredicates.has(raw as NativeRelationPredicate))
       nativeFailure("unknown_predicate", "unknown Constraint scope predicate " + String(raw));
     if (!nativeScopePredicates.has(raw as NativeRelationPredicate))
@@ -441,7 +448,7 @@ function nativeConstraintMetric(value: unknown, label: string): NativeConstraint
     nativeFailure("invalid_constraint", label + ".key must be a non-empty string");
   if (typeof input.max !== "number" || !Number.isFinite(input.max) || input.max < 0)
     nativeFailure("invalid_constraint", label + ".max must be a finite non-negative number");
-  return { key: input.key, max: input.max };
+  return { key: input.key as string, max: input.max as number };
 }
 
 function nativeConstraintEvidence(value: unknown, label: string): NativeConstraintEvidence {
@@ -452,35 +459,40 @@ function nativeConstraintEvidence(value: unknown, label: string): NativeConstrai
   if (typeof input.key !== "string" || input.key.length === 0)
     nativeFailure("invalid_constraint", label + ".key must be a non-empty string");
   const verifier = input.verifier === undefined ? undefined : nativeResourceRef(input.verifier, label + ".verifier");
-  if (input.class === "execution" && (!verifier || verifier.kind !== "artifact"))
-    nativeFailure("invalid_constraint", label + " execution evidence requires an ArtifactRef verifier");
+  const evidenceClass = input.class as "execution" | "domain";
+  const key = input.key as string;
+  if (evidenceClass === "execution" && (!verifier || verifier.kind !== "artifact"))
+    return nativeFailure("invalid_constraint", label + " execution evidence requires an ArtifactRef verifier");
   if (verifier && verifier.kind !== "artifact")
-    nativeFailure("invalid_constraint", label + " verifier must be an ArtifactRef in native v1");
-  return { class: input.class, key: input.key, ...(verifier ? { verifier } : {}) };
+    return nativeFailure("invalid_constraint", label + " verifier must be an ArtifactRef in native v1");
+  return { class: evidenceClass, key, ...(verifier ? { verifier } : {}) };
 }
 
 function nativeConstraints(value: unknown): NativeConstraint[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value)) nativeFailure("invalid_constraint", "constraints must be an array");
+  if (!Array.isArray(value)) return nativeFailure("invalid_constraint", "constraints must be an array");
+  const values = value as unknown[];
   const constraints: NativeConstraint[] = [];
   const ids = new Set<string>();
-  for (let index = 0; index < value.length; index += 1) {
+  for (let index = 0; index < values.length; index += 1) {
     const label = "constraints[" + index + "]";
-    const input = nativeObject(value[index], label);
+    const input = nativeObject(values[index], label);
     nativeExactFields(input, ["id", "activation", "scope", "metric", "evidence"], label);
     if (typeof input.id !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(input.id))
       nativeFailure("invalid_constraint", label + ".id is invalid");
-    if (ids.has(input.id)) nativeFailure("duplicate_constraint_id", "duplicate Constraint id " + input.id);
-    ids.add(input.id);
-    const activation = input.activation === undefined ? "scoped_change" : input.activation;
-    if (activation !== "scoped_change" && activation !== "requirement_cause")
-      nativeFailure("invalid_constraint", label + ".activation is invalid");
+    const id = input.id as string;
+    if (ids.has(id)) return nativeFailure("duplicate_constraint_id", "duplicate Constraint id " + id);
+    ids.add(id);
+    const rawActivation = input.activation === undefined ? "scoped_change" : input.activation;
+    if (rawActivation !== "scoped_change" && rawActivation !== "requirement_cause")
+      return nativeFailure("invalid_constraint", label + ".activation is invalid");
+    const activation = rawActivation as "scoped_change" | "requirement_cause";
     const scope = nativeConstraintScope(input.scope, label + ".scope");
     const metric = input.metric === undefined ? undefined : nativeConstraintMetric(input.metric, label + ".metric");
     const evidence = input.evidence === undefined ? undefined : nativeConstraintEvidence(input.evidence, label + ".evidence");
     if (!metric && !evidence) nativeFailure("invalid_constraint", label + " requires metric or evidence");
     constraints.push({
-      id: input.id,
+      id,
       activation,
       scope,
       ...(metric ? { metric } : {}),
@@ -523,7 +535,8 @@ export function loadNativeRequirements(input: CanonicalSnapshotInput): NativeReq
       if (!identityValid) continue;
       const content = input.readFile(input.revision, path);
       if (content === null || content === undefined) nativeFailure("invalid_native_document", "native source missing at exact snapshot");
-      const raw = Buffer.isBuffer(content) ? content.toString("utf8") : content;
+      const exactContent = content as string | Buffer;
+      const raw = Buffer.isBuffer(exactContent) ? exactContent.toString("utf8") : exactContent;
       const value = parseNativeRequirement(raw, path);
       nativeExactFields(value, ["format", "id", "normative", "lifecycle", "relations", "constraints"], "native Requirement");
       if (value.format !== "repo-guard/requirement-v1")
