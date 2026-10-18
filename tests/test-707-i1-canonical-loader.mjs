@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { strictCanonicalJson, loadCanonicalRequirements, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
+import { strictCanonicalJson, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
 import { runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
 import { parseJson } from "../dist/document-facts.mjs";
 import { test } from "node:test";
@@ -117,4 +117,206 @@ test("I1 uses I0 shadow on existing normalized facts without altering v3 blockin
 test("I1 semantic canonicalizer rejects non-finite or host-only values before SHA256", () => {
   assert.equal(load([item("requirements/R1.json",'{"id":"R1","overflow":1e999}')]).ok, false);
   assert.equal(load([item("requirements/R1.yaml","id: R1\nvalue: .nan\n")]).ok, false);
+});
+
+
+const nativeLoad = (files, extra = {}) => loadNativeRequirements({
+  repository: repo, revision: sha, paths: files.map(x => x[0]),
+  readFile: (revision, path) => { assert.equal(revision, sha); return files.find(x => x[0] === path)?.[1] ?? null; },
+  ...extra,
+});
+
+const nativeYaml = ({
+  id = "R1",
+  normative = "Keep behavior stable.",
+  lifecycle = "",
+  relations = "",
+  constraints = "",
+} = {}) => [
+  "format: repo-guard/requirement-v1",
+  "id: " + id,
+  "normative: " + JSON.stringify(normative),
+  lifecycle,
+  relations,
+  constraints,
+  "",
+].filter(Boolean).join("\n");
+
+test("C2.1 N01-N04 discovers only .rg.yaml/.rg.json and keeps semantic identity independent of source/codec", () => {
+  const yaml = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml())]);
+  const json = nativeLoad([item("requirements/moved/R1.rg.json", JSON.stringify({
+    constraints: [],
+    relations: [],
+    lifecycle: { published: false, current: false, accepted: false },
+    normative: "Keep behavior stable.",
+    id: "R1",
+    format: "repo-guard/requirement-v1",
+  }))]);
+  assert.equal(yaml.ok, true);
+  assert.equal(json.ok, true);
+  assert.deepEqual(yaml.index.R1.semantic, json.index.R1.semantic);
+  assert.notDeepEqual(yaml.index.R1.representation, json.index.R1.representation);
+
+  const ignored = nativeLoad([
+    item("requirements/legacy.yaml", "id: LEGACY\n"),
+    item("requirements/R1.rg.yaml", nativeYaml()),
+  ]);
+  assert.deepEqual(ignored.requirements.map(x => x.id), ["R1"]);
+});
+
+test("C2.1 N05 normative-only digest ignores relation/constraint/lifecycle edits but changes on normative mutation", () => {
+  const base = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml())]);
+  const metadata = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    lifecycle: "lifecycle:\n  accepted: true\n  current: false\n  published: false",
+    relations: "relations:\n  - predicates: [implemented_by]\n    target: { kind: artifact, path: src/a.mts }",
+    constraints: "constraints:\n  - id: lines\n    scope: { relations: [implemented_by], include_generated: false }\n    metric: { key: git.changed_lines, max: 10 }",
+  }))]);
+  const changed = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({ normative: "Different normative meaning." }))]);
+  assert.equal(base.ok, true);
+  assert.equal(metadata.ok, true);
+  assert.equal(changed.ok, true);
+  assert.equal(base.index.R1.semantic.digest, metadata.index.R1.semantic.digest);
+  assert.notEqual(base.index.R1.semantic.digest, changed.index.R1.semantic.digest);
+});
+
+test("C2.1 N06-N10 strict native source fails closed on duplicate keys/IDs, unknown fields and unknown predicates", () => {
+  assert.equal(nativeLoad([item("requirements/R1.rg.json",
+    '{"format":"repo-guard/requirement-v1","id":"R1","normative":"a","normative":"b"}')]).ok, false);
+  assert.equal(nativeLoad([
+    item("requirements/a.rg.yaml", nativeYaml({ id: "R1" })),
+    item("requirements/b.rg.yaml", nativeYaml({ id: "R1" })),
+  ]).ok, false);
+  assert.equal(nativeLoad([item("requirements/R1.rg.yaml",
+    nativeYaml() + "trusted: true\n")]).ok, false);
+  const unknown = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: "relations:\n  - predicates: [protects]\n    target: { kind: artifact, path: src/a.mts }",
+  }))]);
+  assert.equal(unknown.ok, false);
+  assert.ok(unknown.errors.some(e => e.code === "unknown_predicate"));
+});
+
+test("C2.1 N11 grouped relations normalize to sorted primitive facts and duplicate primitive facts are RED", () => {
+  const good = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: [
+      "relations:",
+      "  - predicates: [verified_by, implemented_by]",
+      "    target: { kind: artifact, path: src/a.mts }",
+      "  - source: { kind: artifact, path: src/a.mts }",
+      "    predicates: [generates]",
+      "    target: { kind: artifact, path: dist/a.mjs }",
+    ].join("\n"),
+  }))]);
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.index.R1.relations.map(r => r.predicate), ["generates", "implemented_by", "verified_by"]);
+
+  const duplicate = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: [
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target: { kind: artifact, path: src/a.mts }",
+      "  - predicates: [implemented_by]",
+      "    target: { kind: artifact, path: src/a.mts }",
+    ].join("\n"),
+  }))]);
+  assert.equal(duplicate.ok, false);
+  assert.ok(duplicate.errors.some(e => e.code === "duplicate_relation"));
+});
+
+test("C2.1 N12-N15 ResourceRef and relation domains are exact and authority-neutral", () => {
+  const floating = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: [
+      "relations:",
+      "  - predicates: [documents]",
+      "    target:",
+      "      kind: external_document",
+      "      repository: netkeep80/anum_docs",
+      "      revision: main",
+      "      path: requirements/mts-v0.15.json",
+    ].join("\n"),
+  }))]);
+  assert.equal(floating.ok, false);
+
+  const positional = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: [
+      "relations:",
+      "  - predicates: [documents]",
+      "    target: { kind: document, path: docs/a.json, pointer: /items/0 }",
+    ].join("\n"),
+  }))]);
+  assert.equal(positional.ok, false);
+
+  const badGenerate = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: [
+      "relations:",
+      "  - predicates: [generates]",
+      "    target: { kind: artifact, path: dist/a.mjs }",
+    ].join("\n"),
+  }))]);
+  assert.equal(badGenerate.ok, false);
+
+  const trust = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    relations: [
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target: { kind: artifact, path: src/a.mts, trusted: true }",
+    ].join("\n"),
+  }))]);
+  assert.equal(trust.ok, false);
+});
+
+test("C2.1 N16-N20 constraints normalize exact lifecycle/scope/activation/evidence without provider trust", () => {
+  const good = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    lifecycle: "lifecycle:\n  accepted: true\n  current: false\n  published: false",
+    relations: [
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target: { kind: artifact, path: src/a.mts }",
+      "  - predicates: [constrains]",
+      "    target: { kind: artifact, path: src/ui.mts }",
+    ].join("\n"),
+    constraints: [
+      "constraints:",
+      "  - id: changed-lines",
+      "    activation: scoped_change",
+      "    scope: { relations: [implemented_by], include_generated: true }",
+      "    metric: { key: git.changed_lines, max: 800 }",
+      "  - id: no-ui",
+      "    activation: requirement_cause",
+      "    scope: { relations: [constrains], include_generated: false }",
+      "    metric: { key: git.changed_resources, max: 0 }",
+      "  - id: verified",
+      "    scope: { relations: [implemented_by], include_generated: false }",
+      "    evidence:",
+      "      class: execution",
+      "      key: tests:implementation",
+      "      verifier: { kind: artifact, path: tests/a.test.mjs }",
+    ].join("\n"),
+  }))]);
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.index.R1.lifecycle, { accepted: true, current: false, published: false });
+  assert.deepEqual(good.index.R1.constraints.map(x => x.id), ["changed-lines", "no-ui", "verified"]);
+  assert.equal(JSON.stringify(good.index.R1.constraints).includes("providerId"), false);
+
+  const duplicateConstraint = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    constraints: [
+      "constraints:",
+      "  - id: x",
+      "    scope: { relations: [implemented_by] }",
+      "    metric: { key: git.changed_lines, max: 1 }",
+      "  - id: x",
+      "    scope: { relations: [implemented_by] }",
+      "    metric: { key: git.changed_lines, max: 2 }",
+    ].join("\n"),
+  }))]);
+  assert.equal(duplicateConstraint.ok, false);
+
+  const providerInProject = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml({
+    constraints: [
+      "constraints:",
+      "  - id: verify",
+      "    scope: { relations: [implemented_by] }",
+      "    evidence: { class: domain, key: domain:x, providerId: trusted-ci }",
+    ].join("\n"),
+  }))]);
+  assert.equal(providerInProject.ok, false);
 });
