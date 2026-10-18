@@ -8,7 +8,7 @@ import { createImmutableSnapshotDocumentCache } from "./immutable-snapshot-cache
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
-import { evaluatePolicyPipeline } from "./runtime/pipeline.mjs";
+import { evaluatePolicyPipeline, evaluateRepoGuardTrustedRootMigrationSnapshot } from "./runtime/pipeline.mjs";
 import { createAnalysisCollector } from "./runtime/analysis-report.mjs";
 import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/renderers.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
@@ -90,6 +90,11 @@ function policyAt(reader: SnapshotReader, ref: string) {
 function requirementTransitionGrant(value: unknown): unknown {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as { requirement_transition?: unknown }).requirement_transition ?? null
+    : null;
+}
+function trustedRootTransitionGrant(value: unknown): unknown {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as { trusted_root_transition?: unknown }).trusted_root_transition ?? null
     : null;
 }
 const REQUIREMENT_OVERLAP_SHADOW_ID = "requirement-verification-overlap-shadow";
@@ -199,6 +204,67 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
   if (governanceGrant !== null && basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
 
+  let nativeRootTransitionAuthorized = false;
+  let nativeRootTransitionResult: ReturnType<typeof evaluateRepoGuardTrustedRootMigrationSnapshot> | null = null;
+  const nativeRootGrant = trustedRootTransitionGrant(governanceGrant);
+  if (nativeRootGrant !== null) {
+    const grant = nativeRootGrant as {
+      repository?: unknown;
+      authority_base_sha?: unknown;
+      base_sha?: unknown;
+      head_sha?: unknown;
+      permissions?: unknown;
+    };
+    const trustedSource = trustedAuthorizer?.trusted === true && trustedAuthorizer?.source === "repository_permission";
+    const receipt = trustedSource ? {
+      repository: String(grant.repository ?? ""),
+      authorityBaseRevision: String(grant.authority_base_sha ?? ""),
+      baseRevision: String(grant.base_sha ?? ""),
+      headRevision: String(grant.head_sha ?? ""),
+      permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
+    } : null;
+    try {
+      nativeRootTransitionResult = evaluateRepoGuardTrustedRootMigrationSnapshot({
+        repository: observation.repository,
+        repositoryRoot: roots.repoRoot,
+        trustedAuthorityBaseRevision: base,
+        baseRevision: base,
+        headRevision: exactHead,
+        trustedRootReceipt: receipt,
+      });
+      nativeRootTransitionAuthorized = trustedSource && nativeRootTransitionResult.ok;
+      const details = [
+        ...(!trustedSource ? ["C2.5:trust_authorizer_untrusted"] : []),
+        ...nativeRootTransitionResult.reasons,
+      ];
+      initialChecks.push({
+        name: "trusted-root-transition",
+        check: {
+          ok: nativeRootTransitionAuthorized,
+          message: nativeRootTransitionAuthorized
+            ? "native TrustedRoot transition is exactly authorized by independent trusted issue authority"
+            : "native TrustedRoot transition is not exactly authorized",
+          details,
+          data: {
+            candidate_ready: nativeRootTransitionResult.candidateReady,
+            authorized: nativeRootTransitionResult.trust.authorized,
+            required_permissions: nativeRootTransitionResult.requiredPermissions,
+            migration: nativeRootTransitionResult.migration,
+            equivalence: nativeRootTransitionResult.equivalence,
+          },
+        },
+      });
+    } catch (error: unknown) {
+      initialChecks.push({
+        name: "trusted-root-transition",
+        check: {
+          ok: false,
+          message: `native TrustedRoot transition evaluation failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      });
+    }
+  }
+
   let requirementTransitionAuthorized = false;
   let routineRequirementPaths: string[] = [];
   if (basePolicy) {
@@ -226,7 +292,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
           grant: requirementTransitionGrant(governanceGrant),
           trustedAuthorizer,
         });
-        requirementTransitionAuthorized = transition.authorized;
+        requirementTransitionAuthorized = nativeRootTransitionAuthorized || transition.authorized;
         const routine = governanceGrant === null && !transition.ok
           ? checkRoutineRequirementTransition({
             base: baseGraph, head: headGraph, changedFiles: diff.files, headTrackedFiles: trackedFiles,
@@ -237,16 +303,21 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
           })
           : null;
         if (routine?.ok && (changeIntent as { change_type?: string } | null)?.change_type !== "governance") routineRequirementPaths = routine.requirement_paths;
-        const accepted = transition.ok || routineRequirementPaths.length > 0;
+        const accepted = nativeRootTransitionAuthorized || transition.ok || routineRequirementPaths.length > 0;
         initialChecks.push({
           name: "requirement-transition",
           check: {
             ok: accepted,
-            message: accepted ? "requirement authority transition is exact (trusted grant or proven routine trace addition)" : "requirement authority transition is not exactly authorized",
+            message: accepted
+              ? nativeRootTransitionAuthorized
+                ? "requirement authority transition is exact (native TrustedRoot migration grant)"
+                : "requirement authority transition is exact (trusted grant or proven routine trace addition)"
+              : "requirement authority transition is not exactly authorized",
             details: accepted ? [] : [...transition.reasons, ...(routine?.reasons || [])],
             data: {
               required: transition.required,
               authorized: transition.authorized,
+              native_root_transition_authorized: nativeRootTransitionAuthorized,
               automatic_routine: routineRequirementPaths.length > 0,
               authority_scope_changed: transition.authority_scope_changed,
               base_authority_sha256: transition.base_authority_sha256,
