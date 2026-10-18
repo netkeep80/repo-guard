@@ -145,8 +145,6 @@ export function loadCanonicalRequirements(input) {
         }
     };
 }
-
-
 const nativePredicates = new Set([
     "derives_from", "requires", "implemented_by", "verified_by", "documents",
     "generates", "depends_on", "constrains", "supersedes",
