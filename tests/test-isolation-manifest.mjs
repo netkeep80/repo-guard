@@ -123,7 +123,6 @@ const externalIntegrationParallel = [
 
 const externalIntegrationSerial = [
   "test-699-five-consumer-differential.mjs",
-  "test-731-c2-5-gate-bridge.mjs",
   "test-644-b-requirement-transition-runtime.mjs",
   "test-atomic-governance-cutover.mjs",
   "test-c3-10a-external-base-cutover.mjs",
