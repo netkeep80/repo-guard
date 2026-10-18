@@ -83,6 +83,19 @@ test("#707 I0 no public policy field, schema or CLI toggle is required", () => {
 test("C2.4 native RepoGuard self-host shadow is exact, closed, non-authoritative and legacy-free", () => {
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
+  const representationPaths = execFileSync("git", ["ls-tree", "-r", "--name-only", revision, "--", "requirements/repo-guard"], {
+    cwd: projectRoot, encoding: "utf8",
+  }).split("\n").filter(Boolean);
+  const legacyCount = representationPaths.filter((path) => /^requirements\/repo-guard\/RG-\d\d\.yaml$/.test(path)).length;
+  const nativeCount = representationPaths.filter((path) => /^requirements\/repo-guard\/RG-\d\d\.rg\.yaml$/.test(path)).length;
+  assert.ok(
+    (legacyCount === 8 && nativeCount === 0) || (legacyCount === 0 && nativeCount === 8),
+    `C2.4/C2.5 self-host representation must be exact 8/0 or 0/8; got legacy=${legacyCount}, native=${nativeCount}`,
+  );
+  if (nativeCount === 8) {
+    console.log("C2.4 shadow is historical after exact native root representation becomes active; native semantic inventory is enforced by test-645.");
+    return;
+  }
   const shadow = evaluateRepoGuardNativeSelfHostShadowSnapshot({
     repository: "netkeep80/repo-guard",
     revision,
@@ -223,6 +236,27 @@ function c25WriteNativeMigration(root) {
   }
 }
 
+function c25RepresentationCounts(cwd, revision) {
+  const paths = c25Git(cwd, ["ls-tree", "-r", "--name-only", revision, "--", "requirements/repo-guard"])
+    .split("\n").filter(Boolean);
+  return {
+    legacy: paths.filter((path) => /^requirements\/repo-guard\/RG-\d\d\.yaml$/.test(path)).length,
+    native: paths.filter((path) => /^requirements\/repo-guard\/RG-\d\d\.rg\.yaml$/.test(path)).length,
+  };
+}
+
+function c25LatestLegacyBase(projectRoot) {
+  const head = c25Git(projectRoot, ["rev-parse", "HEAD"]);
+  for (const revision of c25Git(projectRoot, ["rev-list", "--first-parent", head]).split("\n").filter(Boolean)) {
+    const counts = c25RepresentationCounts(projectRoot, revision);
+    if (counts.legacy === 8 && counts.native === 0) return revision;
+    if (!((counts.legacy === 0 && counts.native === 8) || (counts.legacy === 8 && counts.native === 0))) {
+      throw new Error(`C2.5 invalid historical representation at ${revision}: legacy=${counts.legacy}, native=${counts.native}`);
+    }
+  }
+  throw new Error("C2.5 legacy migration base not found in first-parent history");
+}
+
 function c25Fixture(body) {
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const clone = mkdtempSync(join(tmpdir(), "repo-guard-c25-gate-"));
@@ -230,7 +264,7 @@ function c25Fixture(body) {
     execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", projectRoot, clone], { encoding: "utf8" });
     c25Git(clone, ["config", "user.email", "c2.5-gate@example.invalid"]);
     c25Git(clone, ["config", "user.name", "C2.5 Gate Bridge"]);
-    const base = c25Git(projectRoot, ["rev-parse", "HEAD"]);
+    const base = c25LatestLegacyBase(projectRoot);
     c25Git(clone, ["checkout", "-q", base]);
     c25WriteNativeMigration(clone);
     c25Git(clone, ["add", "-A"]);
