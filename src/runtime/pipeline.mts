@@ -2,7 +2,7 @@ import type { RepositoryFactsInput } from "../facts/input.mjs";
 import type { ParsedDiffFile } from "../diff/parser.mjs";
 import { normalizeDocumentFact, resolveJsonPointer } from "../document-facts.mjs";
 import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef } from "../git.mjs";
-import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, semanticRequirementSubject, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type NativeRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
+import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type NativeRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";
@@ -247,11 +247,14 @@ function acceptedRootAuthority(repository: string, revision: string, repositoryR
   const ids = [...sections.keys()].sort((a, b) => a.localeCompare(b, "en"));
   if (!ids.length) throw new Error("I8 accepted root source has no RG headings");
   const subjects: Record<string, SemanticRequirementSubject> = Object.create(null);
+  const texts: Record<string, string> = Object.create(null);
   for (const id of ids) {
-    const value = { id, source: selfHostRootSource, text: sections.get(id)!.join("\n") } as CanonicalRequirement["value"];
+    const text = sections.get(id)!.join("\n");
+    texts[id] = text;
+    const value = { id, source: selfHostRootSource, text } as CanonicalRequirement["value"];
     subjects[id] = semanticRequirementSubject(repository, id, canonicalSemanticDigest(value));
   }
-  return { ids, subjects };
+  return { ids, subjects, texts };
 }
 
 function loadRepoGuardProjection(
@@ -270,7 +273,7 @@ function loadRepoGuardProjection(
   });
   const rootAuthority = acceptedRootAuthority(repository, revision, repositoryRoot);
   const projection = projectRepoGuardLegacyRequirements(raw, implicitSourcePaths, rootAuthority.subjects);
-  return { entries, raw, rootIds: rootAuthority.ids, rootSubjects: rootAuthority.subjects, ...projection };
+  return { entries, raw, rootIds: rootAuthority.ids, rootSubjects: rootAuthority.subjects, rootTexts: rootAuthority.texts, ...projection };
 }
 
 function closeRepoGuardProjection(
@@ -295,6 +298,230 @@ function closeRepoGuardProjection(
     });
   }
   return { revision, requirements: loaded.requirements, j2, j1, entries: loaded.entries, projectionFacts: loaded.facts };
+}
+
+
+export interface RepoGuardNativeSelfHostShadowSnapshotInput {
+  repository: string;
+  revision: string;
+  repositoryRoot: string;
+}
+
+const nativeShadowPredicates: Readonly<Record<string, "implemented_by" | "verified_by" | "documents">> = Object.freeze({
+  implements: "implemented_by",
+  verifies: "verified_by",
+  documents: "documents",
+});
+
+function nativeShadowSourcePath(id: string): string {
+  return "requirements/repo-guard/" + id + ".rg.yaml";
+}
+
+function buildRepoGuardNativeShadowSources(
+  loaded: ReturnType<typeof loadRepoGuardProjection>,
+): {
+  sources: Map<string, string>;
+  from: string[];
+  to: string[];
+  errors: string[];
+} {
+  const sources = new Map<string, string>();
+  const from: string[] = [];
+  const to: string[] = [];
+  const errors: string[] = [];
+  const ids = loaded.rootIds;
+
+  for (const id of ids) {
+    const item = loaded.raw.index[id];
+    const text = loaded.rootTexts[id];
+    if (!item || typeof text !== "string") {
+      errors.push("C2.4:missing_native_shadow_input:" + id);
+      continue;
+    }
+    const root = object(item.value);
+    const artifacts = root.artifacts;
+    if (!Array.isArray(artifacts)) {
+      errors.push("C2.4:invalid_legacy_artifacts:" + id);
+      continue;
+    }
+    const grouped = new Map<string, Set<string>>();
+    for (let index = 0; index < artifacts.length; index++) {
+      const artifact = object(artifacts[index]);
+      if (!artifact || typeof artifact.path !== "string" || !Array.isArray(artifact.relations)) {
+        errors.push("C2.4:invalid_legacy_artifact:" + id + ":" + index);
+        continue;
+      }
+      let path: string;
+      try { path = exactResourcePath(artifact.path); }
+      catch {
+        errors.push("C2.4:unsafe_legacy_artifact:" + id + ":" + index);
+        continue;
+      }
+      const predicates = new Set<string>();
+      let requires = false;
+      for (const rawPredicate of artifact.relations) {
+        if (rawPredicate === "requires") {
+          requires = true;
+          continue;
+        }
+        if (typeof rawPredicate !== "string" || !Object.hasOwn(nativeShadowPredicates, rawPredicate)) {
+          errors.push("C2.4:unsupported_legacy_predicate:" + id + ":" + String(rawPredicate));
+          continue;
+        }
+        predicates.add(nativeShadowPredicates[rawPredicate]!);
+      }
+      if (!predicates.size) {
+        if (!(requires && path === item.source.path))
+          errors.push("C2.4:unmapped_requires_only:" + id + ":" + path);
+        continue;
+      }
+      const target = grouped.get(path) || new Set<string>();
+      for (const predicate of predicates) target.add(predicate);
+      grouped.set(path, target);
+    }
+
+    const nativePath = nativeShadowSourcePath(id);
+    const lines = [
+      "format: repo-guard/requirement-v1",
+      "id: " + id,
+      "normative: " + JSON.stringify(text),
+    ];
+    if (grouped.size) lines.push("relations:");
+    for (const path of [...grouped.keys()].sort((a, b) => a.localeCompare(b, "en"))) {
+      const predicates = [...grouped.get(path)!].sort((a, b) => a.localeCompare(b, "en"));
+      lines.push(
+        "  - predicates: [" + predicates.join(", ") + "]",
+        "    target:",
+        "      kind: artifact",
+        "      path: " + JSON.stringify(path),
+      );
+    }
+    lines.push("");
+    sources.set(nativePath, lines.join("\n"));
+    from.push(item.source.path);
+    to.push(nativePath);
+  }
+  return { sources, from: from.sort(), to: to.sort(), errors: uniqueSorted(errors) };
+}
+
+export function evaluateRepoGuardNativeSelfHostShadowSnapshot(input: RepoGuardNativeSelfHostShadowSnapshotInput) {
+  const reasons: string[] = [];
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+    reasons.push("C2.4:invalid_repository");
+  if (!exactSha.test(input.revision))
+    reasons.push("C2.4:invalid_revision");
+
+  const loaded = loadRepoGuardProjection(input.repository, input.revision, input.repositoryRoot);
+  const legacyRoots = loaded.rootIds.flatMap((id) => loaded.rootSubjects[id] ? [loaded.rootSubjects[id]!] : []);
+  const legacy = closeRepoGuardProjection(input.repository, input.revision, input.repositoryRoot, loaded, legacyRoots);
+  if (loaded.errors.length) reasons.push("C2.4:legacy_projection_invalid");
+  if (!legacy.j2.ok) reasons.push("C2.4:legacy_j2_not_rooted");
+  if (!legacy.j1.ok) reasons.push("C2.4:legacy_j1_not_closed");
+
+  const generated = buildRepoGuardNativeShadowSources(loaded);
+  reasons.push(...generated.errors);
+  const native = loadNativeRequirements({
+    repository: input.repository,
+    revision: input.revision,
+    paths: generated.to,
+    readFile: (revision, path) =>
+      revision === input.revision && generated.sources.has(path) ? generated.sources.get(path)! : null,
+  });
+  if (!native.ok) reasons.push(...native.errors.map((error) => "C2.4:native:" + error.code + ":" + error.path));
+  const lowered = lowerNativeRequirements(native);
+  const candidateRoots = native.requirements.map((item) => item.semantic);
+  const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: candidateRoots });
+
+  const legacySources = new Set(generated.from);
+  const virtualTracked = uniqueSorted([
+    ...loaded.entries.map((entry) => entry.path).filter((path) => !legacySources.has(path)),
+    ...generated.to,
+  ]);
+  const virtualSourceSet = new Set(generated.to);
+  const resolver = createResourceResolver({
+    repository: input.repository,
+    revision: input.revision,
+    requirements: lowered.requirements,
+    readers: {
+      [input.repository]: (revision, path) => {
+        if (revision !== input.revision) return null;
+        if (virtualSourceSet.has(path)) return generated.sources.get(path) || null;
+        return readFileAtRef(revision, path, input.repositoryRoot);
+      },
+    },
+  });
+  const j1 = evaluateTrackedResourceClosure({
+    repository: input.repository,
+    revision: input.revision,
+    requirements: lowered.requirements,
+    j2,
+    trackedPaths: virtualTracked,
+    resourceRelations: lowered.resourceRelations,
+    resolver,
+  });
+  if (!j2.ok) reasons.push("C2.4:native_j2_not_rooted");
+  if (!j1.ok) reasons.push("C2.4:native_j1_not_closed");
+
+  const normativeExact = loaded.rootIds.every((id) =>
+    native.index[id] !== undefined &&
+    typeof loaded.rootTexts[id] === "string" &&
+    native.index[id]!.normative === loaded.rootTexts[id]);
+  if (!normativeExact) reasons.push("C2.4:normative_not_exact");
+
+  const retained = loaded.entries.map((entry) => entry.path).filter((path) => !legacySources.has(path)).sort();
+  const ownerEquivalentOnRetainedResources = retained.every((path) =>
+    sameStrings([...(legacy.j1.owners[path] || [])].sort(), [...(j1.owners[path] || [])].sort()));
+  if (!ownerEquivalentOnRetainedResources) reasons.push("C2.4:owner_mismatch");
+
+  const relationCounts = { implemented_by: 0, verified_by: 0, documents: 0, total: 0 };
+  let blanketRequiresProjected = 0;
+  for (const requirement of native.requirements) {
+    for (const relation of requirement.relations) {
+      if (relation.predicate === "requires") blanketRequiresProjected++;
+      if (relation.predicate === "implemented_by") relationCounts.implemented_by++;
+      if (relation.predicate === "verified_by") relationCounts.verified_by++;
+      if (relation.predicate === "documents") relationCounts.documents++;
+    }
+  }
+  relationCounts.total = relationCounts.implemented_by + relationCounts.verified_by + relationCounts.documents;
+  if (blanketRequiresProjected !== 0) reasons.push("C2.4:blanket_requires_projected");
+
+  const subjectKey = (subject: SemanticRequirementSubject | undefined): string =>
+    subject ? [subject.repository, subject.requirementId, subject.digest].join("\0") : "";
+  const rootIdentityChanges = loaded.rootIds.filter((id) =>
+    subjectKey(loaded.rootSubjects[id]) !== subjectKey(native.index[id]?.semantic)).length;
+  const sharedOwnershipPaths = Object.values(j1.owners).filter((owners) => owners.length > 1).length;
+
+  const normalizedReasons = uniqueSorted(reasons);
+  return {
+    ok: normalizedReasons.length === 0,
+    reasons: normalizedReasons,
+    revision: input.revision,
+    acceptedAuthorityVerified: false,
+    blockingCutoverEligible: false,
+    rootMigrationRequired: true,
+    legacy: {
+      tracked: loaded.entries.length,
+      justified: legacy.j1.justified.length,
+      rooted: legacy.j2.rooted.length,
+    },
+    native: {
+      tracked: virtualTracked.length,
+      justified: j1.justified.length,
+      rooted: j2.rooted.length,
+      unrooted: j2.unrooted.length,
+      candidateRoots,
+    },
+    equivalence: {
+      normativeExact,
+      ownerEquivalentOnRetainedResources,
+      sharedOwnershipPaths,
+      relationCounts,
+      blanketRequiresProjected,
+      rootIdentityChanges,
+    },
+    sourceMigration: { from: generated.from, to: generated.to },
+  };
 }
 
 const diffIdentity = (files: readonly ParsedDiffFile[]): string[] => files.map((file) =>
