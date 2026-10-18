@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
 import { evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
@@ -228,6 +228,7 @@ function c25Fixture(body) {
   const clone = mkdtempSync(join(tmpdir(), "repo-guard-c25-gate-"));
   try {
     execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", projectRoot, clone], { encoding: "utf8" });
+    symlinkSync(join(projectRoot, "node_modules"), join(clone, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     c25Git(clone, ["config", "user.email", "c2.5-gate@example.invalid"]);
     c25Git(clone, ["config", "user.name", "C2.5 Gate Bridge"]);
     const base = c25Git(projectRoot, ["rev-parse", "HEAD"]);
@@ -410,10 +411,10 @@ test("C2.5 gate bridge: representation/J1/J2/relation/ownership/self-trust falsi
       writeFileSync(path, readFileSync(path, "utf8") + "trusted: true\n");
     }, "C2.5:native_invalid");
 
-    evaluateMutation("native J2 identity mismatch", () => {
+    evaluateMutation("native J2 duplicate identity mismatch", () => {
       const path = join(root, "requirements/repo-guard/RG-08.rg.yaml");
-      writeFileSync(path, readFileSync(path, "utf8").replace(/^id: RG-08$/m, "id: RG-09"));
-    }, "C2.5:native_source_set_mismatch");
+      writeFileSync(path, readFileSync(path, "utf8").replace(/^id: RG-08$/m, "id: RG-07"));
+    }, "C2.5:candidate_j2_not_rooted");
 
     evaluateMutation("native J1 mismatch", () => {
       writeFileSync(join(root, "unowned-c25.txt"), "unowned\n");
