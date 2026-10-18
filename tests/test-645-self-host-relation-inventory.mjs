@@ -1187,7 +1187,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   for (const item of native.requirements) {
     assert.deepEqual(
       Object.keys(item).sort(),
-      ["id", "normative", "relations", "representation", "semantic", "source"].sort(),
+      ["constraints", "id", "lifecycle", "normative", "relations", "representation", "semantic", "source"].sort(),
       `${item.id}: native Requirement loader must not expose candidate-authored TRUST`,
     );
   }
