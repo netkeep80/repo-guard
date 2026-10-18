@@ -228,7 +228,6 @@ function c25Fixture(body) {
   const clone = mkdtempSync(join(tmpdir(), "repo-guard-c25-gate-"));
   try {
     execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", projectRoot, clone], { encoding: "utf8" });
-    symlinkSync(join(projectRoot, "node_modules"), join(clone, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     c25Git(clone, ["config", "user.email", "c2.5-gate@example.invalid"]);
     c25Git(clone, ["config", "user.name", "C2.5 Gate Bridge"]);
     const base = c25Git(projectRoot, ["rev-parse", "HEAD"]);
@@ -237,6 +236,7 @@ function c25Fixture(body) {
     c25Git(clone, ["add", "-A"]);
     c25Git(clone, ["commit", "-q", "-m", "C2.5 native migration fixture"]);
     const head = c25Git(clone, ["rev-parse", "HEAD"]);
+    symlinkSync(join(projectRoot, "node_modules"), join(clone, "node_modules"), process.platform === "win32" ? "junction" : "dir");
     return body({ root: clone, base, head });
   } finally {
     rmSync(clone, { recursive: true, force: true });
