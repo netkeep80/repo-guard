@@ -397,7 +397,7 @@ function buildRepoGuardNativeShadowSources(
       );
     }
     lines.push("");
-    sources.set(nativePath, lines.join("\\n"));
+    sources.set(nativePath, lines.join("\n"));
     from.push(item.source.path);
     to.push(nativePath);
   }
@@ -487,7 +487,7 @@ export function evaluateRepoGuardNativeSelfHostShadowSnapshot(input: RepoGuardNa
   if (blanketRequiresProjected !== 0) reasons.push("C2.4:blanket_requires_projected");
 
   const subjectKey = (subject: SemanticRequirementSubject | undefined): string =>
-    subject ? [subject.repository, subject.requirementId, subject.digest].join("\\0") : "";
+    subject ? [subject.repository, subject.requirementId, subject.digest].join("\0") : "";
   const rootIdentityChanges = loaded.rootIds.filter((id) =>
     subjectKey(loaded.rootSubjects[id]) !== subjectKey(native.index[id]?.semantic)).length;
   const sharedOwnershipPaths = Object.values(j1.owners).filter((owners) => owners.length > 1).length;
