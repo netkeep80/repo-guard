@@ -508,7 +508,7 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
                 rule.relations.some((p) => !["requires", "implemented_by", "verified_by", "documents", "generates", "constrains"].includes(String(p))) ||
                 (rule.activation !== undefined && !["scoped_change", "requirement_cause"].includes(String(rule.activation))) ||
                 (rule.includeGenerated !== undefined && typeof rule.includeGenerated !== "boolean") ||
-                (rule.metric !== undefined && typeof rule.metric !== "string") ||
+                (rule.metric !== undefined && !["changed_lines", "changed_resources"].includes(String(rule.metric))) ||
                 (rule.metric === undefined && rule.max !== undefined) ||
                 (rule.metric !== undefined && (typeof rule.max !== "number" || !Number.isSafeInteger(rule.max) || rule.max < 0)) ||
                 (rule.metric === undefined && rule.evidence === undefined) ||
