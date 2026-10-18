@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadCanonicalRequirements } from "../dist/runtime/canonical-requirements.mjs";
+import { loadCanonicalRequirements, loadNativeRequirements } from "../dist/runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
 import { evaluateTransitionCauseClosure } from "../dist/runtime/transition-closure.mjs";
+import { lowerNativeRequirements } from "../dist/runtime/pipeline.mjs";
 
 const repo="netkeep80/repo-guard", A="a".repeat(40), B="b".repeat(40), C="c".repeat(40), D="d".repeat(40);
 const art=(predicate,path)=>({predicate,target:{kind:"artifact",path}});
@@ -47,8 +48,10 @@ const yes=(x,name)=>assert.equal(x.result.ok,true,name+": "+x.result.reasons.joi
 const no=(x,part,name)=>{assert.equal(x.result.ok,false,name+" unexpectedly GREEN");assert.ok(x.result.reasons.some(s=>s.includes(part)),name+" missing "+part+": "+x.result.reasons.join(" | "));};
 const scopes=x=>x.result.explanations.constraints;
 const bound=(id="R1",key="lines")=>`constraint:${id}:${key}`;
+const definitionBound=(id="R1",key="lines")=>`constraint_definition:${id}:${key}`;
 const hasScope=(x,owner,want)=>assert.deepEqual(scopes(x).find(e=>e.requirementId===owner)?.scope,want);
 const ev=(over={})=>({key:"execution:tests/t.mjs",status:"pass",providerId:"ci",verifierPath:"tests/t.mjs",verifierRevision:B,...over});
+const item=(path,text)=>[path,text];
 const domain=(over={})=>({key:"domain:equivalence",status:"pass",providerId:"domain",...over});
 const verifierRelations=()=>({...defaultRelations(),test:art("verified_by","tests/t.mjs")});
 const r1other=()=>({relations:{parent,implementation:art("implemented_by","src/a.ts")},constraints:[lines(3)]});
@@ -114,3 +117,206 @@ test("I7 A12 accepted generation graph remains effective after local stacked edg
 
 test("I7 A13 null observation is diagnostic RED, never evaluator exception",()=>{const {base,head}=run({baseConstraints:[lines(10)]});const result=evaluateTransitionCauseClosure({repository:repo,base,head,trustedAuthorityBase:{revision:base.revision,requirements:base.requirements,j2:base.j2},workIntent:{id:"W",addresses:["R1"]},resourceDeltas:[{kind:"modify",path:"src/a.ts"}],observationFacts:[null],trustedEvidenceProviders:["git"]});no({result},"invalid_observation_fact","A13");});
 test("I7 A14 invalid evidence Resource subject fails closed without sorting error",()=>no(run({baseConstraints:[check()],baseRelations:verifierRelations(),baseFiles:["src/a.ts","tests/t.mjs"],evidence:[ev({subjectPaths:[null]})]}),"missing_evidence:R1:verify","A14"));
+
+
+const requirementCauseZero = (id="no-ui") => ({
+  id,
+  activation: "requirement_cause",
+  relations: ["constrains"],
+  metric: "changed_resources",
+  max: 0,
+});
+
+function hardeningState(revision, { sharedOwnerR2=true, constraint=true } = {}) {
+  const r2Relations = {
+    parent,
+    ...(sharedOwnerR2
+      ? { shared: art("implemented_by","src/shared.ts") }
+      : { dependency: { predicate:"depends_on", target:{kind:"requirement",id:"R1"} } }),
+    guardedUi: art("constrains","src/ui.ts"),
+  };
+  const nodes = [
+    node("ROOT"),
+    node("R1",{parent,shared:art("implemented_by","src/shared.ts")}),
+    node("R2",r2Relations,constraint?[requirementCauseZero()]:undefined),
+    node("R3",{parent,ui:art("implemented_by","src/ui.ts")}),
+  ];
+  return snapshot(revision,nodes,["src/shared.ts","src/ui.ts"]);
+}
+
+function hardeningTransition({ sharedOwnerR2=true, deltas, addresses, receipts=[] } = {}) {
+  const base=hardeningState(A,{sharedOwnerR2});
+  const head=hardeningState(B,{sharedOwnerR2});
+  return evaluateTransitionCauseClosure({
+    repository:repo,
+    base,
+    head,
+    trustedAuthorityBase:{revision:A,requirements:base.requirements,j2:base.j2},
+    resourceDeltas:deltas,
+    workIntent:{id:"W",addresses},
+    trustedReceipts:receipts.map(permissions=>({authorityBaseRevision:A,baseRevision:A,headRevision:B,permissions})),
+  });
+}
+
+test("C2.2 H01 WorkIntent cannot suppress requirement_cause Constraint under N ownership",()=>{
+  const result=hardeningTransition({
+    sharedOwnerR2:true,
+    deltas:[{kind:"modify",path:"src/shared.ts"},{kind:"modify",path:"src/ui.ts"}],
+    addresses:["R1","R3"],
+  });
+  assert.equal(result.ok,false);
+  assert.ok(result.reasons.some(x=>x.includes("constraint_exceeded:R2:no-ui:1>0")),result.reasons.join(" | "));
+  const explanation=result.explanations.constraints.find(x=>x.requirementId==="R2"&&x.constraintId==="no-ui");
+  assert.equal(explanation?.activation,"requirement_cause");
+  assert.equal(explanation?.directApplicable,true);
+  assert.equal(explanation?.selectedCause,false);
+  assert.equal(explanation?.reverseImpacted,false);
+});
+
+test("C2.2 H02 requirement_cause zero-change Constraint is active and GREEN when constrained scope is untouched",()=>{
+  const result=hardeningTransition({
+    sharedOwnerR2:true,
+    deltas:[{kind:"modify",path:"src/shared.ts"}],
+    addresses:["R1"],
+  });
+  assert.equal(result.ok,true,result.reasons.join(" | "));
+  const explanation=result.explanations.constraints.find(x=>x.requirementId==="R2"&&x.constraintId==="no-ui");
+  assert.equal(explanation?.directApplicable,true);
+  assert.equal(explanation?.selectedCause,false);
+  assert.equal(explanation?.observed,0);
+  assert.equal(explanation?.verdict,"PASS");
+});
+
+test("C2.2 H03 reverse impact alone never activates requirement_cause",()=>{
+  const result=hardeningTransition({
+    sharedOwnerR2:false,
+    deltas:[{kind:"modify",path:"src/shared.ts"},{kind:"modify",path:"src/ui.ts"}],
+    addresses:["R1","R3"],
+  });
+  assert.equal(result.ok,true,result.reasons.join(" | "));
+  const explanation=result.explanations.constraints.find(x=>x.requirementId==="R2"&&x.constraintId==="no-ui");
+  assert.equal(explanation?.directApplicable,false);
+  assert.equal(explanation?.selectedCause,false);
+  assert.equal(explanation?.reverseImpacted,true);
+  assert.equal(explanation?.verdict,"NOT_APPLICABLE");
+});
+
+test("C2.2 H04 constrains-derived transition-wide scope blocks only when owner is directly applicable",()=>{
+  const red=hardeningTransition({
+    sharedOwnerR2:true,
+    deltas:[{kind:"modify",path:"src/shared.ts"},{kind:"modify",path:"src/ui.ts"}],
+    addresses:["R1","R3"],
+  });
+  assert.ok(red.explanations.constraints.find(x=>x.requirementId==="R2"&&x.constraintId==="no-ui")?.scope.includes("src/ui.ts"));
+  assert.ok(red.reasons.some(x=>x.includes("constraint_exceeded:R2:no-ui")));
+
+  const ordinaryUi=hardeningTransition({
+    sharedOwnerR2:false,
+    deltas:[{kind:"modify",path:"src/ui.ts"}],
+    addresses:["R3"],
+  });
+  assert.equal(ordinaryUi.ok,true,ordinaryUi.reasons.join(" | "));
+});
+
+test("C2.2 H05 Constraint definition change requires exact constraint permission, broad Requirement grant is insufficient",()=>{
+  const broad=run({
+    baseConstraints:[lines(10)],
+    headConstraints:[lines(20)],
+    resourceDeltas:[],
+    receipts:[["requirement:R1"]],
+    workIntent:{id:"W",addresses:["R1"]},
+  });
+  no(broad,"missing_authority:constraint_definition:R1:lines","H05 broad grant");
+
+  const exact=run({
+    baseConstraints:[lines(10)],
+    headConstraints:[lines(20)],
+    resourceDeltas:[],
+    receipts:[[definitionBound()]],
+    workIntent:{id:"W",addresses:["R1"]},
+  });
+  yes(exact,"H05 exact constraint-definition grant");
+
+  const waiverOnly=run({
+    baseConstraints:[lines(10)],
+    headConstraints:[lines(20)],
+    resourceDeltas:[],
+    receipts:[[bound()]],
+    workIntent:{id:"W",addresses:["R1"]},
+  });
+  no(waiverOnly,"missing_authority:constraint_definition:R1:lines","H05 waiver cannot rewrite definition");
+
+  const definitionOnly=run({
+    baseConstraints:[lines(3)],
+    headConstraints:[lines(3)],
+    observed:5,
+    receipts:[[definitionBound()]],
+    workIntent:{id:"W",addresses:["R1"]},
+  });
+  no(definitionOnly,"constraint_exceeded:R1:lines","H05 definition grant cannot waive runtime obligation");
+});
+
+test("C2.2 H06 lifecycle and Constraint permissions remain non-interchangeable",()=>{
+  const x=run({resourceDeltas:[],workIntent:{id:"W",addresses:["R1"]},receipts:[[bound()]]});
+  const lifecycle=evaluateTransitionCauseClosure({
+    repository:repo,
+    base:x.base,
+    head:x.head,
+    trustedAuthorityBase:{revision:A,requirements:x.base.requirements,j2:x.base.j2},
+    resourceDeltas:[],
+    baseLifecycle:{R1:{accepted:false}},
+    headLifecycle:{R1:{accepted:true}},
+    workIntent:{id:"W",addresses:["R1"]},
+    trustedReceipts:[{authorityBaseRevision:A,baseRevision:A,headRevision:B,permissions:[bound()]}],
+  });
+  assert.equal(lifecycle.ok,false);
+  assert.ok(lifecycle.reasons.some(x=>x.includes("missing_authority:lifecycle:R1:accepted")),lifecycle.reasons.join(" | "));
+});
+
+test("C2.2 H07 native lowering reuses J2/J1 kernel and preserves native semantic subjects",()=>{
+  const files=[
+    item("requirements/ROOT.rg.yaml",[
+      "format: repo-guard/requirement-v1",
+      "id: ROOT",
+      "normative: Root authority.",
+      "",
+    ].join("\n")),
+    item("requirements/R1.rg.yaml",[
+      "format: repo-guard/requirement-v1",
+      "id: R1",
+      "normative: Implementation exists.",
+      "relations:",
+      "  - predicates: [derives_from]",
+      "    target: { kind: requirement, id: ROOT }",
+      "  - predicates: [implemented_by]",
+      "    target: { kind: artifact, path: src/a.ts }",
+      "  - source: { kind: artifact, path: src/a.ts }",
+      "    predicates: [generates]",
+      "    target: { kind: artifact, path: dist/a.js }",
+      "",
+    ].join("\n")),
+  ];
+  const native=loadNativeRequirements({
+    repository:repo,revision:A,paths:files.map(x=>x[0]),
+    readFile:(_,p)=>files.find(x=>x[0]===p)?.[1]??null,
+  });
+  assert.equal(native.ok,true,JSON.stringify(native.errors));
+  const lowered=lowerNativeRequirements(native);
+  assert.equal(lowered.requirements.index.R1.semantic.digest,native.index.R1.semantic.digest);
+  const j2=evaluateRootedRequirements({
+    requirements:lowered.requirements,
+    trustedRoots:[lowered.requirements.index.ROOT.semantic],
+  });
+  assert.equal(j2.ok,true,JSON.stringify(j2));
+  const tracked=["requirements/ROOT.rg.yaml","requirements/R1.rg.yaml","src/a.ts","dist/a.js"];
+  const resolver=createResourceResolver({
+    repository:repo,revision:A,requirements:lowered.requirements,
+    readers:{[repo]:(rev,p)=>rev===A&&tracked.includes(p)?(files.find(x=>x[0]===p)?.[1]??"artifact"):null},
+  });
+  const j1=evaluateTrackedResourceClosure({
+    repository:repo,revision:A,requirements:lowered.requirements,j2,
+    trackedPaths:tracked,resourceRelations:lowered.resourceRelations,resolver,
+  });
+  assert.equal(j1.ok,true,JSON.stringify(j1));
+  assert.deepEqual(j1.owners["dist/a.js"],["R1"]);
+});

@@ -5,6 +5,7 @@ const protectedLifecycleFields = new Set(["accepted", "current", "published"]);
 const allDeltaKinds = new Set([
     "requirement_add", "requirement_modify", "requirement_remove", "requirement_relocate",
     "relation_add", "relation_remove", "relation_replace",
+    "constraint_add", "constraint_modify", "constraint_remove",
     "resource_add", "resource_modify", "resource_delete", "resource_rename", "resource_type_change", "lifecycle",
 ]);
 const obj = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -35,7 +36,7 @@ function requirementCore(value) {
     const root = obj(value);
     if (!root)
         return stable(value);
-    return stable(Object.fromEntries(Object.entries(root).filter(([key]) => key !== "relations")));
+    return stable(Object.fromEntries(Object.entries(root).filter(([key]) => key !== "relations" && key !== "constraints")));
 }
 function targetIdentity(value) {
     const target = obj(value);
@@ -153,6 +154,48 @@ function requirementDeltas(base, head) {
     }
     return out;
 }
+function constraintDeltas(base, head) {
+    const out = [];
+    const ids = sorted(new Set([...Object.keys(base.requirements.index), ...Object.keys(head.requirements.index)]));
+    const indexed = (value) => {
+        const raw = obj(value)?.constraints;
+        const result = new Map();
+        if (!Array.isArray(raw))
+            return result;
+        for (const item of raw) {
+            const record = obj(item);
+            if (record && typeof record.id === "string" && !result.has(record.id))
+                result.set(record.id, item);
+        }
+        return result;
+    };
+    for (const requirementId of ids) {
+        const beforeRequirement = base.requirements.index[requirementId];
+        const afterRequirement = head.requirements.index[requirementId];
+        if (!beforeRequirement || !afterRequirement)
+            continue;
+        const before = indexed(beforeRequirement.value), after = indexed(afterRequirement.value);
+        for (const constraintId of sorted(new Set([...before.keys(), ...after.keys()]))) {
+            const b = before.get(constraintId), a = after.get(constraintId);
+            if (b === undefined)
+                out.push({
+                    id: "constraint_add:" + requirementId + ":" + constraintId,
+                    kind: "constraint_add", subject: requirementId, requirementId, constraintId,
+                });
+            else if (a === undefined)
+                out.push({
+                    id: "constraint_remove:" + requirementId + ":" + constraintId,
+                    kind: "constraint_remove", subject: requirementId, requirementId, constraintId,
+                });
+            else if (stable(b) !== stable(a))
+                out.push({
+                    id: "constraint_modify:" + requirementId + ":" + constraintId,
+                    kind: "constraint_modify", subject: requirementId, requirementId, constraintId,
+                });
+        }
+    }
+    return out;
+}
 function resourceDeltas(input) {
     const out = [], errors = [];
     for (const raw of input) {
@@ -224,7 +267,7 @@ function owners(state, path) {
 }
 function directCandidates(delta, base, head) {
     const result = new Set();
-    if (delta.kind.startsWith("requirement_") || delta.kind === "lifecycle") {
+    if (delta.kind.startsWith("requirement_") || delta.kind.startsWith("constraint_") || delta.kind === "lifecycle") {
         if (delta.requirementId)
             result.add(delta.requirementId);
     }
@@ -409,6 +452,8 @@ function authorityPermissions(delta, input, protectedSet) {
     const result = new Set();
     if (delta.kind === "requirement_add" || delta.kind === "requirement_modify" || delta.kind === "requirement_remove")
         result.add("requirement:" + delta.subject);
+    if (delta.kind.startsWith("constraint_") && delta.requirementId && delta.constraintId)
+        result.add("constraint_definition:" + delta.requirementId + ":" + delta.constraintId);
     if (delta.kind.startsWith("relation_")) {
         const facts = [delta.beforeRelation, delta.afterRelation, delta.relation].filter(Boolean);
         // Each actual relation transition is evaluated against BOTH exact states.
@@ -444,7 +489,7 @@ function snapshotErrors(label, state, repository) {
         errors.push(`${label}:j2_not_rooted`);
     return errors;
 }
-function evaluateScopedObligations(input, deltas, receipts, facts) {
+function evaluateScopedObligations(input, deltas, receipts, facts, applicability) {
     const problems = [], explanations = [];
     const root = (state, id) => obj(state.requirements.index[id]?.value);
     const parseRules = (state, label, id) => {
@@ -460,16 +505,18 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
             const rule = obj(item), evidence = obj(rule?.evidence);
             if (!rule || typeof rule.id !== "string" || !/^[A-Za-z][A-Za-z0-9._-]*$/.test(rule.id) ||
                 seen.has(rule.id) || !Array.isArray(rule.relations) || !rule.relations.length ||
-                rule.relations.some((p) => !["requires", "implemented_by", "verified_by", "documents", "generates"].includes(String(p))) ||
+                rule.relations.some((p) => !["requires", "implemented_by", "verified_by", "documents", "generates", "constrains"].includes(String(p))) ||
+                (rule.activation !== undefined && !["scoped_change", "requirement_cause"].includes(String(rule.activation))) ||
                 (rule.includeGenerated !== undefined && typeof rule.includeGenerated !== "boolean") ||
                 (rule.metric !== undefined && !["changed_lines", "changed_resources"].includes(String(rule.metric))) ||
                 (rule.metric === undefined && rule.max !== undefined) ||
                 (rule.metric !== undefined && (typeof rule.max !== "number" || !Number.isSafeInteger(rule.max) || rule.max < 0)) ||
                 (rule.metric === undefined && rule.evidence === undefined) ||
                 (rule.evidence !== undefined && (!evidence || !["execution", "domain"].includes(String(evidence.kind)) ||
-                    typeof evidence.key !== "string" || !evidence.key || typeof evidence.providerId !== "string" ||
-                    !evidence.providerId || (evidence.kind === "execution" && typeof evidence.verifierPath !== "string"))) ||
-                Object.keys(rule).some(k => !["id", "relations", "includeGenerated", "metric", "max", "evidence"].includes(k))) {
+                    typeof evidence.key !== "string" || !evidence.key ||
+                    (evidence.providerId !== undefined && (typeof evidence.providerId !== "string" || !evidence.providerId)) ||
+                    (evidence.kind === "execution" && typeof evidence.verifierPath !== "string"))) ||
+                Object.keys(rule).some(k => !["id", "activation", "relations", "includeGenerated", "metric", "max", "evidence"].includes(k))) {
                 problems.push("I7:invalid_constraint:" + label + ":" + id);
                 continue;
             }
@@ -585,12 +632,14 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                 const selected = deltas.filter(d => d.kind.startsWith("resource_") &&
                     deltaPaths(d).some(path => proof.has(path)));
                 const touched = sorted(new Set(selected.map(d => d.afterPath || d.beforePath || d.subject)));
+                const activation = rule.activation === "requirement_cause" ? "requirement_cause" : "scoped_change";
+                const active = activation === "requirement_cause" ? applicability.direct.has(id) : selected.length > 0;
                 const token = "constraint:" + id + ":" + rule.id;
-                let observed = null, verdict = selected.length ? "PASS" : "NOT_APPLICABLE";
-                if (selected.length && rule.metric === "changed_resources") {
+                let observed = null, verdict = active ? "PASS" : "NOT_APPLICABLE";
+                if (active && rule.metric === "changed_resources") {
                     observed = selected.length;
                 }
-                else if (selected.length && rule.metric === "changed_lines") {
+                else if (active && rule.metric === "changed_lines") {
                     let sum = 0, complete = true;
                     for (const path of touched) {
                         const number = observationMap.get("changed_lines\0" + path);
@@ -608,6 +657,10 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                     if (observed === null)
                         verdict = "RED";
                 }
+                else if (active && rule.metric !== undefined) {
+                    verdict = "RED";
+                    problems.push("I7:missing_observation:" + id + ":" + rule.id + ":" + String(rule.metric));
+                }
                 if (observed !== null && observed > rule.max) {
                     if (granted(input, receipts, token))
                         verdict = "WAIVED";
@@ -616,7 +669,7 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                         problems.push("I7:constraint_exceeded:" + id + ":" + rule.id + ":" + observed + ">" + rule.max);
                     }
                 }
-                if (selected.length && rule.evidence !== undefined) {
+                if (active && rule.evidence !== undefined) {
                     const spec = rule.evidence;
                     const verifierValid = spec.kind !== "execution" || (() => {
                         const headRelations = obj(root(input.head, id)?.relations);
@@ -626,7 +679,7 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                                 (input.head.j1.owners[spec.verifierPath] || []).includes(id);
                         });
                     })();
-                    const compatible = facts.filter(f => f.key === spec.key && f.requirementId === id &&
+                    const compatible = spec.providerId === undefined ? [] : facts.filter(f => f.key === spec.key && f.requirementId === id &&
                         f.providerId === spec.providerId && providers.has(spec.providerId) &&
                         f.authorityBaseRevision === input.trustedAuthorityBase.revision &&
                         f.baseRevision === input.base.revision && f.headRevision === input.head.revision &&
@@ -644,6 +697,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts) {
                     }
                 }
                 explanations.push({ requirementId: id, constraintId: rule.id, basis: v.label,
+                    activation, directApplicable: applicability.direct.has(id), selectedCause: applicability.selected.has(id),
+                    reverseImpacted: applicability.reverseOnly.has(id),
                     rootedProof: input.trustedAuthorityBase.j2.explanations[id] || input.base.j2.explanations[id] || input.head.j2.explanations[id] || [],
                     exactTransition: { authorityBaseRevision: input.trustedAuthorityBase.revision, baseRevision: input.base.revision, headRevision: input.head.revision }, metric: rule.metric || null,
                     max: rule.max === undefined ? null : rule.max, scope, scopeProofs: Object.fromEntries([...proof.entries()].sort(([a], [b]) => a.localeCompare(b))),
@@ -681,7 +736,8 @@ export function evaluateTransitionCauseClosure(input) {
     const baseRelationState = relations(input.base), headRelationState = relations(input.head);
     reasons.push(...baseRelationState.errors.map(x => "base:" + x), ...headRelationState.errors.map(x => "head:" + x));
     const baseRelations = baseRelationState.facts, headRelations = headRelationState.facts;
-    const deltas = [...requirementDeltas(input.base, input.head), ...relationDeltas(baseRelations, headRelations), ...normalizedResources.deltas,
+    const deltas = [...requirementDeltas(input.base, input.head), ...relationDeltas(baseRelations, headRelations),
+        ...constraintDeltas(input.base, input.head), ...normalizedResources.deltas,
         ...lifecycleDeltas(input.baseLifecycle || {}, input.headLifecycle || {})].sort((a, b) => a.id.localeCompare(b.id, "en"));
     const ruleState = transitionRules(input.trustedAuthorityBase), rules = ruleState.rules;
     reasons.push(...ruleState.errors.map(x => "authority_base:" + x));
@@ -691,16 +747,22 @@ export function evaluateTransitionCauseClosure(input) {
     const authorityRooted = new Set(input.trustedAuthorityBase.j2.rooted);
     const whyChanged = [];
     const affectedAll = new Set();
+    const directApplicableAll = new Set(), selectedCausesAll = new Set();
     for (const delta of deltas) {
         const matchedRules = rules.filter(rule => matchesRule(rule, delta)).sort((a, b) => a.requirementId.localeCompare(b.requirementId, "en"));
         const affectedIds = affected(delta, input.base, input.head, baseRelations, headRelations);
         for (const id of affectedIds)
             affectedAll.add(id);
-        const candidates = directCandidates(delta, input.base, input.head);
+        const structural = directCandidates(delta, input.base, input.head);
+        for (const id of structural)
+            directApplicableAll.add(id);
+        const candidates = new Set(structural);
         for (const rule of matchedRules)
             candidates.add(rule.requirementId);
         const candidateIds = sorted(candidates);
         const causes = candidateIds.filter(id => addresses.has(id) && (authorityRooted.has(id) || granted(input, receiptState.receipts, "requirement:" + id)));
+        for (const id of causes)
+            selectedCausesAll.add(id);
         if (!causes.length)
             reasons.push("J3:no_cause:" + delta.id);
         const permissions = authorityPermissions(delta, input, protectedSet);
@@ -715,12 +777,15 @@ export function evaluateTransitionCauseClosure(input) {
             if (rule.requireAddressed === true && !addresses.has(rule.requirementId))
                 reasons.push(`J3:unacknowledged_impact:${rule.requirementId}:${delta.id}`);
         whyChanged.push({ id: delta.id, kind: delta.kind, subject: delta.subject, affected: affectedIds, applicable: sorted(new Set([...affectedIds, ...matchedRules.map(r => r.requirementId)])),
+            directApplicable: sorted(structural), reverseImpact: affectedIds.filter(id => !structural.has(id)),
             causalCandidates: candidateIds, causes: sorted(causes), requiredAuthority: permissions, requiredEvidence: evidenceKeys });
     }
-    const scoped = evaluateScopedObligations(input, normalizedResources.deltas, receiptState.receipts, evidenceState.facts);
+    const reverseOnly = new Set([...affectedAll].filter(id => !directApplicableAll.has(id)));
+    const scoped = evaluateScopedObligations(input, normalizedResources.deltas, receiptState.receipts, evidenceState.facts, { direct: directApplicableAll, selected: selectedCausesAll, reverseOnly });
     reasons.push(...scoped.reasons);
     const normalizedReasons = sorted(reasons);
     return { ok: normalizedReasons.length === 0, reasons: normalizedReasons, deltas: deltas.map(delta => ({ id: delta.id, kind: delta.kind, subject: delta.subject,
-            ...(delta.beforePath ? { beforePath: delta.beforePath } : {}), ...(delta.afterPath ? { afterPath: delta.afterPath } : {}), ...(delta.field ? { field: delta.field } : {}) })),
+            ...(delta.beforePath ? { beforePath: delta.beforePath } : {}), ...(delta.afterPath ? { afterPath: delta.afterPath } : {}), ...(delta.field ? { field: delta.field } : {}),
+            ...(delta.constraintId ? { constraintId: delta.constraintId } : {}) })),
         affectedRequirements: sorted(affectedAll), explanations: { whyChanged: whyChanged.sort((a, b) => a.id.localeCompare(b.id, "en")), constraints: scoped.constraints } };
 }
