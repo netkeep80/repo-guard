@@ -149,3 +149,422 @@ export function loadCanonicalRequirements(input: CanonicalSnapshotInput): Canoni
     }
   };
 }
+
+
+export type NativeRelationPredicate =
+  | "derives_from"
+  | "requires"
+  | "implemented_by"
+  | "verified_by"
+  | "documents"
+  | "generates"
+  | "depends_on"
+  | "constrains"
+  | "supersedes";
+
+export type NativeResourceRef =
+  | { kind: "requirement"; id: string }
+  | { kind: "artifact"; path: string }
+  | { kind: "document"; path: string; pointer: string }
+  | { kind: "external_document"; repository: string; revision: string; path: string; pointer: string };
+
+export interface NativeRelationFact {
+  source: NativeResourceRef;
+  predicate: NativeRelationPredicate;
+  target: NativeResourceRef;
+}
+
+export interface NativeLifecycle {
+  accepted: boolean;
+  current: boolean;
+  published: boolean;
+}
+
+export interface NativeConstraintScope {
+  relations: readonly NativeRelationPredicate[];
+  include_generated: boolean;
+}
+
+export interface NativeConstraintMetric {
+  key: string;
+  max: number;
+}
+
+export interface NativeConstraintEvidence {
+  class: "execution" | "domain";
+  key: string;
+  verifier?: NativeResourceRef;
+}
+
+export interface NativeConstraint {
+  id: string;
+  activation: "scoped_change" | "requirement_cause";
+  scope: NativeConstraintScope;
+  metric?: NativeConstraintMetric;
+  evidence?: NativeConstraintEvidence;
+}
+
+export type NativeErrorCode =
+  | "invalid_native_document"
+  | "duplicate_key"
+  | "unknown_field"
+  | "malformed_requirement_id"
+  | "duplicate_requirement_id"
+  | "unknown_predicate"
+  | "invalid_relation"
+  | "duplicate_relation"
+  | "invalid_resource_ref"
+  | "floating_external_revision"
+  | "duplicate_constraint_id"
+  | "invalid_constraint";
+
+export interface NativeContractError {
+  code: NativeErrorCode;
+  path: string;
+  message: string;
+  otherPath?: string;
+}
+
+export interface NativeRequirement {
+  id: string;
+  normative: JsonValue;
+  semantic: SemanticRequirementSubject;
+  source: RequirementSourceIdentity;
+  representation: ExactRepresentationSubject;
+  lifecycle: NativeLifecycle;
+  relations: readonly NativeRelationFact[];
+  constraints: readonly NativeConstraint[];
+}
+
+export interface NativeRequirementsResult {
+  ok: boolean;
+  requirements: readonly NativeRequirement[];
+  index: Readonly<Record<string, NativeRequirement>>;
+  errors: readonly NativeContractError[];
+}
+
+const nativePredicates = new Set<NativeRelationPredicate>([
+  "derives_from", "requires", "implemented_by", "verified_by", "documents",
+  "generates", "depends_on", "constrains", "supersedes",
+]);
+
+const nativeScopePredicates = new Set<NativeRelationPredicate>([
+  "requires", "implemented_by", "verified_by", "documents", "constrains",
+]);
+
+class NativeContractFailure extends Error {
+  readonly code: NativeErrorCode;
+  constructor(code: NativeErrorCode, message: string) {
+    super(message);
+    this.name = "NativeContractFailure";
+    this.code = code;
+  }
+}
+
+const nativeFailure = (code: NativeErrorCode, message: string): never => {
+  throw new NativeContractFailure(code, message);
+};
+
+const nativeError = (code: NativeErrorCode, path: string, message: string, otherPath?: string): NativeContractError =>
+  ({ code, path, message, ...(otherPath ? { otherPath } : {}) });
+
+function nativeObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype)
+    nativeFailure("invalid_native_document", label + " must be an object");
+  return value as Record<string, unknown>;
+}
+
+function nativeExactFields(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const unknown = Object.keys(value).filter(key => !allowed.includes(key)).sort();
+  if (unknown.length) nativeFailure("unknown_field", label + " contains unknown field(s): " + unknown.join(", "));
+}
+
+function nativeRequirementId(value: unknown, label = "RequirementId"): string {
+  if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(value))
+    nativeFailure("malformed_requirement_id", "invalid " + label);
+  return value;
+}
+
+function nativePath(value: unknown, label: string): string {
+  if (typeof value !== "string") nativeFailure("invalid_resource_ref", label + " path must be a string");
+  try {
+    const normalized = normalizeDocumentFact(value, "repository_path");
+    if (normalized !== value) nativeFailure("invalid_resource_ref", label + " path is noncanonical");
+    return normalized;
+  } catch (error) {
+    if (error instanceof NativeContractFailure) throw error;
+    nativeFailure("invalid_resource_ref", label + " path is invalid: " + (error as Error).message);
+  }
+}
+
+function nativePointer(value: unknown, label: string): string {
+  if (value === undefined) return "";
+  if (typeof value !== "string" || (value !== "" && (!value.startsWith("/") || /~(?:[^01]|$)/.test(value))))
+    nativeFailure("invalid_resource_ref", label + " pointer is malformed");
+  if (!durablePointer(value)) nativeFailure("invalid_resource_ref", label + " pointer is positional and not durable");
+  return value;
+}
+
+function nativeResourceRef(value: unknown, label: string): NativeResourceRef {
+  const input = nativeObject(value, label);
+  const kind = input.kind;
+  if (kind === "requirement") {
+    nativeExactFields(input, ["kind", "id"], label);
+    return { kind, id: nativeRequirementId(input.id, label + ".id") };
+  }
+  if (kind === "artifact") {
+    nativeExactFields(input, ["kind", "path"], label);
+    return { kind, path: nativePath(input.path, label) };
+  }
+  if (kind === "document") {
+    nativeExactFields(input, ["kind", "path", "pointer"], label);
+    return { kind, path: nativePath(input.path, label), pointer: nativePointer(input.pointer, label) };
+  }
+  if (kind === "external_document") {
+    nativeExactFields(input, ["kind", "repository", "revision", "path", "pointer"], label);
+    if (typeof input.repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+      nativeFailure("invalid_resource_ref", label + " repository is invalid");
+    if (typeof input.revision !== "string" || !/^[0-9a-f]{40}$/.test(input.revision))
+      nativeFailure("floating_external_revision", label + " revision must be an exact immutable SHA");
+    return {
+      kind,
+      repository: input.repository,
+      revision: input.revision,
+      path: nativePath(input.path, label),
+      pointer: nativePointer(input.pointer, label),
+    };
+  }
+  nativeFailure("invalid_resource_ref", label + " has unknown ResourceRef kind");
+}
+
+function nativeRefKey(value: NativeResourceRef): string {
+  return JSON.stringify(canonical(value as unknown as JsonValue));
+}
+
+function nativeRelationDomain(source: NativeResourceRef, predicate: NativeRelationPredicate, target: NativeResourceRef): void {
+  const sourceRequirement = source.kind === "requirement";
+  if (predicate === "generates") {
+    if (source.kind !== "artifact" || target.kind !== "artifact")
+      nativeFailure("invalid_relation", "generates requires explicit local ArtifactRef source and ArtifactRef target");
+    return;
+  }
+  if (!sourceRequirement) nativeFailure("invalid_relation", predicate + " requires RequirementRef source");
+  if (predicate === "derives_from" || predicate === "depends_on" || predicate === "supersedes") {
+    if (target.kind !== "requirement") nativeFailure("invalid_relation", predicate + " requires RequirementRef target");
+    return;
+  }
+  if (predicate === "implemented_by" || predicate === "verified_by" || predicate === "documents") {
+    if (target.kind === "requirement") nativeFailure("invalid_relation", predicate + " requires non-Requirement Resource target");
+  }
+}
+
+function nativeRelations(value: unknown, requirementId: string): NativeRelationFact[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) nativeFailure("invalid_relation", "relations must be an array");
+  const facts: NativeRelationFact[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const declaration = nativeObject(value[index], "relations[" + index + "]");
+    nativeExactFields(declaration, ["source", "predicates", "target"], "relations[" + index + "]");
+    if (!Array.isArray(declaration.predicates) || declaration.predicates.length === 0)
+      nativeFailure("invalid_relation", "relations[" + index + "].predicates must be a non-empty array");
+    const predicates: NativeRelationPredicate[] = [];
+    const local = new Set<string>();
+    for (const raw of declaration.predicates) {
+      if (typeof raw !== "string" || !nativePredicates.has(raw as NativeRelationPredicate))
+        nativeFailure("unknown_predicate", "unknown native relation predicate " + String(raw));
+      if (local.has(raw)) nativeFailure("duplicate_relation", "duplicate predicate " + raw + " in one relation declaration");
+      local.add(raw);
+      predicates.push(raw as NativeRelationPredicate);
+    }
+    predicates.sort();
+    const source = declaration.source === undefined
+      ? { kind: "requirement" as const, id: requirementId }
+      : nativeResourceRef(declaration.source, "relations[" + index + "].source");
+    const target = nativeResourceRef(declaration.target, "relations[" + index + "].target");
+    if (declaration.source !== undefined && predicates.some(predicate => predicate !== "generates"))
+      nativeFailure("invalid_relation", "explicit relation source is only supported for generates in native v1");
+    for (const predicate of predicates) {
+      nativeRelationDomain(source, predicate, target);
+      const fact = { source, predicate, target };
+      const key = nativeRefKey(source) + "\0" + predicate + "\0" + nativeRefKey(target);
+      if (seen.has(key)) nativeFailure("duplicate_relation", "duplicate normalized Relation fact");
+      seen.add(key);
+      facts.push(fact);
+    }
+  }
+  return facts.sort((a, b) =>
+    a.predicate.localeCompare(b.predicate, "en") ||
+    nativeRefKey(a.source).localeCompare(nativeRefKey(b.source), "en") ||
+    nativeRefKey(a.target).localeCompare(nativeRefKey(b.target), "en"));
+}
+
+function nativeLifecycle(value: unknown): NativeLifecycle {
+  if (value === undefined) return { accepted: false, current: false, published: false };
+  const input = nativeObject(value, "lifecycle");
+  nativeExactFields(input, ["accepted", "current", "published"], "lifecycle");
+  for (const key of ["accepted", "current", "published"] as const)
+    if (input[key] !== undefined && typeof input[key] !== "boolean")
+      nativeFailure("invalid_native_document", "lifecycle." + key + " must be boolean");
+  return {
+    accepted: input.accepted === true,
+    current: input.current === true,
+    published: input.published === true,
+  };
+}
+
+function nativeConstraintScope(value: unknown, label: string): NativeConstraintScope {
+  const input = nativeObject(value, label);
+  nativeExactFields(input, ["relations", "include_generated"], label);
+  if (!Array.isArray(input.relations) || input.relations.length === 0)
+    nativeFailure("invalid_constraint", label + ".relations must be a non-empty array");
+  const relations: NativeRelationPredicate[] = [];
+  const seen = new Set<string>();
+  for (const raw of input.relations) {
+    if (typeof raw !== "string" || !nativePredicates.has(raw as NativeRelationPredicate))
+      nativeFailure("unknown_predicate", "unknown Constraint scope predicate " + String(raw));
+    if (!nativeScopePredicates.has(raw as NativeRelationPredicate))
+      nativeFailure("invalid_constraint", "predicate " + raw + " cannot seed Requirement-derived Constraint scope");
+    if (seen.has(raw)) nativeFailure("invalid_constraint", "duplicate Constraint scope predicate " + raw);
+    seen.add(raw);
+    relations.push(raw as NativeRelationPredicate);
+  }
+  if (input.include_generated !== undefined && typeof input.include_generated !== "boolean")
+    nativeFailure("invalid_constraint", label + ".include_generated must be boolean");
+  return { relations: relations.sort(), include_generated: input.include_generated === true };
+}
+
+function nativeConstraintMetric(value: unknown, label: string): NativeConstraintMetric {
+  const input = nativeObject(value, label);
+  nativeExactFields(input, ["key", "max"], label);
+  if (typeof input.key !== "string" || input.key.length === 0)
+    nativeFailure("invalid_constraint", label + ".key must be a non-empty string");
+  if (typeof input.max !== "number" || !Number.isFinite(input.max) || input.max < 0)
+    nativeFailure("invalid_constraint", label + ".max must be a finite non-negative number");
+  return { key: input.key, max: input.max };
+}
+
+function nativeConstraintEvidence(value: unknown, label: string): NativeConstraintEvidence {
+  const input = nativeObject(value, label);
+  nativeExactFields(input, ["class", "key", "verifier"], label);
+  if (input.class !== "execution" && input.class !== "domain")
+    nativeFailure("invalid_constraint", label + ".class must be execution or domain");
+  if (typeof input.key !== "string" || input.key.length === 0)
+    nativeFailure("invalid_constraint", label + ".key must be a non-empty string");
+  const verifier = input.verifier === undefined ? undefined : nativeResourceRef(input.verifier, label + ".verifier");
+  if (input.class === "execution" && (!verifier || verifier.kind !== "artifact"))
+    nativeFailure("invalid_constraint", label + " execution evidence requires an ArtifactRef verifier");
+  if (verifier && verifier.kind !== "artifact")
+    nativeFailure("invalid_constraint", label + " verifier must be an ArtifactRef in native v1");
+  return { class: input.class, key: input.key, ...(verifier ? { verifier } : {}) };
+}
+
+function nativeConstraints(value: unknown): NativeConstraint[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) nativeFailure("invalid_constraint", "constraints must be an array");
+  const constraints: NativeConstraint[] = [];
+  const ids = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const label = "constraints[" + index + "]";
+    const input = nativeObject(value[index], label);
+    nativeExactFields(input, ["id", "activation", "scope", "metric", "evidence"], label);
+    if (typeof input.id !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(input.id))
+      nativeFailure("invalid_constraint", label + ".id is invalid");
+    if (ids.has(input.id)) nativeFailure("duplicate_constraint_id", "duplicate Constraint id " + input.id);
+    ids.add(input.id);
+    const activation = input.activation === undefined ? "scoped_change" : input.activation;
+    if (activation !== "scoped_change" && activation !== "requirement_cause")
+      nativeFailure("invalid_constraint", label + ".activation is invalid");
+    const scope = nativeConstraintScope(input.scope, label + ".scope");
+    const metric = input.metric === undefined ? undefined : nativeConstraintMetric(input.metric, label + ".metric");
+    const evidence = input.evidence === undefined ? undefined : nativeConstraintEvidence(input.evidence, label + ".evidence");
+    if (!metric && !evidence) nativeFailure("invalid_constraint", label + " requires metric or evidence");
+    constraints.push({
+      id: input.id,
+      activation,
+      scope,
+      ...(metric ? { metric } : {}),
+      ...(evidence ? { evidence } : {}),
+    });
+  }
+  return constraints.sort((a, b) => a.id.localeCompare(b.id, "en"));
+}
+
+function nativeRequirementSourcePath(path: string): string {
+  if (!/\.rg\.(?:yaml|json)$/.test(path))
+    nativeFailure("invalid_native_document", "path is not a native Requirement source");
+  const normalized = nativePath(path, "native Requirement source");
+  if (!normalized.startsWith("requirements/"))
+    nativeFailure("invalid_native_document", "native Requirement source must be under requirements/");
+  return normalized;
+}
+
+function parseNativeRequirement(raw: string, path: string): Record<string, unknown> {
+  const value = path.endsWith(".json") ? strictCanonicalJson(raw) : parseYaml(raw);
+  return nativeObject(value, "native Requirement");
+}
+
+export function loadNativeRequirements(input: CanonicalSnapshotInput): NativeRequirementsResult {
+  const errors: NativeContractError[] = [];
+  const items: NativeRequirement[] = [];
+  let identityValid = true;
+  try {
+    validRepository(input.repository);
+    exactRevision(input.revision);
+  } catch (error) {
+    identityValid = false;
+    errors.push(nativeError("invalid_native_document", "", (error as Error).message));
+  }
+  const candidatePaths = [...input.paths].filter(path => /\.rg\.(?:yaml|json)$/.test(path)).sort();
+  for (const candidatePath of candidatePaths) {
+    let path = String(candidatePath);
+    try {
+      path = nativeRequirementSourcePath(path);
+      if (!identityValid) continue;
+      const content = input.readFile(input.revision, path);
+      if (content === null || content === undefined) nativeFailure("invalid_native_document", "native source missing at exact snapshot");
+      const raw = Buffer.isBuffer(content) ? content.toString("utf8") : content;
+      const value = parseNativeRequirement(raw, path);
+      nativeExactFields(value, ["format", "id", "normative", "lifecycle", "relations", "constraints"], "native Requirement");
+      if (value.format !== "repo-guard/requirement-v1")
+        nativeFailure("invalid_native_document", "format must be repo-guard/requirement-v1");
+      const id = nativeRequirementId(value.id);
+      if (!Object.hasOwn(value, "normative"))
+        nativeFailure("invalid_native_document", "native Requirement requires normative");
+      const normative = canonical(value.normative as JsonValue);
+      const lifecycle = nativeLifecycle(value.lifecycle);
+      const relations = nativeRelations(value.relations, id);
+      const constraints = nativeConstraints(value.constraints);
+      items.push({
+        id,
+        normative,
+        semantic: semanticRequirementSubject(input.repository, id, canonicalSemanticDigest(normative)),
+        source: { kind: "requirement_source", path },
+        representation: exactRepresentationSubject(input.repository, input.revision, path),
+        lifecycle,
+        relations,
+        constraints,
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      if (error instanceof NativeContractFailure) errors.push(nativeError(error.code, path, message));
+      else if (/duplicate JSON key|map keys must be unique/i.test(message)) errors.push(nativeError("duplicate_key", path, message));
+      else errors.push(nativeError("invalid_native_document", path, message));
+    }
+  }
+  const index: Record<string, NativeRequirement> = Object.create(null);
+  for (const item of items) {
+    if (Object.hasOwn(index, item.id))
+      errors.push(nativeError("duplicate_requirement_id", item.source.path, "duplicate RequirementId " + item.id, index[item.id].source.path));
+    else
+      index[item.id] = item;
+  }
+  errors.sort((a, b) =>
+    a.path.localeCompare(b.path, "en") ||
+    a.code.localeCompare(b.code, "en") ||
+    a.message.localeCompare(b.message, "en"));
+  const requirements = items.sort((a, b) =>
+    a.id.localeCompare(b.id, "en") ||
+    a.source.path.localeCompare(b.source.path, "en"));
+  return { ok: errors.length === 0, requirements, index, errors };
+}
