@@ -36,6 +36,22 @@ export interface TransitionObservationFact {
   authorityBaseRevision: string; baseRevision: string; headRevision: string;
   path: string; metric: "changed_lines"; value: number; providerId: string;
 }
+export type ProviderBoundary = "observation" | "domain";
+export type ProviderCapability =
+  | { kind: "metric"; key: string; subjectPaths: readonly string[] }
+  | { kind: "evidence"; class: "execution" | "domain"; key: string; requirementId: string;
+      subjectPaths: readonly string[]; verifierPath?: string; verifierRevision?: string };
+export interface AuthenticatedProviderGrant {
+  repository: string;
+  authorityBaseRevision: string;
+  baseRevision: string;
+  headRevision: string;
+  providerId: string;
+  principal: string;
+  producerSource: string;
+  boundary: ProviderBoundary;
+  capability: ProviderCapability;
+}
 export interface TransitionCauseRule {
   authorityRevision: string;
   requirementId: string;
@@ -76,6 +92,7 @@ export interface TransitionClosureInput {
   evidenceFacts?: readonly TransitionEvidenceFact[];
   observationFacts?: readonly TransitionObservationFact[];
   trustedEvidenceProviders?: readonly string[];
+  authenticatedProviderGrants?: readonly AuthenticatedProviderGrant[];
 }
 
 interface RelationFact {
@@ -458,6 +475,83 @@ function evidencePass(input: TransitionClosureInput, facts: readonly TransitionE
   return facts.some(fact=>fact.authorityBaseRevision===input.trustedAuthorityBase.revision && fact.baseRevision===input.base.revision &&
     fact.headRevision===input.head.revision && fact.key===key && fact.status==="pass");
 }
+function providerSubjectPaths(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.some(path=>typeof path!=="string")) return null;
+  try {
+    const paths=(value as string[]).map(path=>normPath(path));
+    if (new Set(paths).size!==paths.length) return null;
+    return sorted(paths);
+  } catch { return null; }
+}
+function validProviderGrants(input: TransitionClosureInput): { grants: AuthenticatedProviderGrant[]; errors: string[] } {
+  const grants:AuthenticatedProviderGrant[]=[], errors:string[]=[];
+  for(const raw of input.authenticatedProviderGrants||[]) {
+    const item=obj(raw), capability=obj(item?.capability);
+    const common=!!item && !!capability &&
+      typeof item.repository==="string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(item.repository) &&
+      exactRevision(item.authorityBaseRevision) && exactRevision(item.baseRevision) && exactRevision(item.headRevision) &&
+      typeof item.providerId==="string" && item.providerId.length>0 && item.providerId!=="*" &&
+      typeof item.principal==="string" && item.principal.length>0 && item.principal!=="*" &&
+      typeof item.producerSource==="string" && item.producerSource.length>0 && item.producerSource!=="*" &&
+      (item.boundary==="observation" || item.boundary==="domain");
+    if(!common) { errors.push("invalid_provider_grant"); continue; }
+    const subjects=providerSubjectPaths(capability.subjectPaths);
+    if(!subjects || typeof capability.key!=="string" || !capability.key || capability.key==="*") {
+      errors.push("invalid_provider_grant"); continue;
+    }
+    if(capability.kind==="metric") {
+      if(item.boundary!=="observation" || Object.keys(capability).some(k=>!["kind","key","subjectPaths"].includes(k))) {
+        errors.push("invalid_provider_grant"); continue;
+      }
+    } else if(capability.kind==="evidence") {
+      if(item.boundary!=="domain" || (capability.class!=="execution" && capability.class!=="domain") ||
+        typeof capability.requirementId!=="string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(capability.requirementId) ||
+        Object.keys(capability).some(k=>!["kind","class","key","requirementId","subjectPaths","verifierPath","verifierRevision"].includes(k))) {
+        errors.push("invalid_provider_grant"); continue;
+      }
+      const hasVerifier=capability.verifierPath!==undefined || capability.verifierRevision!==undefined;
+      if(capability.class==="execution" && !hasVerifier) { errors.push("invalid_provider_grant"); continue; }
+      if(hasVerifier) {
+        if(typeof capability.verifierPath!=="string" || !exactRevision(capability.verifierRevision)) {
+          errors.push("invalid_provider_grant"); continue;
+        }
+        try { normPath(capability.verifierPath); } catch { errors.push("invalid_provider_grant"); continue; }
+      }
+    } else {
+      errors.push("invalid_provider_grant"); continue;
+    }
+    grants.push(raw);
+  }
+  return {grants,errors:sorted(errors)};
+}
+const grantTransitionMatches=(input:TransitionClosureInput, grant:AuthenticatedProviderGrant):boolean =>
+  grant.repository===input.repository &&
+  grant.authorityBaseRevision===input.trustedAuthorityBase.revision &&
+  grant.baseRevision===input.base.revision &&
+  grant.headRevision===input.head.revision;
+const metricAuthorityKey=(metric:string):string => metric==="changed_lines" ? "git.changed_lines" : metric;
+function observationProviderAuthorized(input:TransitionClosureInput, grants:readonly AuthenticatedProviderGrant[], fact:TransitionObservationFact, path:string):boolean {
+  return grants.some(grant=>{
+    if(!grantTransitionMatches(input,grant) || grant.providerId!==fact.providerId || grant.boundary!=="observation" || grant.capability.kind!=="metric") return false;
+    return grant.capability.key===metricAuthorityKey(fact.metric) &&
+      stable(providerSubjectPaths(grant.capability.subjectPaths)||[])===stable([path]);
+  });
+}
+function evidenceProviderAuthorized(input:TransitionClosureInput, grants:readonly AuthenticatedProviderGrant[],
+  fact:TransitionEvidenceFact, spec:Record<string,unknown>, requirementId:string, touched:string[]):boolean {
+  if(typeof fact.providerId!=="string" || !fact.providerId) return false;
+  return grants.some(grant=>{
+    if(!grantTransitionMatches(input,grant) || grant.providerId!==fact.providerId || grant.boundary!=="domain" || grant.capability.kind!=="evidence") return false;
+    const capability=grant.capability;
+    if(capability.class!==spec.kind || capability.key!==spec.key || capability.requirementId!==requirementId) return false;
+    if(stable(providerSubjectPaths(capability.subjectPaths)||[])!==stable(touched)) return false;
+    if(capability.class==="execution")
+      return capability.verifierPath===spec.verifierPath && capability.verifierRevision===input.head.revision;
+    if(capability.verifierPath!==undefined || capability.verifierRevision!==undefined)
+      return capability.verifierPath===fact.verifierPath && capability.verifierRevision===fact.verifierRevision;
+    return true;
+  });
+}
 function authorityPermissions(delta: Delta, input: TransitionClosureInput, protectedSet: ReadonlySet<string>): string[] {
   const result=new Set<string>();
   if (delta.kind==="requirement_add"||delta.kind==="requirement_modify"||delta.kind==="requirement_remove") result.add("requirement:"+delta.subject);
@@ -577,6 +671,9 @@ function evaluateScopedObligations(
     ];
     const ids = sorted(new Set(versions.flatMap(v => Object.keys(v.state.requirements.index))));
     const providers = new Set(input.trustedEvidenceProviders || []);
+    const providerState = validProviderGrants(input);
+    problems.push(...providerState.errors.map(error=>"I7:"+error));
+    const capabilityMode = input.authenticatedProviderGrants !== undefined;
     const observation = input.observationFacts || [];
     const observationMap = new Map<string, number>();
     for (const o of observation) {
@@ -589,9 +686,16 @@ function evaluateScopedObligations(
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
                 o.authorityBaseRevision !== input.trustedAuthorityBase.revision || o.baseRevision !== input.base.revision ||
                 o.headRevision !== input.head.revision || o.metric !== "changed_lines" ||
-                typeof o.providerId !== "string" || !providers.has(o.providerId) ||
+                typeof o.providerId !== "string" || !o.providerId ||
                 !Number.isSafeInteger(o.value) || o.value < 0) {
                 problems.push("I7:invalid_observation:" + path);
+                continue;
+            }
+            const providerAuthorized = capabilityMode
+                ? observationProviderAuthorized(input, providerState.grants, o, path)
+                : providers.has(o.providerId);
+            if (!providerAuthorized) {
+                problems.push("I7:unauthorized_observation_provider:" + path + ":" + o.metric);
                 continue;
             }
             const key = o.metric + "\0" + path;
@@ -665,13 +769,18 @@ function evaluateScopedObligations(
                                 (input.head.j1.owners[spec.verifierPath] || []).includes(id);
                         });
                     })();
-                    const compatible = spec.providerId === undefined ? [] : facts.filter(f => f.key === spec.key && f.requirementId === id &&
-                        f.providerId === spec.providerId && providers.has(spec.providerId) &&
+                    const structurallyCompatible = facts.filter(f => f.key === spec.key && f.requirementId === id &&
+                        (spec.providerId === undefined || f.providerId === spec.providerId) &&
                         f.authorityBaseRevision === input.trustedAuthorityBase.revision &&
                         f.baseRevision === input.base.revision && f.headRevision === input.head.revision &&
                         Array.isArray(f.subjectPaths) && f.subjectPaths.every(path => typeof path === "string") &&
                         stable(sorted(f.subjectPaths)) === stable(touched) &&
                         (spec.kind !== "execution" || (f.verifierPath === spec.verifierPath && f.verifierRevision === input.head.revision)));
+                    const compatible = structurallyCompatible.filter(f => capabilityMode
+                        ? evidenceProviderAuthorized(input, providerState.grants, f, spec, id, touched)
+                        : (spec.providerId !== undefined && f.providerId === spec.providerId && providers.has(spec.providerId)));
+                    if (capabilityMode && structurallyCompatible.length > 0 && compatible.length === 0)
+                        problems.push("I7:unauthorized_evidence_provider:" + id + ":" + rule.id);
                     const statuses = new Set(compatible.map(f => f.status));
                     if (statuses.size > 1) {
                         verdict = "RED";
