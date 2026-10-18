@@ -280,11 +280,12 @@ function nativeRelations(value, requirementId) {
         const local = new Set();
         for (const raw of predicateValues) {
             if (typeof raw !== "string" || !nativePredicates.has(raw))
-                nativeFailure("unknown_predicate", "unknown native relation predicate " + String(raw));
-            if (local.has(raw))
-                nativeFailure("duplicate_relation", "duplicate predicate " + raw + " in one relation declaration");
-            local.add(raw);
-            predicates.push(raw);
+                return nativeFailure("unknown_predicate", "unknown native relation predicate " + String(raw));
+            const predicate = raw;
+            if (local.has(predicate))
+                return nativeFailure("duplicate_relation", "duplicate predicate " + predicate + " in one relation declaration");
+            local.add(predicate);
+            predicates.push(predicate);
         }
         predicates.sort();
         const source = declaration.source === undefined
@@ -331,13 +332,14 @@ function nativeConstraintScope(value, label) {
     const seen = new Set();
     for (const raw of relationValues) {
         if (typeof raw !== "string" || !nativePredicates.has(raw))
-            nativeFailure("unknown_predicate", "unknown Constraint scope predicate " + String(raw));
-        if (!nativeScopePredicates.has(raw))
-            nativeFailure("invalid_constraint", "predicate " + raw + " cannot seed Requirement-derived Constraint scope");
-        if (seen.has(raw))
-            nativeFailure("invalid_constraint", "duplicate Constraint scope predicate " + raw);
-        seen.add(raw);
-        relations.push(raw);
+            return nativeFailure("unknown_predicate", "unknown Constraint scope predicate " + String(raw));
+        const predicate = raw;
+        if (!nativeScopePredicates.has(predicate))
+            return nativeFailure("invalid_constraint", "predicate " + predicate + " cannot seed Requirement-derived Constraint scope");
+        if (seen.has(predicate))
+            return nativeFailure("invalid_constraint", "duplicate Constraint scope predicate " + predicate);
+        seen.add(predicate);
+        relations.push(predicate);
     }
     if (input.include_generated !== undefined && typeof input.include_generated !== "boolean")
         nativeFailure("invalid_constraint", label + ".include_generated must be boolean");
