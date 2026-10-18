@@ -519,7 +519,18 @@ function validProviderGrants(input) {
         }
         grants.push(raw);
     }
-    return { grants, errors: sorted(errors) };
+    const identities = new Map(), conflicted = new Set();
+    for (const grant of grants) {
+        const identity = grant.principal + "\0" + grant.producerSource;
+        const prior = identities.get(grant.providerId);
+        if (prior !== undefined && prior !== identity)
+            conflicted.add(grant.providerId);
+        else
+            identities.set(grant.providerId, identity);
+    }
+    if (conflicted.size)
+        errors.push("invalid_provider_grant");
+    return { grants: grants.filter(grant => !conflicted.has(grant.providerId)), errors: sorted(errors) };
 }
 const grantTransitionMatches = (input, grant) => grant.repository === input.repository &&
     grant.authorityBaseRevision === input.trustedAuthorityBase.revision &&
