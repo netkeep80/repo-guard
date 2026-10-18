@@ -115,10 +115,10 @@ function materializePack(spec, overrides) {
             types.requirement_artifact_path = {
                 sources: [
                     ...jsonGlobs.map((glob) => ({
-                        kind: "structured_pointer", glob, format: "json", pointer: "/artifacts", item_field: "path",
+                        kind: "requirements_strict_resource_paths", glob, format: "json",
                     })),
                     ...yamlGlobs.map((glob) => ({
-                        kind: "structured_pointer", glob, format: "yaml", pointer: "/artifacts", item_field: "path",
+                        kind: "requirements_strict_resource_paths", glob, format: "yaml",
                     })),
                 ],
             };
