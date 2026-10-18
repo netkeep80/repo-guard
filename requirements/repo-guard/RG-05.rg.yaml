@@ -1,0 +1,176 @@
+format: repo-guard/requirement-v1
+id: RG-05
+normative: "### RG-05 — Воспроизводимое происхождение authority\n\n**`MUST`:** если утверждение зависит от внешней семантики или артефакта, оно указывает именно проверенную принятую идентичность; кандидат и плавающая ссылка не выдаются за точный принятый источник. Разные authority фиксируются независимо. Осознанный выбор плавающей зависимости должен быть явным.\n\nРиск — проверено одно, исполнено или принято другое. Нарушение — одного имени версии достаточно для заявления о совпадении контракта, исходников и артефакта. Машинно проверяются точные коммиты, значения контрактов, хеши и доступная история происхождения; это не автоматическое доказательство воспроизводимой сборки.\n\nСредства: отношения документов и внешние проверки зависимостей/артефактов. В `aprover` обычный CI материализует точный `@mts/core` и проверяет пакет; в `anum_parser` отдельны семантическая и визуальная фиксации. Выпуск самого инструмента связывает точный принятый коммит с тегом и объектом выпуска.\n"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".github/workflows/pages.yml"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/doctor.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/facts/control-plane.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/facts/input.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/git.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/immutable-snapshot-cache.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/immutable-snapshot-cache.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/build.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/check-dist.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/observatory/collect.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/observatory/render.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/doctor.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/facts/control-plane.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/facts/input.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/git.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/immutable-snapshot-cache.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/support/immutable-observation.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-647-control-plane-doctor.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-647-control-plane-graph.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-647-git-lease-delete.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-647-merged-residue-planner.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-build-boundary.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-6-observatory-render.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-6-observatory-snapshot.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-6-pages-workflow.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-8b-pr-cancellation.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-8g-suite-observation-cache.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-9g-doctor-git-evidence.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3.8c-linked-issue-observation.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-current-base-ref.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-doctor-boundary.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-doctor.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-git-output-buffer.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-1-machine-safe-git-transaction-coverage.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-1-machine-safe-git-transaction.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-2-cross-repo-linked-issue-process.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-6-exact-repository-observation.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p1-2-observation-report.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p2-1-immutable-snapshot-cache.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p3-linked-issue-authority-freshness.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-freshness-red.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-rg05-runtime-action-authority.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-typescript-source-cutover.mjs"

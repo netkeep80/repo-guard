@@ -1,0 +1,84 @@
+format: repo-guard/requirement-v1
+id: RG-02
+normative: "### RG-02 — Принятие не выводится из готовности\n\n**`MUST`:** там, где проект различает кандидата и принятое поведение, переход требует отдельного наблюдаемого решения уполномоченной стороны, связанного с точной редакцией и её свидетельствами. Зелёный CI, слияние исследовательского кода, закрытая задача и номер пакета сами по себе не означают принятия предметного контракта.\n\nРиск — эксперимент незаметно становится текущей семантикой. Нарушение — потребитель выбирает кандидата как принятое состояние без предусмотренного перехода. Статусы и ссылки проверяемы данными; полнота предметной приёмки требует внешних проверок и решения владельца.\n\nСредства: защищённые документы жизненного цикла, отношения документов, отдельная санкция перехода, точные ссылки. `contract-conformance` проверяет настроенные структурные условия, но сам не выдаёт полномочие принять контракт. Исторический снимок исследования `anum_docs`, использованный при формировании требования, показывал сосуществование принятого `v0.11` и кандидата `v0.12`; это пример разделения состояний, а не утверждение о текущем статусе внешнего проекта.\n"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".github/workflows/release-integrity.yml"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".github/workflows/release.yml"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/version-transition/base/meta/REVISION"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/version-transition/base/repo-policy.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/version-transition/cases/fail-downgrade/head/meta/REVISION"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/version-transition/cases/pass/head/meta/REVISION"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/version-transition/scenario.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "RELEASING.md"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/release-preflight.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/verify-release-ref.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3b-phase-override.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-7-version-truth.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-contract-conformance-current-promotion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-execution-phases.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-post-release-hygiene.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-release-integrity-identity.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-release-observer-independence.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-release-ref.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-release-transaction.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-transition-rules.mjs"
