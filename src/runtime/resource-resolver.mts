@@ -29,7 +29,7 @@ const safePath = (p: unknown): string => {
 };
 const exactIdentity = (repository: string, revision: string, path: string, pointer = ""): ExactRepresentationSubject =>
   ({ kind: "exact_representation", repository, revision, path, pointer });
-function strictRef(value: unknown): ResourceRef {
+export function normalizeResourceRef(value: unknown): ResourceRef {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid ResourceRef object");
   const obj = value as Record<string, unknown>, kind = obj.kind;
   if (typeof kind !== "string" || !Object.hasOwn(definitions, kind)) throw new Error("unknown ResourceRef kind");
@@ -58,7 +58,7 @@ export function createResourceResolver(context: ResolverContext) {
   return {
     resolve(rawRef: unknown, options: { durable?: boolean; expectedRevision?: string } = {}): ResolveResult {
       let ref: ResourceRef;
-      try { ref = strictRef(rawRef); }
+      try { ref = normalizeResourceRef(rawRef); }
       catch (e) { const message = (e as Error).message; return error(/path|noncanonical/i.test(message) ? "unsafe_path" : /invalid external repository or revision/.test(message) ? "invalid_revision" : "invalid_ref", "", message); }
       const subject = JSON.stringify(ref);
       if (ref.kind === "requirement") {
