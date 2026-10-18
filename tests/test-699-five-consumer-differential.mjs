@@ -1126,6 +1126,13 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       evidenceFacts: [d4Evidence],
     });
     assert.equal(d4StaleReceipt.replay.ok, false);
+    const d4StaleEvidence = productionPipeline.evaluateRepositoryShadowReplay({
+      ...d4BaseInput,
+      trustedReceipts: [d4Receipt],
+      evidenceFacts: [{ ...d4Evidence, headRevision: d4Base, verifierRevision: d4Base }],
+    });
+    assert.equal(d4StaleEvidence.replay.ok, false);
+    assert.ok(d4StaleEvidence.replay.gaps.some((x) => x.includes("missing_evidence:D4-TRUST:exact-domain")));
     const d4WrongSubject = productionPipeline.evaluateRepositoryShadowReplay({
       ...d4BaseInput, trustedReceipts: [d4Receipt],
       evidenceFacts: [{ ...d4Evidence, subjectPaths: ["tests/domain.mjs"] }],
@@ -1395,7 +1402,10 @@ test("#726 I9 R01-M10 real-source audit + production provisional replay", { time
       A02: () => assert.equal(d5Normative.replay.ok, false),
       A03: () => assert.equal(d4WrongProvider.replay.ok, false),
       A04: () => assert.equal(d4StaleReceipt.replay.ok, false),
-      A05: () => assert.equal(d4StaleReceipt.replay.ok, false),
+      A05: () => {
+        assert.equal(d4StaleEvidence.replay.ok, false);
+        assert.ok(d4StaleEvidence.replay.gaps.some((x) => x.includes("missing_evidence:D4-TRUST:exact-domain")));
+      },
       A06: () => assert.equal(d4WrongSubject.replay.ok, false),
       A07: () => assert.ok(d4NoTrust.replay.gaps.some((x) => x.includes("missing_evidence"))),
       A08: () => {
