@@ -695,7 +695,9 @@ function evaluateScopedObligations(
                 ? observationProviderAuthorized(input, providerState.grants, o, path)
                 : providers.has(o.providerId);
             if (!providerAuthorized) {
-                problems.push("I7:unauthorized_observation_provider:" + path + ":" + o.metric);
+                problems.push(capabilityMode
+                    ? "I7:unauthorized_observation_provider:" + path + ":" + o.metric
+                    : "I7:invalid_observation:" + path);
                 continue;
             }
             const key = o.metric + "\0" + path;
