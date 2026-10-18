@@ -470,3 +470,20 @@ test("C2.3 P07 wildcard producer capabilities are invalid, never authority",()=>
   assert.equal(result.ok,false);
   assert.ok(result.reasons.some(x=>x.includes("invalid_provider_grant")||x.includes("unauthorized_observation_provider")),result.reasons.join(" | "));
 });
+
+
+test("C2.3 P08 one providerId cannot alias multiple authenticated producer identities",()=>{
+  const {base,head,trustedAuthorityBase}=providerState();
+  const result=evaluateTransitionCauseClosure({
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],workIntent:{id:"W",addresses:["R1"]},
+    observationFacts:[{authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"git",path:"src/a.ts",metric:"changed_lines",value:5}],
+    trustedEvidenceProviders:["git"],
+    authenticatedProviderGrants:[
+      providerGrant(),
+      providerGrant({principal:"github-app:different-producer"}),
+    ],
+  });
+  assert.equal(result.ok,false);
+  assert.ok(result.reasons.some(x=>x.includes("invalid_provider_grant")||x.includes("unauthorized_observation_provider")),result.reasons.join(" | "));
+});
