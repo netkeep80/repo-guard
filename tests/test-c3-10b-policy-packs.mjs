@@ -121,6 +121,35 @@ assert.equal(validate(unknownPackPolicy), false, "unknown or user-defined packs 
 
 console.log("C3.10b closed built-in packs surface contract passed");
 
+const nativeClosedRepositoryPack = resolvePolicyPacks({
+  ...basePolicy,
+  packs: {
+    "requirements-strict": {
+      requirement_json_globs: ["requirements/none/*.json"],
+      requirement_yaml_globs: ["requirements/repo-guard/*.yaml"],
+      requirement_id_pattern: "RG-[0-9]{2}",
+      closed_repository: true,
+      strict_heading_docs: ["requirements/**/*.md"],
+    },
+  },
+});
+assert.equal(nativeClosedRepositoryPack.ok, true);
+const closedSources = nativeClosedRepositoryPack.policy.anchors?.types?.requirement_artifact_path?.sources || [];
+assert.deepEqual(
+  closedSources,
+  [
+    { kind: "requirements_strict_resource_paths", glob: "requirements/none/*.json", format: "json" },
+    { kind: "requirements_strict_resource_paths", glob: "requirements/repo-guard/*.yaml", format: "yaml" },
+  ],
+  "closed requirements-strict must lower to one internal representation-aware resource-path extractor per configured requirement glob",
+);
+assert.equal(
+  schema.definitions.anchor_source.oneOf.some((definition) => definition.properties?.kind?.const === "requirements_strict_resource_paths"),
+  false,
+  "internal requirements-strict resource extractor must not become a public policy DSL kind",
+);
+console.log("C2.5 requirements-strict internal native bridge lowering contract passed");
+
 const versionPackPolicy = {
   ...basePolicy,
   packs: {
