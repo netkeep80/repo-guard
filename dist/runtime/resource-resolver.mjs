@@ -111,7 +111,6 @@ export function createResourceResolver(context) {
         }
     };
 }
-
 const predicates = new Set(["derives_from", "requires", "implemented_by", "verified_by", "documents", "generates", "depends_on", "constrains", "supersedes"]);
 const requirementSourcePredicates = new Set(["derives_from", "requires", "implemented_by", "verified_by", "documents", "depends_on", "constrains", "supersedes"]);
 const resourceScopePredicates = new Set(["requires", "implemented_by", "verified_by", "documents", "constrains"]);
