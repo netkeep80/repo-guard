@@ -327,6 +327,8 @@ export function requirementAuthorityScopeFromPolicy(policy: RequirementAuthority
     if (typeof source.glob !== "string") return [];
     if (closed && source.kind === "structured_pointer" && source.pointer === "/artifacts" && source.item_field === "path"
       && (source.format === "json" || source.format === "yaml")) return [{ glob: source.glob, format: source.format }];
+    if (closed && source.kind === "requirements_strict_resource_paths"
+      && (source.format === "json" || source.format === "yaml")) return [{ glob: source.glob, format: source.format }];
     if (!closed && source.kind === "structured_pointer" && source.pointer === "/id" && source.format === "yaml") return [{ glob: source.glob, format: "yaml" }];
     if (!closed && source.kind === "json_field" && source.field === "id") return [{ glob: source.glob, format: "json" }];
     return [];
