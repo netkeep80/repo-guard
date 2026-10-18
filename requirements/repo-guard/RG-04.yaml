@@ -46,6 +46,8 @@ artifacts:
     relations: [requires, implements]
   - path: "dist/runtime/canonical-requirements.mjs"
     relations: [requires, implements]
+  - path: "dist/runtime/native-contract.mjs"
+    relations: [implements]
   - path: "dist/runtime/pipeline.mjs"
     relations: [requires, implements]
   - path: "dist/runtime/validation.mjs"
@@ -122,6 +124,8 @@ artifacts:
     relations: [requires, implements]
   - path: "src/runtime/canonical-requirements.mts"
     relations: [requires, implements]
+  - path: "src/runtime/native-contract.mts"
+    relations: [implements]
   - path: "src/runtime/pipeline.mts"
     relations: [requires, implements]
   - path: "src/runtime/validation.mts"
