@@ -16,7 +16,7 @@ const safePath = (p) => {
     return norm;
 };
 const exactIdentity = (repository, revision, path, pointer = "") => ({ kind: "exact_representation", repository, revision, path, pointer });
-function strictRef(value) {
+export function normalizeResourceRef(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error("invalid ResourceRef object");
     const obj = value, kind = obj.kind;
@@ -56,7 +56,7 @@ export function createResourceResolver(context) {
         resolve(rawRef, options = {}) {
             let ref;
             try {
-                ref = strictRef(rawRef);
+                ref = normalizeResourceRef(rawRef);
             }
             catch (e) {
                 const message = e.message;
