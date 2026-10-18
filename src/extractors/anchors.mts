@@ -1,6 +1,7 @@
 import type { ParsedDiffFile } from "../diff/parser.mjs";
 import type { DocumentReader, DocumentReaderOptions } from "../document-facts.mjs";
 import { parseJson, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
+import { loadNativeRequirements } from "../runtime/canonical-requirements.mjs";
 import { uniqueSorted } from "../utils/collections.mjs";
 import { matchesAny } from "../utils/path-patterns.mjs";
 import { readRepositoryTextFile } from "../utils/repository-files.mjs";
@@ -27,6 +28,8 @@ export interface AnchorExtractionOptions extends DocumentReaderOptions {
   changedFiles?: readonly ParsedDiffFile[];
   trackedFiles?: readonly string[];
   documents?: Pick<DocumentReader, "text"> | null;
+  repositoryIdentity?: string | null;
+  headRef?: string | null;
 }
 
 export interface AnchorInstance {
@@ -150,6 +153,76 @@ function extractStructuredPointerAnchors(anchorType: string, source: AnchorSourc
   });
 }
 
+
+const exactRevisionPattern = /^[0-9a-f]{40}$/;
+const repositoryIdentityPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+function requirementsStrictResourceInstance(anchorType: string, file: string, value: string): AnchorInstance {
+  return {
+    anchorType,
+    value,
+    file,
+    sourceKind: "requirements_strict_resource_paths",
+    raw: value,
+  };
+}
+
+function extractRequirementsStrictResourcePaths(
+  anchorType: string,
+  source: AnchorSource,
+  file: string,
+  content: string,
+  options: AnchorExtractionOptions,
+): AnchorInstance[] {
+  if (/\.rg\.(?:yaml|json)$/i.test(file)) {
+    const repository = options.repositoryIdentity;
+    const revision = options.headRef;
+    if (typeof repository !== "string" || !repositoryIdentityPattern.test(repository)) {
+      throw new Error("native requirements-strict extraction requires exact repository identity");
+    }
+    if (typeof revision !== "string" || !exactRevisionPattern.test(revision)) {
+      throw new Error("native requirements-strict extraction requires exact HEAD revision");
+    }
+    const native = loadNativeRequirements({
+      repository,
+      revision,
+      paths: [file],
+      readFile: (requestedRevision, requestedPath) =>
+        requestedRevision === revision && requestedPath === file ? content : null,
+    });
+    if (!native.ok || native.requirements.length !== 1) {
+      const details = native.errors.map((error) => `${error.code}:${error.path}:${error.message}`).join(" | ");
+      throw new Error("invalid native Requirement" + (details ? ": " + details : ""));
+    }
+    const requirement = native.requirements[0]!;
+    const paths = new Set<string>([requirement.source.path]);
+    for (const relation of requirement.relations) {
+      if (relation.source.kind === "artifact") paths.add(relation.source.path);
+      if (relation.target.kind === "artifact") paths.add(relation.target.path);
+    }
+    return [...paths]
+      .sort((a, b) => a.localeCompare(b, "en"))
+      .map((path) => requirementsStrictResourceInstance(anchorType, file, path));
+  }
+
+  const legacy = extractStructuredPointerAnchors(
+    anchorType,
+    {
+      kind: "structured_pointer",
+      glob: source.glob,
+      format: source.format,
+      pointer: "/artifacts",
+      item_field: "path",
+    },
+    file,
+    content,
+  );
+  return legacy.map((instance) => ({
+    ...instance,
+    sourceKind: "requirements_strict_resource_paths",
+  }));
+}
+
 function compareInstances(a: AnchorInstance, b: AnchorInstance): number {
   return a.file.localeCompare(b.file) || (a.line || 0) - (b.line || 0) || (a.column || 0) - (b.column || 0) ||
     a.anchorType.localeCompare(b.anchorType) || a.value.localeCompare(b.value);
@@ -169,6 +242,9 @@ export function extractAnchors(policy: AnchorPolicyProjection, options: AnchorEx
           if (source.kind === "regex") instances.push(...extractRegexAnchors(anchorType, source, file, content));
           else if (source.kind === "json_field") instances.push(...extractJsonFieldAnchor(anchorType, source, file, content));
           else if (source.kind === "structured_pointer") instances.push(...extractStructuredPointerAnchors(anchorType, source, file, content));
+          else if (source.kind === "requirements_strict_resource_paths") {
+            instances.push(...extractRequirementsStrictResourcePaths(anchorType, source, file, content, options));
+          }
           else throw new Error(`unsupported anchor source kind "${source.kind}"`);
         } catch (error) {
           errors.push({ anchorType, sourceKind: source.kind, sourceIndex, file, message: (error as Error).message });
