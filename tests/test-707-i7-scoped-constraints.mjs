@@ -48,6 +48,7 @@ const yes=(x,name)=>assert.equal(x.result.ok,true,name+": "+x.result.reasons.joi
 const no=(x,part,name)=>{assert.equal(x.result.ok,false,name+" unexpectedly GREEN");assert.ok(x.result.reasons.some(s=>s.includes(part)),name+" missing "+part+": "+x.result.reasons.join(" | "));};
 const scopes=x=>x.result.explanations.constraints;
 const bound=(id="R1",key="lines")=>`constraint:${id}:${key}`;
+const definitionBound=(id="R1",key="lines")=>`constraint_definition:${id}:${key}`;
 const hasScope=(x,owner,want)=>assert.deepEqual(scopes(x).find(e=>e.requirementId===owner)?.scope,want);
 const ev=(over={})=>({key:"execution:tests/t.mjs",status:"pass",providerId:"ci",verifierPath:"tests/t.mjs",verifierRevision:B,...over});
 const item=(path,text)=>[path,text];
@@ -225,16 +226,34 @@ test("C2.2 H05 Constraint definition change requires exact constraint permission
     receipts:[["requirement:R1"]],
     workIntent:{id:"W",addresses:["R1"]},
   });
-  no(broad,"missing_authority:constraint:R1:lines","H05 broad grant");
+  no(broad,"missing_authority:constraint_definition:R1:lines","H05 broad grant");
 
   const exact=run({
+    baseConstraints:[lines(10)],
+    headConstraints:[lines(20)],
+    resourceDeltas:[],
+    receipts:[[definitionBound()]],
+    workIntent:{id:"W",addresses:["R1"]},
+  });
+  yes(exact,"H05 exact constraint-definition grant");
+
+  const waiverOnly=run({
     baseConstraints:[lines(10)],
     headConstraints:[lines(20)],
     resourceDeltas:[],
     receipts:[[bound()]],
     workIntent:{id:"W",addresses:["R1"]},
   });
-  yes(exact,"H05 exact constraint grant");
+  no(waiverOnly,"missing_authority:constraint_definition:R1:lines","H05 waiver cannot rewrite definition");
+
+  const definitionOnly=run({
+    baseConstraints:[lines(3)],
+    headConstraints:[lines(3)],
+    observed:5,
+    receipts:[[definitionBound()]],
+    workIntent:{id:"W",addresses:["R1"]},
+  });
+  no(definitionOnly,"constraint_exceeded:R1:lines","H05 definition grant cannot waive runtime obligation");
 });
 
 test("C2.2 H06 lifecycle and Constraint permissions remain non-interchangeable",()=>{
