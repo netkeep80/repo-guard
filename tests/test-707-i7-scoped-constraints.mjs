@@ -320,3 +320,170 @@ test("C2.2 H07 native lowering reuses J2/J1 kernel and preserves native semantic
   assert.equal(j1.ok,true,JSON.stringify(j1));
   assert.deepEqual(j1.owners["dist/a.js"],["R1"]);
 });
+
+
+function providerState({constraints=[lines(10)],relations=defaultRelations(),files=["src/a.ts"]}={}){
+  const base=snapshot(A,defaultNodes(relations,constraints),files);
+  const head=snapshot(B,defaultNodes(relations,constraints),files);
+  return {base,head,trustedAuthorityBase:{revision:A,requirements:base.requirements,j2:base.j2}};
+}
+const providerGrant=(over={})=>({
+  repository:repo,
+  authorityBaseRevision:A,
+  baseRevision:A,
+  headRevision:B,
+  providerId:"git",
+  principal:"github-app:trusted-observer",
+  producerSource:"trusted-adapter",
+  boundary:"observation",
+  capability:{kind:"metric",key:"git.changed_lines",subjectPaths:["src/a.ts"]},
+  ...over,
+});
+const domainGrant=(over={})=>({
+  repository:repo,
+  authorityBaseRevision:A,
+  baseRevision:A,
+  headRevision:B,
+  providerId:"ci",
+  principal:"github-app:trusted-domain",
+  producerSource:"trusted-adapter",
+  boundary:"domain",
+  capability:{
+    kind:"evidence",
+    class:"execution",
+    key:"execution:tests/t.mjs",
+    requirementId:"R1",
+    subjectPaths:["src/a.ts"],
+    verifierPath:"tests/t.mjs",
+    verifierRevision:B,
+  },
+  ...over,
+});
+
+test("C2.3 P01 generic provider authentication cannot authorize an OBSERVATION metric claim",()=>{
+  const {base,head,trustedAuthorityBase}=providerState();
+  const result=evaluateTransitionCauseClosure({
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],
+    workIntent:{id:"W",addresses:["R1"]},
+    observationFacts:[{authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"git",path:"src/a.ts",metric:"changed_lines",value:5}],
+    trustedEvidenceProviders:["git"],
+    authenticatedProviderGrants:[],
+  });
+  assert.equal(result.ok,false,"generic provider authentication must not authorize metric production");
+  assert.ok(result.reasons.some(x=>x.includes("unauthorized_observation_provider")),result.reasons.join(" | "));
+});
+
+test("C2.3 P02 exact OBSERVATION producer grant authorizes only its exact metric and subject",()=>{
+  const {base,head,trustedAuthorityBase}=providerState();
+  const common={
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],
+    workIntent:{id:"W",addresses:["R1"]},
+    trustedEvidenceProviders:[],
+  };
+  const fact={authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"git",path:"src/a.ts",metric:"changed_lines",value:5};
+  const ok=evaluateTransitionCauseClosure({...common,observationFacts:[fact],authenticatedProviderGrants:[providerGrant()]});
+  assert.equal(ok.ok,true,ok.reasons.join(" | "));
+  const wrongMetric=evaluateTransitionCauseClosure({...common,observationFacts:[fact],trustedEvidenceProviders:["git"],
+    authenticatedProviderGrants:[providerGrant({capability:{kind:"metric",key:"git.other",subjectPaths:["src/a.ts"]}})]});
+  assert.equal(wrongMetric.ok,false);
+  assert.ok(wrongMetric.reasons.some(x=>x.includes("unauthorized_observation_provider")));
+  const wrongSubject=evaluateTransitionCauseClosure({...common,observationFacts:[fact],trustedEvidenceProviders:["git"],
+    authenticatedProviderGrants:[providerGrant({capability:{kind:"metric",key:"git.changed_lines",subjectPaths:["src/b.ts"]}})]});
+  assert.equal(wrongSubject.ok,false);
+  assert.ok(wrongSubject.reasons.some(x=>x.includes("unauthorized_observation_provider")));
+});
+
+test("C2.3 P03 generic provider authentication cannot authorize a DOMAIN/execution claim",()=>{
+  const {base,head,trustedAuthorityBase}=providerState({constraints:[check()],relations:verifierRelations(),files:["src/a.ts","tests/t.mjs"]});
+  const result=evaluateTransitionCauseClosure({
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],
+    workIntent:{id:"W",addresses:["R1"]},
+    evidenceFacts:[{authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"ci",requirementId:"R1",
+      key:"execution:tests/t.mjs",status:"pass",subjectPaths:["src/a.ts"],verifierPath:"tests/t.mjs",verifierRevision:B}],
+    trustedEvidenceProviders:["ci"],
+    authenticatedProviderGrants:[],
+  });
+  assert.equal(result.ok,false,"generic authentication must not authorize DOMAIN claims");
+  assert.ok(result.reasons.some(x=>x.includes("unauthorized_evidence_provider")),result.reasons.join(" | "));
+});
+
+test("C2.3 P04 exact DOMAIN producer grant authorizes claim + subjects + verifier",()=>{
+  const {base,head,trustedAuthorityBase}=providerState({constraints:[check()],relations:verifierRelations(),files:["src/a.ts","tests/t.mjs"]});
+  const fact={authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"ci",requirementId:"R1",
+    key:"execution:tests/t.mjs",status:"pass",subjectPaths:["src/a.ts"],verifierPath:"tests/t.mjs",verifierRevision:B};
+  const result=evaluateTransitionCauseClosure({
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],
+    workIntent:{id:"W",addresses:["R1"]},
+    evidenceFacts:[fact],
+    trustedEvidenceProviders:[],
+    authenticatedProviderGrants:[domainGrant()],
+  });
+  assert.equal(result.ok,true,result.reasons.join(" | "));
+});
+
+test("C2.3 P05 wrong DOMAIN subject or verifier capability is inapplicable",()=>{
+  const {base,head,trustedAuthorityBase}=providerState({constraints:[check()],relations:verifierRelations(),files:["src/a.ts","tests/t.mjs"]});
+  const fact={authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"ci",requirementId:"R1",
+    key:"execution:tests/t.mjs",status:"pass",subjectPaths:["src/a.ts"],verifierPath:"tests/t.mjs",verifierRevision:B};
+  const common={repository:repo,base,head,trustedAuthorityBase,resourceDeltas:[{kind:"modify",path:"src/a.ts"}],
+    workIntent:{id:"W",addresses:["R1"]},evidenceFacts:[fact],trustedEvidenceProviders:["ci"]};
+  const wrongSubject=evaluateTransitionCauseClosure({...common,authenticatedProviderGrants:[domainGrant({capability:{
+    kind:"evidence",class:"execution",key:"execution:tests/t.mjs",requirementId:"R1",
+    subjectPaths:["src/b.ts"],verifierPath:"tests/t.mjs",verifierRevision:B,
+  }})]});
+  assert.equal(wrongSubject.ok,false);
+  assert.ok(wrongSubject.reasons.some(x=>x.includes("unauthorized_evidence_provider")));
+  const wrongVerifier=evaluateTransitionCauseClosure({...common,authenticatedProviderGrants:[domainGrant({capability:{
+    kind:"evidence",class:"execution",key:"execution:tests/t.mjs",requirementId:"R1",
+    subjectPaths:["src/a.ts"],verifierPath:"tests/other.mjs",verifierRevision:B,
+  }})]});
+  assert.equal(wrongVerifier.ok,false);
+  assert.ok(wrongVerifier.reasons.some(x=>x.includes("unauthorized_evidence_provider")));
+});
+
+test("C2.3 P06 provider grants are exact-transition and boundary scoped",()=>{
+  const {base,head,trustedAuthorityBase}=providerState();
+  const fact={authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"git",path:"src/a.ts",metric:"changed_lines",value:5};
+  const common={repository:repo,base,head,trustedAuthorityBase,resourceDeltas:[{kind:"modify",path:"src/a.ts"}],
+    workIntent:{id:"W",addresses:["R1"]},observationFacts:[fact],trustedEvidenceProviders:["git"]};
+  const stale=evaluateTransitionCauseClosure({...common,authenticatedProviderGrants:[providerGrant({headRevision:C})]});
+  assert.equal(stale.ok,false);
+  assert.ok(stale.reasons.some(x=>x.includes("unauthorized_observation_provider")));
+  const wrongBoundary=evaluateTransitionCauseClosure({...common,authenticatedProviderGrants:[providerGrant({boundary:"domain"})]});
+  assert.equal(wrongBoundary.ok,false);
+  assert.ok(wrongBoundary.reasons.some(x=>x.includes("unauthorized_observation_provider")));
+});
+
+test("C2.3 P07 wildcard producer capabilities are invalid, never authority",()=>{
+  const {base,head,trustedAuthorityBase}=providerState();
+  const result=evaluateTransitionCauseClosure({
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],workIntent:{id:"W",addresses:["R1"]},
+    observationFacts:[{authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"git",path:"src/a.ts",metric:"changed_lines",value:5}],
+    trustedEvidenceProviders:["git"],
+    authenticatedProviderGrants:[providerGrant({capability:{kind:"metric",key:"*",subjectPaths:["src/a.ts"]}})],
+  });
+  assert.equal(result.ok,false);
+  assert.ok(result.reasons.some(x=>x.includes("invalid_provider_grant")||x.includes("unauthorized_observation_provider")),result.reasons.join(" | "));
+});
+
+
+test("C2.3 P08 one providerId cannot alias multiple authenticated producer identities",()=>{
+  const {base,head,trustedAuthorityBase}=providerState();
+  const result=evaluateTransitionCauseClosure({
+    repository:repo,base,head,trustedAuthorityBase,
+    resourceDeltas:[{kind:"modify",path:"src/a.ts"}],workIntent:{id:"W",addresses:["R1"]},
+    observationFacts:[{authorityBaseRevision:A,baseRevision:A,headRevision:B,providerId:"git",path:"src/a.ts",metric:"changed_lines",value:5}],
+    trustedEvidenceProviders:["git"],
+    authenticatedProviderGrants:[
+      providerGrant(),
+      providerGrant({principal:"github-app:different-producer"}),
+    ],
+  });
+  assert.equal(result.ok,false);
+  assert.ok(result.reasons.some(x=>x.includes("invalid_provider_grant")||x.includes("unauthorized_observation_provider")),result.reasons.join(" | "));
+});

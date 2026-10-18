@@ -361,6 +361,7 @@ export function evaluateRepoGuardSelfHost(input) {
         evidenceFacts: input.evidenceFacts || [],
         observationFacts: input.observationFacts || [],
         trustedEvidenceProviders: input.trustedEvidenceProviders || [],
+        authenticatedProviderGrants: input.authenticatedProviderGrants,
     });
     reasons.push(...transition.reasons.map((reason) => "I8:" + reason));
     const normalizedReasons = uniqueSorted(reasons);
@@ -393,6 +394,8 @@ export function evaluateRepoGuardSelfHost(input) {
             providerAuthentication: "external to pure evaluator",
             protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
             trustedEvidenceProviders: uniqueSorted(input.trustedEvidenceProviders || []),
+            providerCapabilityMode: input.authenticatedProviderGrants !== undefined,
+            authenticatedProviderGrantCount: input.authenticatedProviderGrants?.length || 0,
         },
         transition,
     };
@@ -610,6 +613,7 @@ export function evaluateRepositoryShadowReplay(input) {
         evidenceFacts: input.evidenceFacts || [],
         observationFacts: input.observationFacts || [],
         trustedEvidenceProviders: input.trustedEvidenceProviders || [],
+        authenticatedProviderGrants: input.authenticatedProviderGrants,
     });
     const gaps = uniqueSorted([
         ...(authority.snapshotMismatch ? ["I9:authority_snapshot_mismatch"] : []),
