@@ -1,5 +1,5 @@
 import { normalizeDocumentFact, resolveJsonPointer } from "../document-facts.mjs";
-import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef } from "../git.mjs";
+import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef, runGit } from "../git.mjs";
 import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject } from "./canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
@@ -469,6 +469,321 @@ export function evaluateRepoGuardNativeSelfHostShadowSnapshot(input) {
             rootIdentityChanges,
         },
         sourceMigration: { from: generated.from, to: generated.to },
+    };
+}
+const semanticSubjectKey = (subject) => subject ? [subject.repository, subject.requirementId, subject.digest].join("\0") : "";
+const rootMigrationPermission = (id, oldSubject, newSubject) => "trusted_root:" + id + ":" + oldSubject.digest + ":" + newSubject.digest;
+export function evaluateRepoGuardTrustedRootMigrationSnapshot(input) {
+    const candidateReasons = [];
+    const trustReasons = [];
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+        candidateReasons.push("C2.5:invalid_repository");
+    for (const [label, revision] of [
+        ["authority", input.trustedAuthorityBaseRevision],
+        ["base", input.baseRevision],
+        ["head", input.headRevision],
+    ])
+        if (!exactSha.test(revision))
+            candidateReasons.push("C2.5:invalid_" + label + "_revision");
+    try {
+        const mergeBase = runGit(["merge-base", input.baseRevision, input.headRevision], { cwd: input.repositoryRoot }).trim();
+        if (mergeBase !== input.baseRevision)
+            candidateReasons.push("C2.5:base_not_ancestor");
+    }
+    catch {
+        candidateReasons.push("C2.5:base_not_ancestor");
+    }
+    let authorityLoaded;
+    let baseLoaded;
+    try {
+        authorityLoaded = loadRepoGuardProjection(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot);
+        const acceptedSourcePaths = Object.fromEntries(authorityLoaded.raw.requirements.map((item) => [item.id, item.source.path]));
+        baseLoaded = input.baseRevision === input.trustedAuthorityBaseRevision
+            ? authorityLoaded
+            : loadRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, acceptedSourcePaths);
+    }
+    catch (error) {
+        return {
+            ok: false,
+            candidateReady: false,
+            reasons: ["C2.5:legacy_snapshot_invalid:" + error.message],
+            trust: { authorized: false },
+            blockingCutoverEligible: false,
+            requiredPermissions: [],
+            migration: [],
+            equivalence: {
+                normativeExact: false, normativeDigestExact: false, ownerEquivalentOnRetainedResources: false,
+                rootIdentityChanges: 0, sharedOwnershipPaths: 0,
+                relationCounts: { implemented_by: 0, verified_by: 0, documents: 0, total: 0 },
+                blanketRequiresProjected: 0,
+            },
+            authorized: {
+                j2: { rooted: [], unrooted: [] },
+                j1: { tracked: 0, justified: 0, unjustified: 0 },
+            },
+        };
+    }
+    const expectedIds = Array.from({ length: 8 }, (_, index) => "RG-" + String(index + 1).padStart(2, "0"));
+    if (!sameStrings(authorityLoaded.rootIds, expectedIds))
+        candidateReasons.push("C2.5:accepted_root_set_mismatch");
+    if (authorityLoaded.errors.length || baseLoaded.errors.length)
+        candidateReasons.push("C2.5:legacy_projection_invalid");
+    const oldRoots = expectedIds.flatMap((id) => authorityLoaded.rootSubjects[id] ? [authorityLoaded.rootSubjects[id]] : []);
+    if (oldRoots.length !== 8)
+        candidateReasons.push("C2.5:old_root_missing");
+    const baseRootStable = expectedIds.every((id) => semanticSubjectKey(authorityLoaded.rootSubjects[id]) === semanticSubjectKey(baseLoaded.rootSubjects[id]));
+    if (!baseRootStable)
+        candidateReasons.push("C2.5:base_root_stale");
+    const baseState = closeRepoGuardProjection(input.repository, input.baseRevision, input.repositoryRoot, baseLoaded, oldRoots);
+    if (!baseState.j2.ok)
+        candidateReasons.push("C2.5:base_j2_not_rooted");
+    if (!baseState.j1.ok)
+        candidateReasons.push("C2.5:base_j1_not_closed");
+    const headEntries = listTrackedEntriesAtRef(input.headRevision, input.repositoryRoot);
+    const expectedOldPaths = expectedIds.map((id) => "requirements/repo-guard/" + id + ".yaml");
+    const expectedNativePaths = expectedIds.map(nativeShadowSourcePath);
+    const actualNativePaths = headEntries.map((entry) => entry.path)
+        .filter((path) => path.startsWith("requirements/") && /\.rg\.(?:yaml|json)$/.test(path))
+        .sort((a, b) => a.localeCompare(b, "en"));
+    if (!sameStrings(actualNativePaths, expectedNativePaths))
+        candidateReasons.push("C2.5:native_source_set_mismatch");
+    if (expectedOldPaths.some((path) => headEntries.some((entry) => entry.path === path)))
+        candidateReasons.push("C2.5:legacy_source_still_active");
+    if (baseState.entries.length !== 359 || headEntries.length !== 359)
+        candidateReasons.push("C2.5:tracked_count_mismatch");
+    try {
+        const migrationDiff = getExactDiffIdentity(input.baseRevision, input.headRevision, input.repositoryRoot);
+        const actual = migrationDiff
+            .map((file) => JSON.stringify([file.status, file.previousPath || "", file.path]))
+            .sort();
+        const expected = [
+            ...expectedOldPaths.map((path) => JSON.stringify(["deleted", "", path])),
+            ...expectedNativePaths.map((path) => JSON.stringify(["added", "", path])),
+        ].sort();
+        if (!sameStrings(actual, expected))
+            candidateReasons.push("C2.5:migration_diff_not_exact");
+    }
+    catch {
+        candidateReasons.push("C2.5:migration_diff_not_exact");
+    }
+    const native = loadNativeRequirements({
+        repository: input.repository,
+        revision: input.headRevision,
+        paths: actualNativePaths,
+        readFile: (revision, path) => revision === input.headRevision ? readFileAtRef(revision, path, input.repositoryRoot) : null,
+    });
+    if (!native.ok || native.requirements.length !== 8)
+        candidateReasons.push("C2.5:native_invalid");
+    const lowered = lowerNativeRequirements(native);
+    const candidateRoots = native.requirements.map((item) => item.semantic);
+    const candidateJ2 = evaluateRootedRequirements({
+        requirements: lowered.requirements,
+        trustedRoots: candidateRoots,
+    });
+    const emptyJ1 = {
+        ok: false,
+        justified: [],
+        unjustified: headEntries.map((entry) => entry.path),
+        owners: {},
+    };
+    let candidateJ1 = emptyJ1;
+    if (native.ok && candidateJ2.ok) {
+        const headPaths = new Set(headEntries.map((entry) => entry.path));
+        const resolver = createResourceResolver({
+            repository: input.repository,
+            revision: input.headRevision,
+            requirements: lowered.requirements,
+            readers: {
+                [input.repository]: (revision, path) => revision === input.headRevision && headPaths.has(path)
+                    ? readFileAtRef(revision, path, input.repositoryRoot) : null,
+            },
+        });
+        candidateJ1 = evaluateTrackedResourceClosure({
+            repository: input.repository,
+            revision: input.headRevision,
+            requirements: lowered.requirements,
+            j2: candidateJ2,
+            trackedPaths: headEntries.map((entry) => entry.path),
+            resourceRelations: lowered.resourceRelations,
+            resolver,
+        });
+    }
+    if (!candidateJ2.ok)
+        candidateReasons.push("C2.5:candidate_j2_not_rooted");
+    if (!candidateJ1.ok)
+        candidateReasons.push("C2.5:native_j1_not_closed");
+    const migration = expectedIds.flatMap((id) => {
+        const oldTrustedSubject = authorityLoaded.rootSubjects[id];
+        const nativeRequirement = native.index[id];
+        const rootText = authorityLoaded.rootTexts[id];
+        const legacyRequirement = baseLoaded.raw.index[id];
+        if (!oldTrustedSubject || !nativeRequirement || typeof rootText !== "string" || !legacyRequirement)
+            return [];
+        const normativeDigest = canonicalSemanticDigest(rootText);
+        return [{
+                requirementId: id,
+                normativeDigest,
+                oldTrustedSubject,
+                newTrustedSubject: nativeRequirement.semantic,
+                legacyRootSource: {
+                    repository: input.repository,
+                    revision: input.trustedAuthorityBaseRevision,
+                    path: selfHostRootSource,
+                    selector: "heading:" + id,
+                },
+                legacyRepresentation: legacyRequirement.representation,
+                nativeRepresentation: nativeRequirement.representation,
+                sourceMigration: { from: legacyRequirement.source.path, to: nativeRequirement.source.path },
+                permission: rootMigrationPermission(id, oldTrustedSubject, nativeRequirement.semantic),
+            }];
+    });
+    const normativeExact = expectedIds.every((id) => native.index[id] !== undefined &&
+        typeof authorityLoaded.rootTexts[id] === "string" &&
+        native.index[id].normative === authorityLoaded.rootTexts[id]);
+    const normativeDigestExact = migration.length === 8 && migration.every((item) => item.normativeDigest === item.newTrustedSubject.digest);
+    if (!normativeExact || !normativeDigestExact)
+        candidateReasons.push("C2.5:normative_mismatch");
+    const oldSubjectKeys = migration.map((item) => semanticSubjectKey(item.oldTrustedSubject));
+    const newSubjectKeys = migration.map((item) => semanticSubjectKey(item.newTrustedSubject));
+    const rootIdentityChanges = migration.filter((item) => semanticSubjectKey(item.oldTrustedSubject) !== semanticSubjectKey(item.newTrustedSubject)).length;
+    if (migration.length !== 8 || new Set(oldSubjectKeys).size !== 8 || new Set(newSubjectKeys).size !== 8)
+        candidateReasons.push("C2.5:root_alias_or_duplicate");
+    if (rootIdentityChanges !== 8)
+        candidateReasons.push("C2.5:root_identity_change_count");
+    const relationCounts = { implemented_by: 0, verified_by: 0, documents: 0, total: 0 };
+    let blanketRequiresProjected = 0;
+    for (const requirement of native.requirements) {
+        for (const relation of requirement.relations) {
+            if (relation.predicate === "requires")
+                blanketRequiresProjected++;
+            if (relation.predicate === "implemented_by")
+                relationCounts.implemented_by++;
+            if (relation.predicate === "verified_by")
+                relationCounts.verified_by++;
+            if (relation.predicate === "documents")
+                relationCounts.documents++;
+        }
+    }
+    relationCounts.total = relationCounts.implemented_by + relationCounts.verified_by + relationCounts.documents;
+    if (relationCounts.implemented_by !== 143 || relationCounts.verified_by !== 169 ||
+        relationCounts.documents !== 50 || relationCounts.total !== 362)
+        candidateReasons.push("C2.5:relation_count_mismatch");
+    if (blanketRequiresProjected !== 0)
+        candidateReasons.push("C2.5:blanket_requires_projected");
+    const retained = baseState.entries.map((entry) => entry.path)
+        .filter((path) => !expectedOldPaths.includes(path)).sort((a, b) => a.localeCompare(b, "en"));
+    const ownerEquivalentOnRetainedResources = candidateJ1.ok && retained.every((path) => sameStrings([...(baseState.j1.owners[path] || [])].sort(), [...(candidateJ1.owners[path] || [])].sort()));
+    if (!ownerEquivalentOnRetainedResources)
+        candidateReasons.push("C2.5:owner_mismatch");
+    const sharedOwnershipPaths = candidateJ1.ok
+        ? Object.values(candidateJ1.owners).filter((owners) => owners.length > 1).length : 0;
+    if (sharedOwnershipPaths !== 11)
+        candidateReasons.push("C2.5:shared_ownership_mismatch");
+    const requiredPermissions = migration.map((item) => item.permission).sort((a, b) => a.localeCompare(b, "en"));
+    let trustAuthorized = false;
+    const receipt = input.trustedRootReceipt;
+    if (!receipt) {
+        trustReasons.push("C2.5:trust_receipt_missing");
+    }
+    else {
+        const keys = Object.keys(receipt).sort();
+        const expectedKeys = ["authorityBaseRevision", "baseRevision", "headRevision", "permissions", "repository"].sort();
+        if (!sameStrings(keys, expectedKeys))
+            trustReasons.push("C2.5:trust_receipt_invalid");
+        if (receipt.repository !== input.repository)
+            trustReasons.push("C2.5:trust_repository_mismatch");
+        if (receipt.authorityBaseRevision !== input.trustedAuthorityBaseRevision)
+            trustReasons.push("C2.5:trust_authority_base_mismatch");
+        if (receipt.baseRevision !== input.baseRevision)
+            trustReasons.push("C2.5:trust_base_mismatch");
+        if (receipt.headRevision !== input.headRevision)
+            trustReasons.push("C2.5:trust_head_mismatch");
+        if (!Array.isArray(receipt.permissions) ||
+            receipt.permissions.some((permission) => typeof permission !== "string" || !permission || permission.includes("*")) ||
+            new Set(receipt.permissions).size !== receipt.permissions.length) {
+            trustReasons.push("C2.5:trust_permissions_invalid");
+        }
+        else if (!sameStrings([...receipt.permissions].sort((a, b) => a.localeCompare(b, "en")), requiredPermissions)) {
+            trustReasons.push("C2.5:trust_permissions_mismatch");
+        }
+        trustAuthorized = trustReasons.length === 0 && requiredPermissions.length === 8;
+    }
+    const authorizedRoots = trustAuthorized ? candidateRoots : [];
+    const authorizedJ2 = evaluateRootedRequirements({
+        requirements: lowered.requirements,
+        trustedRoots: authorizedRoots,
+    });
+    let authorizedJ1 = emptyJ1;
+    if (native.ok && authorizedJ2.ok) {
+        const headPaths = new Set(headEntries.map((entry) => entry.path));
+        const resolver = createResourceResolver({
+            repository: input.repository,
+            revision: input.headRevision,
+            requirements: lowered.requirements,
+            readers: {
+                [input.repository]: (revision, path) => revision === input.headRevision && headPaths.has(path)
+                    ? readFileAtRef(revision, path, input.repositoryRoot) : null,
+            },
+        });
+        authorizedJ1 = evaluateTrackedResourceClosure({
+            repository: input.repository,
+            revision: input.headRevision,
+            requirements: lowered.requirements,
+            j2: authorizedJ2,
+            trackedPaths: headEntries.map((entry) => entry.path),
+            resourceRelations: lowered.resourceRelations,
+            resolver,
+        });
+    }
+    const normalizedCandidateReasons = uniqueSorted(candidateReasons);
+    const normalizedTrustReasons = uniqueSorted(trustReasons);
+    const reasons = uniqueSorted([...normalizedCandidateReasons, ...normalizedTrustReasons]);
+    const candidateReady = normalizedCandidateReasons.length === 0;
+    return {
+        ok: candidateReady && trustAuthorized && authorizedJ2.ok && authorizedJ1.ok,
+        candidateReady,
+        reasons,
+        trust: {
+            authorized: trustAuthorized,
+            repository: input.repository,
+            authorityBaseRevision: input.trustedAuthorityBaseRevision,
+            baseRevision: input.baseRevision,
+            headRevision: input.headRevision,
+        },
+        blockingCutoverEligible: false,
+        requiredPermissions,
+        migration,
+        candidate: {
+            j2: { rooted: candidateJ2.rooted.length, unrooted: candidateJ2.unrooted.length },
+            j1: {
+                tracked: headEntries.length,
+                justified: candidateJ1.justified.length,
+                unjustified: candidateJ1.unjustified.length,
+            },
+        },
+        authorized: {
+            j2: { rooted: authorizedJ2.rooted.length, unrooted: authorizedJ2.unrooted.length },
+            j1: {
+                tracked: headEntries.length,
+                justified: authorizedJ1.justified.length,
+                unjustified: authorizedJ1.unjustified.length,
+            },
+        },
+        equivalence: {
+            normativeExact,
+            normativeDigestExact,
+            ownerEquivalentOnRetainedResources,
+            rootIdentityChanges,
+            sharedOwnershipPaths,
+            relationCounts,
+            blanketRequiresProjected,
+        },
+        rollback: {
+            exactBaseRevision: input.baseRevision,
+            legacyRootSubjects: oldRoots,
+            legacySourcePaths: expectedOldPaths,
+            legacyBlockingPathRetainedAtBase: true,
+        },
     };
 }
 const diffIdentity = (files) => files.map((file) => JSON.stringify([file.status, file.gitStatus || "", file.previousPath || "", file.path])).sort();

@@ -12,12 +12,26 @@ const expectedIds = [
   "RG-01", "RG-02", "RG-03", "RG-04", "RG-05", "RG-06", "RG-07", "RG-08",
 ];
 const requirementPaths = expectedIds.map((id) => `requirements/repo-guard/${id}.yaml`);
+const nativeRequirementPaths = expectedIds.map((id) => `requirements/repo-guard/${id}.rg.yaml`);
 const revision = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: root,
   encoding: "utf8",
 }).trim();
 assert.match(revision, /^[0-9a-f]{40}$/);
 
+const representationTracked = new Set(execFileSync("git", ["ls-files", "-z"], {
+  cwd: root,
+  encoding: "utf8",
+}).split("\0").filter(Boolean));
+const legacyRepresentationCount = requirementPaths.filter((path) => representationTracked.has(path)).length;
+const nativeRepresentationCount = nativeRequirementPaths.filter((path) => representationTracked.has(path)).length;
+assert.ok(
+  (legacyRepresentationCount === 8 && nativeRepresentationCount === 0)
+    || (legacyRepresentationCount === 0 && nativeRepresentationCount === 8),
+  `C2.5 representation must be exactly legacy 8/0 or native 0/8, got legacy=${legacyRepresentationCount}, native=${nativeRepresentationCount}`,
+);
+
+if (legacyRepresentationCount === 8) {
 const productRequirements = readFileSync(resolve(root, "docs/product-requirements.md"), "utf8");
 for (const id of expectedIds) {
   assert.match(productRequirements, new RegExp(`^### ${id}\\b`, "m"), `${id}: semantic authority heading missing`);
@@ -293,6 +307,14 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   const diffText = gitRuntime.runGit(["-c", "core.quotepath=false", "diff", baseRevision, headRevision], { cwd: root });
   const basePolicy = JSON.parse(gitRuntime.readFileAtRef(baseRevision, "repo-policy.json", root));
   const headPolicy = JSON.parse(gitRuntime.readFileAtRef(headRevision, "repo-policy.json", root));
+  const bridgeGovernanceChanged = exactDiff.some((file) =>
+    file.path === "schemas/governance-grant.schema.json"
+      || file.previousPath === "schemas/governance-grant.schema.json");
+  const bridgeGovernanceFixture = bridgeGovernanceChanged ? {
+    governanceGrant: { authorized_governance_paths: ["schemas/governance-grant.schema.json"] },
+    trustedAuthorizer: { trusted: true, source: "repository_permission" },
+  } : {};
+
   const policyInput = {
     mode: "check-diff",
     repositoryRoot: root,
@@ -308,6 +330,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     trackedFiles: exactTracked,
     changeIntent: null,
     changeIntentSource: "github_issue:#723",
+    ...bridgeGovernanceFixture,
     readFile: (filePath) => gitRuntime.readFileAtRef(headRevision, filePath, root),
     readFileAtRef: (sha, filePath) => gitRuntime.readFileAtRef(sha, filePath, root),
   };
@@ -318,7 +341,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     trustedAuthorityBaseRevision,
     baseRevision,
     headRevision,
-    workIntent: { id: "github:issue:707:i8-i9", source: "github_issue", addresses: ["RG-04", "RG-05", "RG-08"] },
+    workIntent: { id: "github:issue:707:i8-i9", source: "github_issue", addresses: ["RG-01", "RG-04", "RG-05", "RG-08"] },
     protectedResources: protectedBoundary,
   };
   const shadow = pipeline.runRepoGuardSelfHostShadow(policyInput, { quiet: true }, config);
@@ -1061,5 +1084,124 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     trustedRoots: shadow.selfHost.authority.trustedRoots,
     transitionDeltas: shadow.selfHost.transition.deltas,
     transitionExplanations: shadow.selfHost.transition.explanations,
+  }));
+}
+
+
+} else {
+  console.log("\n--- C2.5 representation-aware self-host inventory: native ---");
+  const pipeline = await import("../dist/runtime/pipeline.mjs");
+  const gitRuntime = await import("../dist/git.mjs");
+  const canonicalRuntime = await import("../dist/runtime/canonical-requirements.mjs");
+  const requirementRuntime = await import("../dist/runtime/requirement-closure.mjs");
+  const resolverRuntime = await import("../dist/runtime/resource-resolver.mjs");
+  const resourceRuntime = await import("../dist/runtime/resource-closure.mjs");
+
+  const repository = "netkeep80/repo-guard";
+  const tracked = gitRuntime.listTrackedFilesAtRef(revision, root).sort();
+  assert.equal(tracked.length, 359, "native self-host tracked tree must remain exact");
+
+  const native = canonicalRuntime.loadNativeRequirements({
+    repository,
+    revision,
+    paths: nativeRequirementPaths,
+    readFile: (sha, path) => gitRuntime.readFileAtRef(sha, path, root),
+  });
+  assert.equal(native.ok, true, JSON.stringify(native.errors));
+  assert.equal(native.requirements.length, 8);
+  assert.deepEqual(native.requirements.map((item) => item.id).sort(), expectedIds);
+
+  const authoritativeText = gitRuntime.readFileAtRef(revision, "docs/product-requirements.md", root);
+  assert.equal(typeof authoritativeText, "string");
+  const sections = new Map();
+  let current = null;
+  for (const line of authoritativeText.split(/\r?\n/)) {
+    const match = line.match(/^###\s+(RG-[0-9]{2})\s+—/);
+    if (match) {
+      current = match[1];
+      assert.equal(sections.has(current), false, `duplicate normative heading ${current}`);
+      sections.set(current, [line]);
+      continue;
+    }
+    if (current && /^#{1,3}\s+/.test(line)) current = null;
+    if (current) sections.get(current).push(line);
+  }
+  assert.deepEqual([...sections.keys()].sort(), expectedIds);
+  for (const id of expectedIds) {
+    assert.equal(native.index[id].normative, sections.get(id).join("\n"), `${id}: native normative authority drift`);
+  }
+
+  const lowered = pipeline.lowerNativeRequirements(native);
+  const structuralRoots = native.requirements.map((item) => item.semantic);
+  const j2 = requirementRuntime.evaluateRootedRequirements({
+    requirements: lowered.requirements,
+    trustedRoots: structuralRoots,
+  });
+  assert.equal(j2.ok, true, JSON.stringify(j2.errors));
+  assert.equal(j2.rooted.length, 8);
+  assert.equal(j2.unrooted.length, 0);
+
+  const trackedSet = new Set(tracked);
+  const resolver = resolverRuntime.createResourceResolver({
+    repository,
+    revision,
+    requirements: lowered.requirements,
+    readers: {
+      [repository]: (sha, path) =>
+        sha === revision && trackedSet.has(path) ? gitRuntime.readFileAtRef(sha, path, root) : null,
+    },
+  });
+  const j1 = resourceRuntime.evaluateTrackedResourceClosure({
+    repository,
+    revision,
+    requirements: lowered.requirements,
+    j2,
+    trackedPaths: tracked,
+    resourceRelations: lowered.resourceRelations,
+    resolver,
+  });
+  assert.equal(j1.ok, true, JSON.stringify(j1.errors));
+  assert.equal(j1.justified.length, 359);
+  assert.equal(j1.unjustified.length, 0);
+
+  const relationCounts = { implemented_by: 0, verified_by: 0, documents: 0, total: 0 };
+  let blanketRequires = 0;
+  for (const requirement of native.requirements) {
+    for (const relation of requirement.relations) {
+      if (relation.predicate === "requires") blanketRequires++;
+      if (relation.predicate === "implemented_by") relationCounts.implemented_by++;
+      if (relation.predicate === "verified_by") relationCounts.verified_by++;
+      if (relation.predicate === "documents") relationCounts.documents++;
+    }
+  }
+  relationCounts.total = relationCounts.implemented_by + relationCounts.verified_by + relationCounts.documents;
+  assert.deepEqual(relationCounts, {
+    implemented_by: 143,
+    verified_by: 169,
+    documents: 50,
+    total: 362,
+  });
+  assert.equal(Object.values(j1.owners).filter((owners) => owners.length > 1).length, 11);
+  assert.equal(blanketRequires, 0, "native representation must not restore blanket requires");
+
+  for (const item of native.requirements) {
+    assert.deepEqual(
+      Object.keys(item).sort(),
+      ["constraints", "id", "lifecycle", "normative", "relations", "representation", "semantic", "source"].sort(),
+      `${item.id}: native Requirement loader must not expose candidate-authored TRUST`,
+    );
+  }
+
+  console.log(JSON.stringify({
+    event: "C2.5_NATIVE_SELF_HOST_INVENTORY",
+    revision,
+    tracked: tracked.length,
+    justified: j1.justified.length,
+    rooted: j2.rooted.length,
+    unrooted: j2.unrooted.length,
+    relations: relationCounts,
+    sharedOwnershipPaths: Object.values(j1.owners).filter((owners) => owners.length > 1).length,
+    blanketRequires,
+    normativeExact: true,
   }));
 }
