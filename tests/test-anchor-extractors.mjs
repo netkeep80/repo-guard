@@ -274,3 +274,57 @@ console.log("\n--- resolved must_resolve refs pass cleanly ---");
 
 console.log(`\n${failures === 0 ? "All anchor extractor tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
+
+
+console.log("\n--- C2.5 built-in closed-repository extractor accepts strict native Requirement resources ---");
+{
+  const revision = "a".repeat(40);
+  const repository = "netkeep80/repo-guard";
+  const policy = makePolicy({
+    requirement_artifact_path: {
+      sources: [{ kind: "requirements_strict_resource_paths", glob: "requirements/repo-guard/*.yaml", format: "yaml" }],
+    },
+  });
+  const files = {
+    "requirements/repo-guard/RG-01.rg.yaml": [
+      "format: repo-guard/requirement-v1",
+      "id: RG-01",
+      "normative: \"Native root.\"",
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target:",
+      "      kind: artifact",
+      "      path: src/a.mts",
+      "",
+    ].join("\n"),
+    "src/a.mts": "export const a = true;\n",
+  };
+  const extraction = extractAnchors(policy, {
+    trackedFiles: Object.keys(files),
+    readFile: makeReadFile(files),
+    repositoryIdentity: repository,
+    headRef: revision,
+  });
+  expect("native requirements-strict resources extract without errors", extraction.errors, []);
+  expect(
+    "native requirements-strict resources include implicit Requirement source and relation target",
+    extraction.byType.requirement_artifact_path.map((item) => item.value),
+    ["requirements/repo-guard/RG-01.rg.yaml", "src/a.mts"],
+  );
+
+  const malformedFiles = {
+    "requirements/repo-guard/RG-01.rg.yaml": [
+      "format: repo-guard/requirement-v1",
+      "id: RG-01",
+      "relations: []",
+      "",
+    ].join("\n"),
+  };
+  const malformed = extractAnchors(policy, {
+    trackedFiles: Object.keys(malformedFiles),
+    readFile: makeReadFile(malformedFiles),
+    repositoryIdentity: repository,
+    headRef: revision,
+  });
+  expect("malformed native Requirement remains fail-closed", malformed.errors.length > 0, true);
+}
