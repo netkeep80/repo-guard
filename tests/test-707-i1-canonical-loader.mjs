@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { strictCanonicalJson, loadCanonicalRequirements, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
 import { runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
+import { loadNativeRequirements } from "../dist/runtime/native-contract.mjs";
 import { parseJson } from "../dist/document-facts.mjs";
 import { test } from "node:test";
 const sha = "a".repeat(40), repo = "netkeep80/repo-guard";
@@ -117,4 +118,125 @@ test("I1 uses I0 shadow on existing normalized facts without altering v3 blockin
 test("I1 semantic canonicalizer rejects non-finite or host-only values before SHA256", () => {
   assert.equal(load([item("requirements/R1.json",'{"id":"R1","overflow":1e999}')]).ok, false);
   assert.equal(load([item("requirements/R1.yaml","id: R1\nvalue: .nan\n")]).ok, false);
+});
+
+
+const nativeLoad = (files, extra = {}) => loadNativeRequirements({
+  repository: repo,
+  revision: sha,
+  paths: files.map(x => x[0]),
+  readFile: (revision, path) => {
+    assert.equal(revision, sha);
+    return files.find(x => x[0] === path)?.[1] ?? null;
+  },
+  ...extra,
+});
+
+test("C2.1 N01-N05 native identity hashes normative only across relation/source/codec changes", () => {
+  const json = nativeLoad([item("requirements/R1.rg.json", JSON.stringify({
+    format:"repo-guard/requirement-v1", id:"R1", normative:{text:"stable"},
+    relations:[{predicates:["implemented_by"],target:{kind:"artifact",path:"src/a.mts"}}],
+  }))]);
+  const yaml = nativeLoad([item("requirements/moved/R1.rg.yaml", [
+    "format: repo-guard/requirement-v1",
+    "id: R1",
+    "normative:",
+    "  text: stable",
+    "relations:",
+    "  - predicates: [documents]",
+    "    target: {kind: artifact, path: docs/a.md}",
+    "lifecycle: {accepted: true, current: false, published: false}",
+    "",
+  ].join("\n"))]);
+  const changed = nativeLoad([item("requirements/R1.rg.json", JSON.stringify({
+    format:"repo-guard/requirement-v1", id:"R1", normative:{text:"changed"},
+  }))]);
+  assert.equal(json.ok,true); assert.equal(yaml.ok,true); assert.equal(changed.ok,true);
+  assert.deepEqual(json.index.R1.semantic,yaml.index.R1.semantic);
+  assert.notEqual(json.index.R1.representation.path,yaml.index.R1.representation.path);
+  assert.notEqual(json.index.R1.semantic.digest,changed.index.R1.semantic.digest);
+});
+
+test("C2.1 N06-N11 strict native syntax fails closed", () => {
+  const cases = [
+    ["requirements/R1.rg.json",'{"format":"repo-guard/requirement-v1","id":"R1","id":"R2","normative":"x"}',"duplicate_key"],
+    ["requirements/R1.rg.yaml","format: repo-guard/requirement-v1\nid: R1\nid: R2\nnormative: x\n","duplicate_key"],
+    ["requirements/R1.rg.json",JSON.stringify({format:"repo-guard/requirement-v1",id:"R1",normative:"x",extra:true}),"unknown_field"],
+    ["requirements/R1.rg.json",JSON.stringify({format:"repo-guard/requirement-v1",id:"R1",normative:"x",relations:[{predicates:["protects"],target:{kind:"artifact",path:"src/a.mts"}}]}),"unknown_predicate"],
+    ["requirements/R1.rg.json",JSON.stringify({format:"repo-guard/requirement-v1",id:"R1",normative:"x",constraints:[{id:"c",scope:{relations:["implemented_by"]},evidence:{class:"domain",key:"claim:x",providerId:"candidate"}}]}),"invalid_constraint"],
+    ["requirements/R1.rg.json",JSON.stringify({format:"repo-guard/requirement-v1",id:"R1",normative:"x",relations:[{predicates:["documents"],target:{kind:"external_document",repository:"netkeep80/anum_docs",revision:"main",path:"x.json"}}]}),"invalid_resource_ref"],
+  ];
+  for(const [path,raw,code] of cases) {
+    const result=nativeLoad([item(path,raw)]);
+    assert.equal(result.ok,false,path);
+    assert.ok(result.errors.some(e=>e.code===code),JSON.stringify(result.errors));
+  }
+});
+
+test("C2.1 N12-N16 grouped relations normalize to unique primitive facts", () => {
+  const result=nativeLoad([item("requirements/R1.rg.yaml",[
+    "format: repo-guard/requirement-v1",
+    "id: R1",
+    "normative: stable",
+    "relations:",
+    "  - predicates: [verified_by, implemented_by]",
+    "    target: {kind: artifact, path: src/a.mts}",
+    "constraints:",
+    "  - id: budget",
+    "    scope: {relations: [implemented_by], include_generated: true}",
+    "    metric: {key: git.changed_resources, max: 0}",
+    "  - id: proof",
+    "    activation: requirement_cause",
+    "    scope: {relations: [verified_by]}",
+    "    evidence:",
+    "      class: execution",
+    "      key: tests:proof",
+    "      verifier: {kind: artifact, path: src/a.mts}",
+    "",
+  ].join("\n"))]);
+  assert.equal(result.ok,true,JSON.stringify(result.errors));
+  assert.deepEqual(result.index.R1.relations.map(x=>x.predicate),["implemented_by","verified_by"]);
+  assert.deepEqual(result.index.R1.constraints.map(x=>[x.id,x.activation]),[
+    ["budget","scoped_change"],["proof","requirement_cause"],
+  ]);
+  assert.equal(result.index.R1.lifecycle.accepted,false);
+});
+
+test("C2.1 N17-N20 duplicate semantic facts and malformed domains fail closed", () => {
+  const duplicate=nativeLoad([item("requirements/R1.rg.json",JSON.stringify({
+    format:"repo-guard/requirement-v1",id:"R1",normative:"x",
+    relations:[
+      {predicates:["implemented_by"],target:{kind:"artifact",path:"src/a.mts"}},
+      {predicates:["implemented_by"],target:{kind:"artifact",path:"src/a.mts"}},
+    ],
+  }))]);
+  assert.equal(duplicate.ok,false);
+  assert.ok(duplicate.errors.some(e=>e.code==="duplicate_relation"));
+
+  const badDomain=nativeLoad([item("requirements/R1.rg.json",JSON.stringify({
+    format:"repo-guard/requirement-v1",id:"R1",normative:"x",
+    relations:[{source:{kind:"artifact",path:"src/a.mts"},predicates:["implemented_by"],target:{kind:"artifact",path:"src/b.mts"}}],
+  }))]);
+  assert.equal(badDomain.ok,false);
+  assert.ok(badDomain.errors.some(e=>e.code==="invalid_relation_domain"));
+
+  const dupConstraint=nativeLoad([item("requirements/R1.rg.json",JSON.stringify({
+    format:"repo-guard/requirement-v1",id:"R1",normative:"x",
+    constraints:[
+      {id:"c",scope:{relations:["implemented_by"]},metric:{key:"git.changed_lines",max:1}},
+      {id:"c",scope:{relations:["implemented_by"]},metric:{key:"git.changed_lines",max:2}},
+    ],
+  }))]);
+  assert.equal(dupConstraint.ok,false);
+  assert.ok(dupConstraint.errors.some(e=>e.code==="duplicate_constraint_id"));
+});
+
+test("C2.1 N21 native discovery ignores non-.rg Requirement-shaped documents", () => {
+  const result=nativeLoad([
+    item("requirements/R1.rg.json",'{"format":"repo-guard/requirement-v1","id":"R1","normative":"x"}'),
+    item("requirements/legacy.yaml","id: LEGACY\n"),
+    item("docs/fake.rg.yaml","format: repo-guard/requirement-v1\nid: FAKE\nnormative: x\n"),
+  ]);
+  assert.equal(result.ok,true);
+  assert.deepEqual(result.requirements.map(x=>x.id),["R1"]);
 });
