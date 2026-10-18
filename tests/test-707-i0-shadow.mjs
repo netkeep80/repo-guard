@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
+import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { evaluateRepoGuardNativeSelfHostShadowSnapshot, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
@@ -71,4 +74,60 @@ test("#707 I0 no public policy field, schema or CLI toggle is required", () => {
   assert.equal("shadow" in input.policy, false);
   assert.equal("vnext" in input.policy, false);
   assert.deepEqual(runPolicyPipeline(input, opts), legacy());
+});
+
+
+test("C2.4 native RepoGuard self-host shadow is exact, closed, non-authoritative and legacy-free", () => {
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
+  const shadow = evaluateRepoGuardNativeSelfHostShadowSnapshot({
+    repository: "netkeep80/repo-guard",
+    revision,
+    repositoryRoot: projectRoot,
+  });
+
+  assert.equal(shadow.ok, true, shadow.reasons.join(" | "));
+  assert.equal(shadow.acceptedAuthorityVerified, false);
+  assert.equal(shadow.blockingCutoverEligible, false);
+  assert.equal(shadow.rootMigrationRequired, true);
+
+  assert.equal(shadow.legacy.tracked, 359);
+  assert.equal(shadow.legacy.justified, 359);
+  assert.equal(shadow.native.tracked, 359);
+  assert.equal(shadow.native.justified, 359);
+  assert.equal(shadow.native.rooted, 8);
+  assert.equal(shadow.native.unrooted, 0);
+
+  assert.equal(shadow.equivalence.normativeExact, true);
+  assert.equal(shadow.equivalence.ownerEquivalentOnRetainedResources, true);
+  assert.equal(shadow.equivalence.sharedOwnershipPaths, 11);
+  assert.deepEqual(shadow.equivalence.relationCounts, {
+    implemented_by: 143,
+    verified_by: 169,
+    documents: 50,
+    total: 362,
+  });
+  assert.equal(shadow.equivalence.blanketRequiresProjected, 0);
+  assert.equal(shadow.equivalence.rootIdentityChanges, 8);
+
+  assert.deepEqual(shadow.sourceMigration.from, [
+    "requirements/repo-guard/RG-01.yaml",
+    "requirements/repo-guard/RG-02.yaml",
+    "requirements/repo-guard/RG-03.yaml",
+    "requirements/repo-guard/RG-04.yaml",
+    "requirements/repo-guard/RG-05.yaml",
+    "requirements/repo-guard/RG-06.yaml",
+    "requirements/repo-guard/RG-07.yaml",
+    "requirements/repo-guard/RG-08.yaml",
+  ]);
+  assert.deepEqual(shadow.sourceMigration.to, [
+    "requirements/repo-guard/RG-01.rg.yaml",
+    "requirements/repo-guard/RG-02.rg.yaml",
+    "requirements/repo-guard/RG-03.rg.yaml",
+    "requirements/repo-guard/RG-04.rg.yaml",
+    "requirements/repo-guard/RG-05.rg.yaml",
+    "requirements/repo-guard/RG-06.rg.yaml",
+    "requirements/repo-guard/RG-07.rg.yaml",
+    "requirements/repo-guard/RG-08.rg.yaml",
+  ]);
 });
