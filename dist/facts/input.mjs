@@ -19,7 +19,15 @@ export function buildPolicyFacts(input) {
     };
     const snapshotReadFile = readFileAtRef || ((ref, path) => readGitFileAtRef(ref, path, repositoryRoot));
     const documents = createDocumentReader({ repoRoot: repositoryRoot, readFile: cachedReadFile });
-    const options = { repoRoot: repositoryRoot, trackedFiles: resolvedTrackedFiles, changedFiles: checkedFiles, readFile: cachedReadFile, documents };
+    const options = {
+        repoRoot: repositoryRoot,
+        repositoryIdentity,
+        headRef,
+        trackedFiles: resolvedTrackedFiles,
+        changedFiles: checkedFiles,
+        readFile: cachedReadFile,
+        documents,
+    };
     return {
         mode, repositoryRoot, policy, basePolicy, headPolicy, baseRef, headRef, repositoryIdentity, snapshotDocuments, repositoryObservation,
         changeIntent, changeIntentSource, governanceGrant,
