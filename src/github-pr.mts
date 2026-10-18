@@ -97,6 +97,51 @@ function trustedRootTransitionGrant(value: unknown): unknown {
     ? (value as { trusted_root_transition?: unknown }).trusted_root_transition ?? null
     : null;
 }
+export function evaluateTrustedRootTransitionBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  repositoryRoot: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const nativeRootGrant = trustedRootTransitionGrant(input.governanceGrant);
+  if (nativeRootGrant === null) return null;
+  const grant = nativeRootGrant as {
+    repository?: unknown;
+    authority_base_sha?: unknown;
+    base_sha?: unknown;
+    head_sha?: unknown;
+    permissions?: unknown;
+  };
+  const trustedSource = input.trustedAuthorizer?.trusted === true
+    && input.trustedAuthorizer?.source === "repository_permission";
+  const receipt = trustedSource ? {
+    repository: String(grant.repository ?? ""),
+    authorityBaseRevision: String(grant.authority_base_sha ?? ""),
+    baseRevision: String(grant.base_sha ?? ""),
+    headRevision: String(grant.head_sha ?? ""),
+    permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
+  } : null;
+  const evaluation = evaluateRepoGuardTrustedRootMigrationSnapshot({
+    repository: input.repository,
+    repositoryRoot: input.repositoryRoot,
+    trustedAuthorityBaseRevision: input.baseRevision,
+    baseRevision: input.baseRevision,
+    headRevision: input.headRevision,
+    trustedRootReceipt: receipt,
+  });
+  const reasons = [
+    ...(!trustedSource ? ["C2.5:trust_authorizer_untrusted"] : []),
+    ...evaluation.reasons,
+  ];
+  return {
+    ok: trustedSource && evaluation.ok,
+    trustedSource,
+    reasons,
+    evaluation,
+  };
+}
 const REQUIREMENT_OVERLAP_SHADOW_ID = "requirement-verification-overlap-shadow";
 const REQUIREMENT_IMPLEMENTATION_ANCHOR = "__requirement_changed_implementation";
 const REQUIREMENT_OVERLAP_ANCHOR = "__requirement_verification_overlap";
@@ -206,63 +251,34 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
 
   let nativeRootTransitionAuthorized = false;
   let nativeRootTransitionResult: ReturnType<typeof evaluateRepoGuardTrustedRootMigrationSnapshot> | null = null;
-  const nativeRootGrant = trustedRootTransitionGrant(governanceGrant);
-  if (nativeRootGrant !== null) {
-    const grant = nativeRootGrant as {
-      repository?: unknown;
-      authority_base_sha?: unknown;
-      base_sha?: unknown;
-      head_sha?: unknown;
-      permissions?: unknown;
-    };
-    const trustedSource = trustedAuthorizer?.trusted === true && trustedAuthorizer?.source === "repository_permission";
-    const receipt = trustedSource ? {
-      repository: String(grant.repository ?? ""),
-      authorityBaseRevision: String(grant.authority_base_sha ?? ""),
-      baseRevision: String(grant.base_sha ?? ""),
-      headRevision: String(grant.head_sha ?? ""),
-      permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
-    } : null;
-    try {
-      nativeRootTransitionResult = evaluateRepoGuardTrustedRootMigrationSnapshot({
-        repository: observation.repository,
-        repositoryRoot: roots.repoRoot,
-        trustedAuthorityBaseRevision: base,
-        baseRevision: base,
-        headRevision: exactHead,
-        trustedRootReceipt: receipt,
-      });
-      nativeRootTransitionAuthorized = trustedSource && nativeRootTransitionResult.ok;
-      const details = [
-        ...(!trustedSource ? ["C2.5:trust_authorizer_untrusted"] : []),
-        ...nativeRootTransitionResult.reasons,
-      ];
-      initialChecks.push({
-        name: "trusted-root-transition",
-        check: {
-          ok: nativeRootTransitionAuthorized,
-          message: nativeRootTransitionAuthorized
-            ? "native TrustedRoot transition is exactly authorized by independent trusted issue authority"
-            : "native TrustedRoot transition is not exactly authorized",
-          details,
-          data: {
-            candidate_ready: nativeRootTransitionResult.candidateReady,
-            authorized: nativeRootTransitionResult.trust.authorized,
-            required_permissions: nativeRootTransitionResult.requiredPermissions,
-            migration: nativeRootTransitionResult.migration,
-            equivalence: nativeRootTransitionResult.equivalence,
-          },
+  const nativeRootBoundary = evaluateTrustedRootTransitionBoundary({
+    governanceGrant,
+    trustedAuthorizer,
+    repository: observation.repository,
+    repositoryRoot: roots.repoRoot,
+    baseRevision: base,
+    headRevision: exactHead,
+  });
+  if (nativeRootBoundary !== null) {
+    nativeRootTransitionResult = nativeRootBoundary.evaluation;
+    nativeRootTransitionAuthorized = nativeRootBoundary.ok;
+    initialChecks.push({
+      name: "trusted-root-transition",
+      check: {
+        ok: nativeRootTransitionAuthorized,
+        message: nativeRootTransitionAuthorized
+          ? "native TrustedRoot transition is exactly authorized by independent trusted issue authority"
+          : "native TrustedRoot transition is not exactly authorized",
+        details: nativeRootBoundary.reasons,
+        data: {
+          candidate_ready: nativeRootTransitionResult.candidateReady,
+          authorized: nativeRootTransitionResult.trust.authorized,
+          required_permissions: nativeRootTransitionResult.requiredPermissions,
+          migration: nativeRootTransitionResult.migration,
+          equivalence: nativeRootTransitionResult.equivalence,
         },
-      });
-    } catch (error: unknown) {
-      initialChecks.push({
-        name: "trusted-root-transition",
-        check: {
-          ok: false,
-          message: `native TrustedRoot transition evaluation failed: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      });
-    }
+      },
+    });
   }
 
   let requirementTransitionAuthorized = false;
