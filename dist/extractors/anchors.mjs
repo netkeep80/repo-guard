@@ -1,4 +1,5 @@
 import { parseJson, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
+import { loadNativeRequirements } from "../runtime/canonical-requirements.mjs";
 import { uniqueSorted } from "../utils/collections.mjs";
 import { matchesAny } from "../utils/path-patterns.mjs";
 import { readRepositoryTextFile } from "../utils/repository-files.mjs";
@@ -108,6 +109,61 @@ function extractStructuredPointerAnchors(anchorType, source, file, content) {
         return { anchorType, value: rendered, file, sourceKind: "structured_pointer", raw: rendered };
     });
 }
+const exactRevisionPattern = /^[0-9a-f]{40}$/;
+const repositoryIdentityPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+function requirementsStrictResourceInstance(anchorType, file, value) {
+    return {
+        anchorType,
+        value,
+        file,
+        sourceKind: "requirements_strict_resource_paths",
+        raw: value,
+    };
+}
+function extractRequirementsStrictResourcePaths(anchorType, source, file, content, options) {
+    if (/\.rg\.(?:yaml|json)$/i.test(file)) {
+        const repository = options.repositoryIdentity;
+        const revision = options.headRef;
+        if (typeof repository !== "string" || !repositoryIdentityPattern.test(repository)) {
+            throw new Error("native requirements-strict extraction requires exact repository identity");
+        }
+        if (typeof revision !== "string" || !exactRevisionPattern.test(revision)) {
+            throw new Error("native requirements-strict extraction requires exact HEAD revision");
+        }
+        const native = loadNativeRequirements({
+            repository,
+            revision,
+            paths: [file],
+            readFile: (requestedRevision, requestedPath) => requestedRevision === revision && requestedPath === file ? content : null,
+        });
+        if (!native.ok || native.requirements.length !== 1) {
+            const details = native.errors.map((error) => `${error.code}:${error.path}:${error.message}`).join(" | ");
+            throw new Error("invalid native Requirement" + (details ? ": " + details : ""));
+        }
+        const requirement = native.requirements[0];
+        const paths = new Set([requirement.source.path]);
+        for (const relation of requirement.relations) {
+            if (relation.source.kind === "artifact")
+                paths.add(relation.source.path);
+            if (relation.target.kind === "artifact")
+                paths.add(relation.target.path);
+        }
+        return [...paths]
+            .sort((a, b) => a.localeCompare(b, "en"))
+            .map((path) => requirementsStrictResourceInstance(anchorType, file, path));
+    }
+    const legacy = extractStructuredPointerAnchors(anchorType, {
+        kind: "structured_pointer",
+        glob: source.glob,
+        format: source.format,
+        pointer: "/artifacts",
+        item_field: "path",
+    }, file, content);
+    return legacy.map((instance) => ({
+        ...instance,
+        sourceKind: "requirements_strict_resource_paths",
+    }));
+}
 function compareInstances(a, b) {
     return a.file.localeCompare(b.file) || (a.line || 0) - (b.line || 0) || (a.column || 0) - (b.column || 0) ||
         a.anchorType.localeCompare(b.anchorType) || a.value.localeCompare(b.value);
@@ -129,6 +185,9 @@ export function extractAnchors(policy, options = {}) {
                         instances.push(...extractJsonFieldAnchor(anchorType, source, file, content));
                     else if (source.kind === "structured_pointer")
                         instances.push(...extractStructuredPointerAnchors(anchorType, source, file, content));
+                    else if (source.kind === "requirements_strict_resource_paths") {
+                        instances.push(...extractRequirementsStrictResourcePaths(anchorType, source, file, content, options));
+                    }
                     else
                         throw new Error(`unsupported anchor source kind "${source.kind}"`);
                 }
