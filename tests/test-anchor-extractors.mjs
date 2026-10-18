@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { buildPolicyFacts } from "../dist/facts/input.mjs";
 import { extractAnchors } from "../dist/extractors/anchors.mjs";
 import { runPolicyPipeline } from "../dist/runtime/pipeline.mjs";
+import { resolvePolicyPacks } from "../dist/policy-packs.mjs";
 
 let failures = 0;
 
@@ -275,6 +276,36 @@ console.log("\n--- resolved must_resolve refs pass cleanly ---");
 console.log(`\n${failures === 0 ? "All anchor extractor tests passed" : `${failures} test(s) failed`}`);
 process.exit(failures === 0 ? 0 : 1);
 
+
+console.log("\n--- C2.5 requirements-strict lowers native ownership without public DSL expansion ---");
+{
+  const packed = resolvePolicyPacks({
+    policy_format_version: "0.3.0",
+    repository_kind: "tooling",
+    paths: { forbidden: [], canonical_docs: [], operational_paths: [], governance_paths: [] },
+    diff_rules: { max_new_docs: 10, max_new_files: 10, max_net_added_lines: 1000 },
+    content_rules: [],
+    cochange_rules: [],
+    packs: {
+      "requirements-strict": {
+        requirement_json_globs: ["requirements/none/*.json"],
+        requirement_yaml_globs: ["requirements/repo-guard/*.yaml"],
+        requirement_id_pattern: "RG-[0-9]{2}",
+        closed_repository: true,
+        strict_heading_docs: ["requirements/**/*.md"],
+      },
+    },
+  });
+  expect("closed native requirements pack lowers successfully", packed.ok, true);
+  expect(
+    "closed native requirements pack uses only internal representation-aware resource sources",
+    packed.policy.anchors.types.requirement_artifact_path.sources,
+    [
+      { kind: "requirements_strict_resource_paths", glob: "requirements/none/*.json", format: "json" },
+      { kind: "requirements_strict_resource_paths", glob: "requirements/repo-guard/*.yaml", format: "yaml" },
+    ],
+  );
+}
 
 console.log("\n--- C2.5 built-in closed-repository extractor accepts strict native Requirement resources ---");
 {
