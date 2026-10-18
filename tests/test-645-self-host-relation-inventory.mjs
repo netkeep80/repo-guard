@@ -307,6 +307,14 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   const diffText = gitRuntime.runGit(["-c", "core.quotepath=false", "diff", baseRevision, headRevision], { cwd: root });
   const basePolicy = JSON.parse(gitRuntime.readFileAtRef(baseRevision, "repo-policy.json", root));
   const headPolicy = JSON.parse(gitRuntime.readFileAtRef(headRevision, "repo-policy.json", root));
+  const bridgeGovernanceChanged = exactDiff.some((file) =>
+    file.path === "schemas/governance-grant.schema.json"
+      || file.previousPath === "schemas/governance-grant.schema.json");
+  const bridgeGovernanceFixture = bridgeGovernanceChanged ? {
+    governanceGrant: { authorized_governance_paths: ["schemas/governance-grant.schema.json"] },
+    trustedAuthorizer: { trusted: true, source: "repository_permission" },
+  } : {};
+
   const policyInput = {
     mode: "check-diff",
     repositoryRoot: root,
@@ -322,6 +330,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     trackedFiles: exactTracked,
     changeIntent: null,
     changeIntentSource: "github_issue:#723",
+    ...bridgeGovernanceFixture,
     readFile: (filePath) => gitRuntime.readFileAtRef(headRevision, filePath, root),
     readFileAtRef: (sha, filePath) => gitRuntime.readFileAtRef(sha, filePath, root),
   };
