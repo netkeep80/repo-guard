@@ -453,7 +453,7 @@ function authorityPermissions(delta, input, protectedSet) {
     if (delta.kind === "requirement_add" || delta.kind === "requirement_modify" || delta.kind === "requirement_remove")
         result.add("requirement:" + delta.subject);
     if (delta.kind.startsWith("constraint_") && delta.requirementId && delta.constraintId)
-        result.add("constraint:" + delta.requirementId + ":" + delta.constraintId);
+        result.add("constraint_definition:" + delta.requirementId + ":" + delta.constraintId);
     if (delta.kind.startsWith("relation_")) {
         const facts = [delta.beforeRelation, delta.afterRelation, delta.relation].filter(Boolean);
         // Each actual relation transition is evaluated against BOTH exact states.
