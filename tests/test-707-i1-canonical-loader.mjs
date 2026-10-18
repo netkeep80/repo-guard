@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { strictCanonicalJson, loadCanonicalRequirements, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
 import { runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
-import { loadNativeRequirements } from "../dist/runtime/native-contract.mjs";
+import { loadNativeRequirements } from "../dist/runtime/resource-resolver.mjs";
 import { parseJson } from "../dist/document-facts.mjs";
 import { test } from "node:test";
 const sha = "a".repeat(40), repo = "netkeep80/repo-guard";
