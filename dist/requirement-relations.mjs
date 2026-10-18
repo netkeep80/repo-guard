@@ -357,7 +357,7 @@ export function checkRoutineRequirementTransition(input) {
             }
         }
         for (const [artifactPath, current] of newMetadata) {
-            if (!oldMetadata.has(artifactPath) && ["governance", "requirement", "immutable", "authority", "contract"].includes(String(current.role ?? "").toLowerCase())) {
+            if (!oldMetadata.has(artifactPath) && ["governance", "requirement", "immutable", "authority", "contract"].includes(String(current.role ?? "").trim().toLowerCase())) {
                 reasons.push(`routine_new_protected_artifact_role:${artifactPath}`);
             }
         }
