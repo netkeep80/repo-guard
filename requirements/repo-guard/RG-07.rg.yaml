@@ -1,0 +1,140 @@
+format: repo-guard/requirement-v1
+id: RG-07
+normative: "### RG-07 — Свобода реализации и правильный владелец проверки\n\n**`MUST`:** продукт ограничивает наблюдаемый результат и полномочия, не навязывает последовательность программирования. Проверку, которую лучше выполняют платформа, компилятор или предметный CI, не следует дублировать более слабым блокирующим аналогом без независимой ценности.\n\nРиск — историческая форма реализации и ручная церемония становятся целью. Нарушение — корректное изменение отклоняется только из-за необоснованного числа файлов, формы теста или порядка работы. Проверяемы конкретные дублирующие пути исполнения; оценка независимой ценности остаётся архитектурным решением.\n\nСредства: небольшие декларативные границы, внешние предметные свидетельства, факультативные бюджеты и подсказки. В `anum_parser` тест постоянного числа узлов сохранял дефект визуализации; правильный контракт разрешил изменить реализацию. В `aprover` честный `GAP` предпочтительнее локального обхода отсутствующей upstream-возможности.\n"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/document-facts.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/document-facts.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/markdown-parser.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/markdown-parser.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/markdown-structure.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/markdown-structure.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-analysis.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-analysis.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-api.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-api.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-lowering.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-lowering.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-model.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-model.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/document-facts.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/markdown-parser.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/markdown-structure.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/projection-analysis.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/projection-api.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/projection-lowering.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/projection-model.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-anum-docs-mddb-differential.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-anum-docs-section-differential.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-10a-external-base-cutover.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-document-facts-boundary.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-hybrid-owned-block-identity.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-mddb-structural-model.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-analysis.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-freshness-red.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-lowering.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-model-contract.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-package-consumer.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-runtime-api.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-projection-self-host.mjs"
