@@ -6,7 +6,7 @@ import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, lo
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";
-import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff, type TransitionEvidenceFact, type TransitionObservationFact, type TransitionReceipt, type WorkIntentFact } from "./transition-closure.mjs";
+import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff, type AuthenticatedProviderGrant, type TransitionEvidenceFact, type TransitionObservationFact, type TransitionReceipt, type WorkIntentFact } from "./transition-closure.mjs";
 import { buildPolicyFacts } from "../facts/input.mjs";
 import { runPolicyChecks } from "../checks/orchestrator.mjs";
 import type { ExecutionPhase } from "../checks/rule-registry.mjs";
@@ -35,6 +35,7 @@ export interface RepoGuardSelfHostInput {
   evidenceFacts?: readonly TransitionEvidenceFact[];
   observationFacts?: readonly TransitionObservationFact[];
   trustedEvidenceProviders?: readonly string[];
+  authenticatedProviderGrants?: readonly AuthenticatedProviderGrant[];
 }
 export interface RepoGuardSelfHostConfig extends Omit<RepoGuardSelfHostInput, "observedTrackedPaths" | "observedDiffFiles"> {}
 
@@ -395,6 +396,7 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
     evidenceFacts: input.evidenceFacts || [],
     observationFacts: input.observationFacts || [],
     trustedEvidenceProviders: input.trustedEvidenceProviders || [],
+    authenticatedProviderGrants: input.authenticatedProviderGrants,
   });
   reasons.push(...transition.reasons.map((reason) => "I8:" + reason));
   const normalizedReasons = uniqueSorted(reasons);
@@ -429,6 +431,8 @@ export function evaluateRepoGuardSelfHost(input: RepoGuardSelfHostInput) {
       providerAuthentication: "external to pure evaluator",
       protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
       trustedEvidenceProviders: uniqueSorted(input.trustedEvidenceProviders || []),
+      providerCapabilityMode: input.authenticatedProviderGrants !== undefined,
+      authenticatedProviderGrantCount: input.authenticatedProviderGrants?.length || 0,
     },
     transition,
   };
@@ -556,6 +560,7 @@ export interface RepositoryShadowReplayInput {
   evidenceFacts?: readonly TransitionEvidenceFact[];
   observationFacts?: readonly TransitionObservationFact[];
   trustedEvidenceProviders?: readonly string[];
+  authenticatedProviderGrants?: readonly AuthenticatedProviderGrant[];
 }
 
 /**
@@ -690,6 +695,7 @@ export function evaluateRepositoryShadowReplay(input: RepositoryShadowReplayInpu
     evidenceFacts: input.evidenceFacts || [],
     observationFacts: input.observationFacts || [],
     trustedEvidenceProviders: input.trustedEvidenceProviders || [],
+    authenticatedProviderGrants: input.authenticatedProviderGrants,
   });
   const gaps = uniqueSorted([
     ...(authority.snapshotMismatch ? ["I9:authority_snapshot_mismatch"] : []),
