@@ -359,57 +359,256 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   if (!eventBase || !head) return fail(roots, format, "check_pr.missing_ref", "pull_request event missing base/head SHA");
 
   let observation: RepositoryObservation;
-  try { observation = acquirePullRequestObservation({ repository: typeof repoFullName === "string" ? repoFullName : "", baseRef: typeof baseRef === "string" && baseRef ? baseRef : null, eventBaseSha: eventBase as string, headSha: head as string, cwd: roots.repoRoot }); }
-  catch (error: unknown) { return fail(roots, format, "check_pr.repository_observation", (error as Error).message); }
+  try {
+    observation = acquirePullRequestObservation({
+      repository: typeof repoFullName === "string" ? repoFullName : "",
+      baseRef: typeof baseRef === "string" && baseRef ? baseRef : null,
+      eventBaseSha: eventBase as string,
+      headSha: head as string,
+      cwd: roots.repoRoot,
+    });
+  } catch (error: unknown) {
+    return fail(roots, format, "check_pr.repository_observation", (error as Error).message);
+  }
   const base = observation.base.sha, exactHead = observation.head.sha;
   if (!quiet) {
-    if (observation.base.advanced_since_event) console.log(`Base ref ${String(observation.base.ref)} advanced from event snapshot ${observation.base.event_sha.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
+    if (observation.base.advanced_since_event)
+      console.log(`Base ref ${String(observation.base.ref)} advanced from event snapshot ${observation.base.event_sha.slice(0, 7)} to ${base.slice(0, 7)}; using current base`);
     console.log(`PR #${prNumber as string | number}: checking ChangeIntent and diff (${base.slice(0, 7)}...${exactHead.slice(0, 7)}, merge-base ${observation.merge_base.sha.slice(0, 7)})`);
     console.log(`Repository observation: exact-head T=${observation.evaluated.commit_sha.slice(0, 7)} tree=${observation.evaluated.tree_sha.slice(0, 7)}, checkout=${observation.checkout.commit_sha.slice(0, 7)}${observation.checkout.matches_head ? "" : " (not H)"}${observation.checkout.dirty ? " dirty" : ""}`);
   }
+
   const snapshotDocuments = createImmutableSnapshotDocumentCache({
     readFileAtRef: (ref, path) => readFileAtRef(ref, path, roots.repoRoot),
     parsers: { json: parseJson, yaml: parseYaml },
   });
-  const readSnapshotFile: SnapshotReader = (ref, path) => snapshotDocuments.read({ repository: observation.repository, sha: ref }, path) as string | null;
+  const readSnapshotFile: SnapshotReader = (ref, path) =>
+    snapshotDocuments.read({ repository: observation.repository, sha: ref }, path) as string | null;
   const readEvaluatedFile = (path: string) => readSnapshotFile(observation.evaluated.commit_sha, path);
-  const headRuntime = headPolicyRuntime(roots, observation, readSnapshotFile, quiet);
-  if (!headRuntime) return fail(roots, format, "check_pr.head_policy", "Proposed policy compilation failed");
 
-  const initialChecks: InitialCheck[] = [], baseRead = policyAt(readSnapshotFile, base);
-  let runtime = headRuntime, basePolicy: RuntimePolicy | null = null, trustedGovernancePaths: unknown = [];
-  if (baseRead.error) initialChecks.push({ name: "governance-trusted-boundary", check: { ok: false, message: `cannot establish trusted governance boundary: ${baseRead.error}`, details: [`base_ref: ${base}`] } });
-  else {
-    runtime = loadRuntime(() => loadPolicyRuntimeFromObject(roots, baseRead.policy, { label: "repo-policy.json (base)", historicalBase: true, quiet }), "repo-policy.json (base)", "Base policy compilation failed") as PolicyRuntime;
-    if (!runtime) return fail(roots, format, "check_pr.base_policy", "Base policy compilation failed");
-    basePolicy = runtime.policy; trustedGovernancePaths = (basePolicy as RuntimePolicy & { paths?: { governance_paths?: unknown } }).paths?.governance_paths ?? [];
-  }
-
-  const { ajv, policy, changeIntentSchema, governanceGrantSchema } = runtime;
-  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy } as Parameters<typeof resolveEnforcementMode>[0]);
-  if (!enforcement.ok) return fail(roots, format, "check_pr.enforcement", enforcement.message);
+  // Control-plane schemas are accepted package code, not candidate repo-policy semantics.
+  const control = createPolicyNormalizationContext(roots);
+  const initialChecks: InitialCheck[] = [];
   const linked = fetchLinkedIssue({ prBody, repoFullName, quiet });
   if (linked.fatal) return fail(roots, format, "check_pr.linked_issue", "linked issue fallback failed");
   const { linkedIssues, issueBody, issueContext } = linked;
   let resolved = resolvePRChangeIntentFacts({ prBody, issueBody, linkedIssueCount: linkedIssues.length });
-  if (!resolved.ok && linkedIssues.length === 1 && issueBody === null && resolved.error !== "issue_link_ambiguous") resolved = { ...resolved, error: "issue_fetch_failed", message: `Could not fetch issue #${linkedIssues[0]} body` };
+  if (!resolved.ok && linkedIssues.length === 1 && issueBody === null && resolved.error !== "issue_link_ambiguous")
+    resolved = { ...resolved, error: "issue_fetch_failed", message: `Could not fetch issue #${linkedIssues[0]} body` };
 
   let changeIntent: unknown = null, changeIntentSource = resolved.changeIntentSource || "none";
-  if (!resolved.ok) initialChecks.push({ name: "change-intent", check: { ok: false, message: `[${resolved.error}]: ${resolved.message}` } });
-  else { const check = validationCheck(ajv, changeIntentSchema, resolved.changeIntent, "change-intent (from markdown)"); initialChecks.push({ name: "change-intent", check }); if (check.ok) changeIntent = resolved.changeIntent; }
-  let governanceGrant: unknown = null;
-  if (resolved.grantResult && !resolved.grantResult.ok) initialChecks.push({ name: "governance-grant", check: { ok: false, message: `[${resolved.grantResult.error}]: ${resolved.grantResult.message}` } });
-  else if ((resolved.grantResult as { grant?: unknown } | null | undefined)?.grant) { const grant = (resolved.grantResult as { grant?: unknown }).grant, check = validationCheck(ajv, governanceGrantSchema, grant, "governance-grant (linked issue)"); initialChecks.push({ name: "governance-grant", check }); if (check.ok) governanceGrant = grant; }
+  if (!resolved.ok) {
+    initialChecks.push({ name: "change-intent", check: { ok: false, message: `[${resolved.error}]: ${resolved.message}` } });
+  } else {
+    const check = validationCheck(control.ajv, control.schemas.changeIntent, resolved.changeIntent, "change-intent (from markdown)");
+    initialChecks.push({ name: "change-intent", check });
+    if (check.ok) changeIntent = resolved.changeIntent;
+  }
 
-  let diff, trackedFiles: string[], baseTrackedFiles: string[];
+  let governanceGrant: unknown = null;
+  if (resolved.grantResult && !resolved.grantResult.ok) {
+    initialChecks.push({ name: "governance-grant", check: { ok: false, message: `[${resolved.grantResult.error}]: ${resolved.grantResult.message}` } });
+  } else if ((resolved.grantResult as { grant?: unknown } | null | undefined)?.grant) {
+    const grant = (resolved.grantResult as { grant?: unknown }).grant;
+    const check = validationCheck(control.ajv, control.schemas.governanceGrant, grant, "governance-grant (linked issue)");
+    initialChecks.push({ name: "governance-grant", check });
+    if (check.ok) governanceGrant = grant;
+  }
+
+  let diff: ReturnType<typeof getDiffObservation>, trackedFiles: string[], baseTrackedFiles: string[];
   try {
     diff = getDiffObservation(base, exactHead, roots.repoRoot);
     baseTrackedFiles = listTrackedFilesAtRef(base, roots.repoRoot);
     trackedFiles = listTrackedFilesAtRef(observation.evaluated.commit_sha, roots.repoRoot);
+  } catch (error: unknown) {
+    return fail(roots, format, "check_pr.diff", (error as Error).message);
   }
-  catch (error: unknown) { return fail(roots, format, "check_pr.diff", (error as Error).message); }
+
   let trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null = null;
-  if (governanceGrant !== null && basePolicy && repoFullName) try { trustedAuthorizer = resolveTrustedAuthorizer({ repoFullName, issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null, issueContext }); } catch {}
+  if (governanceGrant !== null && repoFullName) {
+    try {
+      trustedAuthorizer = resolveTrustedAuthorizer({
+        repoFullName,
+        issueNumber: linkedIssues.length === 1 ? linkedIssues[0] : null,
+        issueContext,
+      });
+    } catch {}
+  }
+
+  const baseRepresentation = classifyRepoGuardSelfHostRepresentation(roots.repoRoot, base);
+  const headRepresentation = classifyRepoGuardSelfHostRepresentation(roots.repoRoot, exactHead);
+
+  // Forward cutover: exact root migration + exact atomic permission. No legacy veto runs.
+  if (baseRepresentation.kind === "legacy" && headRepresentation.kind === "native") {
+    const boundary = evaluateAtomicNativeCutoverBoundary({
+      governanceGrant,
+      trustedAuthorizer,
+      repository: observation.repository,
+      repositoryRoot: roots.repoRoot,
+      baseRevision: base,
+      headRevision: exactHead,
+    });
+    const selector = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: baseRepresentation.kind,
+      headRepresentation: headRepresentation.kind,
+      forwardAuthorized: boundary.ok,
+      rollbackAuthorized: false,
+    });
+    if (!selector.ok) {
+      return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-cutover", {
+        ok: false,
+        message: "LEGACY to NATIVE transition is not exactly authorized",
+        details: boundary.reasons,
+        data: { boundary, baseRepresentation, headRepresentation },
+      }, { repositoryObservation: observation });
+    }
+
+    // The representation transition itself is proved by the C2.5 exact migration evaluator.
+    // Once that independent proof passes, evaluate the resulting native HEAD as the post-transition state.
+    const native = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: observation.repository,
+      repositoryRoot: roots.repoRoot,
+      trustedAuthorityBaseRevision: exactHead,
+      baseRevision: exactHead,
+      headRevision: exactHead,
+      workIntent: null,
+      trustedReceipts: [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-cutover", {
+      ok: boundary.ok && native.ok,
+      message: boundary.ok && native.ok
+        ? "exact atomic native cutover proof and post-transition native blocking state are GREEN"
+        : "atomic native cutover proof failed",
+      details: [...boundary.reasons, ...native.reasons],
+      data: {
+        boundary: {
+          rootAuthorized: boundary.rootAuthorized,
+          atomicAuthorized: boundary.atomicAuthorized,
+          migration: boundary.rootBoundary?.evaluation,
+        },
+        native,
+      },
+    }, { repositoryObservation: observation, providerCapabilityMode: native.providerCapabilityMode });
+  }
+
+  // Native steady state: only the native evaluator is authoritative.
+  if (baseRepresentation.kind === "native" && headRepresentation.kind === "native") {
+    const selector = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: baseRepresentation.kind,
+      headRepresentation: headRepresentation.kind,
+      forwardAuthorized: false,
+      rollbackAuthorized: false,
+    });
+    const receiptBoundary = evaluateTransitionReceiptBoundary({
+      governanceGrant,
+      trustedAuthorizer,
+      repository: observation.repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: exactHead,
+    });
+    if (receiptBoundary.present) initialChecks.push({
+      name: "transition-receipt",
+      check: {
+        ok: receiptBoundary.ok,
+        message: receiptBoundary.ok ? "exact native TransitionReceipt is independently authorized" : "native TransitionReceipt is not exact",
+        details: receiptBoundary.reasons,
+      },
+    });
+    const native = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: observation.repository,
+      repositoryRoot: roots.repoRoot,
+      trustedAuthorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: exactHead,
+      workIntent: workIntentFromChangeIntent(changeIntent, prNumber),
+      trustedReceipts: receiptBoundary.receipt ? [receiptBoundary.receipt] : [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "native-blocking", {
+      ok: receiptBoundary.ok && native.ok,
+      message: receiptBoundary.ok && native.ok
+        ? "native J2/J1/J3/Constraint evaluation is authoritative and GREEN"
+        : "native authoritative evaluation is RED",
+      details: [...receiptBoundary.reasons, ...native.reasons],
+      data: native,
+    }, { repositoryObservation: observation, providerCapabilityMode: native.providerCapabilityMode });
+  }
+
+  // Exact reverse rollback is a special authority transition, not a native-RED fallback.
+  if (baseRepresentation.kind === "native" && headRepresentation.kind === "legacy") {
+    const boundary = evaluateAtomicNativeRollbackBoundary({
+      governanceGrant,
+      trustedAuthorizer,
+      repository: observation.repository,
+      repositoryRoot: roots.repoRoot,
+      baseRevision: base,
+      headRevision: exactHead,
+    });
+    const selector = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: baseRepresentation.kind,
+      headRepresentation: headRepresentation.kind,
+      forwardAuthorized: false,
+      rollbackAuthorized: boundary.ok,
+    });
+    return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-rollback", {
+      ok: selector.ok && boundary.ok,
+      message: selector.ok && boundary.ok
+        ? "exact accepted legacy rollback tree is independently authorized"
+        : "NATIVE to LEGACY rollback is not exactly authorized",
+      details: boundary.reasons,
+      data: { boundary, baseRepresentation, headRepresentation },
+    }, { repositoryObservation: observation });
+  }
+
+  // Mixed/unknown representation is never delegated to either evaluator.
+  if (baseRepresentation.kind !== "legacy" || headRepresentation.kind !== "legacy") {
+    const selector = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: baseRepresentation.kind,
+      headRepresentation: headRepresentation.kind,
+      forwardAuthorized: false,
+      rollbackAuthorized: false,
+    });
+    return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "representation-boundary", {
+      ok: false,
+      message: "RepoGuard self-host representation is mixed or unknown",
+      details: [...baseRepresentation.reasons, ...headRepresentation.reasons],
+      data: { baseRepresentation, headRepresentation },
+    }, { repositoryObservation: observation });
+  }
+
+  // LEGACY -> LEGACY remains byte-for-byte the existing authoritative policy path.
+  const headRuntime = headPolicyRuntime(roots, observation, readSnapshotFile, quiet);
+  if (!headRuntime) return fail(roots, format, "check_pr.head_policy", "Proposed policy compilation failed");
+
+  const baseRead = policyAt(readSnapshotFile, base);
+  let runtime = headRuntime, basePolicy: RuntimePolicy | null = null, trustedGovernancePaths: unknown = [];
+  if (baseRead.error) {
+    initialChecks.push({
+      name: "governance-trusted-boundary",
+      check: { ok: false, message: `cannot establish trusted governance boundary: ${baseRead.error}`, details: [`base_ref: ${base}`] },
+    });
+  } else {
+    runtime = loadRuntime(
+      () => loadPolicyRuntimeFromObject(roots, baseRead.policy, { label: "repo-policy.json (base)", historicalBase: true, quiet }),
+      "repo-policy.json (base)",
+      "Base policy compilation failed",
+    ) as PolicyRuntime;
+    if (!runtime) return fail(roots, format, "check_pr.base_policy", "Base policy compilation failed");
+    basePolicy = runtime.policy;
+    trustedGovernancePaths = (basePolicy as RuntimePolicy & { paths?: { governance_paths?: unknown } }).paths?.governance_paths ?? [];
+  }
+
+  const { policy } = runtime;
+  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy } as Parameters<typeof resolveEnforcementMode>[0]);
+  if (!enforcement.ok) return fail(roots, format, "check_pr.enforcement", enforcement.message);
 
   let nativeRootTransitionAuthorized = false;
   let nativeRootTransitionResult: ReturnType<typeof evaluateRepoGuardTrustedRootMigrationSnapshot> | null = null;
@@ -473,14 +672,18 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
         requirementTransitionAuthorized = nativeRootTransitionAuthorized || transition.authorized;
         const routine = governanceGrant === null && !transition.ok
           ? checkRoutineRequirementTransition({
-            base: baseGraph, head: headGraph, changedFiles: diff.files, headTrackedFiles: trackedFiles,
+            base: baseGraph,
+            head: headGraph,
+            changedFiles: diff.files,
+            headTrackedFiles: trackedFiles,
             readFileAtRef: readSnapshotFile,
             governancePaths: Array.isArray(trustedGovernancePaths) ? trustedGovernancePaths as string[] : [],
             forbiddenPaths: (basePolicy as { paths?: { forbidden?: string[] } }).paths?.forbidden || [],
             closedRepository: basePolicy.document_relations?.rules?.some((rule) => rule.id === "requirements-strict:closed-repository") === true,
           })
           : null;
-        if (routine?.ok && (changeIntent as { change_type?: string } | null)?.change_type !== "governance") routineRequirementPaths = routine.requirement_paths;
+        if (routine?.ok && (changeIntent as { change_type?: string } | null)?.change_type !== "governance")
+          routineRequirementPaths = routine.requirement_paths;
         const accepted = nativeRootTransitionAuthorized || transition.ok || routineRequirementPaths.length > 0;
         initialChecks.push({
           name: "requirement-transition",
@@ -519,36 +722,73 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const satisfiedTransactionConstraintKeys = requirementTransitionAuthorized ? ["trace:changed-requirements-need-evidence"] : [];
 
   const baseInput = {
-    mode: "check-pr", repositoryRoot: roots.repoRoot, policy, basePolicy, headPolicy: headRuntime.policy, baseRef: base, headRef: exactHead,
-    repositoryIdentity: observation.repository, snapshotDocuments, repositoryObservation: observation,
-    trackedFiles, readFile: readEvaluatedFile, readFileAtRef: readSnapshotFile,
-    changeIntent, changeIntentSource, governanceGrant, trustedGovernancePaths, trustedAuthorizer, routineRequirementPaths, enforcement, diffText: diff.diffText, diffFiles: diff.files, initialChecks,
+    mode: "check-pr",
+    repositoryRoot: roots.repoRoot,
+    policy,
+    basePolicy,
+    headPolicy: headRuntime.policy,
+    baseRef: base,
+    headRef: exactHead,
+    repositoryIdentity: observation.repository,
+    snapshotDocuments,
+    repositoryObservation: observation,
+    trackedFiles,
+    readFile: readEvaluatedFile,
+    readFileAtRef: readSnapshotFile,
+    changeIntent,
+    changeIntentSource,
+    governanceGrant,
+    trustedGovernancePaths,
+    trustedAuthorizer,
+    routineRequirementPaths,
+    enforcement,
+    diffText: diff.diffText,
+    diffFiles: diff.files,
+    initialChecks,
   } as PipelineInput;
-  const changed = Boolean(basePolicy && !isDeepStrictEqual(basePolicy, headRuntime.policy)), origin = changed ? "base" : "shared";
+  const changed = Boolean(basePolicy && !isDeepStrictEqual(basePolicy, headRuntime.policy));
+  const origin = changed ? "base" : "shared";
   const plan: Array<{ policyOrigin: "base" | "head" | "shared"; input: PipelineInput; options: PipelineOptions }> = [{
     policyOrigin: origin,
     input: baseInput,
     options: { quiet, policyOrigin: origin, satisfiedTransactionConstraintKeys },
   }];
   if (changed) {
-    const proposedEnforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: headRuntime.policy } as Parameters<typeof resolveEnforcementMode>[0]);
+    const proposedEnforcement = resolveEnforcementMode({
+      cliValue: roots.enforcementMode,
+      policy: headRuntime.policy,
+    } as Parameters<typeof resolveEnforcementMode>[0]);
     if (!proposedEnforcement.ok) return fail(roots, format, "check_pr.proposed_enforcement", proposedEnforcement.message);
     plan.push({
       policyOrigin: "head",
       input: { ...baseInput, policy: headRuntime.policy, enforcement: proposedEnforcement, initialChecks: [] } as PipelineInput,
-      options: { quiet: true, printEnforcement: false, ruleNamePrefix: "proposed-policy:", excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES, policyOrigin: "head", satisfiedTransactionConstraintKeys },
+      options: {
+        quiet: true,
+        printEnforcement: false,
+        ruleNamePrefix: "proposed-policy:",
+        excludeRuleFamilies: PROPOSED_POLICY_EXCLUDED_FAMILIES,
+        policyOrigin: "head",
+        satisfiedTransactionConstraintKeys,
+      },
     });
   }
 
   const reporter = createAnalysisCollector(enforcement, { presenter: quiet ? null : createAnalysisTextPresenter() });
   let extra: ReturnType<typeof evaluatePolicyPipeline> | null = null;
   for (let i = 0; i < plan.length; i++) {
-    if (i && !quiet) console.log("\nProposed policy differs from trusted base; checking head runtime policy as an additional veto.");
+    if (i && !quiet)
+      console.log("\nProposed policy differs from trusted base; checking head runtime policy as an additional veto.");
     const metadata = evaluatePolicyPipeline(plan[i].input, plan[i].options, reporter);
     if (!extra) extra = metadata;
   }
-  const evaluationPlan = plan.map((step) => ({ policyOrigin: step.policyOrigin, enforcementMode: step.input.enforcement.mode, executionPhase: step.options.executionPhase || "both", excludedRuleFamilies: step.options.excludeRuleFamilies || [] }));
-  const report = reporter.finish({ ...extra, evaluationPlan }), output = renderAnalysisReport(report, { format });
+  const evaluationPlan = plan.map((step) => ({
+    policyOrigin: step.policyOrigin,
+    enforcementMode: step.input.enforcement.mode,
+    executionPhase: step.options.executionPhase || "both",
+    excludedRuleFamilies: step.options.excludeRuleFamilies || [],
+  }));
+  const report = reporter.finish({ ...extra, evaluationPlan });
+  const output = renderAnalysisReport(report, { format });
   if (output) console.log(output);
   return report.exitCode;
 }
