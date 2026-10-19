@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { classifyRepoGuardSelfHostRepresentation, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
+import { classifyNativeRepositoryRepresentation, classifyRepoGuardSelfHostRepresentation, evaluateNativeRollbackSnapshot, evaluateNativeTrustedRootMigrationSnapshot, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
@@ -827,5 +827,404 @@ test("A1 exact TransitionReceipt transport uses existing trusted issue authority
     });
     assert.equal(verdict.ok, false, name + " unexpectedly GREEN");
     assert.equal(verdict.receipt, null);
+  }
+});
+
+
+/* #749_GENERIC_NATIVE_CONSUMER_RED */
+test("#749 F1 RED: arbitrary repository native representation is discovered structurally", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-749-red-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "rg-749@example.invalid"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "RG 749"], { cwd: root });
+    mkdirSync(join(root, "requirements", "consumer"), { recursive: true });
+    writeFileSync(join(root, "requirements", "consumer", "APP-ROOT.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: APP-ROOT",
+      "normative: Consumer root",
+      "",
+    ].join("\n"));
+    execFileSync("git", ["add", "-A"], { cwd: root });
+    execFileSync("git", ["commit", "-q", "-m", "native consumer"], { cwd: root });
+    const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+
+    const representation = classifyRepoGuardSelfHostRepresentation(root, revision);
+    assert.equal(representation.kind, "native",
+      "native discovery must not depend on netkeep80/repo-guard, RG-01..RG-08, or a fixed root count");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+/* #749_GENERIC_NATIVE_CONSUMER_MATRIX */
+function rg749Git(cwd, args) {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+function rg749ConsumerFixture(ids = ["APP-ROOT"], repository = "acme/widget") {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-749-consumer-"));
+  rg749Git(root, ["init", "-q"]);
+  rg749Git(root, ["config", "user.email", "rg-749@example.invalid"]);
+  rg749Git(root, ["config", "user.name", "RG 749"]);
+  mkdirSync(join(root, "src"), { recursive: true });
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "src", "app.txt"), "v1\n");
+  writeFileSync(join(root, "docs", "product-requirements.md"), "consumer document\n");
+  rg749Git(root, ["add", "-A"]);
+  rg749Git(root, ["commit", "-q", "-m", "legacy baseline"]);
+  const base = rg749Git(root, ["rev-parse", "HEAD"]);
+
+  mkdirSync(join(root, "requirements", "consumer"), { recursive: true });
+  ids.forEach((id, index) => {
+    const lines = [
+      "format: repo-guard/requirement-v1",
+      "id: " + id,
+      "normative: " + JSON.stringify("Requirement " + id),
+    ];
+    if (index === 0) {
+      lines.push(
+        "relations:",
+        "  - predicates: [implemented_by]",
+        "    target:",
+        "      kind: artifact",
+        '      path: "src/app.txt"',
+        "  - predicates: [implemented_by]",
+        "    target:",
+        "      kind: artifact",
+        '      path: "docs/product-requirements.md"',
+      );
+    }
+    lines.push("");
+    writeFileSync(join(root, "requirements", "consumer", id + ".rg.yaml"), lines.join("\n"));
+  });
+  rg749Git(root, ["add", "-A"]);
+  rg749Git(root, ["commit", "-q", "-m", "native candidate"]);
+  const head = rg749Git(root, ["rev-parse", "HEAD"]);
+  return { root, repository, base, head, ids };
+}
+
+function rg749Receipt(prepared, repository, authorityBaseRevision, baseRevision, headRevision) {
+  return {
+    repository,
+    authorityBaseRevision,
+    baseRevision,
+    headRevision,
+    permissions: [...prepared.requiredPermissions],
+  };
+}
+
+test("#749 F1-F10 generic native discovery, steady state, trust and provider boundary", () => {
+  const fixture = rg749ConsumerFixture(["APP-ROOT", "POLICY-A", "TRACE-9"]);
+  const { root, repository, head } = fixture;
+  try {
+    const representation = classifyNativeRepositoryRepresentation(root, head);
+    assert.equal(representation.kind, "native");
+    assert.equal(representation.native, 3);
+
+    const steady = evaluateRepoGuardNativeBlockingSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: head,
+      baseRevision: head,
+      headRevision: head,
+      workIntent: null,
+      trustedReceipts: [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(steady.ok, true, steady.reasons.join(" | "));
+    assert.equal(steady.providerCapabilityMode, true);
+    assert.equal(steady.authenticatedProviderGrantCount, 0);
+
+    const productionSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../src/github-pr.mts"), "utf8");
+    assert.doesNotMatch(productionSource, /selfHostSelectorActive|repository\.toLowerCase\(\)\s*===\s*["']netkeep80\/repo-guard/);
+
+    const selector = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native",
+      headRepresentation: "native",
+      forwardAuthorized: false,
+      rollbackAuthorized: false,
+      candidateRepresentation: "legacy",
+    });
+    assert.equal(selector.ok, true);
+    assert.equal(selector.evaluator, "native");
+
+    writeFileSync(join(root, "docs", "product-requirements.md"), "consumer document changed\n");
+    rg749Git(root, ["add", "docs/product-requirements.md"]);
+    rg749Git(root, ["commit", "-q", "-m", "ordinary consumer doc change"]);
+    const docHead = rg749Git(root, ["rev-parse", "HEAD"]);
+    const noProtectionLeak = evaluateRepoGuardNativeBlockingSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: head,
+      baseRevision: head,
+      headRevision: docHead,
+      workIntent: { id: "F9", addresses: ["APP-ROOT"] },
+      trustedReceipts: [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(noProtectionLeak.ok, true, noProtectionLeak.reasons.join(" | "));
+
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    writeFileSync(join(root, "requirements", "consumer", "NEW-ROOT.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: NEW-ROOT",
+      'normative: "candidate-created root"',
+      "",
+    ].join("\n"));
+    rg749Git(root, ["add", "-A"]);
+    rg749Git(root, ["commit", "-q", "-m", "unauthorized root"]);
+    const unauthorizedHead = rg749Git(root, ["rev-parse", "HEAD"]);
+    const unauthorized = evaluateRepoGuardNativeBlockingSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: head,
+      baseRevision: head,
+      headRevision: unauthorizedHead,
+      workIntent: { id: "F6", addresses: ["NEW-ROOT"] },
+      trustedReceipts: [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(unauthorized.ok, false);
+    assert.ok(unauthorized.reasons.some((reason) => reason.includes("head_j2_not_rooted")), unauthorized.reasons.join(" | "));
+    assert.equal(selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native", headRepresentation: "native",
+    }).evaluator, "native");
+
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    writeFileSync(join(root, "requirements", "consumer", "APP-ROOT.yaml"), "id: APP-ROOT\nartifacts: []\n");
+    rg749Git(root, ["add", "-A"]);
+    rg749Git(root, ["commit", "-q", "-m", "mixed representation"]);
+    const mixedHead = rg749Git(root, ["rev-parse", "HEAD"]);
+    assert.equal(classifyNativeRepositoryRepresentation(root, mixedHead).kind, "mixed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const invalidRoot = mkdtempSync(join(tmpdir(), "repo-guard-749-invalid-"));
+  try {
+    rg749Git(invalidRoot, ["init", "-q"]);
+    rg749Git(invalidRoot, ["config", "user.email", "rg-749@example.invalid"]);
+    rg749Git(invalidRoot, ["config", "user.name", "RG 749"]);
+    mkdirSync(join(invalidRoot, "requirements", "bad"), { recursive: true });
+    writeFileSync(join(invalidRoot, "requirements", "bad", "BROKEN.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: BROKEN",
+      "normative: broken",
+      "trusted: true",
+      "",
+    ].join("\n"));
+    rg749Git(invalidRoot, ["add", "-A"]);
+    rg749Git(invalidRoot, ["commit", "-q", "-m", "invalid native"]);
+    const revision = rg749Git(invalidRoot, ["rev-parse", "HEAD"]);
+    assert.equal(classifyNativeRepositoryRepresentation(invalidRoot, revision).kind, "unknown");
+    const invalid = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: "netkeep80/repo-guard",
+      repositoryRoot: invalidRoot,
+      trustedAuthorityBaseRevision: revision,
+      baseRevision: revision,
+      headRevision: revision,
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(invalid.ok, false);
+  } finally {
+    rmSync(invalidRoot, { recursive: true, force: true });
+  }
+});
+
+test("#749 F11-F14 generic LEGACY/NATIVE authority transitions are exact and count-independent", async () => {
+  const fixture = rg749ConsumerFixture(["APP-ROOT", "POLICY-A", "TRACE-9"]);
+  const { root, repository, base, head } = fixture;
+  try {
+    const prepared = evaluateNativeTrustedRootMigrationSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      trustedRootReceipt: null,
+    });
+    assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
+    assert.equal(prepared.ok, false);
+    assert.equal(prepared.requiredPermissions.length, 3);
+
+    const migrationReceipt = rg749Receipt(prepared, repository, base, base, head);
+    const accepted = evaluateNativeTrustedRootMigrationSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      trustedRootReceipt: migrationReceipt,
+    });
+    assert.equal(accepted.ok, true, accepted.reasons.join(" | "));
+
+    const { evaluateGenericAtomicNativeCutoverBoundary, evaluateGenericAtomicNativeRollbackBoundary } =
+      await import("../dist/github-pr.mjs");
+    const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+    const noAuthority = evaluateGenericAtomicNativeCutoverBoundary({
+      governanceGrant: null,
+      trustedAuthorizer,
+      repository,
+      repositoryRoot: root,
+      baseRevision: base,
+      headRevision: head,
+    });
+    assert.equal(noAuthority.ok, false);
+
+    const cutover = evaluateGenericAtomicNativeCutoverBoundary({
+      governanceGrant: {
+        trusted_root_transition: {
+          repository,
+          authority_base_sha: base,
+          base_sha: base,
+          head_sha: head,
+          permissions: [...prepared.requiredPermissions],
+        },
+        allow_atomic_governance_cutover: true,
+      },
+      trustedAuthorizer,
+      repository,
+      repositoryRoot: root,
+      baseRevision: base,
+      headRevision: head,
+    });
+    assert.equal(cutover.ok, true, cutover.reasons.join(" | "));
+
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    rg749Git(root, ["rm", "-r", "-q", "--", "requirements"]);
+    writeFileSync(join(root, "src", "app.txt"), "not the accepted legacy tree\n");
+    rg749Git(root, ["add", "-A"]);
+    rg749Git(root, ["commit", "-q", "-m", "arbitrary legacy-shaped rollback"]);
+    const badRollbackHead = rg749Git(root, ["rev-parse", "HEAD"]);
+    const badRollback = evaluateNativeRollbackSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: head,
+      baseRevision: head,
+      headRevision: badRollbackHead,
+      trustedRootReceipt: null,
+    });
+    assert.equal(badRollback.ok, false);
+    assert.equal(badRollback.candidateReady, false);
+
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    rg749Git(root, ["rm", "-r", "-q", "--", "."]);
+    rg749Git(root, ["checkout", base, "--", "."]);
+    rg749Git(root, ["commit", "-q", "-m", "exact legacy rollback"]);
+    const rollbackHead = rg749Git(root, ["rev-parse", "HEAD"]);
+    const rollbackPrepared = evaluateNativeRollbackSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: head,
+      baseRevision: head,
+      headRevision: rollbackHead,
+      trustedRootReceipt: null,
+    });
+    assert.equal(rollbackPrepared.candidateReady, true, rollbackPrepared.reasons.join(" | "));
+    assert.equal(rollbackPrepared.ok, false);
+    assert.equal(rollbackPrepared.requiredPermissions.length, 3);
+
+    const rollbackReceipt = rg749Receipt(rollbackPrepared, repository, head, head, rollbackHead);
+    const rollbackAccepted = evaluateNativeRollbackSnapshot({
+      repository,
+      repositoryRoot: root,
+      trustedAuthorityBaseRevision: head,
+      baseRevision: head,
+      headRevision: rollbackHead,
+      trustedRootReceipt: rollbackReceipt,
+    });
+    assert.equal(rollbackAccepted.ok, true, rollbackAccepted.reasons.join(" | "));
+    assert.equal(rollbackAccepted.exactLegacyTreeRestored, true);
+
+    const rollbackBoundary = evaluateGenericAtomicNativeRollbackBoundary({
+      governanceGrant: {
+        trusted_root_transition: {
+          repository,
+          authority_base_sha: head,
+          base_sha: head,
+          head_sha: rollbackHead,
+          permissions: [...rollbackPrepared.requiredPermissions],
+        },
+        allow_atomic_governance_cutover: true,
+      },
+      trustedAuthorizer,
+      repository,
+      repositoryRoot: root,
+      baseRevision: head,
+      headRevision: rollbackHead,
+    });
+    assert.equal(rollbackBoundary.ok, true, rollbackBoundary.reasons.join(" | "));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#749 F15-F16 RepoGuard self-host uses the same generic native steady-state path", () => {
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const base = rg749Git(projectRoot, ["rev-parse", "HEAD"]);
+  assert.equal(classifyNativeRepositoryRepresentation(projectRoot, base).kind, "native");
+
+  const steady = evaluateRepoGuardNativeBlockingSnapshot({
+    repository: "netkeep80/repo-guard",
+    repositoryRoot: projectRoot,
+    trustedAuthorityBaseRevision: base,
+    baseRevision: base,
+    headRevision: base,
+    workIntent: null,
+    trustedReceipts: [],
+    protectedResources: [],
+    evidenceFacts: [],
+    observationFacts: [],
+    authenticatedProviderGrants: [],
+  });
+  assert.equal(steady.ok, true, steady.reasons.join(" | "));
+  assert.equal(steady.providerCapabilityMode, true);
+  assert.equal(steady.authenticatedProviderGrantCount, 0);
+
+  const clone = mkdtempSync(join(tmpdir(), "repo-guard-749-selfhost-"));
+  try {
+    execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", projectRoot, clone], { encoding: "utf8" });
+    rg749Git(clone, ["config", "user.email", "rg-749@example.invalid"]);
+    rg749Git(clone, ["config", "user.name", "RG 749"]);
+    rg749Git(clone, ["checkout", "-q", "--detach", base]);
+    const path = join(clone, "tests", "test-707-i0-shadow.mjs");
+    writeFileSync(path, readFileSync(path, "utf8") + "\n// #749 no-grant native steady-state probe\n");
+    rg749Git(clone, ["add", "tests/test-707-i0-shadow.mjs"]);
+    rg749Git(clone, ["commit", "-q", "-m", "#749 native probe"]);
+    const probeHead = rg749Git(clone, ["rev-parse", "HEAD"]);
+
+    const probe = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: "netkeep80/repo-guard",
+      repositoryRoot: clone,
+      trustedAuthorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: probeHead,
+      workIntent: { id: "#749-probe", addresses: ["RG-04", "RG-08"] },
+      trustedReceipts: [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(probe.ok, true, probe.reasons.join(" | "));
+    assert.equal(probe.providerCapabilityMode, true);
+    assert.equal(probe.authenticatedProviderGrantCount, 0);
+    assert.equal(selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native",
+      headRepresentation: "native",
+    }).evaluator, "native");
+  } finally {
+    rmSync(clone, { recursive: true, force: true });
   }
 });
