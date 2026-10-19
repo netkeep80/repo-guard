@@ -876,26 +876,9 @@ export function runCheckPR(roots, args = []) {
                 data: { boundary, baseRepresentation, headRepresentation },
             }, { repositoryObservation: observation });
         }
-        // TrustedRoot migration authority and ProtectedResource mutation authority are independent.
-        const receiptBoundary = evaluateTransitionReceiptBoundary({
-            governanceGrant,
-            trustedAuthorizer,
-            repository: observation.repository,
-            authorityBaseRevision: base,
-            baseRevision: base,
-            headRevision: exactHead,
-        });
-        if (receiptBoundary.present)
-            initialChecks.push({
-                name: "transition-receipt",
-                check: {
-                    ok: receiptBoundary.ok,
-                    message: receiptBoundary.ok ? "exact cutover TransitionReceipt is independently authorized" : "cutover TransitionReceipt is not exact",
-                    details: receiptBoundary.reasons,
-                },
-            });
         // The representation transition itself is proved by the generic exact migration evaluator.
-        // Once that independent proof passes, evaluate the resulting native HEAD as the post-transition state.
+        // ProtectedResource TRUST is projected into the existing exact TransitionReceipt boundary;
+        // there is no second ProtectedResource authority evaluator.
         const provider = nativeProviderInputs({
             repository: observation.repository,
             eventBaseRevision: base,
@@ -921,24 +904,26 @@ export function runCheckPR(roots, args = []) {
                     },
                 },
             });
-        const protectedAuthority = evaluateProtectedResourceAuthority({
+        const requiredProtectedPermissions = projectProtectedResourcePermissions(diff.files, provider.protectedResources);
+        const receiptBoundary = evaluateTransitionReceiptBoundary({
+            governanceGrant,
+            trustedAuthorizer,
+            repository: observation.repository,
             authorityBaseRevision: base,
             baseRevision: base,
             headRevision: exactHead,
-            resourceDeltas: resourceDeltasFromParsedDiff(diff.files),
-            protectedResources: provider.protectedResources,
-            trustedReceipts: receiptBoundary.receipt ? [receiptBoundary.receipt] : [],
+            requiredPermissions: requiredProtectedPermissions,
         });
-        if (provider.protectedResources.length)
+        if (receiptBoundary.present || requiredProtectedPermissions.length)
             initialChecks.push({
-                name: "protected-resource-authority",
+                name: "transition-receipt",
                 check: {
-                    ok: protectedAuthority.ok,
-                    message: protectedAuthority.ok
-                        ? "cutover ProtectedResource mutations are independently authorized"
-                        : "cutover mutates ProtectedResource without exact resource authority",
-                    details: protectedAuthority.reasons,
-                    data: protectedAuthority,
+                    ok: receiptBoundary.ok,
+                    message: receiptBoundary.ok
+                        ? "exact cutover TransitionReceipt covers every protected Resource mutation"
+                        : "cutover TransitionReceipt is missing exact ProtectedResource authority",
+                    details: receiptBoundary.reasons,
+                    data: { requiredProtectedPermissions },
                 },
             });
         const native = evaluateRepoGuardNativeBlockingSnapshot({
@@ -955,18 +940,18 @@ export function runCheckPR(roots, args = []) {
             authenticatedProviderGrants: provider.authenticatedProviderGrants,
         });
         return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-cutover", {
-            ok: boundary.ok && receiptBoundary.ok && provider.ok && protectedAuthority.ok && native.ok,
-            message: boundary.ok && receiptBoundary.ok && provider.ok && protectedAuthority.ok && native.ok
-                ? "exact atomic native cutover, ProtectedResource authority and post-transition native state are GREEN"
+            ok: boundary.ok && receiptBoundary.ok && provider.ok && native.ok,
+            message: boundary.ok && receiptBoundary.ok && provider.ok && native.ok
+                ? "exact atomic native cutover, ProtectedResource receipt authority and post-transition native state are GREEN"
                 : "atomic native cutover proof failed",
-            details: [...boundary.reasons, ...receiptBoundary.reasons, ...provider.reasons, ...protectedAuthority.reasons, ...native.reasons],
+            details: [...boundary.reasons, ...receiptBoundary.reasons, ...provider.reasons, ...native.reasons],
             data: {
                 boundary: {
                     rootAuthorized: boundary.rootAuthorized,
                     atomicAuthorized: boundary.atomicAuthorized,
                     migration: boundary.rootBoundary?.evaluation,
                 },
-                protectedAuthority,
+                requiredProtectedPermissions,
                 native,
             },
         }, { repositoryObservation: observation, providerCapabilityMode: native.providerCapabilityMode });
@@ -1053,23 +1038,6 @@ export function runCheckPR(roots, args = []) {
             baseRevision: base,
             headRevision: exactHead,
         });
-        const receiptBoundary = evaluateTransitionReceiptBoundary({
-            governanceGrant,
-            trustedAuthorizer,
-            repository: observation.repository,
-            authorityBaseRevision: base,
-            baseRevision: base,
-            headRevision: exactHead,
-        });
-        if (receiptBoundary.present)
-            initialChecks.push({
-                name: "transition-receipt",
-                check: {
-                    ok: receiptBoundary.ok,
-                    message: receiptBoundary.ok ? "exact rollback TransitionReceipt is independently authorized" : "rollback TransitionReceipt is not exact",
-                    details: receiptBoundary.reasons,
-                },
-            });
         const provider = nativeProviderInputs({
             repository: observation.repository,
             eventBaseRevision: base,
@@ -1095,24 +1063,26 @@ export function runCheckPR(roots, args = []) {
                     },
                 },
             });
-        const protectedAuthority = evaluateProtectedResourceAuthority({
+        const requiredProtectedPermissions = projectProtectedResourcePermissions(diff.files, provider.protectedResources);
+        const receiptBoundary = evaluateTransitionReceiptBoundary({
+            governanceGrant,
+            trustedAuthorizer,
+            repository: observation.repository,
             authorityBaseRevision: base,
             baseRevision: base,
             headRevision: exactHead,
-            resourceDeltas: resourceDeltasFromParsedDiff(diff.files),
-            protectedResources: provider.protectedResources,
-            trustedReceipts: receiptBoundary.receipt ? [receiptBoundary.receipt] : [],
+            requiredPermissions: requiredProtectedPermissions,
         });
-        if (provider.protectedResources.length)
+        if (receiptBoundary.present || requiredProtectedPermissions.length)
             initialChecks.push({
-                name: "protected-resource-authority",
+                name: "transition-receipt",
                 check: {
-                    ok: protectedAuthority.ok,
-                    message: protectedAuthority.ok
-                        ? "rollback ProtectedResource mutations are independently authorized"
-                        : "rollback mutates ProtectedResource without exact resource authority",
-                    details: protectedAuthority.reasons,
-                    data: protectedAuthority,
+                    ok: receiptBoundary.ok,
+                    message: receiptBoundary.ok
+                        ? "exact rollback TransitionReceipt covers every protected Resource mutation"
+                        : "rollback TransitionReceipt is missing exact ProtectedResource authority",
+                    details: receiptBoundary.reasons,
+                    data: { requiredProtectedPermissions },
                 },
             });
         const selector = selectRepoGuardAuthoritativeEvaluator({
@@ -1122,12 +1092,12 @@ export function runCheckPR(roots, args = []) {
             rollbackAuthorized: boundary.ok,
         });
         return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-rollback", {
-            ok: selector.ok && boundary.ok && receiptBoundary.ok && provider.ok && protectedAuthority.ok,
-            message: selector.ok && boundary.ok && receiptBoundary.ok && provider.ok && protectedAuthority.ok
-                ? "exact accepted legacy rollback tree and ProtectedResource authority are independently authorized"
+            ok: selector.ok && boundary.ok && receiptBoundary.ok && provider.ok,
+            message: selector.ok && boundary.ok && receiptBoundary.ok && provider.ok
+                ? "exact accepted legacy rollback tree and ProtectedResource receipt authority are independently authorized"
                 : "NATIVE to LEGACY rollback is not exactly authorized",
-            details: [...boundary.reasons, ...receiptBoundary.reasons, ...provider.reasons, ...protectedAuthority.reasons],
-            data: { boundary, protectedAuthority, baseRepresentation, headRepresentation },
+            details: [...boundary.reasons, ...receiptBoundary.reasons, ...provider.reasons],
+            data: { boundary, requiredProtectedPermissions, baseRepresentation, headRepresentation },
         }, { repositoryObservation: observation });
     }
     // Mixed/unknown representation is never delegated to either evaluator.
