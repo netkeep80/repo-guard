@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { loadAuthenticatedProviderBundle, loadGitHubEvent } from "../dist/github-pr.mjs";
 
 function withEventFile(content, run) {
@@ -269,6 +271,106 @@ describe("#752 authenticated provider production boundary", () => {
     } finally {
       rmSync(runner, { recursive: true });
       rmSync(outside, { recursive: true });
+    }
+  });
+
+
+  it("routes authenticated DOMAIN evidence through the real generic native check-pr path", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-provider-native-consumer-"));
+    const runner = mkdtempSync(join(tmpdir(), "repo-guard-provider-native-runner-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
+    const cli = fileURLToPath(new URL("../dist/repo-guard.mjs", import.meta.url));
+    mkdirSync(join(root, "requirements"), { recursive: true });
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "requirements", "APP-01.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: APP-01",
+      'normative: "Application source changes require authenticated domain evidence."',
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target:",
+      "      kind: artifact",
+      '      path: "src/a.txt"',
+      "constraints:",
+      "  - id: authenticated-domain",
+      "    scope:",
+      "      relations: [implemented_by]",
+      "      include_generated: false",
+      "    evidence:",
+      "      class: domain",
+      '      key: "domain:app-review"',
+      "",
+    ].join("\n"));
+    writeFileSync(join(root, "src", "a.txt"), "base\n");
+    try {
+      git("init", "-b", "main");
+      git("config", "user.email", "test@example.com");
+      git("config", "user.name", "Test");
+      git("add", "-A");
+      git("commit", "-q", "-m", "native base");
+      const base = git("rev-parse", "HEAD");
+      writeFileSync(join(root, "src", "a.txt"), "head\n");
+      git("add", "src/a.txt");
+      git("commit", "-q", "-m", "native head");
+      const head = git("rev-parse", "HEAD");
+      const eventPath = join(runner, "event.json");
+      const bundlePath = join(runner, "provider.json");
+      const body = [
+        "```repo-guard-yaml",
+        "change_type: bugfix",
+        "scope:",
+        "  - src/a.txt",
+        "budgets: {}",
+        "anchors:",
+        "  affects: [APP-01]",
+        "  implements: []",
+        "  verifies: []",
+        "must_touch: []",
+        "must_not_touch: []",
+        "expected_effects:",
+        "  - Exercise authenticated DOMAIN evidence",
+        "```",
+      ].join("\n");
+      writeFileSync(eventPath, JSON.stringify({
+        pull_request: { number: 1, base: { sha: base, ref: "main" }, head: { sha: head }, body },
+        repository: { full_name: "arbitrary/native-consumer" },
+      }));
+      writeFileSync(bundlePath, JSON.stringify({
+        format: "repo-guard/provider-bundle-v1",
+        claims: [{
+          boundary: "domain",
+          class: "domain",
+          key: "domain:app-review",
+          requirementId: "APP-01",
+          subjectPaths: ["src/a.txt"],
+          status: "pass",
+        }],
+      }));
+      const commonEnv = {
+        ...process.env,
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_EVENT_NAME: "pull_request_target",
+        GITHUB_WORKFLOW_REF: "arbitrary/native-consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+        GITHUB_WORKFLOW_SHA: base,
+        RUNNER_TEMP: runner,
+      };
+      const noEvidence = spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr", "--format", "json"], {
+        cwd: root, env: commonEnv, encoding: "utf8",
+      });
+      assert.equal(noEvidence.status, 1, noEvidence.stdout + noEvidence.stderr);
+      assert.match(noEvidence.stdout + noEvidence.stderr, /missing_evidence/);
+
+      const withEvidence = spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr", "--format", "json"], {
+        cwd: root,
+        env: { ...commonEnv, RG_AUTHENTICATED_PROVIDER_BUNDLE: bundlePath },
+        encoding: "utf8",
+      });
+      assert.equal(withEvidence.status, 0, withEvidence.stdout + withEvidence.stderr);
+      assert.match(withEvidence.stdout, /"result"\s*:\s*"passed"/);
+      assert.match(withEvidence.stdout, /"providerCapabilityMode"\s*:\s*true/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(runner, { recursive: true, force: true });
     }
   });
 
