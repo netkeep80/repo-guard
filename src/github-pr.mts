@@ -143,6 +143,132 @@ export function evaluateTrustedRootTransitionBoundary(input: {
     evaluation,
   };
 }
+
+function grantObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function atomicCutoverFlag(value: unknown): boolean {
+  return grantObject(value)?.allow_atomic_governance_cutover === true;
+}
+
+function transitionReceiptGrant(value: unknown): Record<string, unknown> | null {
+  const grant = grantObject(value)?.transition_receipt;
+  return grant && typeof grant === "object" && !Array.isArray(grant) ? grant as Record<string, unknown> : null;
+}
+
+function trustedIssueAuthorizer(value: ReturnType<typeof resolveTrustedAuthorizer> | null): boolean {
+  return value?.trusted === true && value?.source === "repository_permission";
+}
+
+export function workIntentFromChangeIntent(changeIntent: unknown, prNumber: unknown) {
+  const root = grantObject(changeIntent);
+  const anchors = grantObject(root?.anchors);
+  const affects = Array.isArray(anchors?.affects)
+    ? anchors!.affects.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  return {
+    id: "pr:" + String(prNumber ?? "unknown"),
+    addresses: [...new Set(affects)].sort((a, b) => a.localeCompare(b, "en")),
+  };
+}
+
+export function evaluateTransitionReceiptBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  authorityBaseRevision: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const grant = transitionReceiptGrant(input.governanceGrant);
+  if (!grant) return { present: false, ok: true, receipt: null as TransitionReceipt | null, reasons: [] as string[] };
+  const reasons: string[] = [];
+  if (!trustedIssueAuthorizer(input.trustedAuthorizer)) reasons.push("A1:transition_receipt_untrusted_source");
+  if (grant.repository !== input.repository) reasons.push("A1:transition_receipt_repository_mismatch");
+  if (grant.authority_base_sha !== input.authorityBaseRevision) reasons.push("A1:transition_receipt_authority_base_mismatch");
+  if (grant.base_sha !== input.baseRevision) reasons.push("A1:transition_receipt_base_mismatch");
+  if (grant.head_sha !== input.headRevision) reasons.push("A1:transition_receipt_head_mismatch");
+  const permissions = Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [];
+  if (!permissions.length || new Set(permissions).size !== permissions.length ||
+      permissions.some((permission) => !permission || permission.includes("*")))
+    reasons.push("A1:transition_receipt_permissions_invalid");
+  const ok = reasons.length === 0;
+  const receipt: TransitionReceipt | null = ok ? {
+    authorityBaseRevision: String(grant.authority_base_sha),
+    baseRevision: String(grant.base_sha),
+    headRevision: String(grant.head_sha),
+    permissions,
+  } : null;
+  return { present: true, ok, receipt, reasons: [...new Set(reasons)].sort() };
+}
+
+export function evaluateAtomicNativeCutoverBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  repositoryRoot: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const root = evaluateTrustedRootTransitionBoundary(input);
+  const rootAuthorized = root?.ok === true;
+  const atomicAuthorized = atomicCutoverFlag(input.governanceGrant) && trustedIssueAuthorizer(input.trustedAuthorizer);
+  const reasons = [
+    ...(root ? root.reasons : ["A1:trusted_root_transition_missing"]),
+    ...(!atomicCutoverFlag(input.governanceGrant) ? ["A1:atomic_cutover_permission_missing"] : []),
+    ...(atomicCutoverFlag(input.governanceGrant) && !trustedIssueAuthorizer(input.trustedAuthorizer)
+      ? ["A1:atomic_cutover_authorizer_untrusted"] : []),
+  ];
+  return {
+    ok: rootAuthorized && atomicAuthorized,
+    rootAuthorized,
+    atomicAuthorized,
+    reasons: [...new Set(reasons)].sort(),
+    rootBoundary: root,
+  };
+}
+
+export function evaluateAtomicNativeRollbackBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  repositoryRoot: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const grant = trustedRootTransitionGrant(input.governanceGrant) as Record<string, unknown> | null;
+  const trustedSource = trustedIssueAuthorizer(input.trustedAuthorizer);
+  const receipt = trustedSource && grant ? {
+    repository: String(grant.repository ?? ""),
+    authorityBaseRevision: String(grant.authority_base_sha ?? ""),
+    baseRevision: String(grant.base_sha ?? ""),
+    headRevision: String(grant.head_sha ?? ""),
+    permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
+  } : null;
+  const evaluation = evaluateRepoGuardNativeRollbackSnapshot({
+    repository: input.repository,
+    repositoryRoot: input.repositoryRoot,
+    trustedAuthorityBaseRevision: input.baseRevision,
+    baseRevision: input.baseRevision,
+    headRevision: input.headRevision,
+    trustedRootReceipt: receipt,
+  });
+  const atomicAuthorized = atomicCutoverFlag(input.governanceGrant) && trustedSource;
+  const reasons = [
+    ...(!trustedSource ? ["A1:rollback_authorizer_untrusted"] : []),
+    ...(!atomicCutoverFlag(input.governanceGrant) ? ["A1:atomic_rollback_permission_missing"] : []),
+    ...evaluation.reasons,
+  ];
+  return {
+    ok: trustedSource && atomicAuthorized && evaluation.ok,
+    rootAuthorized: evaluation.trust.authorized,
+    atomicAuthorized,
+    reasons: [...new Set(reasons)].sort(),
+    evaluation,
+  };
+}
+
 const REQUIREMENT_OVERLAP_SHADOW_ID = "requirement-verification-overlap-shadow";
 const REQUIREMENT_IMPLEMENTATION_ANCHOR = "__requirement_changed_implementation";
 const REQUIREMENT_OVERLAP_ANCHOR = "__requirement_verification_overlap";
