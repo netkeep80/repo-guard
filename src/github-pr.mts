@@ -8,7 +8,7 @@ import { createImmutableSnapshotDocumentCache } from "./immutable-snapshot-cache
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
 import { resolveEnforcementMode } from "./enforcement.mjs";
 import { createPolicyNormalizationContext, loadPolicyRuntimeFromObject, validationCheck } from "./runtime/validation.mjs";
-import { classifyRepoGuardSelfHostRepresentation, evaluatePolicyPipeline, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator } from "./runtime/pipeline.mjs";
+import { classifyRepoGuardSelfHostRepresentation, evaluateNativeRollbackSnapshot, evaluateNativeTrustedRootMigrationSnapshot, evaluatePolicyPipeline, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator } from "./runtime/pipeline.mjs";
 import { createAnalysisCollector } from "./runtime/analysis-report.mjs";
 import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/renderers.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
@@ -144,6 +144,52 @@ export function evaluateTrustedRootTransitionBoundary(input: {
   };
 }
 
+export function evaluateGenericTrustedRootTransitionBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  repositoryRoot: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const nativeRootGrant = trustedRootTransitionGrant(input.governanceGrant);
+  if (nativeRootGrant === null) return null;
+  const grant = nativeRootGrant as {
+    repository?: unknown;
+    authority_base_sha?: unknown;
+    base_sha?: unknown;
+    head_sha?: unknown;
+    permissions?: unknown;
+  };
+  const trustedSource = input.trustedAuthorizer?.trusted === true
+    && input.trustedAuthorizer?.source === "repository_permission";
+  const receipt = trustedSource ? {
+    repository: String(grant.repository ?? ""),
+    authorityBaseRevision: String(grant.authority_base_sha ?? ""),
+    baseRevision: String(grant.base_sha ?? ""),
+    headRevision: String(grant.head_sha ?? ""),
+    permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
+  } : null;
+  const evaluation = evaluateNativeTrustedRootMigrationSnapshot({
+    repository: input.repository,
+    repositoryRoot: input.repositoryRoot,
+    trustedAuthorityBaseRevision: input.baseRevision,
+    baseRevision: input.baseRevision,
+    headRevision: input.headRevision,
+    trustedRootReceipt: receipt,
+  });
+  const reasons = [
+    ...(!trustedSource ? ["A1:migration_trust_authorizer_untrusted"] : []),
+    ...evaluation.reasons,
+  ];
+  return {
+    ok: trustedSource && evaluation.ok,
+    trustedSource,
+    reasons,
+    evaluation,
+  };
+}
+
 function grantObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -229,6 +275,32 @@ export function evaluateAtomicNativeCutoverBoundary(input: {
   };
 }
 
+export function evaluateGenericAtomicNativeCutoverBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  repositoryRoot: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const root = evaluateGenericTrustedRootTransitionBoundary(input);
+  const rootAuthorized = root?.ok === true;
+  const atomicAuthorized = atomicCutoverFlag(input.governanceGrant) && trustedIssueAuthorizer(input.trustedAuthorizer);
+  const reasons = [
+    ...(root ? root.reasons : ["A1:trusted_root_transition_missing"]),
+    ...(!atomicCutoverFlag(input.governanceGrant) ? ["A1:atomic_cutover_permission_missing"] : []),
+    ...(atomicCutoverFlag(input.governanceGrant) && !trustedIssueAuthorizer(input.trustedAuthorizer)
+      ? ["A1:atomic_cutover_authorizer_untrusted"] : []),
+  ];
+  return {
+    ok: rootAuthorized && atomicAuthorized,
+    rootAuthorized,
+    atomicAuthorized,
+    reasons: [...new Set(reasons)].sort(),
+    rootBoundary: root,
+  };
+}
+
 export function evaluateAtomicNativeRollbackBoundary(input: {
   governanceGrant: unknown;
   trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
@@ -247,6 +319,46 @@ export function evaluateAtomicNativeRollbackBoundary(input: {
     permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
   } : null;
   const evaluation = evaluateRepoGuardNativeRollbackSnapshot({
+    repository: input.repository,
+    repositoryRoot: input.repositoryRoot,
+    trustedAuthorityBaseRevision: input.baseRevision,
+    baseRevision: input.baseRevision,
+    headRevision: input.headRevision,
+    trustedRootReceipt: receipt,
+  });
+  const atomicAuthorized = atomicCutoverFlag(input.governanceGrant) && trustedSource;
+  const reasons = [
+    ...(!trustedSource ? ["A1:rollback_authorizer_untrusted"] : []),
+    ...(!atomicCutoverFlag(input.governanceGrant) ? ["A1:atomic_rollback_permission_missing"] : []),
+    ...evaluation.reasons,
+  ];
+  return {
+    ok: trustedSource && atomicAuthorized && evaluation.ok,
+    rootAuthorized: evaluation.trust.authorized,
+    atomicAuthorized,
+    reasons: [...new Set(reasons)].sort(),
+    evaluation,
+  };
+}
+
+export function evaluateGenericAtomicNativeRollbackBoundary(input: {
+  governanceGrant: unknown;
+  trustedAuthorizer: ReturnType<typeof resolveTrustedAuthorizer> | null;
+  repository: string;
+  repositoryRoot: string;
+  baseRevision: string;
+  headRevision: string;
+}) {
+  const grant = trustedRootTransitionGrant(input.governanceGrant) as Record<string, unknown> | null;
+  const trustedSource = trustedIssueAuthorizer(input.trustedAuthorizer);
+  const receipt = trustedSource && grant ? {
+    repository: String(grant.repository ?? ""),
+    authorityBaseRevision: String(grant.authority_base_sha ?? ""),
+    baseRevision: String(grant.base_sha ?? ""),
+    headRevision: String(grant.head_sha ?? ""),
+    permissions: Array.isArray(grant.permissions) ? grant.permissions.map((value) => String(value)) : [],
+  } : null;
+  const evaluation = evaluateNativeRollbackSnapshot({
     repository: input.repository,
     repositoryRoot: input.repositoryRoot,
     trustedAuthorityBaseRevision: input.baseRevision,
@@ -435,18 +547,12 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     } catch {}
   }
 
-  const selfHostSelectorActive = observation.repository.toLowerCase() === "netkeep80/repo-guard";
-  const externalLegacy = { kind: "legacy" as const, legacy: 0, native: 0, reasons: [] as string[] };
-  const baseRepresentation = selfHostSelectorActive
-    ? classifyRepoGuardSelfHostRepresentation(roots.repoRoot, base)
-    : externalLegacy;
-  const headRepresentation = selfHostSelectorActive
-    ? classifyRepoGuardSelfHostRepresentation(roots.repoRoot, exactHead)
-    : externalLegacy;
+  const baseRepresentation = classifyRepoGuardSelfHostRepresentation(roots.repoRoot, base);
+  const headRepresentation = classifyRepoGuardSelfHostRepresentation(roots.repoRoot, exactHead);
 
   // Forward cutover: exact root migration + exact atomic permission. No legacy veto runs.
   if (baseRepresentation.kind === "legacy" && headRepresentation.kind === "native") {
-    const boundary = evaluateAtomicNativeCutoverBoundary({
+    const boundary = evaluateGenericAtomicNativeCutoverBoundary({
       governanceGrant,
       trustedAuthorizer,
       repository: observation.repository,
@@ -469,7 +575,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       }, { repositoryObservation: observation });
     }
 
-    // The representation transition itself is proved by the C2.5 exact migration evaluator.
+    // The representation transition itself is proved by the generic exact migration evaluator.
     // Once that independent proof passes, evaluate the resulting native HEAD as the post-transition state.
     const native = evaluateRepoGuardNativeBlockingSnapshot({
       repository: observation.repository,
@@ -550,7 +656,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
 
   // Exact reverse rollback is a special authority transition, not a native-RED fallback.
   if (baseRepresentation.kind === "native" && headRepresentation.kind === "legacy") {
-    const boundary = evaluateAtomicNativeRollbackBoundary({
+    const boundary = evaluateGenericAtomicNativeRollbackBoundary({
       governanceGrant,
       trustedAuthorizer,
       repository: observation.repository,
@@ -584,7 +690,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     });
     return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "representation-boundary", {
       ok: false,
-      message: "RepoGuard self-host representation is mixed or unknown",
+      message: "repository representation is mixed or unknown",
       details: [...baseRepresentation.reasons, ...headRepresentation.reasons],
       data: { baseRepresentation, headRepresentation },
     }, { repositoryObservation: observation });
