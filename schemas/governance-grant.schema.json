@@ -172,7 +172,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(?:requirement:[A-Za-z][A-Za-z0-9._:-]*|resource:(?!.*[*?\\\\[\\\\]{}])[^\\\\s]+|constraint(?:_definition)?:[A-Za-z][A-Za-z0-9._:-]*:[A-Za-z][A-Za-z0-9._:-]*|lifecycle:[A-Za-z][A-Za-z0-9._:-]*:(?:accepted|current|published))$"
+            "pattern": "^(?:requirement:[A-Za-z][A-Za-z0-9._:-]*|resource:(?!.*[*?\\[\\]\\{\\}])\\S+|constraint(?:_definition)?:[A-Za-z][A-Za-z0-9._:-]*:[A-Za-z][A-Za-z0-9._:-]*|lifecycle:[A-Za-z][A-Za-z0-9._:-]*:(?:accepted|current|published))$"
           }
         }
       }
