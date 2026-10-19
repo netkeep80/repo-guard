@@ -757,3 +757,73 @@ test("A1 reverse selector requires exact rollback receipt and exact accepted leg
     assert.equal(wrong.candidateReady, false);
   });
 });
+
+
+test("A1 atomic cutover rejects unapproved native Constraint/lifecycle/strong semantics", () => {
+  c25Fixture(({ root, base, head }) => {
+    const reset = () => c25Git(root, ["reset", "--hard", "-q", head]);
+    const path = join(root, "requirements/repo-guard/RG-01.rg.yaml");
+
+    writeFileSync(path, readFileSync(path, "utf8") + [
+      "constraints:",
+      "  - id: not-approved-at-cutover",
+      "    scope:",
+      "      relations: [implemented_by]",
+      "    metric:",
+      "      key: git.changed_resources",
+      "      max: 1000",
+      "",
+    ].join("\n"));
+    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["commit", "-q", "-m", "unexpected cutover constraint"]);
+    let verdict = c25Prepared(root, base, c25Git(root, ["rev-parse", "HEAD"]));
+    assert.equal(verdict.candidateReady, false);
+    assert.ok(verdict.reasons.includes("C2.5:unexpected_native_cutover_semantics"), verdict.reasons.join(" | "));
+
+    reset();
+    writeFileSync(path, readFileSync(path, "utf8") + "lifecycle:\n  accepted: true\n");
+    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["commit", "-q", "-m", "unexpected cutover lifecycle"]);
+    verdict = c25Prepared(root, base, c25Git(root, ["rev-parse", "HEAD"]));
+    assert.equal(verdict.candidateReady, false);
+    assert.ok(verdict.reasons.includes("C2.5:unexpected_native_cutover_semantics"), verdict.reasons.join(" | "));
+  });
+});
+
+test("A1 exact TransitionReceipt transport uses existing trusted issue authority and exact tuple", async () => {
+  const { evaluateTransitionReceiptBoundary } = await import("../dist/github-pr.mjs");
+  const sha = (x) => x.repeat(40);
+  const grant = {
+    transition_receipt: {
+      repository: c25Repository,
+      authority_base_sha: sha("a"),
+      base_sha: sha("a"),
+      head_sha: sha("b"),
+      permissions: ["resource:.github/workflows/trusted-enforcement.yml"],
+    },
+  };
+  const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+  const exact = evaluateTransitionReceiptBoundary({
+    governanceGrant: grant, trustedAuthorizer, repository: c25Repository,
+    authorityBaseRevision: sha("a"), baseRevision: sha("a"), headRevision: sha("b"),
+  });
+  assert.equal(exact.present, true);
+  assert.equal(exact.ok, true, exact.reasons.join(" | "));
+  assert.deepEqual(exact.receipt.permissions, grant.transition_receipt.permissions);
+
+  for (const [name, input] of [
+    ["untrusted", { trustedAuthorizer: { trusted: false, source: "repository_permission" } }],
+    ["wrong repo", { repository: "netkeep80/wrong" }],
+    ["wrong authority", { authorityBaseRevision: sha("c") }],
+    ["wrong base", { baseRevision: sha("c") }],
+    ["wrong head", { headRevision: sha("c") }],
+  ]) {
+    const verdict = evaluateTransitionReceiptBoundary({
+      governanceGrant: grant, trustedAuthorizer, repository: c25Repository,
+      authorityBaseRevision: sha("a"), baseRevision: sha("a"), headRevision: sha("b"),
+      ...input,
+    });
+    assert.equal(verdict.ok, false, name + " unexpectedly GREEN");
+    assert.equal(verdict.receipt, null);
+  }
+});
