@@ -1,0 +1,104 @@
+format: repo-guard/requirement-v1
+id: RG-01
+normative: "### RG-01 — Независимая authority\n\n**`MUST`:** намерение изменения не выдаёт разрешение менять правила управления. Решение о такой допустимости опирается на доверенное состояние и санкцию вне проверяемого PR. Неизвестная или недоступная authority не считается разрешением.\n\nРиск — исполнитель переписывает критерии своей приёмки. Нарушение — разрешение выводится только из PR, его изменённого кода проверки, метки или отсутствия данных. Машинно проверяются источник политики, путь санкции и положительное право доверенной стороны; осмысленность человеческого решения машиной не доказывается.\n\nСредства: доверенная `BASE`, `GovernanceGrant`, защищённые пути, независимый производитель обязательного статуса, защита ветки. Самоприменение использует отдельное приложение для `trusted-enforcement`. Потребитель должен настроить такой контур отдельно. Агент с теми же административными полномочиями, что владелец, находится вне этой модели угроз.\n"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".github/workflows/trusted-enforcement.yml"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/checks/rules/governance-paths.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/enforcement.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/trusted-authorizer.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "docs/product-requirements.md"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "repo-policy.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "schemas/governance-grant.schema.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/checks/rules/governance-paths.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/enforcement.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/trusted-authorizer.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-644-a-requirement-relation-core.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-644-b-requirement-transition-runtime.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-644-requirement-transition-falsifier.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-atomic-governance-cutover.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-9h-enforcement-surface-purge.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-enforcement-mode.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-governance-paths.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-hardening.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-2-positive-permission-authority.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-3-trusted-enforcement-workflow.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p2-2-lazy-trust-lookup.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p2-3-self-enforcement-topology.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-security-brace-expansion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-security-fast-uri.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-trusted-authorizer-boundary.mjs"

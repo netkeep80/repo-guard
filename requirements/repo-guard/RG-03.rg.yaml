@@ -1,0 +1,204 @@
+format: repo-guard/requirement-v1
+id: RG-03
+normative: "### RG-03 — Ограниченные и раздельные полномочия изменения\n\n**`MUST`:** явно выбранная граница изменения должна охватывать затронутую authority, включая прежний путь при переименовании. Разрешение менять одну область не распространяется автоматически на соседнюю. Ограничения из непривилегированного намерения не расширяют доверенные потолки.\n\nРиск — переименование или совместное изменение позволяет пересечь запрет. Нарушение — тот же защищаемый объект можно изменить через другое имя либо повышение бюджета в PR. Машинная проверяемость высокая для путей и числовых потолков; путь сам по себе не доказывает семантическую независимость модулей.\n\nСредства: `scope`, `must_not_touch`, потолки политики, governance, `pr_immutable`; для постоянной границы нужна доверенная политика, поскольку сам автор может переписать своё намерение. В `anum_parser` независимость семантического и визуального пакетов дополнительно проверялась точными зависимостями и предметным CI. Доказанный дефект `rename-away` обычного намерения закрыт в #568: `scope` и `must_not_touch` учитывают прежний путь, тогда как положительная семантика `must_touch` намеренно не менялась.\n"
+relations:
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: ".github/ISSUE_TEMPLATE/change-intent.yml"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: ".github/PULL_REQUEST_TEMPLATE.md"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/change-intent.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/check-diff.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/checks/rules/policy-delta-rules.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/checks/state-obligation-plan.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/diff/classification.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/diff/classification.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/diff/filters.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/diff/growth.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/diff/parser.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/diff/parser.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/utils/path-patterns.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/utils/path-patterns.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/minimal-diff-policy/base/repo-policy.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/minimal-diff-policy/base/src/app.txt"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/minimal-diff-policy/cases/fail-forbidden/head/forbidden.txt"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/minimal-diff-policy/cases/pass/head/src/app.txt"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/minimal-diff-policy/scenario.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/base/repo-policy.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/base/src/app.txt"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/cases/fail-must-not-touch/head/docs/oops.md"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/cases/fail-must-not-touch/head/src/app.txt"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/cases/pass/head/src/app.txt"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/change-intent.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "examples/scenarios/surgical-change/scenario.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "schemas/change-intent.schema.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "schemas/repo-policy.schema.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/change-intent.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/check-diff.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/checks/rules/policy-delta-rules.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/checks/state-obligation-plan.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/diff/classification.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/diff/filters.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/diff/growth.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/diff/parser.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/utils/path-patterns.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/fixtures/diff-change-intent.json"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/fixtures/invalid-change-intent.json"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/fixtures/valid-change-intent.json"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-10b-profile-surface-cutover.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-change-intent.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-check-diff-boundary.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-diff-rules.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-4-scoped-state-obligation-replacement.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-4-state-obligation-negative-matrix.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p0-5-trusted-diff-budget-ceilings.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-policy-delta-rules.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-pr-immutable-paths.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-transition-policy-compiler.mjs"

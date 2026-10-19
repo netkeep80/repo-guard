@@ -1,0 +1,156 @@
+format: repo-guard/requirement-v1
+id: RG-08
+normative: "### RG-08 — Самоупрощение вместо накопления возможностей\n\n**`MUST`:** новая блокирующая возможность или публичное понятие обосновывается требованием `RG-*`, реальным неудовлетворённым случаем, независимой ценностью и сравнением с более простым решением. Равная гарантия при меньшей суммарной стоимости предпочтительна. **`SHOULD`:** удалять лишнее, переиспользовать и сводить удобства к существующему ядру до добавления семантики.\n\nРиск — продукт становится процессным надзирателем. Нарушение — задача принимается только потому, что проверка локально полезна, увеличивает покрытие самоприменением или уменьшает одну метрику ценой новых понятий. Автоматизировать можно измерения; решение о необходимости не заменяется числом строк.\n\nСредства: [единый план #518](https://github.com/netkeep80/repo-guard/issues/518), шаблон обоснования в методике, реальные внешние контрпримеры, измерения стоимости. Отсутствие нового свидетельства — достаточное основание не реализовывать предложение. Удаление возможности является полноценным улучшением.\n"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".gitignore"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/utils/collections.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/utils/collections.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/utils/repository-files.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/utils/repository-files.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "docs/architecture-compression-3-baseline.md"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "docs/self-hosting-coverage.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/compression-metrics.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/utils/collections.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/utils/repository-files.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/run.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/support/run-cli.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/support/test-runner.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/support/vnext-699-model.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-699-five-consumer-differential.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-707-i0-shadow.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-2-compression-metrics.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3-historical-lowering.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3c-workflow-path-coverage-deletion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3d1-runtime-tail-deletion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3d2-change-profile-lowering.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3d3-size-rule-lowering.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3e1-compatibility-surface-deletion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3e2-provider-surface-deletion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-3e3-integration-runtime-deletion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-4b-self-host-exemplar.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-8i-cli-harness-compression.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-9a-public-policy-surface-purge.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-9e-self-hosting-narrative-purge.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-c3-compression-baseline-integrity.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-compression-3-baseline.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-compression-metrics-git-io.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-compression-rules.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-isolation-manifest.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p1-1-policy-normalization.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-p2-4-test-isolation.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-self-hosting.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "tsconfig.json"
