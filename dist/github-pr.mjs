@@ -16,6 +16,7 @@ import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/r
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, checkRoutineRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
 import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
+import { evaluateProtectedResourceAuthority, resourceDeltasFromParsedDiff } from "./runtime/transition-closure.mjs";
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"];
 const PROVIDER_BUNDLE_FORMAT = "repo-guard/provider-bundle-v1";
@@ -66,14 +67,17 @@ export function loadAuthenticatedProviderBundle(input) {
     const empty = (reasons = [], present = false) => ({
         ok: reasons.length === 0,
         present,
+        trustPresent: false,
         reasons: [...new Set(reasons)].sort(),
         authenticatedProviderGrants: [],
         observationFacts: [],
         evidenceFacts: [],
+        protectedResources: [],
         provider: null,
+        trust: null,
     });
     const bundlePath = typeof input.bundlePath === "string" ? input.bundlePath.trim() : "";
-    if (!bundlePath)
+    if (!bundlePath && input.eventName !== "pull_request_target")
         return empty();
     const reasons = [];
     if (!REPO.test(input.repository))
@@ -123,6 +127,22 @@ export function loadAuthenticatedProviderBundle(input) {
     }
     if (!exactRevision.test(workflowSha) || workflowSha !== eventBase)
         reasons.push("A2:provider_workflow_source_not_exact_base");
+    if (!bundlePath) {
+        if (reasons.length)
+            return empty(reasons, false);
+        return {
+            ...empty(),
+            trustPresent: true,
+            protectedResources: [workflowPath],
+            trust: {
+                repository: input.repository,
+                authorityBaseRevision: eventBase,
+                source: "accepted-workflow",
+                workflowPath,
+                declaredResources: [],
+            },
+        };
+    }
     const runnerTemp = typeof input.runnerTemp === "string" ? input.runnerTemp : "";
     let raw = "";
     try {
@@ -144,7 +164,7 @@ export function loadAuthenticatedProviderBundle(input) {
         return empty(reasons, true);
     try {
         const document = providerObject(strictCanonicalJson(raw), "provider bundle");
-        providerExactFields(document, ["format", "transition", "claims"], "provider bundle");
+        providerExactFields(document, ["format", "transition", "claims", "trust"], "provider bundle");
         if (document.format !== PROVIDER_BUNDLE_FORMAT)
             throw new Error("unsupported provider bundle format");
         const transition = providerObject(document.transition, "provider bundle transition");
@@ -159,6 +179,18 @@ export function loadAuthenticatedProviderBundle(input) {
             throw new Error("provider bundle HEAD is stale or mismatched");
         if (!Array.isArray(document.claims))
             throw new Error("provider bundle claims must be an array");
+        let declaredProtectedResources = [];
+        if (document.trust !== undefined) {
+            const trust = providerObject(document.trust, "provider bundle trust");
+            providerExactFields(trust, ["repository", "authorityBaseRevision", "protectedResources"], "provider bundle trust");
+            if (trust.repository !== input.repository)
+                throw new Error("provider trust repository is stale or mismatched");
+            if (trust.authorityBaseRevision !== eventBase)
+                throw new Error("provider trust authority BASE is stale or mismatched");
+            declaredProtectedResources = providerSubjectPaths(trust.protectedResources, "provider trust protectedResources");
+        }
+        const protectedResources = [...new Set([workflowPath, ...declaredProtectedResources])]
+            .sort((a, b) => a.localeCompare(b, "en"));
         const identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
         const providerId = "accepted-workflow:" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
         const principal = "github-actions-workflow:" + workflowRef;
@@ -257,11 +289,20 @@ export function loadAuthenticatedProviderBundle(input) {
         return {
             ok: true,
             present: true,
+            trustPresent: true,
             reasons: [],
             authenticatedProviderGrants,
             observationFacts,
             evidenceFacts,
+            protectedResources,
             provider: { providerId, principal, producerSource, workflowPath },
+            trust: {
+                repository: input.repository,
+                authorityBaseRevision: eventBase,
+                source: "accepted-workflow",
+                workflowPath,
+                declaredResources: declaredProtectedResources,
+            },
         };
     }
     catch (error) {
