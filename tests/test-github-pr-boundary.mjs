@@ -466,3 +466,214 @@ describe("#756 ProtectedResource TRUST production boundary", () => {
     }
   });
 });
+
+
+describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () => {
+  const authInput = (overrides = {}) => {
+    const base = "a".repeat(40), head = "b".repeat(40);
+    return {
+      bundlePath: "",
+      eventName: "pull_request_target",
+      repository: "external/consumer",
+      workflowRef: "external/consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+      workflowSha: base,
+      event: {
+        repository: { full_name: "external/consumer" },
+        pull_request: { base: { sha: base }, head: { sha: head } },
+      },
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      ...overrides,
+    };
+  };
+
+  it("P2/P10/P17 exact accepted workflow is intrinsically protected with zero provider grants", () => {
+    const result = loadAuthenticatedProviderBundle(authInput());
+    assert.equal(result.ok, true, result.reasons.join(" | "));
+    assert.equal(result.present, false);
+    assert.equal(result.trustPresent, true);
+    assert.deepEqual(result.protectedResources, [".github/workflows/trusted-enforcement.yml"]);
+    assert.deepEqual(result.authenticatedProviderGrants, []);
+    assert.deepEqual(result.evidenceFacts, []);
+    assert.deepEqual(result.observationFacts, []);
+    assert.equal(result.trust.source, "accepted-workflow");
+  });
+
+  it("P9 candidate pull_request execution cannot mint ProtectedResource TRUST", () => {
+    const result = loadAuthenticatedProviderBundle(authInput({
+      eventName: "pull_request",
+      workflowRef: "external/consumer/.github/workflows/ci.yml@refs/pull/1/merge",
+      workflowSha: "b".repeat(40),
+    }));
+    assert.equal(result.ok, true);
+    assert.equal(result.trustPresent, false);
+    assert.deepEqual(result.protectedResources, []);
+  });
+
+  it("P10 empty authenticated declaration cannot remove intrinsic accepted workflow protection", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-guard-protected-empty-"));
+    const bundle = join(dir, "provider.json");
+    const base = "a".repeat(40), head = "b".repeat(40);
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("external/consumer", base, base, head),
+      claims: [],
+      trust: {
+        repository: "external/consumer",
+        authorityBaseRevision: base,
+        protectedResources: [],
+      },
+    }));
+    try {
+      const result = loadAuthenticatedProviderBundle(authInput({ bundlePath: bundle, runnerTemp: dir }));
+      assert.equal(result.ok, true, result.reasons.join(" | "));
+      assert.deepEqual(result.protectedResources, [".github/workflows/trusted-enforcement.yml"]);
+      assert.deepEqual(result.authenticatedProviderGrants, []);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("P7/P10 TRUST declaration is exact-repository and accepted-BASE bound", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-guard-protected-binding-"));
+    const bundle = join(dir, "provider.json");
+    const base = "a".repeat(40), head = "b".repeat(40);
+    const write = (trust) => writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("external/consumer", base, base, head),
+      claims: [],
+      trust,
+    }));
+    try {
+      write({ repository: "other/repo", authorityBaseRevision: base, protectedResources: ["src/a.ts"] });
+      let result = loadAuthenticatedProviderBundle(authInput({ bundlePath: bundle, runnerTemp: dir }));
+      assert.equal(result.ok, false);
+      assert.ok(result.reasons.some((reason) => reason.includes("trust repository")));
+
+      write({ repository: "external/consumer", authorityBaseRevision: "c".repeat(40), protectedResources: ["src/a.ts"] });
+      result = loadAuthenticatedProviderBundle(authInput({ bundlePath: bundle, runnerTemp: dir }));
+      assert.equal(result.ok, false);
+      assert.ok(result.reasons.some((reason) => reason.includes("trust authority BASE")));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("P18/P19 DOMAIN/OBSERVATION claims remain disjoint from ProtectedResource TRUST", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-guard-protected-separation-"));
+    const bundle = join(dir, "provider.json");
+    const base = "a".repeat(40), head = "b".repeat(40);
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("external/consumer", base, base, head),
+      claims: [
+        { boundary: "observation", metric: "git.changed_lines", path: "src/a.ts", value: 3 },
+        { boundary: "domain", class: "domain", key: "domain:review", requirementId: "APP-01", subjectPaths: ["src/a.ts"], status: "pass" },
+      ],
+    }));
+    try {
+      const result = loadAuthenticatedProviderBundle(authInput({ bundlePath: bundle, runnerTemp: dir }));
+      assert.equal(result.ok, true, result.reasons.join(" | "));
+      assert.deepEqual(result.protectedResources, [".github/workflows/trusted-enforcement.yml"]);
+      assert.equal(result.authenticatedProviderGrants.length, 2);
+      assert.equal(result.observationFacts.length, 1);
+      assert.equal(result.evidenceFacts.length, 1);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("P1/P3/P9/P15/P17/P20 real generic native check-pr protects accepted producer without repository special case", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-756-native-consumer-"));
+    const runner = mkdtempSync(join(tmpdir(), "repo-guard-756-native-runner-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
+    const cli = fileURLToPath(new URL("../dist/repo-guard.mjs", import.meta.url));
+    const workflowPath = ".github/workflows/trusted-enforcement.yml";
+    mkdirSync(join(root, "requirements"), { recursive: true });
+    mkdirSync(join(root, "src"), { recursive: true });
+    mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(root, "requirements", "APP-01.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: APP-01",
+      'normative: "Application and accepted trust producer are governed resources."',
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target:",
+      "      kind: artifact",
+      '      path: "src/a.txt"',
+      "  - predicates: [implemented_by]",
+      "    target:",
+      "      kind: artifact",
+      '      path: ".github/workflows/trusted-enforcement.yml"',
+      "",
+    ].join("\n"));
+    writeFileSync(join(root, "src", "a.txt"), "base\n");
+    writeFileSync(join(root, workflowPath), "name: accepted trust producer\n");
+    const body = [
+      "```repo-guard-yaml",
+      "change_type: bugfix",
+      "scope:",
+      "  - src/a.txt",
+      "  - .github/workflows/trusted-enforcement.yml",
+      "budgets: {}",
+      "anchors:",
+      "  affects: [APP-01]",
+      "  implements: []",
+      "  verifies: []",
+      "must_touch: []",
+      "must_not_touch: []",
+      "expected_effects:",
+      "  - Exercise generic ProtectedResource TRUST",
+      "```",
+    ].join("\n");
+    const eventPath = join(runner, "event.json");
+    try {
+      git("init", "-b", "main");
+      git("config", "user.email", "test@example.com");
+      git("config", "user.name", "Test");
+      git("add", "-A");
+      git("commit", "-q", "-m", "native base");
+      const base = git("rev-parse", "HEAD");
+      git("remote", "add", "origin", root);
+
+      const run = (head) => {
+        writeFileSync(eventPath, JSON.stringify({
+          pull_request: { number: 1, base: { sha: base, ref: "main" }, head: { sha: head }, body },
+          repository: { full_name: "arbitrary/native-consumer" },
+        }));
+        return spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr", "--format", "json"], {
+          cwd: root,
+          env: {
+            ...process.env,
+            GITHUB_EVENT_PATH: eventPath,
+            GITHUB_EVENT_NAME: "pull_request_target",
+            GITHUB_WORKFLOW_REF: "arbitrary/native-consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+            GITHUB_WORKFLOW_SHA: base,
+            RUNNER_TEMP: runner,
+          },
+          encoding: "utf8",
+        });
+      };
+
+      git("checkout", "-q", "-b", "ordinary");
+      writeFileSync(join(root, "src", "a.txt"), "ordinary head\n");
+      git("add", "src/a.txt");
+      git("commit", "-q", "-m", "ordinary source change");
+      const ordinaryHead = git("rev-parse", "HEAD");
+      const ordinary = run(ordinaryHead);
+      assert.equal(ordinary.status, 0, ordinary.stdout + ordinary.stderr);
+      assert.match(ordinary.stdout, /"providerCapabilityMode"\s*:\s*true/);
+      assert.match(ordinary.stdout, /"authenticatedProviderGrantCount"\s*:\s*0/);
+      assert.match(ordinary.stdout, /\.github\/workflows\/trusted-enforcement\.yml/);
+
+      git("checkout", "-q", "-B", "protected", base);
+      writeFileSync(join(root, workflowPath), "name: candidate-mutated trust producer\n");
+      git("add", workflowPath);
+      git("commit", "-q", "-m", "mutate protected producer");
+      const protectedHead = git("rev-parse", "HEAD");
+      const protectedRun = run(protectedHead);
+      assert.equal(protectedRun.status, 1, protectedRun.stdout + protectedRun.stderr);
+      assert.match(protectedRun.stdout + protectedRun.stderr,
+        /missing_authority:resource:\.github\/workflows\/trusted-enforcement\.yml/);
+      assert.match(protectedRun.stdout, /"evaluator"\s*:\s*"native"/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(runner, { recursive: true, force: true });
+    }
+  });
+});
