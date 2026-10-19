@@ -681,7 +681,7 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
 });
 
 
-test("#756 accepted ProtectedResource source is exact BASE-bound, not candidate HEAD-bound", () => {
+it("#756 accepted ProtectedResource source is exact BASE-bound, not candidate HEAD-bound", () => {
   const base = "a".repeat(40), head = "b".repeat(40);
   const result = loadAuthenticatedProviderBundle({
     bundlePath: "",
