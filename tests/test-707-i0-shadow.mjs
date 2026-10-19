@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
 import { classifyRepoGuardSelfHostRepresentation, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
@@ -827,5 +827,32 @@ test("A1 exact TransitionReceipt transport uses existing trusted issue authority
     });
     assert.equal(verdict.ok, false, name + " unexpectedly GREEN");
     assert.equal(verdict.receipt, null);
+  }
+});
+
+
+/* #749_GENERIC_NATIVE_CONSUMER_RED */
+test("#749 F1 RED: arbitrary repository native representation is discovered structurally", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-749-red-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "rg-749@example.invalid"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "RG 749"], { cwd: root });
+    mkdirSync(join(root, "requirements", "consumer"), { recursive: true });
+    writeFileSync(join(root, "requirements", "consumer", "APP-ROOT.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: APP-ROOT",
+      "normative: Consumer root",
+      "",
+    ].join("\n"));
+    execFileSync("git", ["add", "-A"], { cwd: root });
+    execFileSync("git", ["commit", "-q", "-m", "native consumer"], { cwd: root });
+    const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+
+    const representation = classifyRepoGuardSelfHostRepresentation(root, revision);
+    assert.equal(representation.kind, "native",
+      "native discovery must not depend on netkeep80/repo-guard, RG-01..RG-08, or a fixed root count");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
