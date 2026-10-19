@@ -1241,9 +1241,10 @@ export function evaluateRepoGuardNativeRollbackSnapshot(input: RepoGuardNativeRo
     candidateReasons.push("A1:rollback_target_evaluation_failed:" + (error as Error).message);
   }
 
-  const requiredPermissions = (forwardProof?.migration || []).map((item) =>
-    "trusted_root:" + item.requirementId + ":" + item.newTrustedSubject.digest + ":" + item.oldTrustedSubject.digest)
-    .sort((a, b) => a.localeCompare(b, "en"));
+  const requiredPermissions = (forwardProof?.requiredPermissions || []).flatMap((permission) => {
+    const match = /^trusted_root:([^:]+):([0-9a-f]{64}):([0-9a-f]{64})$/.exec(permission);
+    return match ? ["trusted_root:" + match[1] + ":" + match[3] + ":" + match[2]] : [];
+  }).sort((a, b) => a.localeCompare(b, "en"));
 
   let trustAuthorized = false;
   const receipt = input.trustedRootReceipt;
