@@ -43,6 +43,7 @@ interface AuthenticatedProviderBundleInput {
   bundlePath?: string | null;
   runnerTemp?: string | null;
   eventName?: string | null;
+  reevaluation?: { kind: "linked-issue"; sourceEvent: unknown } | null;
   repository: string;
   workflowRef?: string | null;
   workflowSha?: string | null;
@@ -144,7 +145,31 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     trust: null,
   });
   const bundlePath = typeof input.bundlePath === "string" ? input.bundlePath.trim() : "";
-  if (!bundlePath && input.eventName !== "pull_request_target") return empty();
+  // Trigger kind selects acquisition only. TRUST still comes from the exact accepted workflow
+  // source and the immutable repository/BASE/HEAD tuple below.
+  const linkedIssueRefresh = input.eventName === "issues" && input.reevaluation?.kind === "linked-issue";
+  const controlPlaneRecognized = input.eventName === "pull_request_target" || linkedIssueRefresh;
+  if (!controlPlaneRecognized) {
+    if (!bundlePath) return empty();
+    return empty(["A2:provider_untrusted_event"], true);
+  }
+  if (linkedIssueRefresh) {
+    const refreshReasons: string[] = [];
+    try {
+      const sourceEvent = providerObject(input.reevaluation?.sourceEvent, "provider refresh source event");
+      const repository = providerObject(sourceEvent.repository, "provider refresh source event.repository");
+      const issue = providerObject(sourceEvent.issue, "provider refresh source event.issue");
+      const changes = providerObject(sourceEvent.changes, "provider refresh source event.changes");
+      providerObject(changes.body, "provider refresh source event.changes.body");
+      if (sourceEvent.action !== "edited") refreshReasons.push("A2:provider_refresh_event_not_edited");
+      if (repository.full_name !== input.repository) refreshReasons.push("A2:provider_refresh_repository_mismatch");
+      if (!Number.isSafeInteger(issue.number) || Number(issue.number) <= 0)
+        refreshReasons.push("A2:provider_refresh_issue_invalid");
+    } catch (error) {
+      refreshReasons.push("A2:provider_refresh_event_invalid:" + (error as Error).message);
+    }
+    if (refreshReasons.length) return empty(refreshReasons, Boolean(bundlePath));
+  }
 
   const reasons: string[] = [];
   if (!REPO.test(input.repository)) reasons.push("A2:provider_invalid_repository");
@@ -153,7 +178,6 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     ["base", input.baseRevision],
     ["head", input.headRevision],
   ] as const) if (!exactRevision.test(revision)) reasons.push("A2:provider_invalid_" + label + "_revision");
-  if (input.eventName !== "pull_request_target") reasons.push("A2:provider_untrusted_event");
 
   let eventBase = "", eventHead = "";
   try {
@@ -362,6 +386,18 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
   }
 }
 
+function nativeProviderReevaluation(): AuthenticatedProviderBundleInput["reevaluation"] {
+  if ((process.env.GITHUB_EVENT_NAME || "") !== "issues" || !process.env.RG_EVENT_PATH) return null;
+  const ambientPath = process.env.GITHUB_EVENT_PATH || "";
+  if (!ambientPath || ambientPath === process.env.RG_EVENT_PATH)
+    return { kind: "linked-issue", sourceEvent: null };
+  try {
+    return { kind: "linked-issue", sourceEvent: JSON.parse(readFileSync(ambientPath, "utf8")) };
+  } catch {
+    return { kind: "linked-issue", sourceEvent: null };
+  }
+}
+
 function nativeProviderInputs(input: {
   repository: string;
   eventBaseRevision: string;
@@ -374,6 +410,7 @@ function nativeProviderInputs(input: {
     bundlePath: process.env.RG_AUTHENTICATED_PROVIDER_BUNDLE || "",
     runnerTemp: process.env.RUNNER_TEMP || "",
     eventName: process.env.GITHUB_EVENT_NAME || "",
+    reevaluation: nativeProviderReevaluation(),
     repository: input.repository,
     workflowRef: process.env.GITHUB_WORKFLOW_REF || "",
     workflowSha: process.env.GITHUB_WORKFLOW_SHA || "",
