@@ -564,9 +564,10 @@ test("A1 native steady-state executes J3 and cannot fall back to legacy GREEN", 
   c25Fixture(({ root, head }) => {
     const base = head;
     const nativeDoc = parseYaml(readFileSync(join(root, "requirements/repo-guard/RG-01.rg.yaml"), "utf8"));
-    const target = nativeDoc.relations.find((relation) => relation.predicates.includes("implemented_by")).target.path;
+    const target = nativeDoc.relations.find((relation) =>
+      relation.predicates.includes("implemented_by") && relation.target.path.startsWith("src/")).target.path;
     writeFileSync(join(root, target), readFileSync(join(root, target), "utf8") + "\nA1 steady-state fixture\n");
-    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["add", "--", target]);
     c25Git(root, ["commit", "-q", "-m", "A1 native steady-state resource change"]);
     const next = c25Git(root, ["rev-parse", "HEAD"]);
 
@@ -604,7 +605,8 @@ test("A1 native provider capability mode is structurally forced and exact", () =
   c25Fixture(({ root, head }) => {
     const nativePath = join(root, "requirements/repo-guard/RG-01.rg.yaml");
     const nativeDoc = parseYaml(readFileSync(nativePath, "utf8"));
-    const target = nativeDoc.relations.find((relation) => relation.predicates.includes("implemented_by")).target.path;
+    const target = nativeDoc.relations.find((relation) =>
+      relation.predicates.includes("implemented_by") && relation.target.path.startsWith("src/")).target.path;
     const verifier = nativeDoc.relations.find((relation) => relation.predicates.includes("verified_by")).target.path;
     writeFileSync(nativePath, readFileSync(nativePath, "utf8") + [
       "constraints:",
@@ -625,12 +627,12 @@ test("A1 native provider capability mode is structurally forced and exact", () =
       "        path: " + JSON.stringify(verifier),
       "",
     ].join("\n"));
-    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["add", "--", "requirements/repo-guard/RG-01.rg.yaml"]);
     c25Git(root, ["commit", "-q", "-m", "A1 accepted provider-constraint fixture"]);
     const base = c25Git(root, ["rev-parse", "HEAD"]);
 
     writeFileSync(join(root, target), readFileSync(join(root, target), "utf8") + "\nA1 provider fixture\n");
-    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["add", "--", target]);
     c25Git(root, ["commit", "-q", "-m", "A1 provider-observed change"]);
     const next = c25Git(root, ["rev-parse", "HEAD"]);
     const workIntent = { id: "a1-provider", addresses: ["RG-01"] };
@@ -774,7 +776,7 @@ test("A1 atomic cutover rejects unapproved native Constraint/lifecycle/strong se
       "      max: 1000",
       "",
     ].join("\n"));
-    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["add", "--", "requirements/repo-guard/RG-01.rg.yaml"]);
     c25Git(root, ["commit", "-q", "-m", "unexpected cutover constraint"]);
     let verdict = c25Prepared(root, base, c25Git(root, ["rev-parse", "HEAD"]));
     assert.equal(verdict.candidateReady, false);
@@ -782,7 +784,7 @@ test("A1 atomic cutover rejects unapproved native Constraint/lifecycle/strong se
 
     reset();
     writeFileSync(path, readFileSync(path, "utf8") + "lifecycle:\n  accepted: true\n");
-    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["add", "--", "requirements/repo-guard/RG-01.rg.yaml"]);
     c25Git(root, ["commit", "-q", "-m", "unexpected cutover lifecycle"]);
     verdict = c25Prepared(root, base, c25Git(root, ["rev-parse", "HEAD"]));
     assert.equal(verdict.candidateReady, false);
