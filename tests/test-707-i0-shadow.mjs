@@ -1529,3 +1529,34 @@ test("#756 P18-P20 DOMAIN PASS and ProtectedResource TRUST are non-interchangeab
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("#756 protected delete/rename/type-change all require exact resource identity authority", () => {
+  const base = "a".repeat(40), head = "b".repeat(40);
+  const cases = [
+    { name: "delete", delta: { kind: "delete", path: "trusted/source.yml" }, permission: "resource:trusted/source.yml" },
+    { name: "rename", delta: { kind: "rename", previousPath: "trusted/source.yml", path: "trusted/moved.yml" }, permission: "resource:trusted/source.yml" },
+    { name: "type-change", delta: { kind: "type_change", path: "trusted/source.yml", beforeType: "blob", afterType: "commit" }, permission: "resource:trusted/source.yml" },
+  ];
+  for (const item of cases) {
+    const red = evaluateProtectedResourceAuthority({
+      authorityBaseRevision: base, baseRevision: base, headRevision: head,
+      resourceDeltas: [item.delta],
+      protectedResources: ["trusted/source.yml"],
+      trustedReceipts: [],
+    });
+    assert.equal(red.ok, false, item.name + " unexpectedly GREEN");
+    assert.ok(red.reasons.some((reason) => reason.includes("missing_authority:" + item.permission)), red.reasons.join(" | "));
+
+    const green = evaluateProtectedResourceAuthority({
+      authorityBaseRevision: base, baseRevision: base, headRevision: head,
+      resourceDeltas: [item.delta],
+      protectedResources: ["trusted/source.yml"],
+      trustedReceipts: [{
+        authorityBaseRevision: base, baseRevision: base, headRevision: head,
+        permissions: [item.permission],
+      }],
+    });
+    assert.equal(green.ok, true, item.name + ": " + green.reasons.join(" | "));
+  }
+});
