@@ -435,8 +435,14 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     } catch {}
   }
 
-  const baseRepresentation = classifyRepoGuardSelfHostRepresentation(roots.repoRoot, base);
-  const headRepresentation = classifyRepoGuardSelfHostRepresentation(roots.repoRoot, exactHead);
+  const selfHostSelectorActive = observation.repository.toLowerCase() === "netkeep80/repo-guard";
+  const externalLegacy = { kind: "legacy" as const, legacy: 0, native: 0, reasons: [] as string[] };
+  const baseRepresentation = selfHostSelectorActive
+    ? classifyRepoGuardSelfHostRepresentation(roots.repoRoot, base)
+    : externalLegacy;
+  const headRepresentation = selfHostSelectorActive
+    ? classifyRepoGuardSelfHostRepresentation(roots.repoRoot, exactHead)
+    : externalLegacy;
 
   // Forward cutover: exact root migration + exact atomic permission. No legacy veto runs.
   if (baseRepresentation.kind === "legacy" && headRepresentation.kind === "native") {
