@@ -633,7 +633,7 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       const base = git("rev-parse", "HEAD");
       git("remote", "add", "origin", root);
 
-      const run = (head) => {
+      const run = (head, eventName = "pull_request_target") => {
         writeFileSync(eventPath, JSON.stringify({
           pull_request: { number: 1, base: { sha: base, ref: "main" }, head: { sha: head }, body },
           repository: { full_name: "arbitrary/native-consumer" },
@@ -643,7 +643,7 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
           env: {
             ...process.env,
             GITHUB_EVENT_PATH: eventPath,
-            GITHUB_EVENT_NAME: "pull_request_target",
+            GITHUB_EVENT_NAME: eventName,
             GITHUB_WORKFLOW_REF: "arbitrary/native-consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
             GITHUB_WORKFLOW_SHA: base,
             RUNNER_TEMP: runner,
@@ -673,6 +673,13 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       assert.match(protectedRun.stdout + protectedRun.stderr,
         /missing_authority:resource:\.github\/workflows\/trusted-enforcement\.yml/);
       assert.match(protectedRun.stdout, /"evaluator"\s*:\s*"native"/);
+
+      const issueRefresh = run(protectedHead, "issues");
+      assert.equal(issueRefresh.status, 1,
+        "DEFECT #760: linked-issue same-HEAD refresh dropped accepted-workflow ProtectedResource TRUST\n" +
+        issueRefresh.stdout + issueRefresh.stderr);
+      assert.match(issueRefresh.stdout + issueRefresh.stderr,
+        /missing_authority:resource:\.github\/workflows\/trusted-enforcement\.yml/);
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(runner, { recursive: true, force: true });
