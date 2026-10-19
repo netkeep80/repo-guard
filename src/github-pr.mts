@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { isAbsolute, relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
 import { evaluatePrimitiveRelation } from "./checks/relation-kernel.mjs";
-import { parseJson, parseYaml } from "./document-facts.mjs";
+import { normalizeDocumentFact, parseJson, parseYaml } from "./document-facts.mjs";
 import { acquirePullRequestObservation, getDiffObservation, listTrackedFilesAtRef, readFileAtRef, type RepositoryObservation } from "./git.mjs";
 import { createImmutableSnapshotDocumentCache } from "./immutable-snapshot-cache.mjs";
 import { extractChangeIntent, extractGovernanceGrant, extractLinkedIssueNumbers, extractLinkedIssueReferences, resolveChangeIntent } from "./change-intent.mjs";
@@ -13,7 +15,8 @@ import { createAnalysisCollector } from "./runtime/analysis-report.mjs";
 import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/renderers.mjs";
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, checkRoutineRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
-import type { TransitionReceipt } from "./runtime/transition-closure.mjs";
+import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
+import type { AuthenticatedProviderGrant, TransitionEvidenceFact, TransitionObservationFact, TransitionReceipt } from "./runtime/transition-closure.mjs";
 
 type PolicyRuntime = ReturnType<typeof loadPolicyRuntimeFromObject>;
 type RuntimePolicy = PolicyRuntime["policy"];
@@ -34,6 +37,291 @@ interface InitialCheck { name: string; check: unknown; }
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, ISSUE = /^[1-9][0-9]*$/;
 const PROPOSED_POLICY_EXCLUDED_FAMILIES = ["governance-paths", "policy-delta"] as const;
+
+
+interface AuthenticatedProviderBundleInput {
+  bundlePath?: string | null;
+  runnerTemp?: string | null;
+  eventName?: string | null;
+  repository: string;
+  workflowRef?: string | null;
+  workflowSha?: string | null;
+  event: unknown;
+  authorityBaseRevision: string;
+  baseRevision: string;
+  headRevision: string;
+}
+interface AuthenticatedProviderBundleResult {
+  ok: boolean;
+  present: boolean;
+  reasons: string[];
+  authenticatedProviderGrants: AuthenticatedProviderGrant[];
+  observationFacts: TransitionObservationFact[];
+  evidenceFacts: TransitionEvidenceFact[];
+  provider?: { providerId: string; principal: string; producerSource: string; workflowPath: string } | null;
+}
+
+const PROVIDER_BUNDLE_FORMAT = "repo-guard/provider-bundle-v1";
+const exactRevision = /^[0-9a-f]{40}$/;
+const requirementId = /^[A-Za-z][A-Za-z0-9._:-]*$/;
+
+function providerObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype)
+    throw new Error(label + " must be an object");
+  return value as Record<string, unknown>;
+}
+function providerExactFields(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key)).sort();
+  if (unknown.length) throw new Error(label + " contains unknown field(s): " + unknown.join(", "));
+}
+function providerPath(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(label + " must be a string");
+  const normalized = normalizeDocumentFact(value, "repository_path");
+  if (normalized !== value || /[*?\\[\\]{}]/.test(value) || value.endsWith("/"))
+    throw new Error(label + " must be an exact canonical repository path");
+  return value;
+}
+function providerWorkflowPath(workflowRef: string, repository: string): string {
+  const marker = repository + "/";
+  const at = workflowRef.lastIndexOf("@");
+  if (at <= marker.length || !workflowRef.startsWith(marker))
+    throw new Error("workflow_ref does not identify the evaluated repository");
+  const path = workflowRef.slice(marker.length, at);
+  if (!path.startsWith(".github/workflows/") || !/\.ya?ml$/.test(path))
+    throw new Error("workflow_ref is not an accepted workflow path");
+  return providerPath(path, "workflow path");
+}
+function providerClaimKey(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value || value === "*" || value.includes("\n"))
+    throw new Error(label + " must be a non-wildcard identifier");
+  return value;
+}
+function providerSubjectPaths(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(label + " must be an array");
+  const paths = value.map((item, index) => providerPath(item, label + "[" + index + "]"));
+  if (new Set(paths).size !== paths.length) throw new Error(label + " contains duplicate paths");
+  return [...paths].sort((a, b) => a.localeCompare(b, "en"));
+}
+
+export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBundleInput): AuthenticatedProviderBundleResult {
+  const empty = (reasons: string[] = [], present = false): AuthenticatedProviderBundleResult => ({
+    ok: reasons.length === 0,
+    present,
+    reasons: [...new Set(reasons)].sort(),
+    authenticatedProviderGrants: [],
+    observationFacts: [],
+    evidenceFacts: [],
+    provider: null,
+  });
+  const bundlePath = typeof input.bundlePath === "string" ? input.bundlePath.trim() : "";
+  if (!bundlePath) return empty();
+
+  const reasons: string[] = [];
+  if (!REPO.test(input.repository)) reasons.push("A2:provider_invalid_repository");
+  for (const [label, revision] of [
+    ["authority", input.authorityBaseRevision],
+    ["base", input.baseRevision],
+    ["head", input.headRevision],
+  ] as const) if (!exactRevision.test(revision)) reasons.push("A2:provider_invalid_" + label + "_revision");
+  if (input.eventName !== "pull_request_target") reasons.push("A2:provider_untrusted_event");
+
+  let eventBase = "", eventHead = "";
+  try {
+    const event = providerObject(input.event, "provider event");
+    const repository = providerObject(event.repository, "provider event.repository");
+    const pr = providerObject(event.pull_request, "provider event.pull_request");
+    const base = providerObject(pr.base, "provider event.pull_request.base");
+    const head = providerObject(pr.head, "provider event.pull_request.head");
+    if (repository.full_name !== input.repository) reasons.push("A2:provider_event_repository_mismatch");
+    eventBase = typeof base.sha === "string" ? base.sha : "";
+    eventHead = typeof head.sha === "string" ? head.sha : "";
+    if (!exactRevision.test(eventBase)) reasons.push("A2:provider_event_base_invalid");
+    if (!exactRevision.test(eventHead)) reasons.push("A2:provider_event_head_invalid");
+  } catch (error) {
+    reasons.push("A2:provider_event_invalid:" + (error as Error).message);
+  }
+
+  const steady = eventBase === input.baseRevision && eventHead === input.headRevision &&
+    input.authorityBaseRevision === eventBase;
+  const postCutover = eventHead === input.baseRevision && eventHead === input.headRevision &&
+    input.authorityBaseRevision === eventHead;
+  if (!steady && !postCutover) reasons.push("A2:provider_transition_mismatch");
+
+  const workflowRef = typeof input.workflowRef === "string" ? input.workflowRef : "";
+  const workflowSha = typeof input.workflowSha === "string" ? input.workflowSha : "";
+  let workflowPath = "";
+  try { workflowPath = providerWorkflowPath(workflowRef, input.repository); }
+  catch (error) { reasons.push("A2:provider_workflow_ref_invalid:" + (error as Error).message); }
+  if (!exactRevision.test(workflowSha) || workflowSha !== eventBase)
+    reasons.push("A2:provider_workflow_source_not_exact_base");
+
+  const runnerTemp = typeof input.runnerTemp === "string" ? input.runnerTemp : "";
+  let raw = "";
+  try {
+    if (!runnerTemp || !isAbsolute(runnerTemp) || !isAbsolute(bundlePath))
+      throw new Error("runner temp and provider bundle path must be absolute");
+    const tempReal = realpathSync(runnerTemp);
+    const bundleReal = realpathSync(bundlePath);
+    const rel = relative(tempReal, bundleReal);
+    if (!rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel))
+      throw new Error("provider bundle must be a file below RUNNER_TEMP");
+    if (!lstatSync(bundleReal).isFile()) throw new Error("provider bundle must be a regular file");
+    raw = readFileSync(bundleReal, "utf8");
+  } catch (error) {
+    reasons.push("A2:provider_bundle_path_invalid:" + (error as Error).message);
+  }
+  if (reasons.length) return empty(reasons, true);
+
+  try {
+    const document = providerObject(strictCanonicalJson(raw), "provider bundle");
+    providerExactFields(document, ["format", "transition", "claims"], "provider bundle");
+    if (document.format !== PROVIDER_BUNDLE_FORMAT) throw new Error("unsupported provider bundle format");
+    const transition = providerObject(document.transition, "provider bundle transition");
+    providerExactFields(
+      transition,
+      ["repository", "authorityBaseRevision", "baseRevision", "headRevision"],
+      "provider bundle transition",
+    );
+    if (transition.repository !== input.repository) throw new Error("provider bundle repository is stale or mismatched");
+    if (transition.authorityBaseRevision !== input.authorityBaseRevision)
+      throw new Error("provider bundle authority BASE is stale or mismatched");
+    if (transition.baseRevision !== input.baseRevision) throw new Error("provider bundle BASE is stale or mismatched");
+    if (transition.headRevision !== input.headRevision) throw new Error("provider bundle HEAD is stale or mismatched");
+    if (!Array.isArray(document.claims)) throw new Error("provider bundle claims must be an array");
+
+    const identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
+    const providerId = "accepted-workflow:" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
+    const principal = "github-actions-workflow:" + workflowRef;
+    const producerSource = workflowSha + ":" + workflowPath;
+    const authenticatedProviderGrants: AuthenticatedProviderGrant[] = [];
+    const observationFacts: TransitionObservationFact[] = [];
+    const evidenceFacts: TransitionEvidenceFact[] = [];
+    const seen = new Set<string>();
+
+    for (let index = 0; index < document.claims.length; index += 1) {
+      const claim = providerObject(document.claims[index], "provider bundle claims[" + index + "]");
+      if (claim.boundary === "observation") {
+        providerExactFields(claim, ["boundary", "metric", "path", "value"], "provider observation claim");
+        if (claim.metric !== "git.changed_lines") throw new Error("provider observation metric is unsupported");
+        const path = providerPath(claim.path, "provider observation path");
+        if (!Number.isSafeInteger(claim.value) || Number(claim.value) < 0)
+          throw new Error("provider observation value must be a non-negative safe integer");
+        const key = JSON.stringify(["observation", claim.metric, path]);
+        if (seen.has(key)) throw new Error("duplicate provider observation claim");
+        seen.add(key);
+        observationFacts.push({
+          authorityBaseRevision: input.authorityBaseRevision,
+          baseRevision: input.baseRevision,
+          headRevision: input.headRevision,
+          providerId,
+          path,
+          metric: "changed_lines",
+          value: Number(claim.value),
+        });
+        authenticatedProviderGrants.push({
+          repository: input.repository,
+          authorityBaseRevision: input.authorityBaseRevision,
+          baseRevision: input.baseRevision,
+          headRevision: input.headRevision,
+          providerId,
+          principal,
+          producerSource,
+          boundary: "observation",
+          capability: { kind: "metric", key: "git.changed_lines", subjectPaths: [path] },
+        });
+        continue;
+      }
+
+      if (claim.boundary === "domain") {
+        providerExactFields(claim, ["boundary", "class", "key", "requirementId", "subjectPaths", "status", "verifierPath"], "provider domain claim");
+        if (claim.class !== "execution" && claim.class !== "domain") throw new Error("provider domain class is invalid");
+        if (typeof claim.requirementId !== "string" || !requirementId.test(claim.requirementId))
+          throw new Error("provider domain RequirementId is invalid");
+        const keyName = providerClaimKey(claim.key, "provider domain key");
+        const subjectPaths = providerSubjectPaths(claim.subjectPaths, "provider domain subjectPaths");
+        if (claim.status !== "pass" && claim.status !== "fail") throw new Error("provider domain status is invalid");
+        let verifierPath: string | undefined;
+        if (claim.verifierPath !== undefined) verifierPath = providerPath(claim.verifierPath, "provider verifierPath");
+        if (claim.class === "execution" && verifierPath === undefined)
+          throw new Error("execution provider claim requires verifierPath");
+        const key = JSON.stringify(["domain", claim.class, keyName, claim.requirementId, subjectPaths, verifierPath || ""]);
+        if (seen.has(key)) throw new Error("duplicate provider domain claim");
+        seen.add(key);
+        evidenceFacts.push({
+          authorityBaseRevision: input.authorityBaseRevision,
+          baseRevision: input.baseRevision,
+          headRevision: input.headRevision,
+          providerId,
+          requirementId: claim.requirementId,
+          key: keyName,
+          status: claim.status,
+          subjectPaths,
+          ...(verifierPath ? { verifierPath, verifierRevision: input.headRevision } : {}),
+        });
+        authenticatedProviderGrants.push({
+          repository: input.repository,
+          authorityBaseRevision: input.authorityBaseRevision,
+          baseRevision: input.baseRevision,
+          headRevision: input.headRevision,
+          providerId,
+          principal,
+          producerSource,
+          boundary: "domain",
+          capability: {
+            kind: "evidence",
+            class: claim.class,
+            key: keyName,
+            requirementId: claim.requirementId,
+            subjectPaths,
+            ...(verifierPath ? { verifierPath, verifierRevision: input.headRevision } : {}),
+          },
+        });
+        continue;
+      }
+      throw new Error("provider claim boundary is invalid");
+    }
+
+    return {
+      ok: true,
+      present: true,
+      reasons: [],
+      authenticatedProviderGrants,
+      observationFacts,
+      evidenceFacts,
+      provider: { providerId, principal, producerSource, workflowPath },
+    };
+  } catch (error) {
+    return empty(["A2:provider_bundle_invalid:" + (error as Error).message], true);
+  }
+}
+
+function nativeProviderInputs(input: {
+  repository: string;
+  eventBaseRevision: string;
+  eventHeadRevision: string;
+  authorityBaseRevision: string;
+  baseRevision: string;
+  headRevision: string;
+}): AuthenticatedProviderBundleResult {
+  return loadAuthenticatedProviderBundle({
+    bundlePath: process.env.RG_AUTHENTICATED_PROVIDER_BUNDLE || "",
+    runnerTemp: process.env.RUNNER_TEMP || "",
+    eventName: process.env.GITHUB_EVENT_NAME || "",
+    repository: input.repository,
+    workflowRef: process.env.GITHUB_WORKFLOW_REF || "",
+    workflowSha: process.env.GITHUB_WORKFLOW_SHA || "",
+    event: {
+      repository: { full_name: input.repository },
+      pull_request: {
+        base: { sha: input.eventBaseRevision },
+        head: { sha: input.eventHeadRevision },
+      },
+    },
+    authorityBaseRevision: input.authorityBaseRevision,
+    baseRevision: input.baseRevision,
+    headRevision: input.headRevision,
+  });
+}
 
 function githubEventPath(): string | undefined { return process.env.RG_EVENT_PATH || process.env.GITHUB_EVENT_PATH; }
 export function loadGitHubEvent(): GitHubEventResult {
@@ -577,6 +865,25 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
 
     // The representation transition itself is proved by the generic exact migration evaluator.
     // Once that independent proof passes, evaluate the resulting native HEAD as the post-transition state.
+    const provider = nativeProviderInputs({
+      repository: observation.repository,
+      eventBaseRevision: base,
+      eventHeadRevision: exactHead,
+      authorityBaseRevision: exactHead,
+      baseRevision: exactHead,
+      headRevision: exactHead,
+    });
+    if (provider.present) initialChecks.push({
+      name: "authenticated-provider-boundary",
+      check: {
+        ok: provider.ok,
+        message: provider.ok
+          ? "authenticated provider bundle is bound to the exact native evaluation"
+          : "authenticated provider bundle is invalid or unauthenticated",
+        details: provider.reasons,
+        data: { provider: provider.provider, grants: provider.authenticatedProviderGrants.length },
+      },
+    });
     const native = evaluateRepoGuardNativeBlockingSnapshot({
       repository: observation.repository,
       repositoryRoot: roots.repoRoot,
@@ -586,16 +893,16 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       workIntent: null,
       trustedReceipts: [],
       protectedResources: [],
-      evidenceFacts: [],
-      observationFacts: [],
-      authenticatedProviderGrants: [],
+      evidenceFacts: provider.evidenceFacts,
+      observationFacts: provider.observationFacts,
+      authenticatedProviderGrants: provider.authenticatedProviderGrants,
     });
     return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-cutover", {
-      ok: boundary.ok && native.ok,
-      message: boundary.ok && native.ok
+      ok: boundary.ok && provider.ok && native.ok,
+      message: boundary.ok && provider.ok && native.ok
         ? "exact atomic native cutover proof and post-transition native blocking state are GREEN"
         : "atomic native cutover proof failed",
-      details: [...boundary.reasons, ...native.reasons],
+      details: [...boundary.reasons, ...provider.reasons, ...native.reasons],
       data: {
         boundary: {
           rootAuthorized: boundary.rootAuthorized,
@@ -631,6 +938,25 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
         details: receiptBoundary.reasons,
       },
     });
+    const provider = nativeProviderInputs({
+      repository: observation.repository,
+      eventBaseRevision: base,
+      eventHeadRevision: exactHead,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: exactHead,
+    });
+    if (provider.present) initialChecks.push({
+      name: "authenticated-provider-boundary",
+      check: {
+        ok: provider.ok,
+        message: provider.ok
+          ? "authenticated provider bundle is bound to the exact native transition"
+          : "authenticated provider bundle is invalid or unauthenticated",
+        details: provider.reasons,
+        data: { provider: provider.provider, grants: provider.authenticatedProviderGrants.length },
+      },
+    });
     const native = evaluateRepoGuardNativeBlockingSnapshot({
       repository: observation.repository,
       repositoryRoot: roots.repoRoot,
@@ -640,16 +966,16 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       workIntent: workIntentFromChangeIntent(changeIntent, prNumber),
       trustedReceipts: receiptBoundary.receipt ? [receiptBoundary.receipt] : [],
       protectedResources: [],
-      evidenceFacts: [],
-      observationFacts: [],
-      authenticatedProviderGrants: [],
+      evidenceFacts: provider.evidenceFacts,
+      observationFacts: provider.observationFacts,
+      authenticatedProviderGrants: provider.authenticatedProviderGrants,
     });
     return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "native-blocking", {
-      ok: receiptBoundary.ok && native.ok,
-      message: receiptBoundary.ok && native.ok
+      ok: receiptBoundary.ok && provider.ok && native.ok,
+      message: receiptBoundary.ok && provider.ok && native.ok
         ? "native J2/J1/J3/Constraint evaluation is authoritative and GREEN"
         : "native authoritative evaluation is RED",
-      details: [...receiptBoundary.reasons, ...native.reasons],
+      details: [...receiptBoundary.reasons, ...provider.reasons, ...native.reasons],
       data: native,
     }, { repositoryObservation: observation, providerCapabilityMode: native.providerCapabilityMode });
   }
