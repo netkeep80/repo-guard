@@ -423,3 +423,79 @@ describe("#752 authenticated provider production boundary", () => {
   });
 
 });
+
+
+test("#756 RED production falsifier: accepted producer mutation must require resource authority", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-756-red-consumer-"));
+  const runner = mkdtempSync(join(tmpdir(), "repo-guard-756-red-runner-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
+  const cli = fileURLToPath(new URL("../dist/repo-guard.mjs", import.meta.url));
+  const workflowPath = ".github/workflows/trusted-enforcement.yml";
+  mkdirSync(join(root, "requirements"), { recursive: true });
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(root, "requirements", "APP-01.rg.yaml"), [
+    "format: repo-guard/requirement-v1",
+    "id: APP-01",
+    'normative: "Accepted trust producer is a governed resource."',
+    "relations:",
+    "  - predicates: [implemented_by]",
+    "    target:",
+    "      kind: artifact",
+    '      path: ".github/workflows/trusted-enforcement.yml"',
+    "",
+  ].join("\n"));
+  writeFileSync(join(root, workflowPath), "name: accepted trust producer\n");
+  const body = [
+    "```repo-guard-yaml",
+    "change_type: bugfix",
+    "scope:",
+    "  - .github/workflows/trusted-enforcement.yml",
+    "budgets: {}",
+    "anchors:",
+    "  affects: [APP-01]",
+    "  implements: []",
+    "  verifies: []",
+    "must_touch: []",
+    "must_not_touch: []",
+    "expected_effects:",
+    "  - Prove Requirement cause is not TRUST authority",
+    "```",
+  ].join("\n");
+  const eventPath = join(runner, "event.json");
+  try {
+    git("init", "-b", "main");
+    git("config", "user.email", "red@example.com");
+    git("config", "user.name", "RED");
+    git("add", "-A");
+    git("commit", "-q", "-m", "native base");
+    const baseSha = git("rev-parse", "HEAD");
+    git("remote", "add", "origin", root);
+    git("checkout", "-q", "-b", "candidate");
+    writeFileSync(join(root, workflowPath), "name: candidate-mutated trust producer\n");
+    git("add", workflowPath);
+    git("commit", "-q", "-m", "mutate accepted trust producer");
+    const headSha = git("rev-parse", "HEAD");
+    writeFileSync(eventPath, JSON.stringify({
+      pull_request: { number: 1, base: { sha: baseSha, ref: "main" }, head: { sha: headSha }, body },
+      repository: { full_name: "arbitrary/native-consumer" },
+    }));
+    const result = spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr", "--format", "json"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_EVENT_NAME: "pull_request_target",
+        GITHUB_WORKFLOW_REF: "arbitrary/native-consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+        GITHUB_WORKFLOW_SHA: baseSha,
+        RUNNER_TEMP: runner,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1,
+      "DEFECT #756: production allowed accepted trust producer mutation as ordinary Requirement-caused Resource\n" +
+      result.stdout + result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(runner, { recursive: true, force: true });
+  }
+});
