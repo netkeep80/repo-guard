@@ -425,7 +425,7 @@ describe("#752 authenticated provider production boundary", () => {
 });
 
 
-test("#756 RED production falsifier: accepted producer mutation must require resource authority", () => {
+it("#756 RED production falsifier: accepted producer mutation must require resource authority", () => {
   const root = mkdtempSync(join(tmpdir(), "repo-guard-756-red-consumer-"));
   const runner = mkdtempSync(join(tmpdir(), "repo-guard-756-red-runner-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
