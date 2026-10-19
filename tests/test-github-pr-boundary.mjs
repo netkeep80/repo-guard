@@ -423,3 +423,46 @@ describe("#752 authenticated provider production boundary", () => {
   });
 
 });
+
+
+describe("#756 ProtectedResource TRUST production boundary", () => {
+  it("RED: accepted provider boundary transports exact ProtectedResource TRUST separately from DOMAIN/OBSERVATION", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-guard-protected-trust-red-"));
+    const bundle = join(dir, "provider.json");
+    const base = "a".repeat(40), head = "b".repeat(40);
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("external/consumer", base, base, head),
+      claims: [],
+      trust: {
+        repository: "external/consumer",
+        authorityBaseRevision: base,
+        protectedResources: [".github/workflows/trusted-enforcement.yml"]
+      }
+    }));
+    try {
+      const result = loadAuthenticatedProviderBundle({
+        bundlePath: bundle,
+        runnerTemp: dir,
+        eventName: "pull_request_target",
+        repository: "external/consumer",
+        workflowRef: "external/consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+        workflowSha: base,
+        event: {
+          repository: { full_name: "external/consumer" },
+          pull_request: { base: { sha: base }, head: { sha: head } }
+        },
+        authorityBaseRevision: base,
+        baseRevision: base,
+        headRevision: head
+      });
+      assert.equal(result.ok, true, result.reasons.join(" | "));
+      assert.deepEqual(result.protectedResources, [".github/workflows/trusted-enforcement.yml"]);
+      assert.deepEqual(result.authenticatedProviderGrants, []);
+      assert.deepEqual(result.evidenceFacts, []);
+      assert.deepEqual(result.observationFacts, []);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});
