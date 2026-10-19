@@ -16,6 +16,7 @@ import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/r
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, checkRoutineRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
 import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
+import { evaluateProtectedResourceAuthority, resourceDeltasFromParsedDiff } from "./runtime/transition-closure.mjs";
 import type { AuthenticatedProviderGrant, TransitionEvidenceFact, TransitionObservationFact, TransitionReceipt } from "./runtime/transition-closure.mjs";
 
 type PolicyRuntime = ReturnType<typeof loadPolicyRuntimeFromObject>;
@@ -54,11 +55,20 @@ interface AuthenticatedProviderBundleInput {
 interface AuthenticatedProviderBundleResult {
   ok: boolean;
   present: boolean;
+  trustPresent: boolean;
   reasons: string[];
   authenticatedProviderGrants: AuthenticatedProviderGrant[];
   observationFacts: TransitionObservationFact[];
   evidenceFacts: TransitionEvidenceFact[];
+  protectedResources: string[];
   provider?: { providerId: string; principal: string; producerSource: string; workflowPath: string } | null;
+  trust?: {
+    repository: string;
+    authorityBaseRevision: string;
+    source: "accepted-workflow";
+    workflowPath: string;
+    declaredResources: string[];
+  } | null;
 }
 
 const PROVIDER_BUNDLE_FORMAT = "repo-guard/provider-bundle-v1";
@@ -107,14 +117,17 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
   const empty = (reasons: string[] = [], present = false): AuthenticatedProviderBundleResult => ({
     ok: reasons.length === 0,
     present,
+    trustPresent: false,
     reasons: [...new Set(reasons)].sort(),
     authenticatedProviderGrants: [],
     observationFacts: [],
     evidenceFacts: [],
+    protectedResources: [],
     provider: null,
+    trust: null,
   });
   const bundlePath = typeof input.bundlePath === "string" ? input.bundlePath.trim() : "";
-  if (!bundlePath) return empty();
+  if (!bundlePath && input.eventName !== "pull_request_target") return empty();
 
   const reasons: string[] = [];
   if (!REPO.test(input.repository)) reasons.push("A2:provider_invalid_repository");
@@ -155,6 +168,22 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
   if (!exactRevision.test(workflowSha) || workflowSha !== eventBase)
     reasons.push("A2:provider_workflow_source_not_exact_base");
 
+  if (!bundlePath) {
+    if (reasons.length) return empty(reasons, false);
+    return {
+      ...empty(),
+      trustPresent: true,
+      protectedResources: [workflowPath],
+      trust: {
+        repository: input.repository,
+        authorityBaseRevision: eventBase,
+        source: "accepted-workflow",
+        workflowPath,
+        declaredResources: [],
+      },
+    };
+  }
+
   const runnerTemp = typeof input.runnerTemp === "string" ? input.runnerTemp : "";
   let raw = "";
   try {
@@ -174,7 +203,7 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
 
   try {
     const document = providerObject(strictCanonicalJson(raw), "provider bundle");
-    providerExactFields(document, ["format", "transition", "claims"], "provider bundle");
+    providerExactFields(document, ["format", "transition", "claims", "trust"], "provider bundle");
     if (document.format !== PROVIDER_BUNDLE_FORMAT) throw new Error("unsupported provider bundle format");
     const transition = providerObject(document.transition, "provider bundle transition");
     providerExactFields(
@@ -188,6 +217,18 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     if (transition.baseRevision !== input.baseRevision) throw new Error("provider bundle BASE is stale or mismatched");
     if (transition.headRevision !== input.headRevision) throw new Error("provider bundle HEAD is stale or mismatched");
     if (!Array.isArray(document.claims)) throw new Error("provider bundle claims must be an array");
+
+    let declaredProtectedResources: string[] = [];
+    if (document.trust !== undefined) {
+      const trust = providerObject(document.trust, "provider bundle trust");
+      providerExactFields(trust, ["repository", "authorityBaseRevision", "protectedResources"], "provider bundle trust");
+      if (trust.repository !== input.repository) throw new Error("provider trust repository is stale or mismatched");
+      if (trust.authorityBaseRevision !== eventBase)
+        throw new Error("provider trust authority BASE is stale or mismatched");
+      declaredProtectedResources = providerSubjectPaths(trust.protectedResources, "provider trust protectedResources");
+    }
+    const protectedResources = [...new Set([workflowPath, ...declaredProtectedResources])]
+      .sort((a, b) => a.localeCompare(b, "en"));
 
     const identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
     const providerId = "accepted-workflow:" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
@@ -284,11 +325,20 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     return {
       ok: true,
       present: true,
+      trustPresent: true,
       reasons: [],
       authenticatedProviderGrants,
       observationFacts,
       evidenceFacts,
+      protectedResources,
       provider: { providerId, principal, producerSource, workflowPath },
+      trust: {
+        repository: input.repository,
+        authorityBaseRevision: eventBase,
+        source: "accepted-workflow",
+        workflowPath,
+        declaredResources: declaredProtectedResources,
+      },
     };
   } catch (error) {
     return empty(["A2:provider_bundle_invalid:" + (error as Error).message], true);
