@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, 
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
 import { classifyNativeRepositoryRepresentation, classifyRepoGuardSelfHostRepresentation, evaluateNativeRollbackSnapshot, evaluateNativeTrustedRootMigrationSnapshot, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
-import { evaluateProtectedResourceAuthority } from "../dist/runtime/transition-closure.mjs";
+import { evaluateTransitionReceiptBoundary, projectProtectedResourcePermissions } from "../dist/github-pr.mjs";
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
@@ -1346,35 +1346,42 @@ test("#756 P12-P14 exact root cutover authority never implies ProtectedResource 
     });
     assert.equal(rootBoundary.ok, true, rootBoundary.reasons.join(" | "));
 
-    const rootReceiptCannotMutateResource = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: base, baseRevision: base, headRevision: cutHead,
-      resourceDeltas: [{ kind: "modify", path: "src/app.txt" }],
-      protectedResources: ["src/app.txt"],
-      trustedReceipts: [{
-        authorityBaseRevision: base, baseRevision: base, headRevision: cutHead,
-        permissions: [...prepared.requiredPermissions],
-      }],
-    });
-    assert.equal(rootReceiptCannotMutateResource.ok, false);
-    assert.ok(rootReceiptCannotMutateResource.reasons.some((reason) =>
-      reason.includes("missing_authority:resource:src/app.txt")));
+    const requiredPermissions = projectProtectedResourcePermissions(
+      [{ path: "src/app.txt" }],
+      ["src/app.txt"],
+    );
+    assert.deepEqual(requiredPermissions, ["resource:src/app.txt"]);
 
-    const noResourceReceipt = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: base, baseRevision: base, headRevision: cutHead,
-      resourceDeltas: [{ kind: "modify", path: "src/app.txt" }],
-      protectedResources: ["src/app.txt"],
-      trustedReceipts: [],
+    const withoutResource = evaluateTransitionReceiptBoundary({
+      governanceGrant: rootGrant,
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: cutHead,
+      requiredPermissions,
     });
-    assert.equal(noResourceReceipt.ok, false);
+    assert.equal(withoutResource.ok, false);
+    assert.ok(withoutResource.reasons.includes(
+      "A1:transition_receipt_permission_missing:resource:src/app.txt"));
 
-    const exact = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: base, baseRevision: base, headRevision: cutHead,
-      resourceDeltas: [{ kind: "modify", path: "src/app.txt" }],
-      protectedResources: ["src/app.txt"],
-      trustedReceipts: [{
-        authorityBaseRevision: base, baseRevision: base, headRevision: cutHead,
-        permissions: ["resource:src/app.txt"],
-      }],
+    const exact = evaluateTransitionReceiptBoundary({
+      governanceGrant: {
+        ...rootGrant,
+        transition_receipt: {
+          repository,
+          authority_base_sha: base,
+          base_sha: base,
+          head_sha: cutHead,
+          permissions: requiredPermissions,
+        },
+      },
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: cutHead,
+      requiredPermissions,
     });
     assert.equal(exact.ok, true, exact.reasons.join(" | "));
     assert.deepEqual(exact.requiredPermissions, ["resource:src/app.txt"]);
@@ -1382,7 +1389,6 @@ test("#756 P12-P14 exact root cutover authority never implies ProtectedResource 
     rmSync(root, { recursive: true, force: true });
   }
 });
-
 test("#756 rollback root authority is exact-tree authority, not blanket ProtectedResource authority", async () => {
   const { root, repository, base, head } = rg749ConsumerFixture(["APP-ROOT", "POLICY-A"]);
   try {
@@ -1404,50 +1410,63 @@ test("#756 rollback root authority is exact-tree authority, not blanket Protecte
     assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
     const { evaluateGenericAtomicNativeRollbackBoundary } = await import("../dist/github-pr.mjs");
     const trustedAuthorizer = { trusted: true, source: "repository_permission" };
-    const rootBoundary = evaluateGenericAtomicNativeRollbackBoundary({
-      governanceGrant: {
-        trusted_root_transition: {
-          repository,
-          authority_base_sha: nativeBase,
-          base_sha: nativeBase,
-          head_sha: rollbackHead,
-          permissions: [...prepared.requiredPermissions],
-        },
-        allow_atomic_governance_cutover: true,
+    const rootGrant = {
+      trusted_root_transition: {
+        repository,
+        authority_base_sha: nativeBase,
+        base_sha: nativeBase,
+        head_sha: rollbackHead,
+        permissions: [...prepared.requiredPermissions],
       },
+      allow_atomic_governance_cutover: true,
+    };
+    const rootBoundary = evaluateGenericAtomicNativeRollbackBoundary({
+      governanceGrant: rootGrant,
       trustedAuthorizer, repository, repositoryRoot: root,
       baseRevision: nativeBase, headRevision: rollbackHead,
     });
     assert.equal(rootBoundary.ok, true, rootBoundary.reasons.join(" | "));
 
-    const withoutResource = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
-      resourceDeltas: [{ kind: "modify", path: "src/app.txt" }],
-      protectedResources: ["src/app.txt"],
-      trustedReceipts: [{
-        authorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
-        permissions: [...prepared.requiredPermissions],
-      }],
+    const requiredPermissions = projectProtectedResourcePermissions(
+      [{ path: "src/app.txt" }],
+      ["src/app.txt"],
+    );
+    const withoutResource = evaluateTransitionReceiptBoundary({
+      governanceGrant: rootGrant,
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: nativeBase,
+      baseRevision: nativeBase,
+      headRevision: rollbackHead,
+      requiredPermissions,
     });
     assert.equal(withoutResource.ok, false);
-    assert.ok(withoutResource.reasons.some((reason) =>
-      reason.includes("missing_authority:resource:src/app.txt")));
+    assert.ok(withoutResource.reasons.includes(
+      "A1:transition_receipt_permission_missing:resource:src/app.txt"));
 
-    const exactResource = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
-      resourceDeltas: [{ kind: "modify", path: "src/app.txt" }],
-      protectedResources: ["src/app.txt"],
-      trustedReceipts: [{
-        authorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
-        permissions: ["resource:src/app.txt"],
-      }],
+    const exactResource = evaluateTransitionReceiptBoundary({
+      governanceGrant: {
+        ...rootGrant,
+        transition_receipt: {
+          repository,
+          authority_base_sha: nativeBase,
+          base_sha: nativeBase,
+          head_sha: rollbackHead,
+          permissions: requiredPermissions,
+        },
+      },
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: nativeBase,
+      baseRevision: nativeBase,
+      headRevision: rollbackHead,
+      requiredPermissions,
     });
     assert.equal(exactResource.ok, true, exactResource.reasons.join(" | "));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
-
 test("#756 P18-P20 DOMAIN PASS and ProtectedResource TRUST are non-interchangeable", () => {
   const { root, repository, head } = rg749ConsumerFixture(["APP-ROOT"]);
   try {
@@ -1531,31 +1550,50 @@ test("#756 P18-P20 DOMAIN PASS and ProtectedResource TRUST are non-interchangeab
 });
 
 
-test("#756 protected delete/rename/type-change all require exact resource identity authority", () => {
+test("#756 protected delete/rename/type-change project exact resource identity into the canonical receipt boundary", () => {
   const base = "a".repeat(40), head = "b".repeat(40);
+  const repository = "example/consumer";
+  const trustedAuthorizer = { trusted: true, source: "repository_permission" };
   const cases = [
-    { name: "delete", delta: { kind: "delete", path: "trusted/source.yml" }, permission: "resource:trusted/source.yml" },
-    { name: "rename", delta: { kind: "rename", previousPath: "trusted/source.yml", path: "trusted/moved.yml" }, permission: "resource:trusted/source.yml" },
-    { name: "type-change", delta: { kind: "type_change", path: "trusted/source.yml", beforeType: "blob", afterType: "commit" }, permission: "resource:trusted/source.yml" },
+    { name: "delete", file: { path: "trusted/source.yml" }, permission: "resource:trusted/source.yml" },
+    { name: "rename", file: { previousPath: "trusted/source.yml", path: "trusted/moved.yml" }, permission: "resource:trusted/source.yml" },
+    { name: "type-change", file: { path: "trusted/source.yml" }, permission: "resource:trusted/source.yml" },
   ];
   for (const item of cases) {
-    const red = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: base, baseRevision: base, headRevision: head,
-      resourceDeltas: [item.delta],
-      protectedResources: ["trusted/source.yml"],
-      trustedReceipts: [],
+    const requiredPermissions = projectProtectedResourcePermissions(
+      [item.file],
+      ["trusted/source.yml"],
+    );
+    assert.deepEqual(requiredPermissions, [item.permission], item.name);
+
+    const red = evaluateTransitionReceiptBoundary({
+      governanceGrant: null,
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      requiredPermissions,
     });
     assert.equal(red.ok, false, item.name + " unexpectedly GREEN");
-    assert.ok(red.reasons.some((reason) => reason.includes("missing_authority:" + item.permission)), red.reasons.join(" | "));
+    assert.ok(red.reasons.includes("A1:transition_receipt_permission_missing:" + item.permission));
 
-    const green = evaluateProtectedResourceAuthority({
-      authorityBaseRevision: base, baseRevision: base, headRevision: head,
-      resourceDeltas: [item.delta],
-      protectedResources: ["trusted/source.yml"],
-      trustedReceipts: [{
-        authorityBaseRevision: base, baseRevision: base, headRevision: head,
-        permissions: [item.permission],
-      }],
+    const green = evaluateTransitionReceiptBoundary({
+      governanceGrant: {
+        transition_receipt: {
+          repository,
+          authority_base_sha: base,
+          base_sha: base,
+          head_sha: head,
+          permissions: requiredPermissions,
+        },
+      },
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      requiredPermissions,
     });
     assert.equal(green.ok, true, item.name + ": " + green.reasons.join(" | "));
   }
