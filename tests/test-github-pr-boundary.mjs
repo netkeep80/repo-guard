@@ -677,3 +677,26 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
     }
   });
 });
+
+
+test("#756 accepted ProtectedResource source is exact BASE-bound, not candidate HEAD-bound", () => {
+  const base = "a".repeat(40), head = "b".repeat(40);
+  const result = loadAuthenticatedProviderBundle({
+    bundlePath: "",
+    eventName: "pull_request_target",
+    repository: "external/consumer",
+    workflowRef: "external/consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+    workflowSha: head,
+    event: {
+      repository: { full_name: "external/consumer" },
+      pull_request: { base: { sha: base }, head: { sha: head } },
+    },
+    authorityBaseRevision: base,
+    baseRevision: base,
+    headRevision: head,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.trustPresent, false);
+  assert.deepEqual(result.protectedResources, []);
+  assert.ok(result.reasons.includes("A2:provider_workflow_source_not_exact_base"));
+});
