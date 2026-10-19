@@ -174,8 +174,19 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
 
   try {
     const document = providerObject(strictCanonicalJson(raw), "provider bundle");
-    providerExactFields(document, ["format", "claims"], "provider bundle");
+    providerExactFields(document, ["format", "transition", "claims"], "provider bundle");
     if (document.format !== PROVIDER_BUNDLE_FORMAT) throw new Error("unsupported provider bundle format");
+    const transition = providerObject(document.transition, "provider bundle transition");
+    providerExactFields(
+      transition,
+      ["repository", "authorityBaseRevision", "baseRevision", "headRevision"],
+      "provider bundle transition",
+    );
+    if (transition.repository !== input.repository) throw new Error("provider bundle repository is stale or mismatched");
+    if (transition.authorityBaseRevision !== input.authorityBaseRevision)
+      throw new Error("provider bundle authority BASE is stale or mismatched");
+    if (transition.baseRevision !== input.baseRevision) throw new Error("provider bundle BASE is stale or mismatched");
+    if (transition.headRevision !== input.headRevision) throw new Error("provider bundle HEAD is stale or mismatched");
     if (!Array.isArray(document.claims)) throw new Error("provider bundle claims must be an array");
 
     const identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
