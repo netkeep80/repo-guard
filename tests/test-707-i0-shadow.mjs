@@ -829,3 +829,5 @@ test("A1 exact TransitionReceipt transport uses existing trusted issue authority
     assert.equal(verdict.receipt, null);
   }
 });
+
+// Native authority post-cutover production probe; do not merge.
