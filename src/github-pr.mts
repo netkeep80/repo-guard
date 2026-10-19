@@ -54,11 +54,20 @@ interface AuthenticatedProviderBundleInput {
 interface AuthenticatedProviderBundleResult {
   ok: boolean;
   present: boolean;
+  trustPresent: boolean;
   reasons: string[];
   authenticatedProviderGrants: AuthenticatedProviderGrant[];
   observationFacts: TransitionObservationFact[];
   evidenceFacts: TransitionEvidenceFact[];
+  protectedResources: string[];
   provider?: { providerId: string; principal: string; producerSource: string; workflowPath: string } | null;
+  trust?: {
+    repository: string;
+    authorityBaseRevision: string;
+    source: "accepted-workflow";
+    workflowPath: string;
+    declaredResources: string[];
+  } | null;
 }
 
 const PROVIDER_BUNDLE_FORMAT = "repo-guard/provider-bundle-v1";
@@ -103,18 +112,39 @@ function providerSubjectPaths(value: unknown, label: string): string[] {
   return [...paths].sort((a, b) => a.localeCompare(b, "en"));
 }
 
+export function projectProtectedResourcePermissions(
+  files: readonly { path: string; previousPath?: string }[],
+  protectedResources: readonly string[],
+): string[] {
+  const protectedSet = new Set(protectedResources.map((path, index) =>
+    providerPath(path, "protectedResources[" + index + "]")));
+  const permissions = new Set<string>();
+  for (const [index, file] of files.entries()) {
+    const current = providerPath(file.path, "diff.files[" + index + "].path");
+    if (protectedSet.has(current)) permissions.add("resource:" + current);
+    if (file.previousPath !== undefined) {
+      const previous = providerPath(file.previousPath, "diff.files[" + index + "].previousPath");
+      if (protectedSet.has(previous)) permissions.add("resource:" + previous);
+    }
+  }
+  return [...permissions].sort((a, b) => a.localeCompare(b, "en"));
+}
+
 export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBundleInput): AuthenticatedProviderBundleResult {
   const empty = (reasons: string[] = [], present = false): AuthenticatedProviderBundleResult => ({
     ok: reasons.length === 0,
     present,
+    trustPresent: false,
     reasons: [...new Set(reasons)].sort(),
     authenticatedProviderGrants: [],
     observationFacts: [],
     evidenceFacts: [],
+    protectedResources: [],
     provider: null,
+    trust: null,
   });
   const bundlePath = typeof input.bundlePath === "string" ? input.bundlePath.trim() : "";
-  if (!bundlePath) return empty();
+  if (!bundlePath && input.eventName !== "pull_request_target") return empty();
 
   const reasons: string[] = [];
   if (!REPO.test(input.repository)) reasons.push("A2:provider_invalid_repository");
@@ -155,6 +185,22 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
   if (!exactRevision.test(workflowSha) || workflowSha !== eventBase)
     reasons.push("A2:provider_workflow_source_not_exact_base");
 
+  if (!bundlePath) {
+    if (reasons.length) return empty(reasons, false);
+    return {
+      ...empty(),
+      trustPresent: true,
+      protectedResources: [workflowPath],
+      trust: {
+        repository: input.repository,
+        authorityBaseRevision: eventBase,
+        source: "accepted-workflow",
+        workflowPath,
+        declaredResources: [],
+      },
+    };
+  }
+
   const runnerTemp = typeof input.runnerTemp === "string" ? input.runnerTemp : "";
   let raw = "";
   try {
@@ -174,7 +220,7 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
 
   try {
     const document = providerObject(strictCanonicalJson(raw), "provider bundle");
-    providerExactFields(document, ["format", "transition", "claims"], "provider bundle");
+    providerExactFields(document, ["format", "transition", "claims", "trust"], "provider bundle");
     if (document.format !== PROVIDER_BUNDLE_FORMAT) throw new Error("unsupported provider bundle format");
     const transition = providerObject(document.transition, "provider bundle transition");
     providerExactFields(
@@ -188,6 +234,18 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     if (transition.baseRevision !== input.baseRevision) throw new Error("provider bundle BASE is stale or mismatched");
     if (transition.headRevision !== input.headRevision) throw new Error("provider bundle HEAD is stale or mismatched");
     if (!Array.isArray(document.claims)) throw new Error("provider bundle claims must be an array");
+
+    let declaredProtectedResources: string[] = [];
+    if (document.trust !== undefined) {
+      const trust = providerObject(document.trust, "provider bundle trust");
+      providerExactFields(trust, ["repository", "authorityBaseRevision", "protectedResources"], "provider bundle trust");
+      if (trust.repository !== input.repository) throw new Error("provider trust repository is stale or mismatched");
+      if (trust.authorityBaseRevision !== eventBase)
+        throw new Error("provider trust authority BASE is stale or mismatched");
+      declaredProtectedResources = providerSubjectPaths(trust.protectedResources, "provider trust protectedResources");
+    }
+    const protectedResources = [...new Set([workflowPath, ...declaredProtectedResources])]
+      .sort((a, b) => a.localeCompare(b, "en"));
 
     const identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
     const providerId = "accepted-workflow:" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
@@ -284,11 +342,20 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     return {
       ok: true,
       present: true,
+      trustPresent: true,
       reasons: [],
       authenticatedProviderGrants,
       observationFacts,
       evidenceFacts,
+      protectedResources,
       provider: { providerId, principal, producerSource, workflowPath },
+      trust: {
+        repository: input.repository,
+        authorityBaseRevision: eventBase,
+        source: "accepted-workflow",
+        workflowPath,
+        declaredResources: declaredProtectedResources,
+      },
     };
   } catch (error) {
     return empty(["A2:provider_bundle_invalid:" + (error as Error).message], true);
@@ -514,10 +581,27 @@ export function evaluateTransitionReceiptBoundary(input: {
   authorityBaseRevision: string;
   baseRevision: string;
   headRevision: string;
+  requiredPermissions?: readonly string[];
 }) {
+  const requiredPermissions = [...new Set(input.requiredPermissions || [])].sort((a, b) => a.localeCompare(b, "en"));
+  const requiredReasons = requiredPermissions
+    .filter((permission) => !permission || permission.includes("*"))
+    .map((permission) => "A1:transition_receipt_required_permission_invalid:" + permission);
   const grant = transitionReceiptGrant(input.governanceGrant);
-  if (!grant) return { present: false, ok: true, receipt: null as TransitionReceipt | null, reasons: [] as string[] };
-  const reasons: string[] = [];
+  if (!grant) {
+    const reasons = [
+      ...requiredReasons,
+      ...requiredPermissions.map((permission) => "A1:transition_receipt_permission_missing:" + permission),
+    ];
+    return {
+      present: false,
+      ok: reasons.length === 0,
+      receipt: null as TransitionReceipt | null,
+      reasons: [...new Set(reasons)].sort(),
+      requiredPermissions,
+    };
+  }
+  const reasons: string[] = [...requiredReasons];
   if (!trustedIssueAuthorizer(input.trustedAuthorizer)) reasons.push("A1:transition_receipt_untrusted_source");
   if (grant.repository !== input.repository) reasons.push("A1:transition_receipt_repository_mismatch");
   if (grant.authority_base_sha !== input.authorityBaseRevision) reasons.push("A1:transition_receipt_authority_base_mismatch");
@@ -527,6 +611,8 @@ export function evaluateTransitionReceiptBoundary(input: {
   if (!permissions.length || new Set(permissions).size !== permissions.length ||
       permissions.some((permission) => !permission || permission.includes("*")))
     reasons.push("A1:transition_receipt_permissions_invalid");
+  for (const permission of requiredPermissions)
+    if (!permissions.includes(permission)) reasons.push("A1:transition_receipt_permission_missing:" + permission);
   const ok = reasons.length === 0;
   const receipt: TransitionReceipt | null = ok ? {
     authorityBaseRevision: String(grant.authority_base_sha),
@@ -534,7 +620,7 @@ export function evaluateTransitionReceiptBoundary(input: {
     headRevision: String(grant.head_sha),
     permissions,
   } : null;
-  return { present: true, ok, receipt, reasons: [...new Set(reasons)].sort() };
+  return { present: true, ok, receipt, reasons: [...new Set(reasons)].sort(), requiredPermissions };
 }
 
 export function evaluateAtomicNativeCutoverBoundary(input: {
@@ -864,7 +950,8 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
     }
 
     // The representation transition itself is proved by the generic exact migration evaluator.
-    // Once that independent proof passes, evaluate the resulting native HEAD as the post-transition state.
+    // ProtectedResource TRUST is projected into the existing exact TransitionReceipt boundary;
+    // there is no second ProtectedResource authority evaluator.
     const provider = nativeProviderInputs({
       repository: observation.repository,
       eventBaseRevision: base,
@@ -873,15 +960,41 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       baseRevision: exactHead,
       headRevision: exactHead,
     });
-    if (provider.present) initialChecks.push({
+    if (provider.present || provider.trustPresent) initialChecks.push({
       name: "authenticated-provider-boundary",
       check: {
         ok: provider.ok,
         message: provider.ok
-          ? "authenticated provider bundle is bound to the exact native evaluation"
-          : "authenticated provider bundle is invalid or unauthenticated",
+          ? "authenticated provider/TRUST boundary is bound to the accepted workflow source"
+          : "authenticated provider/TRUST boundary is invalid or unauthenticated",
         details: provider.reasons,
-        data: { provider: provider.provider, grants: provider.authenticatedProviderGrants.length },
+        data: {
+          provider: provider.provider,
+          grants: provider.authenticatedProviderGrants.length,
+          protectedResources: provider.protectedResources,
+          trust: provider.trust,
+        },
+      },
+    });
+    const requiredProtectedPermissions = projectProtectedResourcePermissions(diff.files, provider.protectedResources);
+    const receiptBoundary = evaluateTransitionReceiptBoundary({
+      governanceGrant,
+      trustedAuthorizer,
+      repository: observation.repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: exactHead,
+      requiredPermissions: requiredProtectedPermissions,
+    });
+    if (receiptBoundary.present || requiredProtectedPermissions.length) initialChecks.push({
+      name: "transition-receipt",
+      check: {
+        ok: receiptBoundary.ok,
+        message: receiptBoundary.ok
+          ? "exact cutover TransitionReceipt covers every protected Resource mutation"
+          : "cutover TransitionReceipt is missing exact ProtectedResource authority",
+        details: receiptBoundary.reasons,
+        data: { requiredProtectedPermissions },
       },
     });
     const native = evaluateRepoGuardNativeBlockingSnapshot({
@@ -892,23 +1005,24 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       headRevision: exactHead,
       workIntent: null,
       trustedReceipts: [],
-      protectedResources: [],
+      protectedResources: provider.protectedResources,
       evidenceFacts: provider.evidenceFacts,
       observationFacts: provider.observationFacts,
       authenticatedProviderGrants: provider.authenticatedProviderGrants,
     });
     return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-cutover", {
-      ok: boundary.ok && provider.ok && native.ok,
-      message: boundary.ok && provider.ok && native.ok
-        ? "exact atomic native cutover proof and post-transition native blocking state are GREEN"
+      ok: boundary.ok && receiptBoundary.ok && provider.ok && native.ok,
+      message: boundary.ok && receiptBoundary.ok && provider.ok && native.ok
+        ? "exact atomic native cutover, ProtectedResource receipt authority and post-transition native state are GREEN"
         : "atomic native cutover proof failed",
-      details: [...boundary.reasons, ...provider.reasons, ...native.reasons],
+      details: [...boundary.reasons, ...receiptBoundary.reasons, ...provider.reasons, ...native.reasons],
       data: {
         boundary: {
           rootAuthorized: boundary.rootAuthorized,
           atomicAuthorized: boundary.atomicAuthorized,
           migration: boundary.rootBoundary?.evaluation,
         },
+        requiredProtectedPermissions,
         native,
       },
     }, { repositoryObservation: observation, providerCapabilityMode: native.providerCapabilityMode });
@@ -946,15 +1060,20 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       baseRevision: base,
       headRevision: exactHead,
     });
-    if (provider.present) initialChecks.push({
+    if (provider.present || provider.trustPresent) initialChecks.push({
       name: "authenticated-provider-boundary",
       check: {
         ok: provider.ok,
         message: provider.ok
-          ? "authenticated provider bundle is bound to the exact native transition"
-          : "authenticated provider bundle is invalid or unauthenticated",
+          ? "authenticated provider/TRUST boundary is bound to the exact native transition"
+          : "authenticated provider/TRUST boundary is invalid or unauthenticated",
         details: provider.reasons,
-        data: { provider: provider.provider, grants: provider.authenticatedProviderGrants.length },
+        data: {
+          provider: provider.provider,
+          grants: provider.authenticatedProviderGrants.length,
+          protectedResources: provider.protectedResources,
+          trust: provider.trust,
+        },
       },
     });
     const native = evaluateRepoGuardNativeBlockingSnapshot({
@@ -965,7 +1084,7 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       headRevision: exactHead,
       workIntent: workIntentFromChangeIntent(changeIntent, prNumber),
       trustedReceipts: receiptBoundary.receipt ? [receiptBoundary.receipt] : [],
-      protectedResources: [],
+      protectedResources: provider.protectedResources,
       evidenceFacts: provider.evidenceFacts,
       observationFacts: provider.observationFacts,
       authenticatedProviderGrants: provider.authenticatedProviderGrants,
@@ -990,6 +1109,51 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       baseRevision: base,
       headRevision: exactHead,
     });
+    const provider = nativeProviderInputs({
+      repository: observation.repository,
+      eventBaseRevision: base,
+      eventHeadRevision: exactHead,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: exactHead,
+    });
+    if (provider.present || provider.trustPresent) initialChecks.push({
+      name: "authenticated-provider-boundary",
+      check: {
+        ok: provider.ok,
+        message: provider.ok
+          ? "authenticated provider/TRUST boundary is bound to the exact rollback transition"
+          : "authenticated provider/TRUST boundary is invalid or unauthenticated",
+        details: provider.reasons,
+        data: {
+          provider: provider.provider,
+          grants: provider.authenticatedProviderGrants.length,
+          protectedResources: provider.protectedResources,
+          trust: provider.trust,
+        },
+      },
+    });
+    const requiredProtectedPermissions = projectProtectedResourcePermissions(diff.files, provider.protectedResources);
+    const receiptBoundary = evaluateTransitionReceiptBoundary({
+      governanceGrant,
+      trustedAuthorizer,
+      repository: observation.repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: exactHead,
+      requiredPermissions: requiredProtectedPermissions,
+    });
+    if (receiptBoundary.present || requiredProtectedPermissions.length) initialChecks.push({
+      name: "transition-receipt",
+      check: {
+        ok: receiptBoundary.ok,
+        message: receiptBoundary.ok
+          ? "exact rollback TransitionReceipt covers every protected Resource mutation"
+          : "rollback TransitionReceipt is missing exact ProtectedResource authority",
+        details: receiptBoundary.reasons,
+        data: { requiredProtectedPermissions },
+      },
+    });
     const selector = selectRepoGuardAuthoritativeEvaluator({
       baseRepresentation: baseRepresentation.kind,
       headRepresentation: headRepresentation.kind,
@@ -997,12 +1161,12 @@ export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
       rollbackAuthorized: boundary.ok,
     });
     return emitAuthorityResult(roots, format, quiet, initialChecks, selector, "atomic-native-rollback", {
-      ok: selector.ok && boundary.ok,
-      message: selector.ok && boundary.ok
-        ? "exact accepted legacy rollback tree is independently authorized"
+      ok: selector.ok && boundary.ok && receiptBoundary.ok && provider.ok,
+      message: selector.ok && boundary.ok && receiptBoundary.ok && provider.ok
+        ? "exact accepted legacy rollback tree and ProtectedResource receipt authority are independently authorized"
         : "NATIVE to LEGACY rollback is not exactly authorized",
-      details: boundary.reasons,
-      data: { boundary, baseRepresentation, headRepresentation },
+      details: [...boundary.reasons, ...receiptBoundary.reasons, ...provider.reasons],
+      data: { boundary, requiredProtectedPermissions, baseRepresentation, headRepresentation },
     }, { repositoryObservation: observation });
   }
 

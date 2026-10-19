@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, 
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
 import { classifyNativeRepositoryRepresentation, classifyRepoGuardSelfHostRepresentation, evaluateNativeRollbackSnapshot, evaluateNativeTrustedRootMigrationSnapshot, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
+import { evaluateTransitionReceiptBoundary, projectProtectedResourcePermissions } from "../dist/github-pr.mjs";
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
@@ -1226,5 +1227,374 @@ test("#749 F15-F16 RepoGuard self-host uses the same generic native steady-state
     }).evaluator, "native");
   } finally {
     rmSync(clone, { recursive: true, force: true });
+  }
+});
+
+
+/* #756_GENERIC_PROTECTED_RESOURCE_TRUST_MATRIX */
+test("#756 P1-P9 native steady state requires exact resource authority independently of Requirement cause", () => {
+  const { root, repository, head } = rg749ConsumerFixture(["APP-ROOT"]);
+  try {
+    const unchanged = evaluateRepoGuardNativeBlockingSnapshot({
+      repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: head, baseRevision: head, headRevision: head,
+      workIntent: null, trustedReceipts: [],
+      protectedResources: ["src/app.txt"],
+      evidenceFacts: [], observationFacts: [], authenticatedProviderGrants: [],
+    });
+    assert.equal(unchanged.ok, true, unchanged.reasons.join(" | "));
+
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    writeFileSync(join(root, "src", "app.txt"), "protected steady change\n");
+    rg749Git(root, ["add", "src/app.txt"]);
+    rg749Git(root, ["commit", "-q", "-m", "#756 protected steady change"]);
+    const next = rg749Git(root, ["rev-parse", "HEAD"]);
+    const common = {
+      repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: head, baseRevision: head, headRevision: next,
+      workIntent: { id: "#756-steady", addresses: ["APP-ROOT"] },
+      protectedResources: ["src/app.txt"],
+      evidenceFacts: [], observationFacts: [], authenticatedProviderGrants: [],
+    };
+    const noReceipt = evaluateRepoGuardNativeBlockingSnapshot({ ...common, trustedReceipts: [] });
+    assert.equal(noReceipt.ok, false);
+    assert.ok(noReceipt.reasons.some((reason) =>
+      reason.includes("missing_authority:resource:src/app.txt")), noReceipt.reasons.join(" | "));
+    assert.ok(!noReceipt.reasons.some((reason) => reason.includes("J3:no_cause")),
+      "valid Requirement cause must not be confused with missing TRUST authority");
+
+    const wrongPath = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common,
+      trustedReceipts: [{
+        authorityBaseRevision: head, baseRevision: head, headRevision: next,
+        permissions: ["resource:docs/product-requirements.md"],
+      }],
+    });
+    assert.equal(wrongPath.ok, false);
+    assert.ok(wrongPath.reasons.some((reason) => reason.includes("missing_authority:resource:src/app.txt")));
+
+    const staleBase = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common,
+      trustedReceipts: [{
+        authorityBaseRevision: head, baseRevision: "a".repeat(40), headRevision: next,
+        permissions: ["resource:src/app.txt"],
+      }],
+    });
+    assert.equal(staleBase.ok, false);
+    assert.ok(staleBase.reasons.some((reason) => reason.includes("missing_authority:resource:src/app.txt")));
+
+    const wrongHead = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common,
+      trustedReceipts: [{
+        authorityBaseRevision: head, baseRevision: head, headRevision: "b".repeat(40),
+        permissions: ["resource:src/app.txt"],
+      }],
+    });
+    assert.equal(wrongHead.ok, false);
+    assert.ok(wrongHead.reasons.some((reason) => reason.includes("missing_authority:resource:src/app.txt")));
+
+    const exact = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common,
+      trustedReceipts: [{
+        authorityBaseRevision: head, baseRevision: head, headRevision: next,
+        permissions: ["resource:src/app.txt"],
+      }],
+    });
+    assert.equal(exact.ok, true, exact.reasons.join(" | "));
+    assert.equal(exact.providerCapabilityMode, true);
+    assert.equal(exact.authenticatedProviderGrantCount, 0);
+
+    const ordinary = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common, protectedResources: [], trustedReceipts: [],
+    });
+    assert.equal(ordinary.ok, true, ordinary.reasons.join(" | "));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#756 P12-P14 exact root cutover authority never implies ProtectedResource mutation authority", async () => {
+  const { root, repository, base, head } = rg749ConsumerFixture(["APP-ROOT", "POLICY-A"]);
+  try {
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    writeFileSync(join(root, "src", "app.txt"), "cutover protected mutation\n");
+    rg749Git(root, ["add", "src/app.txt"]);
+    rg749Git(root, ["commit", "-q", "-m", "#756 cutover protected mutation"]);
+    const cutHead = rg749Git(root, ["rev-parse", "HEAD"]);
+
+    const prepared = evaluateNativeTrustedRootMigrationSnapshot({
+      repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: base, baseRevision: base, headRevision: cutHead,
+      trustedRootReceipt: null,
+    });
+    assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
+    const { evaluateGenericAtomicNativeCutoverBoundary } = await import("../dist/github-pr.mjs");
+    const rootGrant = {
+      trusted_root_transition: {
+        repository,
+        authority_base_sha: base,
+        base_sha: base,
+        head_sha: cutHead,
+        permissions: [...prepared.requiredPermissions],
+      },
+      allow_atomic_governance_cutover: true,
+    };
+    const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+    const rootBoundary = evaluateGenericAtomicNativeCutoverBoundary({
+      governanceGrant: rootGrant, trustedAuthorizer, repository,
+      repositoryRoot: root, baseRevision: base, headRevision: cutHead,
+    });
+    assert.equal(rootBoundary.ok, true, rootBoundary.reasons.join(" | "));
+
+    const requiredPermissions = projectProtectedResourcePermissions(
+      [{ path: "src/app.txt" }],
+      ["src/app.txt"],
+    );
+    assert.deepEqual(requiredPermissions, ["resource:src/app.txt"]);
+
+    const withoutResource = evaluateTransitionReceiptBoundary({
+      governanceGrant: rootGrant,
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: cutHead,
+      requiredPermissions,
+    });
+    assert.equal(withoutResource.ok, false);
+    assert.ok(withoutResource.reasons.includes(
+      "A1:transition_receipt_permission_missing:resource:src/app.txt"));
+
+    const exact = evaluateTransitionReceiptBoundary({
+      governanceGrant: {
+        ...rootGrant,
+        transition_receipt: {
+          repository,
+          authority_base_sha: base,
+          base_sha: base,
+          head_sha: cutHead,
+          permissions: requiredPermissions,
+        },
+      },
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: cutHead,
+      requiredPermissions,
+    });
+    assert.equal(exact.ok, true, exact.reasons.join(" | "));
+    assert.deepEqual(exact.requiredPermissions, ["resource:src/app.txt"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test("#756 rollback root authority is exact-tree authority, not blanket ProtectedResource authority", async () => {
+  const { root, repository, base, head } = rg749ConsumerFixture(["APP-ROOT", "POLICY-A"]);
+  try {
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    writeFileSync(join(root, "src", "app.txt"), "native protected value\n");
+    rg749Git(root, ["add", "src/app.txt"]);
+    rg749Git(root, ["commit", "-q", "-m", "#756 native protected baseline"]);
+    const nativeBase = rg749Git(root, ["rev-parse", "HEAD"]);
+
+    rg749Git(root, ["read-tree", "--reset", "-u", base]);
+    rg749Git(root, ["commit", "-q", "-m", "#756 exact legacy rollback"]);
+    const rollbackHead = rg749Git(root, ["rev-parse", "HEAD"]);
+
+    const prepared = evaluateNativeRollbackSnapshot({
+      repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
+      trustedRootReceipt: null,
+    });
+    assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
+    const { evaluateGenericAtomicNativeRollbackBoundary } = await import("../dist/github-pr.mjs");
+    const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+    const rootGrant = {
+      trusted_root_transition: {
+        repository,
+        authority_base_sha: nativeBase,
+        base_sha: nativeBase,
+        head_sha: rollbackHead,
+        permissions: [...prepared.requiredPermissions],
+      },
+      allow_atomic_governance_cutover: true,
+    };
+    const rootBoundary = evaluateGenericAtomicNativeRollbackBoundary({
+      governanceGrant: rootGrant,
+      trustedAuthorizer, repository, repositoryRoot: root,
+      baseRevision: nativeBase, headRevision: rollbackHead,
+    });
+    assert.equal(rootBoundary.ok, true, rootBoundary.reasons.join(" | "));
+
+    const requiredPermissions = projectProtectedResourcePermissions(
+      [{ path: "src/app.txt" }],
+      ["src/app.txt"],
+    );
+    const withoutResource = evaluateTransitionReceiptBoundary({
+      governanceGrant: rootGrant,
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: nativeBase,
+      baseRevision: nativeBase,
+      headRevision: rollbackHead,
+      requiredPermissions,
+    });
+    assert.equal(withoutResource.ok, false);
+    assert.ok(withoutResource.reasons.includes(
+      "A1:transition_receipt_permission_missing:resource:src/app.txt"));
+
+    const exactResource = evaluateTransitionReceiptBoundary({
+      governanceGrant: {
+        ...rootGrant,
+        transition_receipt: {
+          repository,
+          authority_base_sha: nativeBase,
+          base_sha: nativeBase,
+          head_sha: rollbackHead,
+          permissions: requiredPermissions,
+        },
+      },
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: nativeBase,
+      baseRevision: nativeBase,
+      headRevision: rollbackHead,
+      requiredPermissions,
+    });
+    assert.equal(exactResource.ok, true, exactResource.reasons.join(" | "));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test("#756 P18-P20 DOMAIN PASS and ProtectedResource TRUST are non-interchangeable", () => {
+  const { root, repository, head } = rg749ConsumerFixture(["APP-ROOT"]);
+  try {
+    rg749Git(root, ["checkout", "-q", "--detach", head]);
+    const requirementPath = join(root, "requirements", "consumer", "APP-ROOT.rg.yaml");
+    writeFileSync(requirementPath, readFileSync(requirementPath, "utf8") + [
+      "constraints:",
+      "  - id: domain-review",
+      "    scope:",
+      "      relations: [implemented_by]",
+      "      include_generated: false",
+      "    evidence:",
+      "      class: domain",
+      "      key: domain:review",
+      "",
+    ].join("\n"));
+    rg749Git(root, ["add", "requirements/consumer/APP-ROOT.rg.yaml"]);
+    rg749Git(root, ["commit", "-q", "-m", "#756 accepted domain constraint"]);
+    const acceptedBase = rg749Git(root, ["rev-parse", "HEAD"]);
+
+    writeFileSync(join(root, "src", "app.txt"), "domain/protected transition\n");
+    rg749Git(root, ["add", "src/app.txt"]);
+    rg749Git(root, ["commit", "-q", "-m", "#756 domain and protected change"]);
+    const next = rg749Git(root, ["rev-parse", "HEAD"]);
+    const fact = {
+      authorityBaseRevision: acceptedBase, baseRevision: acceptedBase, headRevision: next,
+      providerId: "domain756", requirementId: "APP-ROOT",
+      key: "domain:review", status: "pass", subjectPaths: ["src/app.txt"],
+    };
+    const grant = {
+      repository, authorityBaseRevision: acceptedBase, baseRevision: acceptedBase, headRevision: next,
+      providerId: "domain756", principal: "github-app:domain756", producerSource: "accepted-workflow",
+      boundary: "domain",
+      capability: {
+        kind: "evidence", class: "domain", key: "domain:review", requirementId: "APP-ROOT",
+        subjectPaths: ["src/app.txt"],
+      },
+    };
+    const common = {
+      repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: acceptedBase, baseRevision: acceptedBase, headRevision: next,
+      workIntent: { id: "#756-separation", addresses: ["APP-ROOT"] },
+      protectedResources: ["src/app.txt"], observationFacts: [],
+    };
+
+    const domainCannotAuthorizeTrust = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common,
+      trustedReceipts: [],
+      evidenceFacts: [fact],
+      authenticatedProviderGrants: [grant],
+    });
+    assert.equal(domainCannotAuthorizeTrust.ok, false);
+    assert.ok(domainCannotAuthorizeTrust.reasons.some((reason) =>
+      reason.includes("missing_authority:resource:src/app.txt")), domainCannotAuthorizeTrust.reasons.join(" | "));
+    assert.ok(!domainCannotAuthorizeTrust.reasons.some((reason) => reason.includes("missing_evidence")),
+      domainCannotAuthorizeTrust.reasons.join(" | "));
+
+    const trustCannotFakeDomain = evaluateRepoGuardNativeBlockingSnapshot({
+      ...common,
+      trustedReceipts: [{
+        authorityBaseRevision: acceptedBase, baseRevision: acceptedBase, headRevision: next,
+        permissions: ["resource:src/app.txt"],
+      }],
+      evidenceFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(trustCannotFakeDomain.ok, false);
+    assert.ok(trustCannotFakeDomain.reasons.some((reason) => reason.includes("missing_evidence")),
+      trustCannotFakeDomain.reasons.join(" | "));
+    assert.ok(!trustCannotFakeDomain.reasons.some((reason) =>
+      reason.includes("missing_authority:resource:src/app.txt")), trustCannotFakeDomain.reasons.join(" | "));
+
+    const selected = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native", headRepresentation: "native",
+      forwardAuthorized: false, rollbackAuthorized: false,
+    });
+    assert.deepEqual(selected, { ok: true, evaluator: "native", transition: "steady" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("#756 protected delete/rename/type-change project exact resource identity into the canonical receipt boundary", () => {
+  const base = "a".repeat(40), head = "b".repeat(40);
+  const repository = "example/consumer";
+  const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+  const cases = [
+    { name: "delete", file: { path: "trusted/source.yml" }, permission: "resource:trusted/source.yml" },
+    { name: "rename", file: { previousPath: "trusted/source.yml", path: "trusted/moved.yml" }, permission: "resource:trusted/source.yml" },
+    { name: "type-change", file: { path: "trusted/source.yml" }, permission: "resource:trusted/source.yml" },
+  ];
+  for (const item of cases) {
+    const requiredPermissions = projectProtectedResourcePermissions(
+      [item.file],
+      ["trusted/source.yml"],
+    );
+    assert.deepEqual(requiredPermissions, [item.permission], item.name);
+
+    const red = evaluateTransitionReceiptBoundary({
+      governanceGrant: null,
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      requiredPermissions,
+    });
+    assert.equal(red.ok, false, item.name + " unexpectedly GREEN");
+    assert.ok(red.reasons.includes("A1:transition_receipt_permission_missing:" + item.permission));
+
+    const green = evaluateTransitionReceiptBoundary({
+      governanceGrant: {
+        transition_receipt: {
+          repository,
+          authority_base_sha: base,
+          base_sha: base,
+          head_sha: head,
+          permissions: requiredPermissions,
+        },
+      },
+      trustedAuthorizer,
+      repository,
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      requiredPermissions,
+    });
+    assert.equal(green.ok, true, item.name + ": " + green.reasons.join(" | "));
   }
 });
