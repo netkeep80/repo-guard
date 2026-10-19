@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, 
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
 import { classifyNativeRepositoryRepresentation, classifyRepoGuardSelfHostRepresentation, evaluateNativeRollbackSnapshot, evaluateNativeTrustedRootMigrationSnapshot, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
+import { evaluateProtectedResourceAuthority } from "../dist/runtime/transition-closure.mjs";
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
