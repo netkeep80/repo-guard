@@ -35,7 +35,7 @@ function providerPath(value, label) {
     if (typeof value !== "string")
         throw new Error(label + " must be a string");
     const normalized = normalizeDocumentFact(value, "repository_path");
-    if (normalized !== value || /[*?\[\]{}]/.test(value) || value.endsWith("/"))
+    if (normalized !== value || /[*?\\[\\]{}]/.test(value) || value.endsWith("/"))
         throw new Error(label + " must be an exact canonical repository path");
     return value;
 }
