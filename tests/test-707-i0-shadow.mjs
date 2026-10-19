@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { parseYaml } from "../dist/document-facts.mjs";
-import { evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
+import { classifyRepoGuardSelfHostRepresentation, evaluateRepoGuardNativeBlockingSnapshot, evaluateRepoGuardNativeRollbackSnapshot, evaluateRepoGuardNativeSelfHostShadowSnapshot, evaluateRepoGuardTrustedRootMigrationSnapshot, selectRepoGuardAuthoritativeEvaluator, runPolicyPipeline, runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
 const input = {
   mode: "check-diff",
   repositoryRoot: "/tmp/rg-i0-fixture",
@@ -473,4 +473,359 @@ test("C2.5 gate bridge: representation/J1/J2/relation/ownership/self-trust falsi
 
     reset();
   });
+});
+
+
+/* A1_ATOMIC_NATIVE_SELECTOR_TEST */
+test("A1 selector is trusted-BASE controlled, fail-closed and never either-GREEN", () => {
+  const pick = (baseRepresentation, headRepresentation, forwardAuthorized = false, rollbackAuthorized = false) =>
+    selectRepoGuardAuthoritativeEvaluator({ baseRepresentation, headRepresentation, forwardAuthorized, rollbackAuthorized });
+
+  assert.deepEqual(pick("legacy", "legacy"), { ok: true, evaluator: "legacy", transition: "steady" });
+  assert.equal(pick("legacy", "native").ok, false);
+  assert.equal(pick("legacy", "native", true).evaluator, "native");
+  assert.equal(pick("legacy", "native", true).transition, "forward_cutover");
+  assert.deepEqual(pick("native", "native"), { ok: true, evaluator: "native", transition: "steady" });
+  assert.equal(pick("native", "legacy").ok, false);
+  assert.equal(pick("native", "legacy", false, true).evaluator, "legacy");
+  assert.equal(pick("native", "legacy", false, true).transition, "rollback");
+  for (const pair of [["mixed", "native"], ["legacy", "mixed"], ["unknown", "native"], ["native", "unknown"]])
+    assert.equal(pick(pair[0], pair[1], true, true).ok, false, pair.join(" -> ") + " must be RED");
+
+  // There is deliberately no candidate-controlled selector parameter.
+  assert.equal(pick("legacy", "native", false, false).evaluator, undefined);
+});
+
+test("A1 real-Git forward cutover boundary requires exact roots AND atomic permission", async () => {
+  const { evaluateAtomicNativeCutoverBoundary } = await import("../dist/github-pr.mjs");
+  c25Fixture(({ root, base, head }) => {
+    assert.equal(classifyRepoGuardSelfHostRepresentation(root, base).kind, "legacy");
+    assert.equal(classifyRepoGuardSelfHostRepresentation(root, head).kind, "native");
+
+    const prepared = c25Prepared(root, base, head);
+    assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
+    const exact = c25ExactGrant(prepared, base, head);
+    const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+
+    const noGrant = evaluateAtomicNativeCutoverBoundary({
+      governanceGrant: null, trustedAuthorizer, repository: c25Repository,
+      repositoryRoot: root, baseRevision: base, headRevision: head,
+    });
+    assert.equal(noGrant.ok, false);
+
+    const rootsOnly = evaluateAtomicNativeCutoverBoundary({
+      governanceGrant: { trusted_root_transition: exact }, trustedAuthorizer, repository: c25Repository,
+      repositoryRoot: root, baseRevision: base, headRevision: head,
+    });
+    assert.equal(rootsOnly.ok, false);
+    assert.equal(rootsOnly.rootAuthorized, true);
+    assert.equal(rootsOnly.atomicAuthorized, false);
+
+    const atomicOnly = evaluateAtomicNativeCutoverBoundary({
+      governanceGrant: { allow_atomic_governance_cutover: true }, trustedAuthorizer, repository: c25Repository,
+      repositoryRoot: root, baseRevision: base, headRevision: head,
+    });
+    assert.equal(atomicOnly.ok, false);
+
+    const exactAtomic = evaluateAtomicNativeCutoverBoundary({
+      governanceGrant: { trusted_root_transition: exact, allow_atomic_governance_cutover: true },
+      trustedAuthorizer, repository: c25Repository, repositoryRoot: root, baseRevision: base, headRevision: head,
+    });
+    assert.equal(exactAtomic.ok, true, exactAtomic.reasons.join(" | "));
+
+    const selected = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "legacy", headRepresentation: "native",
+      forwardAuthorized: exactAtomic.ok, rollbackAuthorized: false,
+    });
+    assert.deepEqual(selected, { ok: true, evaluator: "native", transition: "forward_cutover" });
+
+    // Post-transition native state is independently executable through the production J2/J1/J3 composition.
+    const native = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: head, baseRevision: head, headRevision: head,
+      workIntent: null,
+      trustedReceipts: [],
+      protectedResources: [],
+      evidenceFacts: [],
+      observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(native.ok, true, native.reasons.join(" | "));
+    assert.equal(native.providerCapabilityMode, true);
+    assert.equal(native.j2.rooted, 8);
+    assert.equal(native.j2.unrooted, 0);
+    assert.equal(native.j1.tracked, 359);
+    assert.equal(native.j1.unjustified, 0);
+    assert.equal(native.j3.ok, true);
+  });
+});
+
+test("A1 native steady-state executes J3 and cannot fall back to legacy GREEN", () => {
+  c25Fixture(({ root, head }) => {
+    const base = head;
+    const nativeDoc = parseYaml(readFileSync(join(root, "requirements/repo-guard/RG-01.rg.yaml"), "utf8"));
+    const target = nativeDoc.relations.find((relation) =>
+      relation.predicates.includes("implemented_by") && relation.target.path.startsWith("src/")).target.path;
+    writeFileSync(join(root, target), readFileSync(join(root, target), "utf8") + "\nA1 steady-state fixture\n");
+    c25Git(root, ["add", "--", target]);
+    c25Git(root, ["commit", "-q", "-m", "A1 native steady-state resource change"]);
+    const next = c25Git(root, ["rev-parse", "HEAD"]);
+
+    const green = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: base, baseRevision: base, headRevision: next,
+      workIntent: { id: "a1-steady", addresses: ["RG-01"] },
+      trustedReceipts: [], protectedResources: [], evidenceFacts: [], observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(green.ok, true, green.reasons.join(" | "));
+    assert.equal(green.j3.ok, true);
+
+    const red = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: base, baseRevision: base, headRevision: next,
+      workIntent: { id: "a1-steady", addresses: [] },
+      trustedReceipts: [], protectedResources: [], evidenceFacts: [], observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(red.ok, false);
+    assert.ok(red.reasons.some((reason) => reason.includes("J3:no_cause")), red.reasons.join(" | "));
+
+    const selected = selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native", headRepresentation: "native",
+      forwardAuthorized: false, rollbackAuthorized: false,
+    });
+    assert.deepEqual(selected, { ok: true, evaluator: "native", transition: "steady" });
+    // A hypothetical legacy GREEN is not an input to selector and cannot alter native RED.
+    assert.equal(red.ok, false);
+  });
+});
+
+test("A1 native provider capability mode is structurally forced and exact", () => {
+  c25Fixture(({ root, head }) => {
+    const nativePath = join(root, "requirements/repo-guard/RG-01.rg.yaml");
+    const nativeDoc = parseYaml(readFileSync(nativePath, "utf8"));
+    const target = nativeDoc.relations.find((relation) =>
+      relation.predicates.includes("implemented_by") && relation.target.path.startsWith("src/")).target.path;
+    const verifier = nativeDoc.relations.find((relation) => relation.predicates.includes("verified_by")).target.path;
+    writeFileSync(nativePath, readFileSync(nativePath, "utf8") + [
+      "constraints:",
+      "  - id: a1-lines",
+      "    scope:",
+      "      relations: [implemented_by]",
+      "    metric:",
+      "      key: git.changed_lines",
+      "      max: 1000",
+      "  - id: a1-execution",
+      "    scope:",
+      "      relations: [implemented_by]",
+      "    evidence:",
+      "      class: execution",
+      "      key: tests:a1",
+      "      verifier:",
+      "        kind: artifact",
+      "        path: " + JSON.stringify(verifier),
+      "",
+    ].join("\n"));
+    c25Git(root, ["add", "--", "requirements/repo-guard/RG-01.rg.yaml"]);
+    c25Git(root, ["commit", "-q", "-m", "A1 accepted provider-constraint fixture"]);
+    const base = c25Git(root, ["rev-parse", "HEAD"]);
+
+    writeFileSync(join(root, target), readFileSync(join(root, target), "utf8") + "\nA1 provider fixture\n");
+    c25Git(root, ["add", "--", target]);
+    c25Git(root, ["commit", "-q", "-m", "A1 provider-observed change"]);
+    const next = c25Git(root, ["rev-parse", "HEAD"]);
+    const workIntent = { id: "a1-provider", addresses: ["RG-01"] };
+
+    const missing = evaluateRepoGuardNativeBlockingSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: base, baseRevision: base, headRevision: next,
+      workIntent, trustedReceipts: [], protectedResources: [],
+      evidenceFacts: [], observationFacts: [],
+      authenticatedProviderGrants: [],
+    });
+    assert.equal(missing.providerCapabilityMode, true);
+    assert.equal(missing.ok, false);
+    assert.ok(missing.reasons.some((reason) => reason.includes("missing_observation")), missing.reasons.join(" | "));
+    assert.ok(missing.reasons.some((reason) => reason.includes("missing_evidence")), missing.reasons.join(" | "));
+
+    const observationFact = {
+      authorityBaseRevision: base, baseRevision: base, headRevision: next,
+      path: target, metric: "changed_lines", value: 1, providerId: "obs-a1",
+    };
+    const evidenceFact = {
+      authorityBaseRevision: base, baseRevision: base, headRevision: next,
+      key: "tests:a1", status: "pass", providerId: "domain-a1", requirementId: "RG-01",
+      subjectPaths: [target], verifierPath: verifier, verifierRevision: next,
+    };
+    const observationGrant = {
+      repository: c25Repository, authorityBaseRevision: base, baseRevision: base, headRevision: next,
+      providerId: "obs-a1", principal: "app:observation", producerSource: base, boundary: "observation",
+      capability: { kind: "metric", key: "git.changed_lines", subjectPaths: [target] },
+    };
+    const domainGrant = {
+      repository: c25Repository, authorityBaseRevision: base, baseRevision: base, headRevision: next,
+      providerId: "domain-a1", principal: "app:domain", producerSource: base, boundary: "domain",
+      capability: {
+        kind: "evidence", class: "execution", key: "tests:a1", requirementId: "RG-01",
+        subjectPaths: [target], verifierPath: verifier, verifierRevision: next,
+      },
+    };
+    const exact = (grants = [observationGrant, domainGrant]) => evaluateRepoGuardNativeBlockingSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: base, baseRevision: base, headRevision: next,
+      workIntent, trustedReceipts: [], protectedResources: [],
+      evidenceFacts: [evidenceFact], observationFacts: [observationFact],
+      authenticatedProviderGrants: grants,
+    });
+    const green = exact();
+    assert.equal(green.ok, true, green.reasons.join(" | "));
+    assert.equal(green.providerCapabilityMode, true);
+
+    const mutations = [
+      ["wrong metric", { ...observationGrant, capability: { ...observationGrant.capability, key: "git.wrong" } }, domainGrant],
+      ["wrong subject", { ...observationGrant, capability: { ...observationGrant.capability, subjectPaths: ["README.md"] } }, domainGrant],
+      ["wrong repository", { ...observationGrant, repository: "netkeep80/wrong" }, domainGrant],
+      ["wrong transition", { ...observationGrant, headRevision: "f".repeat(40) }, domainGrant],
+      ["wrong Requirement", observationGrant, { ...domainGrant, capability: { ...domainGrant.capability, requirementId: "RG-02" } }],
+      ["wrong verifier", observationGrant, { ...domainGrant, capability: { ...domainGrant.capability, verifierPath: "README.md" } }],
+    ];
+    for (const [name, first, second] of mutations)
+      assert.equal(exact([first, second]).ok, false, name + " unexpectedly GREEN");
+  });
+});
+
+test("A1 WorkIntent adapter reuses only non-authoritative affects addresses", async () => {
+  const { workIntentFromChangeIntent } = await import("../dist/github-pr.mjs");
+  assert.deepEqual(
+    workIntentFromChangeIntent({
+      change_type: "feature",
+      scope: ["**"], budgets: {}, must_touch: [], must_not_touch: [],
+      anchors: { affects: ["RG-02", "RG-01"], implements: ["RG-08"], verifies: ["RG-07"] },
+      expected_effects: [],
+      evaluator: "native",
+    }, 743),
+    { id: "pr:743", addresses: ["RG-01", "RG-02"] },
+  );
+  assert.deepEqual(workIntentFromChangeIntent(null, 1), { id: "pr:1", addresses: [] });
+});
+
+test("A1 reverse selector requires exact rollback receipt and exact accepted legacy tree", () => {
+  c25Fixture(({ root, base, head }) => {
+    const nativeBase = head;
+    c25Git(root, ["read-tree", "--reset", "-u", base]);
+    c25Git(root, ["commit", "-q", "-m", "A1 exact rollback fixture"]);
+    const rollbackHead = c25Git(root, ["rev-parse", "HEAD"]);
+
+    const prepared = evaluateRepoGuardNativeRollbackSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
+      trustedRootReceipt: null,
+    });
+    assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
+    assert.equal(prepared.ok, false);
+    assert.equal(prepared.trust.authorized, false);
+    assert.equal(prepared.requiredPermissions.length, 8);
+
+    const receipt = {
+      repository: c25Repository,
+      authorityBaseRevision: nativeBase,
+      baseRevision: nativeBase,
+      headRevision: rollbackHead,
+      permissions: prepared.requiredPermissions,
+    };
+    const exact = evaluateRepoGuardNativeRollbackSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: rollbackHead,
+      trustedRootReceipt: receipt,
+    });
+    assert.equal(exact.ok, true, exact.reasons.join(" | "));
+    assert.equal(exact.exactLegacyTreeRestored, true);
+    assert.deepEqual(selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native", headRepresentation: "legacy",
+      forwardAuthorized: false, rollbackAuthorized: exact.ok,
+    }), { ok: true, evaluator: "legacy", transition: "rollback" });
+
+    writeFileSync(join(root, "README.md"), readFileSync(join(root, "README.md"), "utf8") + "\nnon-exact rollback\n");
+    c25Git(root, ["add", "-A"]);
+    c25Git(root, ["commit", "-q", "-m", "A1 non-exact rollback"]);
+    const wrongHead = c25Git(root, ["rev-parse", "HEAD"]);
+    const wrong = evaluateRepoGuardNativeRollbackSnapshot({
+      repository: c25Repository, repositoryRoot: root,
+      trustedAuthorityBaseRevision: nativeBase, baseRevision: nativeBase, headRevision: wrongHead,
+      trustedRootReceipt: { ...receipt, headRevision: wrongHead },
+    });
+    assert.equal(wrong.ok, false);
+    assert.equal(wrong.candidateReady, false);
+  });
+});
+
+
+test("A1 atomic cutover rejects unapproved native Constraint/lifecycle/strong semantics", () => {
+  c25Fixture(({ root, base, head }) => {
+    const reset = () => c25Git(root, ["reset", "--hard", "-q", head]);
+    const path = join(root, "requirements/repo-guard/RG-01.rg.yaml");
+
+    writeFileSync(path, readFileSync(path, "utf8") + [
+      "constraints:",
+      "  - id: not-approved-at-cutover",
+      "    scope:",
+      "      relations: [implemented_by]",
+      "    metric:",
+      "      key: git.changed_resources",
+      "      max: 1000",
+      "",
+    ].join("\n"));
+    c25Git(root, ["add", "--", "requirements/repo-guard/RG-01.rg.yaml"]);
+    c25Git(root, ["commit", "-q", "-m", "unexpected cutover constraint"]);
+    let verdict = c25Prepared(root, base, c25Git(root, ["rev-parse", "HEAD"]));
+    assert.equal(verdict.candidateReady, false);
+    assert.ok(verdict.reasons.includes("C2.5:unexpected_native_cutover_semantics"), verdict.reasons.join(" | "));
+
+    reset();
+    writeFileSync(path, readFileSync(path, "utf8") + "lifecycle:\n  accepted: true\n");
+    c25Git(root, ["add", "--", "requirements/repo-guard/RG-01.rg.yaml"]);
+    c25Git(root, ["commit", "-q", "-m", "unexpected cutover lifecycle"]);
+    verdict = c25Prepared(root, base, c25Git(root, ["rev-parse", "HEAD"]));
+    assert.equal(verdict.candidateReady, false);
+    assert.ok(verdict.reasons.includes("C2.5:unexpected_native_cutover_semantics"), verdict.reasons.join(" | "));
+  });
+});
+
+test("A1 exact TransitionReceipt transport uses existing trusted issue authority and exact tuple", async () => {
+  const { evaluateTransitionReceiptBoundary } = await import("../dist/github-pr.mjs");
+  const sha = (x) => x.repeat(40);
+  const grant = {
+    transition_receipt: {
+      repository: c25Repository,
+      authority_base_sha: sha("a"),
+      base_sha: sha("a"),
+      head_sha: sha("b"),
+      permissions: ["resource:.github/workflows/trusted-enforcement.yml"],
+    },
+  };
+  const trustedAuthorizer = { trusted: true, source: "repository_permission" };
+  const exact = evaluateTransitionReceiptBoundary({
+    governanceGrant: grant, trustedAuthorizer, repository: c25Repository,
+    authorityBaseRevision: sha("a"), baseRevision: sha("a"), headRevision: sha("b"),
+  });
+  assert.equal(exact.present, true);
+  assert.equal(exact.ok, true, exact.reasons.join(" | "));
+  assert.deepEqual(exact.receipt.permissions, grant.transition_receipt.permissions);
+
+  for (const [name, input] of [
+    ["untrusted", { trustedAuthorizer: { trusted: false, source: "repository_permission" } }],
+    ["wrong repo", { repository: "netkeep80/wrong" }],
+    ["wrong authority", { authorityBaseRevision: sha("c") }],
+    ["wrong base", { baseRevision: sha("c") }],
+    ["wrong head", { headRevision: sha("c") }],
+  ]) {
+    const verdict = evaluateTransitionReceiptBoundary({
+      governanceGrant: grant, trustedAuthorizer, repository: c25Repository,
+      authorityBaseRevision: sha("a"), baseRevision: sha("a"), headRevision: sha("b"),
+      ...input,
+    });
+    assert.equal(verdict.ok, false, name + " unexpectedly GREEN");
+    assert.equal(verdict.receipt, null);
+  }
 });
