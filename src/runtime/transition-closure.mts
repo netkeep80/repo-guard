@@ -322,69 +322,6 @@ export function resourceDeltasFromParsedDiff(files: readonly ParsedDiffFile[]): 
   });
 }
 
-export interface ProtectedResourceAuthorityInput {
-  authorityBaseRevision: string;
-  baseRevision: string;
-  headRevision: string;
-  resourceDeltas?: readonly ResourceDeltaObservation[];
-  protectedResources?: readonly string[];
-  trustedReceipts?: readonly TransitionReceipt[];
-}
-
-export function evaluateProtectedResourceAuthority(input: ProtectedResourceAuthorityInput) {
-  const reasons: string[] = [];
-  for (const [label, revision] of [
-    ["authority", input.authorityBaseRevision],
-    ["base", input.baseRevision],
-    ["head", input.headRevision],
-  ] as const) if (!exactRevision(revision)) reasons.push("invalid_" + label + "_revision");
-
-  const normalized = resourceDeltas(input.resourceDeltas || []);
-  reasons.push(...normalized.errors);
-
-  const protectedSet = new Set<string>();
-  for (const raw of input.protectedResources || []) {
-    try { protectedSet.add(normPath(raw)); }
-    catch (error) { reasons.push("invalid_protected_resource:" + String(raw) + ":" + (error as Error).message); }
-  }
-
-  const receipts: TransitionReceipt[] = [];
-  for (const item of input.trustedReceipts || []) {
-    if (!exactRevision(item.authorityBaseRevision) || !exactRevision(item.baseRevision) || !exactRevision(item.headRevision) ||
-        !Array.isArray(item.permissions) || item.permissions.some((value) => !permissionToken(value) || value.includes("*"))) {
-      reasons.push("invalid_trusted_receipt");
-      continue;
-    }
-    receipts.push(item);
-  }
-
-  const required = new Set<string>(), changed = new Set<string>();
-  for (const delta of normalized.deltas) {
-    if (!delta.kind.startsWith("resource_")) continue;
-    for (const path of deltaPaths(delta)) {
-      if (!protectedSet.has(path)) continue;
-      changed.add(path);
-      const permission = "resource:" + path;
-      required.add(permission);
-      const granted = receipts.some((receipt) =>
-        receipt.authorityBaseRevision === input.authorityBaseRevision &&
-        receipt.baseRevision === input.baseRevision &&
-        receipt.headRevision === input.headRevision &&
-        receipt.permissions.includes(permission));
-      if (!granted) reasons.push("missing_authority:" + permission + ":" + delta.id);
-    }
-  }
-
-  const normalizedReasons = sorted(reasons);
-  return {
-    ok: normalizedReasons.length === 0,
-    reasons: normalizedReasons,
-    protectedResources: sorted(protectedSet),
-    changedProtectedResources: sorted(changed),
-    requiredPermissions: sorted(required),
-  };
-}
-
 function lifecycleDeltas(base: LifecycleState, head: LifecycleState): Delta[] {
   const out:Delta[]=[];
   for (const subject of sorted(new Set([...Object.keys(base),...Object.keys(head)]))) {
