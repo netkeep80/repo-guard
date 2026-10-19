@@ -490,6 +490,16 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
     };
   };
 
+  const linkedIssueReevaluation = (repository = "external/consumer") => ({
+    kind: "linked-issue",
+    sourceEvent: {
+      action: "edited",
+      issue: { number: 77 },
+      changes: { body: { from: "previous issue body" } },
+      repository: { full_name: repository },
+    },
+  });
+
   it("P2/P10/P17 exact accepted workflow is intrinsically protected with zero provider grants", () => {
     const result = loadAuthenticatedProviderBundle(authInput());
     assert.equal(result.ok, true, result.reasons.join(" | "));
@@ -500,6 +510,30 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
     assert.deepEqual(result.evidenceFacts, []);
     assert.deepEqual(result.observationFacts, []);
     assert.equal(result.trust.source, "accepted-workflow");
+  });
+
+  it("#760 same immutable transition preserves zero-grant ProtectedResource TRUST across linked-issue refresh", () => {
+    const normal = loadAuthenticatedProviderBundle(authInput());
+    const refresh = loadAuthenticatedProviderBundle(authInput({
+      eventName: "issues",
+      reevaluation: linkedIssueReevaluation(),
+    }));
+    assert.deepEqual(refresh, normal);
+  });
+
+  it("#760 issues trigger alone is not TRUST and malformed explicit refresh fails closed", () => {
+    const triggerOnly = loadAuthenticatedProviderBundle(authInput({ eventName: "issues" }));
+    assert.equal(triggerOnly.ok, true);
+    assert.equal(triggerOnly.trustPresent, false);
+    assert.deepEqual(triggerOnly.protectedResources, []);
+
+    const malformed = loadAuthenticatedProviderBundle(authInput({
+      eventName: "issues",
+      reevaluation: { kind: "linked-issue", sourceEvent: { action: "edited" } },
+    }));
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.trustPresent, false);
+    assert.ok(malformed.reasons.some((reason) => reason.startsWith("A2:provider_refresh_event_invalid:")));
   });
 
   it("P9 candidate pull_request execution cannot mint ProtectedResource TRUST", () => {
@@ -577,6 +611,15 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       assert.equal(result.authenticatedProviderGrants.length, 2);
       assert.equal(result.observationFacts.length, 1);
       assert.equal(result.evidenceFacts.length, 1);
+
+      const refresh = loadAuthenticatedProviderBundle(authInput({
+        bundlePath: bundle,
+        runnerTemp: dir,
+        eventName: "issues",
+        reevaluation: linkedIssueReevaluation(),
+      }));
+      assert.deepEqual(refresh, result,
+        "#760 authenticated DOMAIN/OBSERVATION/TRUST projection changed across same-transition refresh");
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
@@ -624,6 +667,7 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       "```",
     ].join("\n");
     const eventPath = join(runner, "event.json");
+    const issueEventPath = join(runner, "issue-event.json");
     try {
       git("init", "-b", "main");
       git("config", "user.email", "test@example.com");
@@ -633,21 +677,34 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       const base = git("rev-parse", "HEAD");
       git("remote", "add", "origin", root);
 
-      const run = (head) => {
+      const run = (head, mode = "normal") => {
         writeFileSync(eventPath, JSON.stringify({
           pull_request: { number: 1, base: { sha: base, ref: "main" }, head: { sha: head }, body },
           repository: { full_name: "arbitrary/native-consumer" },
         }));
+        const env = {
+          ...process.env,
+          GITHUB_EVENT_PATH: eventPath,
+          GITHUB_EVENT_NAME: "pull_request_target",
+          GITHUB_WORKFLOW_REF: "arbitrary/native-consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+          GITHUB_WORKFLOW_SHA: base,
+          RUNNER_TEMP: runner,
+        };
+        delete env.RG_EVENT_PATH;
+        if (mode === "refresh") {
+          writeFileSync(issueEventPath, JSON.stringify({
+            action: "edited",
+            issue: { number: 77 },
+            changes: { body: { from: "previous issue body" } },
+            repository: { full_name: "arbitrary/native-consumer" },
+          }));
+          env.GITHUB_EVENT_PATH = issueEventPath;
+          env.GITHUB_EVENT_NAME = "issues";
+          env.RG_EVENT_PATH = eventPath;
+        }
         return spawnSync(process.execPath, [cli, "--repo-root", root, "check-pr", "--format", "json"], {
           cwd: root,
-          env: {
-            ...process.env,
-            GITHUB_EVENT_PATH: eventPath,
-            GITHUB_EVENT_NAME: "pull_request_target",
-            GITHUB_WORKFLOW_REF: "arbitrary/native-consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
-            GITHUB_WORKFLOW_SHA: base,
-            RUNNER_TEMP: runner,
-          },
+          env,
           encoding: "utf8",
         });
       };
@@ -663,6 +720,12 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       assert.match(ordinary.stdout, /"authenticatedProviderGrantCount"\s*:\s*0/);
       assert.match(ordinary.stdout, /\.github\/workflows\/trusted-enforcement\.yml/);
 
+      const ordinaryRefresh = run(ordinaryHead, "refresh");
+      assert.equal(ordinaryRefresh.status, ordinary.status, ordinaryRefresh.stdout + ordinaryRefresh.stderr);
+      assert.match(ordinaryRefresh.stdout, /"providerCapabilityMode"\s*:\s*true/);
+      assert.match(ordinaryRefresh.stdout, /"authenticatedProviderGrantCount"\s*:\s*0/);
+      assert.match(ordinaryRefresh.stdout, /\.github\/workflows\/trusted-enforcement\.yml/);
+
       git("checkout", "-q", "-B", "protected", base);
       writeFileSync(join(root, workflowPath), "name: candidate-mutated trust producer\n");
       git("add", workflowPath);
@@ -673,6 +736,16 @@ describe("#756 authenticated ProtectedResource TRUST adversarial boundary", () =
       assert.match(protectedRun.stdout + protectedRun.stderr,
         /missing_authority:resource:\.github\/workflows\/trusted-enforcement\.yml/);
       assert.match(protectedRun.stdout, /"evaluator"\s*:\s*"native"/);
+
+      const issueRefresh = run(protectedHead, "refresh");
+      assert.equal(issueRefresh.status, protectedRun.status,
+        "#760 same BASE/HEAD changed security verdict across linked-issue refresh\n" +
+        issueRefresh.stdout + issueRefresh.stderr);
+      assert.match(issueRefresh.stdout + issueRefresh.stderr,
+        /missing_authority:resource:\.github\/workflows\/trusted-enforcement\.yml/);
+      assert.match(issueRefresh.stdout, /"evaluator"\s*:\s*"native"/);
+      assert.match(issueRefresh.stdout, /"providerCapabilityMode"\s*:\s*true/);
+      assert.match(issueRefresh.stdout, /"authenticatedProviderGrantCount"\s*:\s*0/);
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(runner, { recursive: true, force: true });
