@@ -829,3 +829,60 @@ test("A1 exact TransitionReceipt transport uses existing trusted issue authority
     assert.equal(verdict.receipt, null);
   }
 });
+
+
+test("post-cutover exact native main retains executable rollback boundary", () => {
+  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const nativeMain = "7af56ba97dc007d4ab338f410503164810a73582";
+  const legacyTarget = "3162e73a3217d7b067f692c9f4fdea7be432612e";
+  const legacyTree = "2d2fea101de5a3bbba8a79e07db65721e2cea6eb";
+  const clone = mkdtempSync(join(tmpdir(), "rg-post-cutover-rollback-"));
+  try {
+    execFileSync("git", ["clone", "-q", "--local", "--no-hardlinks", projectRoot, clone], { encoding: "utf8" });
+    c25Git(clone, ["config", "user.email", "rollback-probe@example.invalid"]);
+    c25Git(clone, ["config", "user.name", "Rollback Probe"]);
+    c25Git(clone, ["checkout", "-q", nativeMain]);
+    assert.equal(c25Git(clone, ["rev-parse", nativeMain + "^1"]), legacyTarget);
+    c25Git(clone, ["read-tree", "--reset", "-u", legacyTarget]);
+    c25Git(clone, ["commit", "-q", "-m", "exact rollback probe"]);
+    const rollbackHead = c25Git(clone, ["rev-parse", "HEAD"]);
+    assert.equal(c25Git(clone, ["rev-parse", rollbackHead + "^{tree}"]), legacyTree);
+
+    const prepared = evaluateRepoGuardNativeRollbackSnapshot({
+      repository: c25Repository,
+      repositoryRoot: clone,
+      trustedAuthorityBaseRevision: nativeMain,
+      baseRevision: nativeMain,
+      headRevision: rollbackHead,
+      trustedRootReceipt: null,
+    });
+    assert.equal(prepared.candidateReady, true, prepared.reasons.join(" | "));
+    assert.equal(prepared.ok, false);
+    assert.equal(prepared.exactLegacyTreeRestored, true);
+    assert.equal(prepared.requiredPermissions.length, 8);
+
+    const exact = evaluateRepoGuardNativeRollbackSnapshot({
+      repository: c25Repository,
+      repositoryRoot: clone,
+      trustedAuthorityBaseRevision: nativeMain,
+      baseRevision: nativeMain,
+      headRevision: rollbackHead,
+      trustedRootReceipt: {
+        repository: c25Repository,
+        authorityBaseRevision: nativeMain,
+        baseRevision: nativeMain,
+        headRevision: rollbackHead,
+        permissions: prepared.requiredPermissions,
+      },
+    });
+    assert.equal(exact.ok, true, exact.reasons.join(" | "));
+    assert.deepEqual(selectRepoGuardAuthoritativeEvaluator({
+      baseRepresentation: "native",
+      headRepresentation: "legacy",
+      forwardAuthorized: false,
+      rollbackAuthorized: exact.ok,
+    }), { ok: true, evaluator: "legacy", transition: "rollback" });
+  } finally {
+    rmSync(clone, { recursive: true, force: true });
+  }
+});
