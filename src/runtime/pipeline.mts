@@ -55,6 +55,61 @@ const exactResourcePath = (value: unknown): string => {
 const sameStrings = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((value, index) => value === b[index]);
 
+
+export type RepoGuardSelfHostRepresentationKind = "legacy" | "native" | "mixed" | "unknown";
+
+const repoGuardRootIds = Object.freeze(Array.from(
+  { length: 8 },
+  (_value, index) => "RG-" + String(index + 1).padStart(2, "0"),
+));
+const repoGuardLegacyRootPaths = Object.freeze(repoGuardRootIds.map((id) => "requirements/repo-guard/" + id + ".yaml"));
+const repoGuardNativeRootPaths = Object.freeze(repoGuardRootIds.map((id) => "requirements/repo-guard/" + id + ".rg.yaml"));
+
+export function classifyRepoGuardSelfHostRepresentation(repositoryRoot: string, revision: string) {
+  if (!exactSha.test(revision)) return { kind: "unknown" as const, legacy: 0, native: 0, reasons: ["A1:invalid_revision"] };
+  let paths: string[];
+  try {
+    paths = listTrackedEntriesAtRef(revision, repositoryRoot).map((entry) => entry.path);
+  } catch (error) {
+    return { kind: "unknown" as const, legacy: 0, native: 0, reasons: ["A1:representation_read_failed:" + (error as Error).message] };
+  }
+  const pathSet = new Set(paths);
+  const legacy = repoGuardLegacyRootPaths.filter((path) => pathSet.has(path)).length;
+  const native = repoGuardNativeRootPaths.filter((path) => pathSet.has(path)).length;
+  const extraNativeRoots = paths.filter((path) =>
+    /^requirements\/repo-guard\/RG-[0-9]{2}\.rg\.(?:yaml|json)$/.test(path) &&
+    !repoGuardNativeRootPaths.includes(path as typeof repoGuardNativeRootPaths[number]));
+  const exactLegacy = legacy === 8 && native === 0 && extraNativeRoots.length === 0;
+  const exactNative = legacy === 0 && native === 8 && extraNativeRoots.length === 0;
+  const kind: RepoGuardSelfHostRepresentationKind = exactLegacy ? "legacy" : exactNative ? "native" :
+    legacy > 0 && native > 0 ? "mixed" : "unknown";
+  const reasons = kind === "legacy" || kind === "native" ? [] : [
+    "A1:representation_not_exact:legacy=" + legacy + ":native=" + native + ":extra_native=" + extraNativeRoots.length,
+  ];
+  return { kind, legacy, native, reasons, paths: { legacy: repoGuardLegacyRootPaths, native: repoGuardNativeRootPaths } };
+}
+
+export function selectRepoGuardAuthoritativeEvaluator(input: {
+  baseRepresentation: RepoGuardSelfHostRepresentationKind;
+  headRepresentation: RepoGuardSelfHostRepresentationKind;
+  forwardAuthorized?: boolean;
+  rollbackAuthorized?: boolean;
+}) {
+  const { baseRepresentation: base, headRepresentation: head } = input;
+  if (base === "legacy" && head === "legacy")
+    return { ok: true as const, evaluator: "legacy" as const, transition: "steady" as const };
+  if (base === "native" && head === "native")
+    return { ok: true as const, evaluator: "native" as const, transition: "steady" as const };
+  if (base === "legacy" && head === "native" && input.forwardAuthorized === true)
+    return { ok: true as const, evaluator: "native" as const, transition: "forward_cutover" as const };
+  if (base === "native" && head === "legacy" && input.rollbackAuthorized === true)
+    return { ok: true as const, evaluator: "legacy" as const, transition: "rollback" as const };
+  const reason = base === "legacy" && head === "native" ? "A1:forward_cutover_authority_missing" :
+    base === "native" && head === "legacy" ? "A1:rollback_authority_missing" :
+    "A1:representation_mixed_or_unknown";
+  return { ok: false as const, reason, baseRepresentation: base, headRepresentation: head };
+}
+
 export function lowerNativeRequirements(native: NativeRequirementsResult) {
   const errors: CanonicalError[] = native.errors.map(error => ({
     code: "invalid_canonical_source",
