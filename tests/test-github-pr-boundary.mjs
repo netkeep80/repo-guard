@@ -265,6 +265,8 @@ describe("#752 authenticated provider production boundary", () => {
       assert.equal(result.ok, true, result.reasons.join(" | "));
       assert.equal(result.authenticatedProviderGrants[0].authorityBaseRevision, nativeHead);
       assert.match(result.authenticatedProviderGrants[0].producerSource, new RegExp("^" + legacyBase));
+      assert.deepEqual(result.protectedResources, [".github/workflows/trusted-enforcement.yml"]);
+      assert.equal(result.trust.authorityBaseRevision, legacyBase);
     } finally { rmSync(dir, { recursive: true }); }
   });
 
