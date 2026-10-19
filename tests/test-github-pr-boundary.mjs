@@ -330,6 +330,8 @@ describe("#752 authenticated provider production boundary", () => {
       git("add", "-A");
       git("commit", "-q", "-m", "native base");
       const base = git("rev-parse", "HEAD");
+      git("remote", "add", "origin", root);
+      git("checkout", "-q", "-b", "feature");
       writeFileSync(join(root, "src", "a.txt"), "head\n");
       git("add", "src/a.txt");
       git("commit", "-q", "-m", "native head");
