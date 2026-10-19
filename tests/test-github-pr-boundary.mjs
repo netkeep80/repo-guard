@@ -775,3 +775,5 @@ it("#756 accepted ProtectedResource source is exact BASE-bound, not candidate HE
   assert.deepEqual(result.protectedResources, []);
   assert.ok(result.reasons.includes("A2:provider_workflow_source_not_exact_base"));
 });
+
+// #760 post-merge evidence-only linked-issue same-HEAD refresh probe.
