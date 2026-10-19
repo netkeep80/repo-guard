@@ -56,38 +56,98 @@ const sameStrings = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((value, index) => value === b[index]);
 
 
-export type RepoGuardSelfHostRepresentationKind = "legacy" | "native" | "mixed" | "unknown";
+export type NativeRepositoryRepresentationKind = "legacy" | "native" | "mixed" | "unknown";
+export type RepoGuardSelfHostRepresentationKind = NativeRepositoryRepresentationKind;
 
-const repoGuardRootIds = Object.freeze(Array.from(
-  { length: 8 },
-  (_value, index) => "RG-" + String(index + 1).padStart(2, "0"),
-));
-const repoGuardLegacyRootPaths = Object.freeze(repoGuardRootIds.map((id) => "requirements/repo-guard/" + id + ".yaml"));
-const repoGuardNativeRootPaths = Object.freeze(repoGuardRootIds.map((id) => "requirements/repo-guard/" + id + ".rg.yaml"));
+const nativeRequirementSourcePattern = /^requirements\/.*\.rg\.(?:yaml|json)$/;
 
-export function classifyRepoGuardSelfHostRepresentation(repositoryRoot: string, revision: string) {
-  if (!exactSha.test(revision)) return { kind: "unknown" as const, legacy: 0, native: 0, reasons: ["A1:invalid_revision"] };
+function legacyCounterpartPath(path: string): string {
+  return path.replace(/\.rg\.(yaml|json)$/, ".$1");
+}
+
+export function classifyNativeRepositoryRepresentation(repositoryRoot: string, revision: string) {
+  if (!exactSha.test(revision))
+    return { kind: "unknown" as const, legacy: 0, native: 0, reasons: ["A1:invalid_revision"], paths: { legacy: [] as string[], native: [] as string[] } };
+
   let paths: string[];
   try {
     paths = listTrackedEntriesAtRef(revision, repositoryRoot).map((entry) => entry.path);
   } catch (error) {
-    return { kind: "unknown" as const, legacy: 0, native: 0, reasons: ["A1:representation_read_failed:" + (error as Error).message] };
+    return {
+      kind: "unknown" as const,
+      legacy: 0,
+      native: 0,
+      reasons: ["A1:representation_read_failed:" + (error as Error).message],
+      paths: { legacy: [] as string[], native: [] as string[] },
+    };
   }
+
+  const nativePaths = paths.filter((path) => nativeRequirementSourcePattern.test(path))
+    .sort((a, b) => a.localeCompare(b, "en"));
+  if (!nativePaths.length) {
+    return {
+      kind: "legacy" as const,
+      legacy: 1,
+      native: 0,
+      reasons: [] as string[],
+      paths: { legacy: [] as string[], native: nativePaths },
+    };
+  }
+
   const pathSet = new Set(paths);
-  const legacy = repoGuardLegacyRootPaths.filter((path) => pathSet.has(path)).length;
-  const native = repoGuardNativeRootPaths.filter((path) => pathSet.has(path)).length;
-  const extraNativeRoots = paths.filter((path) =>
-    /^requirements\/repo-guard\/RG-[0-9]{2}\.rg\.(?:yaml|json)$/.test(path) &&
-    !repoGuardNativeRootPaths.includes(path as typeof repoGuardNativeRootPaths[number]));
-  const exactLegacy = legacy === 8 && native === 0 && extraNativeRoots.length === 0;
-  const exactNative = legacy === 0 && native === 8 && extraNativeRoots.length === 0;
-  const kind: RepoGuardSelfHostRepresentationKind = exactLegacy ? "legacy" : exactNative ? "native" :
-    legacy > 0 && native > 0 ? "mixed" : "unknown";
-  const reasons = kind === "legacy" || kind === "native" ? [] : [
-    "A1:representation_not_exact:legacy=" + legacy + ":native=" + native + ":extra_native=" + extraNativeRoots.length,
-  ];
-  return { kind, legacy, native, reasons, paths: { legacy: repoGuardLegacyRootPaths, native: repoGuardNativeRootPaths } };
+  const legacyPaths = uniqueSorted(nativePaths
+    .map(legacyCounterpartPath)
+    .filter((path) => pathSet.has(path)));
+  if (legacyPaths.length) {
+    return {
+      kind: "mixed" as const,
+      legacy: legacyPaths.length,
+      native: nativePaths.length,
+      reasons: ["A1:representation_mixed:legacy_counterparts=" + legacyPaths.length + ":native=" + nativePaths.length],
+      paths: { legacy: legacyPaths, native: nativePaths },
+    };
+  }
+
+  try {
+    const native = loadNativeRequirements({
+      repository: "repo-guard/representation-classifier",
+      revision,
+      paths: nativePaths,
+      readFile: (sha, path) => sha === revision ? readFileAtRef(sha, path, repositoryRoot) : null,
+    });
+    if (!native.ok || native.requirements.length === 0) {
+      return {
+        kind: "unknown" as const,
+        legacy: 0,
+        native: nativePaths.length,
+        reasons: uniqueSorted([
+          "A1:representation_native_invalid",
+          ...native.errors.map((error) => "A1:representation_native_invalid:" + error.code + ":" + error.path),
+        ]),
+        paths: { legacy: legacyPaths, native: nativePaths },
+      };
+    }
+  } catch (error) {
+    return {
+      kind: "unknown" as const,
+      legacy: 0,
+      native: nativePaths.length,
+      reasons: ["A1:representation_native_invalid:" + (error as Error).message],
+      paths: { legacy: legacyPaths, native: nativePaths },
+    };
+  }
+
+  return {
+    kind: "native" as const,
+    legacy: 0,
+    native: nativePaths.length,
+    reasons: [] as string[],
+    paths: { legacy: legacyPaths, native: nativePaths },
+  };
 }
+
+// Historical export retained for C2.4/C2.5 evidence. Semantics are now generic.
+export const classifyRepoGuardSelfHostRepresentation = classifyNativeRepositoryRepresentation;
 
 export function selectRepoGuardAuthoritativeEvaluator(input: {
   baseRepresentation: RepoGuardSelfHostRepresentationKind;
@@ -401,7 +461,7 @@ export function evaluateRepoGuardNativeBlockingSnapshot(input: RepoGuardNativeBl
     headLifecycle: head.lifecycle,
     workIntent: input.workIntent || null,
     trustedReceipts: input.trustedReceipts || [],
-    protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
+    protectedResources: uniqueSorted(input.protectedResources || []),
     evidenceFacts: input.evidenceFacts || [],
     observationFacts: input.observationFacts || [],
     authenticatedProviderGrants,
@@ -1286,6 +1346,264 @@ export function evaluateRepoGuardNativeRollbackSnapshot(input: RepoGuardNativeRo
     exactLegacyTreeRestored,
     rollbackTargetRevision: targetRevision,
     forwardProvenanceCandidateReady: forwardProof?.candidateReady === true,
+  };
+}
+
+
+export interface NativeTrustedRootMigrationSnapshotInput extends RepoGuardTrustedRootMigrationSnapshotInput {}
+export interface NativeRollbackSnapshotInput extends RepoGuardNativeRollbackSnapshotInput {}
+
+function genericLegacyAuthoritySubject(repository: string, revision: string, requirementId: string): SemanticRequirementSubject {
+  const digest = canonicalSemanticDigest({
+    kind: "legacy_authority_snapshot",
+    repository,
+    revision,
+  });
+  return semanticRequirementSubject(repository, requirementId, digest);
+}
+
+function exactGenericTrustedRootReceipt(
+  input: RepoGuardTrustedRootMigrationSnapshotInput,
+  requiredPermissions: readonly string[],
+  prefix: string,
+) {
+  const reasons: string[] = [];
+  const receipt = input.trustedRootReceipt;
+  if (!receipt) {
+    reasons.push(prefix + ":trust_receipt_missing");
+    return { authorized: false, reasons };
+  }
+
+  const expectedKeys = ["authorityBaseRevision", "baseRevision", "headRevision", "permissions", "repository"].sort();
+  if (!sameStrings(Object.keys(receipt).sort(), expectedKeys)) reasons.push(prefix + ":trust_receipt_invalid");
+  if (receipt.repository !== input.repository) reasons.push(prefix + ":trust_repository_mismatch");
+  if (receipt.authorityBaseRevision !== input.trustedAuthorityBaseRevision)
+    reasons.push(prefix + ":trust_authority_base_mismatch");
+  if (receipt.baseRevision !== input.baseRevision) reasons.push(prefix + ":trust_base_mismatch");
+  if (receipt.headRevision !== input.headRevision) reasons.push(prefix + ":trust_head_mismatch");
+
+  if (!Array.isArray(receipt.permissions) ||
+      receipt.permissions.some((permission) => typeof permission !== "string" || !permission || permission.includes("*")) ||
+      new Set(receipt.permissions).size !== receipt.permissions.length) {
+    reasons.push(prefix + ":trust_permissions_invalid");
+  } else if (!sameStrings(
+    [...receipt.permissions].sort((a, b) => a.localeCompare(b, "en")),
+    [...requiredPermissions].sort((a, b) => a.localeCompare(b, "en")),
+  )) {
+    reasons.push(prefix + ":trust_permissions_mismatch");
+  }
+
+  const normalized = uniqueSorted(reasons);
+  return { authorized: normalized.length === 0 && requiredPermissions.length > 0, reasons: normalized };
+}
+
+export function evaluateNativeTrustedRootMigrationSnapshot(input: NativeTrustedRootMigrationSnapshotInput) {
+  const candidateReasons: string[] = [];
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+    candidateReasons.push("A1:migration_invalid_repository");
+  for (const [label, revision] of [
+    ["authority", input.trustedAuthorityBaseRevision],
+    ["base", input.baseRevision],
+    ["head", input.headRevision],
+  ] as const) if (!exactSha.test(revision)) candidateReasons.push("A1:migration_invalid_" + label + "_revision");
+
+  if (input.trustedAuthorityBaseRevision !== input.baseRevision)
+    candidateReasons.push("A1:migration_authority_base_must_equal_legacy_base");
+
+  const baseRepresentation = classifyNativeRepositoryRepresentation(input.repositoryRoot, input.baseRevision);
+  const headRepresentation = classifyNativeRepositoryRepresentation(input.repositoryRoot, input.headRevision);
+  if (baseRepresentation.kind !== "legacy") candidateReasons.push("A1:migration_base_not_legacy");
+  if (headRepresentation.kind !== "native") candidateReasons.push("A1:migration_head_not_native");
+
+  try {
+    const mergeBase = runGit(["merge-base", input.baseRevision, input.headRevision], { cwd: input.repositoryRoot }).trim();
+    if (mergeBase !== input.baseRevision) candidateReasons.push("A1:migration_base_not_ancestor");
+  } catch {
+    candidateReasons.push("A1:migration_base_not_ancestor");
+  }
+
+  let headRaw: ReturnType<typeof readRepoGuardNativeSnapshot>;
+  try {
+    headRaw = readRepoGuardNativeSnapshot(input.repository, input.headRevision, input.repositoryRoot);
+  } catch (error) {
+    return {
+      ok: false,
+      candidateReady: false,
+      reasons: uniqueSorted([...candidateReasons, "A1:migration_snapshot_read_failed:" + (error as Error).message]),
+      trust: { authorized: false },
+      requiredPermissions: [] as string[],
+      migration: [] as unknown[],
+      candidate: { j2: { rooted: 0, unrooted: 0 }, j1: { tracked: 0, justified: 0, unjustified: 0 } },
+      authorized: { j2: { rooted: 0, unrooted: 0 }, j1: { tracked: 0, justified: 0, unjustified: 0 } },
+    };
+  }
+
+  if (!headRaw.native.ok || headRaw.native.requirements.length === 0)
+    candidateReasons.push("A1:migration_native_requirements_invalid");
+
+  const candidateRoots = headRaw.native.requirements.map((item) => item.semantic);
+  const candidate = closeRepoGuardNativeSnapshot(
+    input.repository, input.repositoryRoot, headRaw, candidateRoots,
+  );
+  if (!candidate.j2.ok) candidateReasons.push("A1:migration_candidate_j2_not_rooted");
+  if (!candidate.j1.ok) candidateReasons.push("A1:migration_candidate_j1_not_closed");
+
+  const migration = headRaw.native.requirements.map((item) => {
+    const oldTrustedSubject = genericLegacyAuthoritySubject(
+      input.repository, input.trustedAuthorityBaseRevision, item.id,
+    );
+    return {
+      requirementId: item.id,
+      oldTrustedSubject,
+      newTrustedSubject: item.semantic,
+      nativeRepresentation: item.representation,
+      permission: rootMigrationPermission(item.id, oldTrustedSubject, item.semantic),
+    };
+  }).sort((a, b) => a.requirementId.localeCompare(b.requirementId, "en"));
+  const requiredPermissions = migration.map((item) => item.permission).sort((a, b) => a.localeCompare(b, "en"));
+  const trust = exactGenericTrustedRootReceipt(input, requiredPermissions, "A1:migration");
+
+  const authorized = closeRepoGuardNativeSnapshot(
+    input.repository,
+    input.repositoryRoot,
+    headRaw,
+    trust.authorized ? candidateRoots : [],
+  );
+  const normalizedCandidateReasons = uniqueSorted(candidateReasons);
+  const reasons = uniqueSorted([...normalizedCandidateReasons, ...trust.reasons]);
+  const candidateReady = normalizedCandidateReasons.length === 0;
+
+  return {
+    ok: candidateReady && trust.authorized && authorized.j2.ok && authorized.j1.ok,
+    candidateReady,
+    reasons,
+    trust: {
+      authorized: trust.authorized,
+      repository: input.repository,
+      authorityBaseRevision: input.trustedAuthorityBaseRevision,
+      baseRevision: input.baseRevision,
+      headRevision: input.headRevision,
+    },
+    requiredPermissions,
+    migration,
+    candidate: {
+      j2: { rooted: candidate.j2.rooted.length, unrooted: candidate.j2.unrooted.length },
+      j1: {
+        tracked: headRaw.entries.length,
+        justified: candidate.j1.justified.length,
+        unjustified: candidate.j1.unjustified.length,
+      },
+    },
+    authorized: {
+      j2: { rooted: authorized.j2.rooted.length, unrooted: authorized.j2.unrooted.length },
+      j1: {
+        tracked: headRaw.entries.length,
+        justified: authorized.j1.justified.length,
+        unjustified: authorized.j1.unjustified.length,
+      },
+    },
+    representation: { base: baseRepresentation, head: headRepresentation },
+  };
+}
+
+export function evaluateNativeRollbackSnapshot(input: NativeRollbackSnapshotInput) {
+  const candidateReasons: string[] = [];
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+    candidateReasons.push("A1:rollback_invalid_repository");
+  for (const [label, revision] of [
+    ["authority", input.trustedAuthorityBaseRevision],
+    ["base", input.baseRevision],
+    ["head", input.headRevision],
+  ] as const) if (!exactSha.test(revision)) candidateReasons.push("A1:rollback_invalid_" + label + "_revision");
+
+  if (input.trustedAuthorityBaseRevision !== input.baseRevision)
+    candidateReasons.push("A1:rollback_authority_base_must_equal_native_base");
+
+  const baseRepresentation = classifyNativeRepositoryRepresentation(input.repositoryRoot, input.baseRevision);
+  const headRepresentation = classifyNativeRepositoryRepresentation(input.repositoryRoot, input.headRevision);
+  if (baseRepresentation.kind !== "native") candidateReasons.push("A1:rollback_base_not_native");
+  if (headRepresentation.kind !== "legacy") candidateReasons.push("A1:rollback_head_not_legacy");
+
+  try {
+    const mergeBase = runGit(["merge-base", input.baseRevision, input.headRevision], { cwd: input.repositoryRoot }).trim();
+    if (mergeBase !== input.baseRevision) candidateReasons.push("A1:rollback_base_not_ancestor");
+  } catch {
+    candidateReasons.push("A1:rollback_base_not_ancestor");
+  }
+
+  let baseRaw: ReturnType<typeof readRepoGuardNativeSnapshot>;
+  try {
+    baseRaw = readRepoGuardNativeSnapshot(input.repository, input.baseRevision, input.repositoryRoot);
+  } catch (error) {
+    return {
+      ok: false,
+      candidateReady: false,
+      reasons: uniqueSorted([...candidateReasons, "A1:rollback_native_snapshot_read_failed:" + (error as Error).message]),
+      trust: { authorized: false },
+      requiredPermissions: [] as string[],
+      exactLegacyTreeRestored: false,
+      rollbackTargetRevision: null as string | null,
+    };
+  }
+
+  const baseRoots = baseRaw.native.requirements.map((item) => item.semantic);
+  const baseState = closeRepoGuardNativeSnapshot(
+    input.repository, input.repositoryRoot, baseRaw, baseRoots,
+  );
+  if (!baseRaw.native.ok || baseRaw.native.requirements.length === 0)
+    candidateReasons.push("A1:rollback_native_requirements_invalid");
+  if (!baseState.j2.ok) candidateReasons.push("A1:rollback_base_j2_not_rooted");
+  if (!baseState.j1.ok) candidateReasons.push("A1:rollback_base_j1_not_closed");
+
+  let rollbackTargetRevision: string | null = null;
+  let exactLegacyTreeRestored = false;
+  try {
+    rollbackTargetRevision = firstParentLegacyRollbackTarget(input.repositoryRoot, input.baseRevision);
+    if (!rollbackTargetRevision) {
+      candidateReasons.push("A1:rollback_legacy_target_missing");
+    } else {
+      const targetTree = runGit(["rev-parse", rollbackTargetRevision + "^{tree}"], { cwd: input.repositoryRoot }).trim();
+      const headTree = runGit(["rev-parse", input.headRevision + "^{tree}"], { cwd: input.repositoryRoot }).trim();
+      exactLegacyTreeRestored = targetTree === headTree;
+      if (!exactLegacyTreeRestored) candidateReasons.push("A1:rollback_tree_not_exact");
+    }
+  } catch (error) {
+    candidateReasons.push("A1:rollback_target_evaluation_failed:" + (error as Error).message);
+  }
+
+  const requiredPermissions = rollbackTargetRevision
+    ? baseRaw.native.requirements.map((item) => {
+        const legacySubject = genericLegacyAuthoritySubject(input.repository, rollbackTargetRevision!, item.id);
+        return rootMigrationPermission(item.id, item.semantic, legacySubject);
+      }).sort((a, b) => a.localeCompare(b, "en"))
+    : [];
+  const trust = exactGenericTrustedRootReceipt(input, requiredPermissions, "A1:rollback");
+  const normalizedCandidateReasons = uniqueSorted(candidateReasons);
+  const candidateReady = normalizedCandidateReasons.length === 0;
+
+  return {
+    ok: candidateReady && trust.authorized,
+    candidateReady,
+    reasons: uniqueSorted([...normalizedCandidateReasons, ...trust.reasons]),
+    trust: {
+      authorized: trust.authorized,
+      repository: input.repository,
+      authorityBaseRevision: input.trustedAuthorityBaseRevision,
+      baseRevision: input.baseRevision,
+      headRevision: input.headRevision,
+    },
+    requiredPermissions,
+    exactLegacyTreeRestored,
+    rollbackTargetRevision,
+    base: {
+      j2: { rooted: baseState.j2.rooted.length, unrooted: baseState.j2.unrooted.length },
+      j1: {
+        tracked: baseRaw.entries.length,
+        justified: baseState.j1.justified.length,
+        unjustified: baseState.j1.unjustified.length,
+      },
+    },
+    representation: { base: baseRepresentation, head: headRepresentation },
   };
 }
 
