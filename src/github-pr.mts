@@ -16,7 +16,6 @@ import { createAnalysisTextPresenter, renderAnalysisReport } from "./reporting/r
 import { fetchIssueAuthorContext, resolveTrustedAuthorizer } from "./trusted-authorizer.mjs";
 import { buildRequirementAuthorityFromSnapshot, checkRequirementTransition, checkRoutineRequirementTransition, normalizeRequirementAuthority, projectRequirementTransactionEvidence } from "./requirement-relations.mjs";
 import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
-import { evaluateProtectedResourceAuthority, resourceDeltasFromParsedDiff } from "./runtime/transition-closure.mjs";
 import type { AuthenticatedProviderGrant, TransitionEvidenceFact, TransitionObservationFact, TransitionReceipt } from "./runtime/transition-closure.mjs";
 
 type PolicyRuntime = ReturnType<typeof loadPolicyRuntimeFromObject>;
@@ -111,6 +110,24 @@ function providerSubjectPaths(value: unknown, label: string): string[] {
   const paths = value.map((item, index) => providerPath(item, label + "[" + index + "]"));
   if (new Set(paths).size !== paths.length) throw new Error(label + " contains duplicate paths");
   return [...paths].sort((a, b) => a.localeCompare(b, "en"));
+}
+
+export function projectProtectedResourcePermissions(
+  files: readonly { path: string; previousPath?: string }[],
+  protectedResources: readonly string[],
+): string[] {
+  const protectedSet = new Set(protectedResources.map((path, index) =>
+    providerPath(path, "protectedResources[" + index + "]")));
+  const permissions = new Set<string>();
+  for (const [index, file] of files.entries()) {
+    const current = providerPath(file.path, "diff.files[" + index + "].path");
+    if (protectedSet.has(current)) permissions.add("resource:" + current);
+    if (file.previousPath !== undefined) {
+      const previous = providerPath(file.previousPath, "diff.files[" + index + "].previousPath");
+      if (protectedSet.has(previous)) permissions.add("resource:" + previous);
+    }
+  }
+  return [...permissions].sort((a, b) => a.localeCompare(b, "en"));
 }
 
 export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBundleInput): AuthenticatedProviderBundleResult {
@@ -564,10 +581,27 @@ export function evaluateTransitionReceiptBoundary(input: {
   authorityBaseRevision: string;
   baseRevision: string;
   headRevision: string;
+  requiredPermissions?: readonly string[];
 }) {
+  const requiredPermissions = [...new Set(input.requiredPermissions || [])].sort((a, b) => a.localeCompare(b, "en"));
+  const requiredReasons = requiredPermissions
+    .filter((permission) => !permission || permission.includes("*"))
+    .map((permission) => "A1:transition_receipt_required_permission_invalid:" + permission);
   const grant = transitionReceiptGrant(input.governanceGrant);
-  if (!grant) return { present: false, ok: true, receipt: null as TransitionReceipt | null, reasons: [] as string[] };
-  const reasons: string[] = [];
+  if (!grant) {
+    const reasons = [
+      ...requiredReasons,
+      ...requiredPermissions.map((permission) => "A1:transition_receipt_permission_missing:" + permission),
+    ];
+    return {
+      present: false,
+      ok: reasons.length === 0,
+      receipt: null as TransitionReceipt | null,
+      reasons: [...new Set(reasons)].sort(),
+      requiredPermissions,
+    };
+  }
+  const reasons: string[] = [...requiredReasons];
   if (!trustedIssueAuthorizer(input.trustedAuthorizer)) reasons.push("A1:transition_receipt_untrusted_source");
   if (grant.repository !== input.repository) reasons.push("A1:transition_receipt_repository_mismatch");
   if (grant.authority_base_sha !== input.authorityBaseRevision) reasons.push("A1:transition_receipt_authority_base_mismatch");
@@ -577,6 +611,8 @@ export function evaluateTransitionReceiptBoundary(input: {
   if (!permissions.length || new Set(permissions).size !== permissions.length ||
       permissions.some((permission) => !permission || permission.includes("*")))
     reasons.push("A1:transition_receipt_permissions_invalid");
+  for (const permission of requiredPermissions)
+    if (!permissions.includes(permission)) reasons.push("A1:transition_receipt_permission_missing:" + permission);
   const ok = reasons.length === 0;
   const receipt: TransitionReceipt | null = ok ? {
     authorityBaseRevision: String(grant.authority_base_sha),
@@ -584,7 +620,7 @@ export function evaluateTransitionReceiptBoundary(input: {
     headRevision: String(grant.head_sha),
     permissions,
   } : null;
-  return { present: true, ok, receipt, reasons: [...new Set(reasons)].sort() };
+  return { present: true, ok, receipt, reasons: [...new Set(reasons)].sort(), requiredPermissions };
 }
 
 export function evaluateAtomicNativeCutoverBoundary(input: {
