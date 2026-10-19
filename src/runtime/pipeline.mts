@@ -1046,6 +1046,14 @@ export function evaluateRepoGuardTrustedRootMigrationSnapshot(input: RepoGuardTr
   if (blanketRequiresProjected !== 0)
     candidateReasons.push("C2.5:blanket_requires_projected");
 
+  const unexpectedCutoverSemantics = native.requirements.some((requirement) =>
+    requirement.constraints.length > 0 ||
+    requirement.lifecycle.accepted || requirement.lifecycle.current || requirement.lifecycle.published ||
+    requirement.relations.some((relation) =>
+      !["implemented_by", "verified_by", "documents"].includes(relation.predicate)));
+  if (unexpectedCutoverSemantics)
+    candidateReasons.push("C2.5:unexpected_native_cutover_semantics");
+
   const retained = baseState.entries.map((entry) => entry.path)
     .filter((path) => !expectedOldPaths.includes(path)).sort((a, b) => a.localeCompare(b, "en"));
   const ownerEquivalentOnRetainedResources = candidateJ1.ok && retained.every((path) =>
@@ -1160,6 +1168,123 @@ export function evaluateRepoGuardTrustedRootMigrationSnapshot(input: RepoGuardTr
       legacySourcePaths: expectedOldPaths,
       legacyBlockingPathRetainedAtBase: true,
     },
+
+  };
+}
+
+export interface RepoGuardNativeRollbackSnapshotInput {
+  repository: string;
+  repositoryRoot: string;
+  trustedAuthorityBaseRevision: string;
+  baseRevision: string;
+  headRevision: string;
+  trustedRootReceipt?: RepoGuardTrustedRootMigrationReceipt | null;
+}
+
+function firstParentLegacyRollbackTarget(repositoryRoot: string, nativeBaseRevision: string): string | null {
+  const history = runGit(["rev-list", "--first-parent", nativeBaseRevision], { cwd: repositoryRoot })
+    .split("\n").filter(Boolean);
+  for (const revision of history.slice(1)) {
+    if (classifyRepoGuardSelfHostRepresentation(repositoryRoot, revision).kind === "legacy") return revision;
+  }
+  return null;
+}
+
+export function evaluateRepoGuardNativeRollbackSnapshot(input: RepoGuardNativeRollbackSnapshotInput) {
+  const candidateReasons: string[] = [];
+  const trustReasons: string[] = [];
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+    candidateReasons.push("A1:rollback_invalid_repository");
+  for (const [label, revision] of [
+    ["authority", input.trustedAuthorityBaseRevision],
+    ["base", input.baseRevision],
+    ["head", input.headRevision],
+  ] as const) if (!exactSha.test(revision)) candidateReasons.push("A1:rollback_invalid_" + label + "_revision");
+
+  if (input.trustedAuthorityBaseRevision !== input.baseRevision)
+    candidateReasons.push("A1:rollback_authority_base_must_equal_native_base");
+  if (classifyRepoGuardSelfHostRepresentation(input.repositoryRoot, input.baseRevision).kind !== "native")
+    candidateReasons.push("A1:rollback_base_not_native");
+  if (classifyRepoGuardSelfHostRepresentation(input.repositoryRoot, input.headRevision).kind !== "legacy")
+    candidateReasons.push("A1:rollback_head_not_legacy");
+
+  try {
+    const mergeBase = runGit(["merge-base", input.baseRevision, input.headRevision], { cwd: input.repositoryRoot }).trim();
+    if (mergeBase !== input.baseRevision) candidateReasons.push("A1:rollback_base_not_ancestor");
+  } catch {
+    candidateReasons.push("A1:rollback_base_not_ancestor");
+  }
+
+  let targetRevision: string | null = null;
+  let exactLegacyTreeRestored = false;
+  let forwardProof: ReturnType<typeof evaluateRepoGuardTrustedRootMigrationSnapshot> | null = null;
+  try {
+    targetRevision = firstParentLegacyRollbackTarget(input.repositoryRoot, input.baseRevision);
+    if (!targetRevision) {
+      candidateReasons.push("A1:rollback_legacy_target_missing");
+    } else {
+      const targetTree = runGit(["rev-parse", targetRevision + "^{tree}"], { cwd: input.repositoryRoot }).trim();
+      const headTree = runGit(["rev-parse", input.headRevision + "^{tree}"], { cwd: input.repositoryRoot }).trim();
+      exactLegacyTreeRestored = targetTree === headTree;
+      if (!exactLegacyTreeRestored) candidateReasons.push("A1:rollback_tree_not_exact");
+      forwardProof = evaluateRepoGuardTrustedRootMigrationSnapshot({
+        repository: input.repository,
+        repositoryRoot: input.repositoryRoot,
+        trustedAuthorityBaseRevision: targetRevision,
+        baseRevision: targetRevision,
+        headRevision: input.baseRevision,
+        trustedRootReceipt: null,
+      });
+      if (!forwardProof.candidateReady) candidateReasons.push("A1:rollback_forward_provenance_invalid");
+    }
+  } catch (error) {
+    candidateReasons.push("A1:rollback_target_evaluation_failed:" + (error as Error).message);
+  }
+
+  const requiredPermissions = (forwardProof?.migration || []).map((item) =>
+    "trusted_root:" + item.requirementId + ":" + item.newTrustedSubject.digest + ":" + item.oldTrustedSubject.digest)
+    .sort((a, b) => a.localeCompare(b, "en"));
+
+  let trustAuthorized = false;
+  const receipt = input.trustedRootReceipt;
+  if (!receipt) {
+    trustReasons.push("A1:rollback_trust_receipt_missing");
+  } else {
+    const keys = Object.keys(receipt).sort();
+    const expectedKeys = ["authorityBaseRevision", "baseRevision", "headRevision", "permissions", "repository"].sort();
+    if (!sameStrings(keys, expectedKeys)) trustReasons.push("A1:rollback_trust_receipt_invalid");
+    if (receipt.repository !== input.repository) trustReasons.push("A1:rollback_trust_repository_mismatch");
+    if (receipt.authorityBaseRevision !== input.trustedAuthorityBaseRevision)
+      trustReasons.push("A1:rollback_trust_authority_base_mismatch");
+    if (receipt.baseRevision !== input.baseRevision) trustReasons.push("A1:rollback_trust_base_mismatch");
+    if (receipt.headRevision !== input.headRevision) trustReasons.push("A1:rollback_trust_head_mismatch");
+    if (!Array.isArray(receipt.permissions) ||
+        receipt.permissions.some((permission) => typeof permission !== "string" || !permission || permission.includes("*")) ||
+        new Set(receipt.permissions).size !== receipt.permissions.length) {
+      trustReasons.push("A1:rollback_trust_permissions_invalid");
+    } else if (!sameStrings([...receipt.permissions].sort((a, b) => a.localeCompare(b, "en")), requiredPermissions)) {
+      trustReasons.push("A1:rollback_trust_permissions_mismatch");
+    }
+    trustAuthorized = trustReasons.length === 0 && requiredPermissions.length === 8;
+  }
+
+  const normalizedCandidateReasons = uniqueSorted(candidateReasons);
+  const normalizedTrustReasons = uniqueSorted(trustReasons);
+  const candidateReady = normalizedCandidateReasons.length === 0;
+  return {
+    ok: candidateReady && trustAuthorized,
+    candidateReady,
+    reasons: uniqueSorted([...normalizedCandidateReasons, ...normalizedTrustReasons]),
+    trust: {
+      authorized: trustAuthorized,
+      authorityBaseRevision: input.trustedAuthorityBaseRevision,
+      baseRevision: input.baseRevision,
+      headRevision: input.headRevision,
+    },
+    requiredPermissions,
+    exactLegacyTreeRestored,
+    rollbackTargetRevision: targetRevision,
+    forwardProvenanceCandidateReady: forwardProof?.candidateReady === true,
   };
 }
 
