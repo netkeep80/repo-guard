@@ -423,3 +423,5 @@ describe("#752 authenticated provider production boundary", () => {
   });
 
 });
+
+// post-merge production probe for #752
