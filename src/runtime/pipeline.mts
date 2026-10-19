@@ -201,6 +201,246 @@ export function lowerNativeRequirements(native: NativeRequirementsResult) {
   return { requirements: result, lifecycle, resourceRelations };
 }
 
+export interface RepoGuardNativeBlockingSnapshotInput {
+  repository: string;
+  repositoryRoot: string;
+  trustedAuthorityBaseRevision: string;
+  baseRevision: string;
+  headRevision: string;
+  workIntent?: WorkIntentFact | null;
+  trustedReceipts?: readonly TransitionReceipt[];
+  protectedResources?: readonly string[];
+  evidenceFacts?: readonly TransitionEvidenceFact[];
+  observationFacts?: readonly TransitionObservationFact[];
+  authenticatedProviderGrants?: readonly AuthenticatedProviderGrant[];
+}
+
+function readRepoGuardNativeSnapshot(repository: string, revision: string, repositoryRoot: string) {
+  const entries = listTrackedEntriesAtRef(revision, repositoryRoot);
+  const nativePaths = entries.map((entry) => entry.path)
+    .filter((path) => path.startsWith("requirements/") && /\.rg\.(?:yaml|json)$/.test(path))
+    .sort((a, b) => a.localeCompare(b, "en"));
+  const native = loadNativeRequirements({
+    repository,
+    revision,
+    paths: nativePaths,
+    readFile: (sha, path) => sha === revision ? readFileAtRef(sha, path, repositoryRoot) : null,
+  });
+  const lowered = lowerNativeRequirements(native);
+  return { revision, entries, nativePaths, native, ...lowered };
+}
+
+function closeRepoGuardNativeSnapshot(
+  repository: string,
+  repositoryRoot: string,
+  snapshot: ReturnType<typeof readRepoGuardNativeSnapshot>,
+  trustedRoots: readonly SemanticRequirementSubject[],
+) {
+  const j2 = evaluateRootedRequirements({ requirements: snapshot.requirements, trustedRoots });
+  let j1 = {
+    ok: false,
+    justified: [] as string[],
+    unjustified: snapshot.entries.map((entry) => entry.path),
+    errors: [{ code: "j2_not_rooted", path: "" }],
+    explanations: {} as Record<string, string[]>,
+    owners: {} as Record<string, string[]>,
+  };
+  if (snapshot.requirements.ok && j2.ok) {
+    const resolver = createResourceResolver({
+      repository,
+      revision: snapshot.revision,
+      requirements: snapshot.requirements,
+      readers: {
+        [repository]: (sha, path) =>
+          sha === snapshot.revision ? readFileAtRef(sha, path, repositoryRoot) : null,
+      },
+    });
+    j1 = evaluateTrackedResourceClosure({
+      repository,
+      revision: snapshot.revision,
+      requirements: snapshot.requirements,
+      j2,
+      trackedPaths: snapshot.entries.map((entry) => entry.path),
+      resourceRelations: snapshot.resourceRelations,
+      resolver,
+    });
+  }
+  return { ...snapshot, j2, j1 };
+}
+
+function exactReceiptAllows(
+  input: Pick<RepoGuardNativeBlockingSnapshotInput, "trustedAuthorityBaseRevision" | "baseRevision" | "headRevision" | "trustedReceipts">,
+  permission: string,
+): boolean {
+  return (input.trustedReceipts || []).some((receipt) =>
+    receipt.authorityBaseRevision === input.trustedAuthorityBaseRevision &&
+    receipt.baseRevision === input.baseRevision &&
+    receipt.headRevision === input.headRevision &&
+    Array.isArray(receipt.permissions) &&
+    receipt.permissions.every((item) => typeof item === "string" && item.length > 0 && item !== "*" && !item.includes("*")) &&
+    receipt.permissions.includes(permission));
+}
+
+function nativeRootsForHead(
+  input: RepoGuardNativeBlockingSnapshotInput,
+  authority: ReturnType<typeof readRepoGuardNativeSnapshot>,
+  head: ReturnType<typeof readRepoGuardNativeSnapshot>,
+): SemanticRequirementSubject[] {
+  const accepted = new Map(authority.native.requirements.map((item) => [item.id, item.semantic]));
+  const roots: SemanticRequirementSubject[] = [];
+  for (const item of head.native.requirements) {
+    const prior = accepted.get(item.id);
+    if (prior && semanticSubjectKey(prior) === semanticSubjectKey(item.semantic)) {
+      roots.push(prior);
+      continue;
+    }
+    if (exactReceiptAllows(input, "requirement:" + item.id)) roots.push(item.semantic);
+  }
+  return roots.sort((a, b) => a.requirementId.localeCompare(b.requirementId, "en"));
+}
+
+export function evaluateRepoGuardNativeBlockingSnapshot(input: RepoGuardNativeBlockingSnapshotInput) {
+  const reasons: string[] = [];
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository))
+    reasons.push("A1:native_invalid_repository");
+  for (const [label, revision] of [
+    ["authority", input.trustedAuthorityBaseRevision],
+    ["base", input.baseRevision],
+    ["head", input.headRevision],
+  ] as const) if (!exactSha.test(revision)) reasons.push("A1:native_invalid_" + label + "_revision");
+
+  if (reasons.length) {
+    return {
+      ok: false,
+      reasons: uniqueSorted(reasons),
+      providerCapabilityMode: true,
+      j2: { rooted: 0, unrooted: 0 },
+      j1: { tracked: 0, justified: 0, unjustified: 0 },
+      j3: { ok: false, reasons: ["A1:native_input_invalid"] },
+    };
+  }
+
+  let authorityRaw: ReturnType<typeof readRepoGuardNativeSnapshot>;
+  let baseRaw: ReturnType<typeof readRepoGuardNativeSnapshot>;
+  let headRaw: ReturnType<typeof readRepoGuardNativeSnapshot>;
+  try {
+    authorityRaw = readRepoGuardNativeSnapshot(input.repository, input.trustedAuthorityBaseRevision, input.repositoryRoot);
+    baseRaw = input.baseRevision === input.trustedAuthorityBaseRevision
+      ? authorityRaw
+      : readRepoGuardNativeSnapshot(input.repository, input.baseRevision, input.repositoryRoot);
+    headRaw = input.headRevision === input.baseRevision
+      ? baseRaw
+      : input.headRevision === input.trustedAuthorityBaseRevision
+        ? authorityRaw
+        : readRepoGuardNativeSnapshot(input.repository, input.headRevision, input.repositoryRoot);
+  } catch (error) {
+    return {
+      ok: false,
+      reasons: ["A1:native_snapshot_read_failed:" + (error as Error).message],
+      providerCapabilityMode: true,
+      j2: { rooted: 0, unrooted: 0 },
+      j1: { tracked: 0, justified: 0, unjustified: 0 },
+      j3: { ok: false, reasons: ["A1:native_snapshot_read_failed"] },
+    };
+  }
+
+  if (classifyRepoGuardSelfHostRepresentation(input.repositoryRoot, input.trustedAuthorityBaseRevision).kind !== "native")
+    reasons.push("A1:authority_not_native");
+  if (classifyRepoGuardSelfHostRepresentation(input.repositoryRoot, input.baseRevision).kind !== "native")
+    reasons.push("A1:base_not_native");
+  if (classifyRepoGuardSelfHostRepresentation(input.repositoryRoot, input.headRevision).kind !== "native")
+    reasons.push("A1:head_not_native");
+
+  const authorityRoots = authorityRaw.native.requirements.map((item) => item.semantic);
+  const authority = closeRepoGuardNativeSnapshot(input.repository, input.repositoryRoot, authorityRaw, authorityRoots);
+  const base = closeRepoGuardNativeSnapshot(input.repository, input.repositoryRoot, baseRaw, authorityRoots);
+  const headRoots = nativeRootsForHead(input, authorityRaw, headRaw);
+  const head = closeRepoGuardNativeSnapshot(input.repository, input.repositoryRoot, headRaw, headRoots);
+
+  for (const [label, state] of [["authority", authority], ["base", base], ["head", head]] as const) {
+    if (!state.requirements.ok) reasons.push("A1:" + label + "_native_requirements_invalid");
+    if (!state.j2.ok) reasons.push("A1:" + label + "_j2_not_rooted");
+    if (!state.j1.ok) reasons.push("A1:" + label + "_j1_not_closed");
+  }
+
+  let exactDiff: ParsedDiffFile[] = [];
+  try {
+    exactDiff = getExactDiffIdentity(input.baseRevision, input.headRevision, input.repositoryRoot);
+  } catch (error) {
+    reasons.push("A1:native_diff_failed:" + (error as Error).message);
+  }
+
+  // Native production always supplies this field, including the empty set.
+  // This makes the legacy generic-provider fallback structurally unreachable.
+  const authenticatedProviderGrants = [...(input.authenticatedProviderGrants || [])];
+
+  const transition = evaluateTransitionCauseClosure({
+    repository: input.repository,
+    base: {
+      revision: base.revision,
+      requirements: base.requirements,
+      j2: base.j2,
+      j1: base.j1,
+      resourceRelations: base.resourceRelations,
+    },
+    head: {
+      revision: head.revision,
+      requirements: head.requirements,
+      j2: head.j2,
+      j1: head.j1,
+      resourceRelations: head.resourceRelations,
+    },
+    trustedAuthorityBase: {
+      revision: authority.revision,
+      requirements: authority.requirements,
+      j2: authority.j2,
+      resourceRelations: authority.resourceRelations,
+    },
+    resourceDeltas: resourceDeltasFromParsedDiff(exactDiff),
+    baseLifecycle: base.lifecycle,
+    headLifecycle: head.lifecycle,
+    workIntent: input.workIntent || null,
+    trustedReceipts: input.trustedReceipts || [],
+    protectedResources: uniqueSorted([...selfHostProtectedResources, ...(input.protectedResources || [])]),
+    evidenceFacts: input.evidenceFacts || [],
+    observationFacts: input.observationFacts || [],
+    authenticatedProviderGrants,
+  });
+  reasons.push(...transition.reasons.map((reason) => "A1:" + reason));
+
+  const normalizedReasons = uniqueSorted(reasons);
+  return {
+    ok: normalizedReasons.length === 0,
+    reasons: normalizedReasons,
+    providerCapabilityMode: true,
+    authenticatedProviderGrantCount: authenticatedProviderGrants.length,
+    authority: {
+      revision: authority.revision,
+      nativeRequirements: authority.native.requirements.length,
+      rooted: authority.j2.rooted,
+    },
+    base: {
+      revision: base.revision,
+      nativeRequirements: base.native.requirements.length,
+      rooted: base.j2.rooted,
+      tracked: base.entries.length,
+      justified: base.j1.justified.length,
+    },
+    head: {
+      revision: head.revision,
+      nativeRequirements: head.native.requirements.length,
+      rooted: head.j2.rooted,
+      tracked: head.entries.length,
+      justified: head.j1.justified.length,
+    },
+    j2: { rooted: head.j2.rooted.length, unrooted: head.j2.unrooted.length },
+    j1: { tracked: head.entries.length, justified: head.j1.justified.length, unjustified: head.j1.unjustified.length },
+    j3: { ok: transition.ok, reasons: transition.reasons, deltas: transition.deltas, explanations: transition.explanations },
+    constraints: transition.explanations.constraints,
+    transition,
+  };
+}
+
 export function projectRepoGuardLegacyRequirements(
   raw: CanonicalRequirementsResult,
   implicitSourcePaths: Readonly<Record<string, string>> = Object.fromEntries(raw.requirements.map((item) => [item.id, item.source.path])),
