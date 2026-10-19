@@ -7,6 +7,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadAuthenticatedProviderBundle, loadGitHubEvent } from "../dist/github-pr.mjs";
 
+const providerTransition = (repository, authorityBaseRevision, baseRevision, headRevision) => ({
+  repository, authorityBaseRevision, baseRevision, headRevision,
+});
+
 function withEventFile(content, run) {
   const dir = mkdtempSync(join(tmpdir(), "repo-guard-github-pr-boundary-"));
   const eventPath = join(dir, "event.json");
@@ -60,6 +64,7 @@ describe("#752 authenticated provider production boundary", () => {
     const base = "a".repeat(40), head = "b".repeat(40);
     writeFileSync(bundle, JSON.stringify({
       format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, head),
       claims: [{
         boundary: "domain",
         class: "domain",
@@ -116,7 +121,11 @@ describe("#752 authenticated provider production boundary", () => {
     const dir = mkdtempSync(join(tmpdir(), "repo-guard-provider-candidate-"));
     const bundle = join(dir, "provider.json");
     const base = "a".repeat(40), head = "b".repeat(40);
-    writeFileSync(bundle, JSON.stringify({ format: "repo-guard/provider-bundle-v1", claims: [] }));
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, head),
+      claims: []
+    }));
     try {
       const result = loadAuthenticatedProviderBundle({
         bundlePath: bundle, runnerTemp: dir, eventName: "pull_request",
@@ -137,6 +146,7 @@ describe("#752 authenticated provider production boundary", () => {
     const base = "a".repeat(40), head = "b".repeat(40);
     writeFileSync(bundle, JSON.stringify({
       format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, head),
       claims: [{
         boundary: "domain", class: "domain", key: "domain:example", requirementId: "APP-01",
         subjectPaths: ["README.md"], status: "pass", providerId: "candidate"
@@ -160,7 +170,11 @@ describe("#752 authenticated provider production boundary", () => {
     const dir = mkdtempSync(join(tmpdir(), "repo-guard-provider-stale-"));
     const bundle = join(dir, "provider.json");
     const base = "a".repeat(40), head = "b".repeat(40);
-    writeFileSync(bundle, JSON.stringify({ format: "repo-guard/provider-bundle-v1", claims: [] }));
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, head),
+      claims: []
+    }));
     try {
       const result = loadAuthenticatedProviderBundle({
         bundlePath: bundle, runnerTemp: dir, eventName: "pull_request_target",
@@ -181,6 +195,7 @@ describe("#752 authenticated provider production boundary", () => {
     const base = "a".repeat(40), head = "b".repeat(40);
     writeFileSync(bundle, JSON.stringify({
       format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("another/consumer", base, base, head),
       claims: [{ boundary: "observation", metric: "git.changed_lines", path: "src/a.ts", value: 7 }]
     }));
     try {
@@ -207,6 +222,7 @@ describe("#752 authenticated provider production boundary", () => {
     const base = "a".repeat(40), head = "b".repeat(40);
     writeFileSync(bundle, JSON.stringify({
       format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, head),
       claims: [{
         boundary: "domain", class: "execution", key: "tests:core", requirementId: "APP-01",
         subjectPaths: ["src/a.ts"], status: "pass", verifierPath: "tests/core.test.mjs"
@@ -234,6 +250,7 @@ describe("#752 authenticated provider production boundary", () => {
     const legacyBase = "a".repeat(40), nativeHead = "b".repeat(40);
     writeFileSync(bundle, JSON.stringify({
       format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", nativeHead, nativeHead, nativeHead),
       claims: [{ boundary: "domain", class: "domain", key: "domain:cutover", requirementId: "APP-01", subjectPaths: [], status: "pass" }]
     }));
     try {
@@ -256,7 +273,11 @@ describe("#752 authenticated provider production boundary", () => {
     const outside = mkdtempSync(join(tmpdir(), "repo-guard-provider-outside-"));
     const bundle = join(outside, "provider.json");
     const base = "a".repeat(40), head = "b".repeat(40);
-    writeFileSync(bundle, JSON.stringify({ format: "repo-guard/provider-bundle-v1", claims: [] }));
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, head),
+      claims: []
+    }));
     try {
       const result = loadAuthenticatedProviderBundle({
         bundlePath: bundle, runnerTemp: runner, eventName: "pull_request_target",
@@ -337,6 +358,7 @@ describe("#752 authenticated provider production boundary", () => {
       }));
       writeFileSync(bundlePath, JSON.stringify({
         format: "repo-guard/provider-bundle-v1",
+        transition: providerTransition("arbitrary/native-consumer", base, base, head),
         claims: [{
           boundary: "domain",
           class: "domain",
@@ -372,6 +394,30 @@ describe("#752 authenticated provider production boundary", () => {
       rmSync(root, { recursive: true, force: true });
       rmSync(runner, { recursive: true, force: true });
     }
+  });
+
+
+  it("rejects a stale provider bundle transition tuple instead of rebinding evidence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "repo-guard-provider-stale-tuple-"));
+    const bundle = join(dir, "provider.json");
+    const base = "a".repeat(40), head = "b".repeat(40), stale = "c".repeat(40);
+    writeFileSync(bundle, JSON.stringify({
+      format: "repo-guard/provider-bundle-v1",
+      transition: providerTransition("example/consumer", base, base, stale),
+      claims: [{ boundary: "domain", class: "domain", key: "domain:example", requirementId: "APP-01", subjectPaths: [], status: "pass" }]
+    }));
+    try {
+      const result = loadAuthenticatedProviderBundle({
+        bundlePath: bundle, runnerTemp: dir, eventName: "pull_request_target",
+        repository: "example/consumer",
+        workflowRef: "example/consumer/.github/workflows/trusted-enforcement.yml@refs/heads/main",
+        workflowSha: base,
+        event: { repository: { full_name: "example/consumer" }, pull_request: { base: { sha: base }, head: { sha: head } } },
+        authorityBaseRevision: base, baseRevision: base, headRevision: head
+      });
+      assert.equal(result.ok, false);
+      assert.ok(result.reasons.some((reason) => reason.includes("provider bundle HEAD is stale or mismatched")));
+    } finally { rmSync(dir, { recursive: true }); }
   });
 
 });
