@@ -51,6 +51,15 @@ inputs:
     required: false
     default: ""
 
+  authenticated-provider-bundle:
+    description: >
+      Absolute path under RUNNER_TEMP to a runtime-generated
+      repo-guard/provider-bundle-v1 JSON document. Native check-pr accepts it
+      only from an exact pull_request_target workflow source at the PR base.
+      Never point this input at candidate repository content.
+    required: false
+    default: ""
+
   node-version:
     description: "Node.js version to use when running repo-guard."
     required: false
@@ -95,6 +104,7 @@ runs:
         RG_BASE: ${{ inputs.base }}
         RG_HEAD: ${{ inputs.head }}
         RG_CHANGE_INTENT: ${{ inputs.change-intent }}
+        RG_AUTHENTICATED_PROVIDER_BUNDLE: ${{ inputs.authenticated-provider-bundle }}
       run: |
         set +e
         REPO_ROOT="${RG_REPO_ROOT:-${GITHUB_WORKSPACE:-$PWD}}"
