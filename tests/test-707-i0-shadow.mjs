@@ -1228,3 +1228,5 @@ test("#749 F15-F16 RepoGuard self-host uses the same generic native steady-state
     rmSync(clone, { recursive: true, force: true });
   }
 });
+
+// #749 post-merge generic native no-grant production probe
