@@ -313,6 +313,41 @@ function fail(roots: CheckPrRoots, format: Format, reasonCode: string, message: 
   console.log(renderAnalysisReport(report, { format })); return 1;
 }
 
+
+function emitAuthorityResult(
+  roots: CheckPrRoots,
+  format: Format,
+  quiet: boolean,
+  initialChecks: readonly InitialCheck[],
+  selector: ReturnType<typeof selectRepoGuardAuthoritativeEvaluator>,
+  name: string,
+  check: { ok: boolean; message: string; details?: readonly string[]; data?: unknown },
+  metadata: Record<string, unknown> = {},
+) {
+  const enforcement = resolveEnforcementMode({ cliValue: roots.enforcementMode, policy: { enforcement: { mode: "blocking" } } });
+  if (!enforcement.ok) return fail(roots, format, "check_pr.enforcement", enforcement.message);
+  const reporter = createAnalysisCollector(enforcement, { presenter: quiet ? null : createAnalysisTextPresenter() });
+  for (const item of initialChecks) reporter.report(item.name, item.check, { policyOrigin: "trusted-base-selector", enforcementMode: enforcement.mode });
+  reporter.report("authority-selector", {
+    ok: selector.ok,
+    message: selector.ok
+      ? "authoritative evaluator selected from trusted BASE representation"
+      : "authoritative evaluator selection failed closed",
+    details: selector.ok ? [] : [selector.reason],
+    data: selector,
+  }, { policyOrigin: "trusted-base-selector", enforcementMode: enforcement.mode });
+  reporter.report(name, check, { policyOrigin: "trusted-base-selector", enforcementMode: enforcement.mode });
+  const report = reporter.finish({
+    command: "check-pr",
+    repositoryRoot: roots.repoRoot,
+    authoritySelection: selector,
+    ...metadata,
+  });
+  const output = renderAnalysisReport(report, { format });
+  if (output) console.log(output);
+  return report.exitCode;
+}
+
 export function runCheckPR(roots: CheckPrRoots, args: string[] = []) {
   const format = formatOf(args);
   if (!format) { console.error(`Unexpected argument for check-pr: ${args[0] || ""}`); return 1; }
