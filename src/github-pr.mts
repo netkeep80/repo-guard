@@ -47,6 +47,7 @@ interface AuthenticatedProviderBundleInput {
   repository: string;
   workflowRef?: string | null;
   workflowSha?: string | null;
+  authorityProvider?: unknown;
   event: unknown;
   authorityBaseRevision: string;
   baseRevision: string;
@@ -61,17 +62,18 @@ interface AuthenticatedProviderBundleResult {
   observationFacts: TransitionObservationFact[];
   evidenceFacts: TransitionEvidenceFact[];
   protectedResources: string[];
-  provider?: { providerId: string; principal: string; producerSource: string; workflowPath: string } | null;
+  provider?: { providerId: string; principal: string; producerSource: string; workflowPath: string | null } | null;
   trust?: {
     repository: string;
     authorityBaseRevision: string;
-    source: "accepted-workflow";
-    workflowPath: string;
+    source: "accepted-workflow" | "github-app-service";
+    workflowPath: string | null;
     declaredResources: string[];
   } | null;
 }
 
 const PROVIDER_BUNDLE_FORMAT = "repo-guard/provider-bundle-v1";
+const SERVICE_AUTHORITY_FORMAT = "repo-guard/github-app-authority-v1";
 const exactRevision = /^[0-9a-f]{40}$/;
 const requirementId = /^[A-Za-z][A-Za-z0-9._:-]*$/;
 
@@ -148,7 +150,8 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
   // Trigger kind selects acquisition only. TRUST still comes from the exact accepted workflow
   // source and the immutable repository/BASE/HEAD tuple below.
   const linkedIssueRefresh = input.eventName === "issues" && input.reevaluation?.kind === "linked-issue";
-  const controlPlaneRecognized = input.eventName === "pull_request_target" || linkedIssueRefresh;
+  const serviceAuthority = input.eventName === "repo_guard_service";
+  const controlPlaneRecognized = input.eventName === "pull_request_target" || linkedIssueRefresh || serviceAuthority;
   if (!controlPlaneRecognized) {
     if (!bundlePath) return empty();
     return empty(["A2:provider_untrusted_event"], true);
@@ -203,22 +206,50 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
 
   const workflowRef = typeof input.workflowRef === "string" ? input.workflowRef : "";
   const workflowSha = typeof input.workflowSha === "string" ? input.workflowSha : "";
-  let workflowPath = "";
-  try { workflowPath = providerWorkflowPath(workflowRef, input.repository); }
-  catch (error) { reasons.push("A2:provider_workflow_ref_invalid:" + (error as Error).message); }
-  if (!exactRevision.test(workflowSha) || workflowSha !== eventBase)
-    reasons.push("A2:provider_workflow_source_not_exact_base");
+  let workflowPath: string | null = null;
+  let authoritySource: "accepted-workflow" | "github-app-service" = "accepted-workflow";
+  let identity = "", principal = "", producerSource = "";
+  let intrinsicProtectedResources: string[] = [];
+  if (serviceAuthority) {
+    authoritySource = "github-app-service";
+    try {
+      const authority = providerObject(input.authorityProvider, "service authority");
+      providerExactFields(authority, ["format", "appId", "installationId", "repositoryId", "evaluatorSha"], "service authority");
+      if (authority.format !== SERVICE_AUTHORITY_FORMAT) throw new Error("service authority format is invalid");
+      const appId = typeof authority.appId === "string" ? authority.appId : "";
+      if (!/^[1-9][0-9]*$/.test(appId)) throw new Error("service authority appId is invalid");
+      for (const field of ["installationId", "repositoryId"] as const)
+        if (!Number.isSafeInteger(authority[field]) || Number(authority[field]) <= 0)
+          throw new Error("service authority " + field + " is invalid");
+      if (typeof authority.evaluatorSha !== "string" || !exactRevision.test(authority.evaluatorSha))
+        throw new Error("service authority evaluatorSha is invalid");
+      identity = [input.repository, appId, authority.installationId, authority.repositoryId, authority.evaluatorSha].join("\0");
+      principal = "github-app:" + appId + ":installation:" + authority.installationId + ":repository:" + authority.repositoryId;
+      producerSource = "repo-guard-service:" + authority.evaluatorSha;
+    } catch (error) {
+      reasons.push("A2:provider_service_authority_invalid:" + (error as Error).message);
+    }
+  } else {
+    try { workflowPath = providerWorkflowPath(workflowRef, input.repository); }
+    catch (error) { reasons.push("A2:provider_workflow_ref_invalid:" + (error as Error).message); }
+    if (!exactRevision.test(workflowSha) || workflowSha !== eventBase)
+      reasons.push("A2:provider_workflow_source_not_exact_base");
+    if (workflowPath) intrinsicProtectedResources = [workflowPath];
+    identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
+    principal = "github-actions-workflow:" + workflowRef;
+    producerSource = workflowSha + ":" + (workflowPath || "");
+  }
 
   if (!bundlePath) {
     if (reasons.length) return empty(reasons, false);
     return {
       ...empty(),
       trustPresent: true,
-      protectedResources: [workflowPath],
+      protectedResources: intrinsicProtectedResources,
       trust: {
         repository: input.repository,
         authorityBaseRevision: eventBase,
-        source: "accepted-workflow",
+        source: authoritySource,
         workflowPath,
         declaredResources: [],
       },
@@ -268,13 +299,10 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
         throw new Error("provider trust authority BASE is stale or mismatched");
       declaredProtectedResources = providerSubjectPaths(trust.protectedResources, "provider trust protectedResources");
     }
-    const protectedResources = [...new Set([workflowPath, ...declaredProtectedResources])]
+    const protectedResources = [...new Set([...intrinsicProtectedResources, ...declaredProtectedResources])]
       .sort((a, b) => a.localeCompare(b, "en"));
 
-    const identity = input.repository + "\0" + workflowRef + "\0" + workflowSha;
-    const providerId = "accepted-workflow:" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
-    const principal = "github-actions-workflow:" + workflowRef;
-    const producerSource = workflowSha + ":" + workflowPath;
+    const providerId = authoritySource + ":" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
     const authenticatedProviderGrants: AuthenticatedProviderGrant[] = [];
     const observationFacts: TransitionObservationFact[] = [];
     const evidenceFacts: TransitionEvidenceFact[] = [];
@@ -376,7 +404,7 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
       trust: {
         repository: input.repository,
         authorityBaseRevision: eventBase,
-        source: "accepted-workflow",
+        source: authoritySource,
         workflowPath,
         declaredResources: declaredProtectedResources,
       },
@@ -398,6 +426,12 @@ function nativeProviderReevaluation(): AuthenticatedProviderBundleInput["reevalu
   }
 }
 
+function nativeAuthorityProvider(): unknown {
+  const raw = process.env.RG_AUTHORITY_PROVIDER || "";
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
 function nativeProviderInputs(input: {
   repository: string;
   eventBaseRevision: string;
@@ -414,6 +448,7 @@ function nativeProviderInputs(input: {
     repository: input.repository,
     workflowRef: process.env.GITHUB_WORKFLOW_REF || "",
     workflowSha: process.env.GITHUB_WORKFLOW_SHA || "",
+    authorityProvider: nativeAuthorityProvider(),
     event: {
       repository: { full_name: input.repository },
       pull_request: {

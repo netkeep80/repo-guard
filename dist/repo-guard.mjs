@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, createHmac, createSign, timingSafeEqual } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { extractLinkedIssueReferences } from "./change-intent.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url)), packageRoot = resolve(__dirname, "..");
 const valueOptions = (...names) => Object.fromEntries(names.map((name) => [name, true]));
 const COMMAND_SPECS = {
     validate: { options: {}, positionals: 1, run: async (roots, args) => (await import("./validate.mjs")).runValidate(roots, args) },
     "check-diff": { options: valueOptions("--base", "--head", "--change-intent", "--format"), positionals: 0, run: async (roots, args) => (await import("./check-diff.mjs")).runCheckDiff(roots, args) },
     "check-pr": { options: valueOptions("--format"), positionals: 0, run: async (roots, args) => (await import("./github-pr.mjs")).runCheckPR(roots, args) },
+    "trusted-service": { options: {}, positionals: 0, run: async (roots, args) => runTrustedService(roots, args) },
     init: { options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0, run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args) },
     doctor: { options: valueOptions("--format"), positionals: 0, run: async (roots) => ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0) },
 };
