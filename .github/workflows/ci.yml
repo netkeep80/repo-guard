@@ -48,6 +48,15 @@ jobs:
       - name: Report architecture compression metrics
         run: npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
 
+      - name: Run compiler-only self-host witness
+        if: github.event_name == 'pull_request'
+        run: >-
+          node dist/repo-guard.mjs check
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --format summary
+
+
       - name: Validate repo-policy.json
         run: npx repo-guard
 
