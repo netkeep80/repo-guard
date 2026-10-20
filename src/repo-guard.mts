@@ -63,11 +63,12 @@ export interface AuthorityEvaluationKey {
   authorityBase: string; base: string; head: string; evaluator: string; authorityDigest: string;
 }
 export interface AuthorityTarget { installationId: number; repositoryId: number; repository: string; pr: number; }
-export interface AuthorityRecord { key: AuthorityEvaluationKey; state: "pending" | "success" | "failure"; }
+export interface AuthorityObservation { active: boolean; key: AuthorityEvaluationKey; merge: string | null; }
+export interface AuthorityRecord { key: AuthorityEvaluationKey; carrier: string | null; state: "pending" | "success" | "failure"; }
 export interface AuthorityDependencies {
-  observe(target: AuthorityTarget): Promise<{ active: boolean; key: AuthorityEvaluationKey }>;
-  publish(target: AuthorityTarget, head: string, state: "pending" | "success" | "failure"): Promise<void>;
-  evaluate(target: AuthorityTarget, key: AuthorityEvaluationKey): Promise<"success" | "failure">;
+  observe(target: AuthorityTarget): Promise<AuthorityObservation>;
+  publish(target: AuthorityTarget, sha: string, state: "pending" | "success" | "failure"): Promise<void>;
+  evaluate(target: AuthorityTarget, key: AuthorityEvaluationKey, merge: string): Promise<"success" | "failure">;
   get(target: AuthorityTarget): AuthorityRecord | null;
   put(record: AuthorityRecord): void;
   remove(target: AuthorityTarget): void;
@@ -90,37 +91,58 @@ const exactRepo = (value: unknown) => {
 };
 const targetId = (target: AuthorityTarget) => `${target.installationId}:${target.repositoryId}:${target.pr}`;
 export function sameAuthorityEvaluationKey(a?: AuthorityEvaluationKey | null, b?: AuthorityEvaluationKey | null): boolean {
-  return Boolean(a && b && JSON.stringify(a) === JSON.stringify(b));
+  return Boolean(a && b
+    && a.repositoryId === b.repositoryId
+    && a.authorityBase === b.authorityBase
+    && a.base === b.base
+    && a.head === b.head
+    && a.evaluator === b.evaluator
+    && a.authorityDigest === b.authorityDigest);
 }
 export async function reconcileAuthorityTarget(target: AuthorityTarget, deps: AuthorityDependencies): Promise<"inactive" | "skipped" | "pending" | "success" | "failure"> {
-  const preservePending = async (observed: { active: boolean; key: AuthorityEvaluationKey }) => {
+  const preservePending = async (observed: AuthorityObservation) => {
     const previous = deps.get(target);
-    if (previous?.state === "pending" && sameAuthorityEvaluationKey(previous.key, observed.key)) return;
-    await deps.publish(target, observed.key.head, "pending");
-    deps.put({ key: observed.key, state: "pending" });
+    if (!previous || previous.key.head !== observed.key.head) await deps.publish(target, observed.key.head, "pending");
+    const carrier = observed.merge ?? previous?.carrier ?? null;
+    const alreadyPending = previous?.state === "pending"
+      && sameAuthorityEvaluationKey(previous.key, observed.key)
+      && previous.carrier === carrier;
+    if (carrier && !alreadyPending) await deps.publish(target, carrier, "pending");
+    deps.put({ key: observed.key, carrier, state: "pending" });
   };
   for (let attempt = 0; attempt < 3; attempt++) {
     const before = await deps.observe(target);
     if (!before.active) { await preservePending(before); return "inactive"; }
     const previous = deps.get(target);
-    if (previous && previous.state !== "pending" && sameAuthorityEvaluationKey(previous.key, before.key)) return "skipped";
-    const alreadyPending = previous?.state === "pending" && sameAuthorityEvaluationKey(previous.key, before.key);
-    if (!alreadyPending) {
-      await deps.publish(target, before.key.head, "pending");
-      deps.put({ key: before.key, state: "pending" });
+    const sameKey = sameAuthorityEvaluationKey(previous?.key, before.key);
+    const sameCarrier = previous?.carrier === before.merge;
+    if (previous && previous.state !== "pending" && sameKey && sameCarrier) return "skipped";
+
+    if (!previous || previous.key.head !== before.key.head) await deps.publish(target, before.key.head, "pending");
+    if (!before.merge) {
+      deps.put({ key: before.key, carrier: null, state: "pending" });
+      return "pending";
     }
+
+    const alreadyPending = previous?.state === "pending" && sameKey && sameCarrier;
+    if (!alreadyPending) {
+      await deps.publish(target, before.merge, "pending");
+      deps.put({ key: before.key, carrier: before.merge, state: "pending" });
+    }
+
     let result: "success" | "failure";
-    try { result = await deps.evaluate(target, before.key); }
+    try { result = await deps.evaluate(target, before.key, before.merge); }
     catch { return "pending"; }
+
     const after = await deps.observe(target);
     if (!after.active) { await preservePending(after); return "inactive"; }
-    if (!sameAuthorityEvaluationKey(before.key, after.key)) {
-      await deps.publish(target, after.key.head, "pending");
-      deps.put({ key: after.key, state: "pending" });
+    if (!sameAuthorityEvaluationKey(before.key, after.key) || before.merge !== after.merge) {
+      await preservePending(after);
       continue;
     }
-    await deps.publish(target, after.key.head, result);
-    deps.put({ key: after.key, state: result });
+
+    await deps.publish(target, before.merge, result);
+    deps.put({ key: after.key, carrier: before.merge, state: result });
     return result;
   }
   throw new Error("authority inputs did not stabilize");
@@ -204,11 +226,12 @@ async function observeAuthority(config: AuthorityConfig, target: AuthorityTarget
     issues.push({ number: ref.number, body: issue?.body ?? "", login, type: issue?.user?.type ?? null, association: issue?.author_association ?? null, permission });
   }
   const base = exactSha(pr?.base?.sha, "BASE"), head = exactSha(pr?.head?.sha, "HEAD");
-  return { active: pr?.state === "open" && pr?.draft !== true && pr?.base?.ref === pr?.base?.repo?.default_branch, key: { installationId: target.installationId, repositoryId: target.repositoryId, repository: target.repository, pr: target.pr, authorityBase: base, base, head, evaluator: config.evaluator, authorityDigest: createHash("sha256").update(JSON.stringify({ body, issues })).digest("hex") } };
+  const merge = typeof pr?.merge_commit_sha === "string" && SHA40.test(pr.merge_commit_sha) ? pr.merge_commit_sha : null;
+  return { active: pr?.state === "open" && pr?.draft !== true && pr?.base?.ref === pr?.base?.repo?.default_branch, merge, key: { installationId: target.installationId, repositoryId: target.repositoryId, repository: target.repository, pr: target.pr, authorityBase: base, base, head, evaluator: config.evaluator, authorityDigest: createHash("sha256").update(JSON.stringify({ body, issues })).digest("hex") } };
 }
-async function publishAuthority(config: AuthorityConfig, target: AuthorityTarget, head: string, state: "pending" | "success" | "failure") {
+async function publishAuthority(config: AuthorityConfig, target: AuthorityTarget, sha: string, state: "pending" | "success" | "failure") {
   const token = await installationToken(config, target.installationId, target.repositoryId, true);
-  await api(config, `/repos/${target.repository}/statuses/${exactSha(head, "status HEAD")}`, token, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ state, context: AUTHORITY_CONTEXT, description: state === "pending" ? "repo-guard reevaluation required" : state === "success" ? "repo-guard approved this exact transition" : "repo-guard rejected this exact transition" }) });
+  await api(config, `/repos/${target.repository}/statuses/${exactSha(sha, "status SHA")}`, token, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ state, context: AUTHORITY_CONTEXT, description: state === "pending" ? "repo-guard reevaluation required" : state === "success" ? "repo-guard approved this exact transition" : "repo-guard rejected this exact transition" }) });
 }
 export function serviceEvaluatorEnvironment(
   baseEnv: NodeJS.ProcessEnv,
@@ -274,7 +297,7 @@ export async function runBoundedChild(
   });
 }
 
-async function evaluateAuthority(config: AuthorityConfig, target: AuthorityTarget, key: AuthorityEvaluationKey): Promise<"success" | "failure"> {
+async function evaluateAuthority(config: AuthorityConfig, target: AuthorityTarget, key: AuthorityEvaluationKey, expectedMerge: string): Promise<"success" | "failure"> {
   mkdirSync(config.work, { recursive: true }); const root = mkdtempSync(join(config.work, "rg-service-")), runner = mkdtempSync(join(config.work, "rg-runner-"));
   const token = await installationToken(config, target.installationId, target.repositoryId), env = gitEnv(token);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: "pipe", timeout: SERVICE_GIT_TIMEOUT_MS }).trim();
@@ -284,7 +307,7 @@ async function evaluateAuthority(config: AuthorityConfig, target: AuthorityTarge
     git("init", "-q"); git("remote", "add", "origin", `https://github.com/${target.repository}.git`);
     git("fetch", "--no-tags", "--prune", "origin", `+refs/heads/${baseRef}:refs/remotes/origin/${baseRef}`, `+refs/pull/${target.pr}/head:refs/remotes/pull/${target.pr}/head`, `+refs/pull/${target.pr}/merge:refs/remotes/pull/${target.pr}/merge`);
     const merge = git("rev-parse", `refs/remotes/pull/${target.pr}/merge`);
-    if (git("rev-parse", `refs/remotes/origin/${baseRef}`) !== key.base || git("rev-parse", `refs/remotes/pull/${target.pr}/head`) !== key.head || git("rev-parse", `${merge}^1`) !== key.base || git("rev-parse", `${merge}^2`) !== key.head) throw new Error("fetched transition changed");
+    if (merge !== expectedMerge || git("rev-parse", `refs/remotes/origin/${baseRef}`) !== key.base || git("rev-parse", `refs/remotes/pull/${target.pr}/head`) !== key.head || git("rev-parse", `${merge}^1`) !== key.base || git("rev-parse", `${merge}^2`) !== key.head) throw new Error("fetched transition changed");
     git("checkout", "-q", "--detach", key.base);
     const eventPath = join(runner, "event.json"); writeFileSync(eventPath, JSON.stringify({ pull_request: { number: target.pr, base: { sha: key.base, ref: baseRef }, head: { sha: key.head }, body: pr?.body ?? "" }, repository: { full_name: target.repository } }));
     const execution = await runBoundedChild(
@@ -317,7 +340,7 @@ async function repositoryTargets(config: AuthorityConfig, installationId: number
 export async function runTrustedService(roots: { packageRoot: string }, args: string[] = []): Promise<number> {
   if (args.length) throw new Error("trusted-service accepts no arguments");
   const config = loadAuthorityConfig(roots.packageRoot), state = fileState(config.state), queues = new Map<string, Promise<void>>();
-  const deps: AuthorityDependencies = { observe: (target) => observeAuthority(config, target), publish: (target, head, status) => publishAuthority(config, target, head, status), evaluate: (target, key) => evaluateAuthority(config, target, key), get: state.get, put: state.put, remove: state.remove };
+  const deps: AuthorityDependencies = { observe: (target) => observeAuthority(config, target), publish: (target, sha, status) => publishAuthority(config, target, sha, status), evaluate: (target, key, merge) => evaluateAuthority(config, target, key, merge), get: state.get, put: state.put, remove: state.remove };
   const enqueue = (target: AuthorityTarget) => { const id = targetId(target), prior = queues.get(id) ?? Promise.resolve(); const next = prior.catch(() => undefined).then(() => reconcileAuthorityTarget(target, deps)).then(() => undefined).catch((error) => console.error(`trusted-service ${id}: ${error.message}`)).finally(() => { if (queues.get(id) === next) queues.delete(id); }); queues.set(id, next); };
   const reconcileKnown = async () => { try { for (const target of state.list()) enqueue(target); } catch (error) { console.error(`trusted-service reconcile: ${(error as Error).message}`); } };
   const enqueueRepository = async (installationId: number, repositoryId: number, repository: string, linkedIssue?: number | null) => {
