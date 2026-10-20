@@ -22,7 +22,41 @@ ${parent ? `  - predicates: [derives_from]
       kind: artifact
       path: "${target}"
 ` : ""}`;
-const evaluate = (base, head) => evaluateLocalCompiler({ root, repository: "fixture/c1", base, head });
+const evaluate = (base, head) => evaluateLocalCompiler({ root, repository: "fixture/c1", base, head });\nconst coreReq = ({ maxResources, maxLines, evidence = false, verifierRelation = true } = {}) => {
+  let text = req("CORE", "src/a.txt");
+  if (evidence && verifierRelation) text += `  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/verifier.mjs"
+`;
+  const constraints = [];
+  if (maxResources !== undefined) constraints.push(`  - id: resources
+    scope:
+      relations: [implemented_by]
+    metric:
+      key: git.changed_resources
+      max: ${maxResources}
+`);
+  if (maxLines !== undefined) constraints.push(`  - id: lines
+    scope:
+      relations: [implemented_by]
+    metric:
+      key: git.changed_lines
+      max: ${maxLines}
+`);
+  if (evidence) constraints.push(`  - id: execution
+    scope:
+      relations: [implemented_by]
+    evidence:
+      class: execution
+      key: tests-pass
+      verifier:
+        kind: artifact
+        path: "tests/verifier.mjs"
+`);
+  return text + (constraints.length ? "constraints:\n" + constraints.join("") : "");
+};
+
 
 try {
   git("init", "-q");
@@ -97,7 +131,70 @@ try {
   assert.equal(report.ok, true, "local CLI should agree with direct evaluator");
   assert.equal(report.base, normative);
   assert.equal(report.head, restored);
-  console.log("C1 local compiler structural witnesses: PASS");
+
+  put("requirements/core.rg.yaml", coreReq({ maxResources: 0 }));
+  const resourceLimitBase = commit("add deterministic resource constraint");
+  assert.equal(evaluate(restored, resourceLimitBase).ok, true, "adding deterministic constraint without scoped resource change GREEN");
+
+  put("src/a.txt", "resource-limit-red\n");
+  const resourceLimitRed = commit("exceed resource constraint");
+  assert.equal(evaluate(resourceLimitBase, resourceLimitRed).ok, false, "changed_resources limit RED");
+
+  put("requirements/core.rg.yaml", coreReq({ maxResources: 1 }));
+  const resourceLimitRaised = commit("raise deterministic resource constraint");
+  assert.equal(evaluate(resourceLimitRed, resourceLimitRaised).ok, true, "constraint definition change needs no RepoGuard receipt");
+
+  put("src/a.txt", "resource-limit-green\n");
+  const resourceLimitGreen = commit("meet resource constraint");
+  assert.equal(evaluate(resourceLimitRaised, resourceLimitGreen).ok, true, "changed_resources limit GREEN");
+
+  put("requirements/core.rg.yaml", coreReq({ maxLines: 0 }));
+  const lineLimitBase = commit("add deterministic changed-lines constraint");
+  assert.equal(evaluate(resourceLimitGreen, lineLimitBase).ok, true);
+
+  put("src/a.txt", "line-limit-red\n");
+  const lineLimitRed = commit("exceed changed-lines constraint");
+  assert.equal(evaluate(lineLimitBase, lineLimitRed).ok, false, "local Git changed_lines observation drives RED");
+
+  put("requirements/core.rg.yaml", coreReq({ maxLines: 10 }));
+  const lineLimitRaised = commit("raise changed-lines constraint");
+  assert.equal(evaluate(lineLimitRed, lineLimitRaised).ok, true);
+
+  put("src/a.txt", "line-limit-green\n");
+  const lineLimitGreen = commit("meet changed-lines constraint");
+  assert.equal(evaluate(lineLimitRaised, lineLimitGreen).ok, true, "local Git changed_lines observation drives GREEN");
+
+  put("requirements/core.rg.yaml", coreReq({ evidence: true }));
+  put("tests/verifier.mjs", "process.exit(0);\n");
+  const evidenceBase = commit("declare external CI evidence traceability");
+  assert.equal(evaluate(lineLimitGreen, evidenceBase).ok, true);
+
+  put("src/a.txt", "external-evidence-delegated\n");
+  const evidenceGreen = commit("change under external CI evidence constraint");
+  const delegated = evaluate(evidenceBase, evidenceGreen);
+  assert.equal(delegated.ok, true, "external execution truth is delegated to ordinary CI");
+  assert.equal(delegated.j3.constraints.some(item => item.constraintId === "execution" && item.verdict === "DELEGATED"), true);
+
+  put("requirements/core.rg.yaml", coreReq({ evidence: true, verifierRelation: false }));
+  git("rm", "-q", "tests/verifier.mjs");
+  put("src/a.txt", "invalid-external-verifier\n");
+  const evidenceRed = commit("remove external verifier traceability");
+  assert.equal(evaluate(evidenceGreen, evidenceRed).ok, false, "execution constraint without verified_by traceability RED");
+
+  const cliPath = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+  const cleanJson = execFileSync(process.execPath, [
+    cliPath, "--repo-root", root, "check", "--base", evidenceBase, "--head", evidenceGreen, "--format", "json",
+  ], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH } });
+  const ciJson = execFileSync(process.execPath, [
+    cliPath, "--repo-root", root, "check", "--base", evidenceBase, "--head", evidenceGreen, "--format", "json",
+  ], { cwd: root, encoding: "utf8", env: {
+    PATH: process.env.PATH,
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_PATH: "/nonexistent/event.json",
+    GH_TOKEN: "must-not-be-read",
+  } });
+  assert.deepEqual(JSON.parse(ciJson), JSON.parse(cleanJson), "exact BASE/HEAD verdict must be independent of GitHub CI environment");
+  console.log("C1 local compiler structural/constraint/equivalence witnesses: PASS");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
