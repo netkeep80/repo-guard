@@ -35,6 +35,7 @@ const observedCommands = new Set([
   ...(validateRuns.includes("npx repo-guard\n") || validateRuns.includes("run: npx repo-guard") ? ["validate"] : []),
   ...(validateRuns.includes("repo-guard doctor") ? ["doctor"] : []),
   ...(validateRuns.includes("check-diff") ? ["check-diff"] : []),
+  ...(validateRuns.includes("dist/repo-guard.mjs check") ? ["check"] : []),
   ...(selfCheckStep?.run === expectedSelfCheckCommand ? ["check-pr"] : []),
 ]);
 
