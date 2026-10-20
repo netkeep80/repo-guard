@@ -234,4 +234,30 @@ async function discoverAuthorityTargets(config: AuthorityConfig) {
 
 export async function runTrustedService(roots: { packageRoot: string }, args: string[] = []): Promise<number> {
   if (args.length) throw new Error("trusted-service accepts no arguments");
-  const config = loadAuthorityConfig(roots.packageRoot), state = fileState(config.state), queues = new Map
+  const config = loadAuthorityConfig(roots.packageRoot), state = fileState(config.state), queues = new Map<string, Promise<void>>();
+  const deps: AuthorityDependencies = { observe: (target) => observeAuthority(config, target), publish: (target, head, status) => publishAuthority(config, target, head, status), evaluate: (target, key) => evaluateAuthority(config, target, key), get: state.get, put: state.put, remove: state.remove };
+  const enqueue = (target: AuthorityTarget) => { const id = targetId(target), prior = queues.get(id) ?? Promise.resolve(); const next = prior.catch(() => undefined).then(() => reconcileAuthorityTarget(target, deps)).then(() => undefined).catch((error) => console.error(`trusted-service ${id}: ${error.message}`)).finally(() => { if (queues.get(id) === next) queues.delete(id); }); queues.set(id, next); };
+  const reconcileAll = async () => { try { for (const target of await discoverAuthorityTargets(config)) enqueue(target); } catch (error) { console.error(`trusted-service reconcile: ${(error as Error).message}`); } };
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/healthz") { response.writeHead(200).end("ok\n"); return; }
+    if (request.method !== "POST" || request.url !== "/webhook") { response.writeHead(404).end(); return; }
+    const chunks: Buffer[] = []; let size = 0;
+    request.on("data", (chunk: Buffer) => { size += chunk.length; if (size > 1024 * 1024) request.destroy(); else chunks.push(chunk); });
+    request.on("error", () => { if (!response.headersSent) response.writeHead(400).end(); });
+    request.on("end", () => {
+      const body = Buffer.concat(chunks), signature = Array.isArray(request.headers["x-hub-signature-256"]) ? request.headers["x-hub-signature-256"][0] : request.headers["x-hub-signature-256"];
+      if (!verifyAuthorityWebhook(config.webhookSecret, body, signature)) { response.writeHead(401).end(); return; }
+      let payload: any; try { payload = JSON.parse(body.toString("utf8")); } catch { response.writeHead(400).end(); return; }
+      const event = Array.isArray(request.headers["x-github-event"]) ? request.headers["x-github-event"][0] : request.headers["x-github-event"];
+      try {
+        if (event === "pull_request" && payload?.pull_request?.number) enqueue({ installationId: positive(payload?.installation?.id, "installation"), repositoryId: positive(payload?.repository?.id, "repository"), repository: exactRepo(payload?.repository?.full_name), pr: positive(payload.pull_request.number, "PR") });
+        else if (event === "issues" && payload?.action === "edited") void repositoryTargets(config, positive(payload?.installation?.id, "installation"), positive(payload?.repository?.id, "repository"), exactRepo(payload?.repository?.full_name)).then((targets) => targets.forEach(enqueue)).catch((error) => console.error(error.message));
+        else if (event === "installation" || event === "installation_repositories") void reconcileAll();
+      } catch (error) { console.error(`trusted-service webhook: ${(error as Error).message}`); }
+      response.writeHead(202).end();
+    });
+  });
+  server.listen(config.port, config.host); setInterval(() => void reconcileAll(), config.interval).unref(); await reconcileAll();
+  console.log(`repo-guard trusted-service ${config.host}:${config.port}; gate=${AUTHORITY_CONTEXT}; evaluator=${config.evaluator}`);
+  return await new Promise((resolveResult) => { const stop = () => server.close(() => resolveResult(0)); process.once("SIGINT", stop); process.once("SIGTERM", stop); });
+}
