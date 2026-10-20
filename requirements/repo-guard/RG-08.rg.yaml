@@ -10,7 +10,7 @@ relations:
     target:
       kind: artifact
       path: "dist/local-compiler.mjs"
-  - predicates: [implemented_by]
+  - predicates: [verified_by]
     target:
       kind: artifact
       path: "tests/test-786-local-compiler.mjs"
