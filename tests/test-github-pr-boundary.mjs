@@ -775,3 +775,82 @@ it("#756 accepted ProtectedResource source is exact BASE-bound, not candidate HE
   assert.deepEqual(result.protectedResources, []);
   assert.ok(result.reasons.includes("A2:provider_workflow_source_not_exact_base"));
 });
+
+
+describe("#767 central GitHub App service provider boundary", () => {
+  const serviceInput = (overrides = {}) => {
+    const base = "a".repeat(40), head = "b".repeat(40);
+    return {
+      bundlePath: "",
+      eventName: "repo_guard_service",
+      repository: "external/consumer",
+      authorityProvider: {
+        format: "repo-guard/github-app-authority-v1",
+        appId: "1234",
+        installationId: 5678,
+        repositoryId: 9012,
+        evaluatorSha: "c".repeat(40),
+      },
+      event: {
+        repository: { id: 9012, full_name: "external/consumer" },
+        pull_request: { base: { sha: base }, head: { sha: head } },
+      },
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      ...overrides,
+    };
+  };
+
+  it("accepts exact central service TRUST without a consumer workflow or repository secret", () => {
+    const result = loadAuthenticatedProviderBundle(serviceInput());
+    assert.equal(result.ok, true, result.reasons.join(" | "));
+    assert.equal(result.trustPresent, true);
+    assert.deepEqual(result.protectedResources, []);
+    assert.equal(result.trust.source, "github-app-service");
+    assert.equal(result.provider.principal, "github-app:1234:installation:5678:repository:9012");
+    assert.equal(result.provider.producerSource, "repo-guard-service:" + "c".repeat(40));
+  });
+
+  it("fails closed for malformed service identity or stale transition identity", () => {
+    const malformed = loadAuthenticatedProviderBundle(serviceInput({
+      authorityProvider: {
+        format: "repo-guard/github-app-authority-v1",
+        appId: "candidate",
+        installationId: 5678,
+        repositoryId: 9012,
+        evaluatorSha: "c".repeat(40),
+      },
+    }));
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.trustPresent, false);
+    assert.ok(malformed.reasons.some((reason) => reason.startsWith("A2:provider_service_authority_invalid:")));
+
+
+    const wrongRepository = loadAuthenticatedProviderBundle(serviceInput({
+      event: {
+        repository: { id: 9999, full_name: "external/consumer" },
+        pull_request: { base: { sha: "a".repeat(40) }, head: { sha: "b".repeat(40) } },
+      },
+    }));
+    assert.equal(wrongRepository.ok, false);
+    assert.equal(wrongRepository.trustPresent, false);
+    assert.ok(wrongRepository.reasons.some((reason) => reason.includes("repositoryId does not match")));
+
+    const stale = loadAuthenticatedProviderBundle(serviceInput({
+      authorityBaseRevision: "d".repeat(40),
+    }));
+    assert.equal(stale.ok, false);
+    assert.equal(stale.trustPresent, false);
+    assert.ok(stale.reasons.includes("A2:provider_transition_mismatch"));
+  });
+
+  it("does not treat candidate pull_request execution as central service TRUST", () => {
+    const candidate = loadAuthenticatedProviderBundle(serviceInput({
+      eventName: "pull_request",
+    }));
+    assert.equal(candidate.ok, true);
+    assert.equal(candidate.trustPresent, false);
+    assert.deepEqual(candidate.protectedResources, []);
+  });
+});
