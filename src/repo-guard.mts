@@ -2,7 +2,7 @@
 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, createHmac, createSign, timingSafeEqual } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
@@ -75,6 +75,8 @@ export interface AuthorityDependencies {
 
 const AUTHORITY_CONTEXT = "trusted-enforcement";
 const AUTHORITY_FORMAT = "repo-guard/github-app-authority-v1";
+const SERVICE_GIT_TIMEOUT_MS = 30_000;
+const SERVICE_EVALUATOR_TIMEOUT_MS = 120_000;
 const SHA40 = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const positive = (value: unknown, label: string) => {
@@ -91,9 +93,15 @@ export function sameAuthorityEvaluationKey(a?: AuthorityEvaluationKey | null, b?
   return Boolean(a && b && JSON.stringify(a) === JSON.stringify(b));
 }
 export async function reconcileAuthorityTarget(target: AuthorityTarget, deps: AuthorityDependencies): Promise<"inactive" | "skipped" | "pending" | "success" | "failure"> {
+  const preservePending = async (observed: { active: boolean; key: AuthorityEvaluationKey }) => {
+    const previous = deps.get(target);
+    if (previous?.state === "pending" && sameAuthorityEvaluationKey(previous.key, observed.key)) return;
+    await deps.publish(target, observed.key.head, "pending");
+    deps.put({ key: observed.key, state: "pending" });
+  };
   for (let attempt = 0; attempt < 3; attempt++) {
     const before = await deps.observe(target);
-    if (!before.active) { deps.remove(target); return "inactive"; }
+    if (!before.active) { await preservePending(before); return "inactive"; }
     const previous = deps.get(target);
     if (previous && previous.state !== "pending" && sameAuthorityEvaluationKey(previous.key, before.key)) return "skipped";
     const alreadyPending = previous?.state === "pending" && sameAuthorityEvaluationKey(previous.key, before.key);
@@ -105,7 +113,7 @@ export async function reconcileAuthorityTarget(target: AuthorityTarget, deps: Au
     try { result = await deps.evaluate(target, before.key); }
     catch { return "pending"; }
     const after = await deps.observe(target);
-    if (!after.active) { deps.remove(target); return "inactive"; }
+    if (!after.active) { await preservePending(after); return "inactive"; }
     if (!sameAuthorityEvaluationKey(before.key, after.key)) {
       await deps.publish(target, after.key.head, "pending");
       deps.put({ key: after.key, state: "pending" });
@@ -163,9 +171,9 @@ function loadAuthorityConfig(packageRoot: string): AuthorityConfig {
   const key = process.env.RG_GITHUB_APP_PRIVATE_KEY || (keyPath ? readFileSync(keyPath, "utf8") : "");
   if (!key) throw new Error("RG_GITHUB_APP_PRIVATE_KEY or RG_GITHUB_APP_PRIVATE_KEY_FILE is required");
   const evaluatorRoot = resolve(process.env.RG_EVALUATOR_ROOT || packageRoot);
-  const actual = execFileSync("git", ["-C", evaluatorRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const actual = execFileSync("git", ["-C", evaluatorRoot, "rev-parse", "HEAD"], { encoding: "utf8", timeout: SERVICE_GIT_TIMEOUT_MS }).trim();
   if (actual !== evaluator) throw new Error(`evaluator checkout ${actual} != ${evaluator}`);
-  if (execFileSync("git", ["-C", evaluatorRoot, "status", "--porcelain=v1", "--untracked-files=no"], { encoding: "utf8" }).trim()) throw new Error("evaluator checkout has tracked modifications");
+  if (execFileSync("git", ["-C", evaluatorRoot, "status", "--porcelain=v1", "--untracked-files=no"], { encoding: "utf8", timeout: SERVICE_GIT_TIMEOUT_MS }).trim()) throw new Error("evaluator checkout has tracked modifications");
   const port = Number(process.env.RG_SERVICE_PORT || "8787"), interval = Number(process.env.RG_RECONCILE_MS || "60000");
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535 || !Number.isSafeInteger(interval) || interval < 1000) throw new Error("invalid service port/reconcile interval");
   return { appId, key, webhookSecret, evaluator, evaluatorRoot, state: resolve(process.env.RG_SERVICE_STATE_PATH || ".repo-guard-service-state.json"), work: resolve(process.env.RG_SERVICE_WORKSPACE_ROOT || tmpdir()), api: (process.env.RG_GITHUB_API_BASE || "https://api.github.com").replace(/\/$/, ""), host: process.env.RG_SERVICE_HOST || "0.0.0.0", port, interval };
@@ -202,20 +210,89 @@ async function publishAuthority(config: AuthorityConfig, target: AuthorityTarget
   const token = await installationToken(config, target.installationId, target.repositoryId, true);
   await api(config, `/repos/${target.repository}/statuses/${exactSha(head, "status HEAD")}`, token, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ state, context: AUTHORITY_CONTEXT, description: state === "pending" ? "repo-guard reevaluation required" : state === "success" ? "repo-guard approved this exact transition" : "repo-guard rejected this exact transition" }) });
 }
+export function serviceEvaluatorEnvironment(
+  baseEnv: NodeJS.ProcessEnv,
+  token: string,
+  target: AuthorityTarget,
+  config: { appId: string; evaluator: string },
+  eventPath: string,
+  runner: string,
+): NodeJS.ProcessEnv {
+  return {
+    ...baseEnv,
+    GH_TOKEN: token,
+    GITHUB_REPOSITORY: target.repository,
+    GITHUB_EVENT_NAME: "repo_guard_service",
+    GITHUB_WORKFLOW_REF: "",
+    GITHUB_WORKFLOW_SHA: "",
+    RG_EVENT_PATH: eventPath,
+    RUNNER_TEMP: runner,
+    RG_AUTHENTICATED_PROVIDER_BUNDLE: "",
+    RG_SERVICE_REPOSITORY_ID: String(target.repositoryId),
+    RG_AUTHORITY_PROVIDER: JSON.stringify({
+      format: AUTHORITY_FORMAT,
+      appId: config.appId,
+      installationId: target.installationId,
+      repositoryId: target.repositoryId,
+      evaluatorSha: config.evaluator,
+    }),
+  };
+}
+
+export async function runBoundedChild(
+  command: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv },
+  timeoutMs: number,
+): Promise<{ status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error("child timeout must be a positive integer");
+  return await new Promise((resolveChild, rejectChild) => {
+    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "", settled = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const finishError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectChild(error);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGKILL");
+      finishError(new Error(`child process timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.once("error", (error) => finishError(error));
+    child.once("close", (status, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveChild({ status, signal, stdout, stderr });
+    });
+  });
+}
+
 async function evaluateAuthority(config: AuthorityConfig, target: AuthorityTarget, key: AuthorityEvaluationKey): Promise<"success" | "failure"> {
   mkdirSync(config.work, { recursive: true }); const root = mkdtempSync(join(config.work, "rg-service-")), runner = mkdtempSync(join(config.work, "rg-runner-"));
   const token = await installationToken(config, target.installationId, target.repositoryId), env = gitEnv(token);
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: "pipe" }).trim();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: "pipe", timeout: SERVICE_GIT_TIMEOUT_MS }).trim();
   try {
     const pr = await api(config, `/repos/${target.repository}/pulls/${target.pr}`, token), baseRef = String(pr?.base?.ref || "");
-    execFileSync("git", ["check-ref-format", "--branch", baseRef], { stdio: "pipe" });
+    execFileSync("git", ["check-ref-format", "--branch", baseRef], { stdio: "pipe", timeout: SERVICE_GIT_TIMEOUT_MS });
     git("init", "-q"); git("remote", "add", "origin", `https://github.com/${target.repository}.git`);
     git("fetch", "--no-tags", "--prune", "origin", `+refs/heads/${baseRef}:refs/remotes/origin/${baseRef}`, `+refs/pull/${target.pr}/head:refs/remotes/pull/${target.pr}/head`, `+refs/pull/${target.pr}/merge:refs/remotes/pull/${target.pr}/merge`);
     const merge = git("rev-parse", `refs/remotes/pull/${target.pr}/merge`);
     if (git("rev-parse", `refs/remotes/origin/${baseRef}`) !== key.base || git("rev-parse", `refs/remotes/pull/${target.pr}/head`) !== key.head || git("rev-parse", `${merge}^1`) !== key.base || git("rev-parse", `${merge}^2`) !== key.head) throw new Error("fetched transition changed");
     git("checkout", "-q", "--detach", key.base);
     const eventPath = join(runner, "event.json"); writeFileSync(eventPath, JSON.stringify({ pull_request: { number: target.pr, base: { sha: key.base, ref: baseRef }, head: { sha: key.head }, body: pr?.body ?? "" }, repository: { full_name: target.repository } }));
-    const execution = spawnSync(process.execPath, [resolve(config.evaluatorRoot, "dist/repo-guard.mjs"), "--repo-root", root, "--enforcement", "blocking", "check-pr", "--format", "json"], { cwd: root, encoding: "utf8", env: { ...env, GH_TOKEN: token, GITHUB_REPOSITORY: target.repository, GITHUB_EVENT_NAME: "repo_guard_service", GITHUB_WORKFLOW_REF: "", GITHUB_WORKFLOW_SHA: "", RG_EVENT_PATH: eventPath, RUNNER_TEMP: runner, RG_AUTHENTICATED_PROVIDER_BUNDLE: "", RG_AUTHORITY_PROVIDER: JSON.stringify({ format: AUTHORITY_FORMAT, appId: config.appId, installationId: target.installationId, repositoryId: target.repositoryId, evaluatorSha: config.evaluator }) } });
+    const execution = await runBoundedChild(
+      process.execPath,
+      [resolve(config.evaluatorRoot, "dist/repo-guard.mjs"), "--repo-root", root, "--enforcement", "blocking", "check-pr", "--format", "json"],
+      { cwd: root, env: serviceEvaluatorEnvironment(env, token, target, config, eventPath, runner) },
+      SERVICE_EVALUATOR_TIMEOUT_MS,
+    );
     let report: any = null; try { report = JSON.parse(execution.stdout || ""); } catch {}
     if (!report || !Number.isInteger(report.exitCode) || report.result === "error")
       throw new Error("native evaluator did not produce a policy verdict");
