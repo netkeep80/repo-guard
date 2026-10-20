@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   COMMANDS,
   reconcileAuthorityTarget,
+  runBoundedChild,
   runCli,
   sameAuthorityEvaluationKey,
   verifyAuthorityWebhook,
@@ -53,6 +54,16 @@ assert.match(
   trustedServiceSource,
   /repositoryTargets\(config, installationId, repositoryId, repository, linkedIssue\)/,
   "issue refresh must remain repository/linked-issue scoped",
+);
+assert.doesNotMatch(
+  trustedServiceSource,
+  /spawnSync\(/,
+  "trusted-service evaluator must not synchronously block the webhook event loop",
+);
+assert.match(
+  trustedServiceSource,
+  /timeout: SERVICE_GIT_TIMEOUT_MS/,
+  "synchronous Git operations in trusted-service must have a hard deadline",
 );
 
 const sha = (char) => char.repeat(40);
@@ -166,6 +177,60 @@ const inMemoryDeps = ({ observed, evaluation = "success", publications = [], eva
   assert.equal(await reconcileAuthorityTarget(second, deps), "success");
   assert.deepEqual(publications.map((entry) => entry[1]), ["pending", "success", "pending", "success"]);
   assert.equal(records.size, 2, "one service runtime must keep independent state for multiple repositories");
+}
+
+
+{
+  const publications = [], records = new Map();
+  let phase = "active-old";
+  let removeCalls = 0;
+  const oldKey = key(), refreshedKey = key({ authorityDigest: sha("e") });
+  const deps = {
+    observe: async () => ({
+      active: phase !== "inactive",
+      key: phase === "active-old" ? oldKey : refreshedKey,
+    }),
+    publish: async (_target, _head, state) => publications.push([phase, state]),
+    evaluate: async () => "success",
+    get: (current) => records.get([current.installationId, current.repositoryId, current.pr].join(":")) ?? null,
+    put: (record) => records.set(keyId(record.key), record),
+    remove: () => { removeCalls += 1; },
+  };
+  assert.equal(await reconcileAuthorityTarget(target, deps), "success");
+  phase = "inactive";
+  assert.equal(await reconcileAuthorityTarget(target, deps), "inactive");
+  assert.equal(removeCalls, 0, "inactive PR must stay durably known for bounded recovery");
+  assert.equal(records.get(keyId(refreshedKey)).state, "pending");
+  assert.deepEqual(publications.map((entry) => entry[1]), ["pending", "success", "pending"],
+    "closing/drafting a previously GREEN PR must invalidate the old HEAD before dormancy");
+
+  phase = "active-new";
+  assert.equal(await reconcileAuthorityTarget(target, deps), "success",
+    "periodic recovery must reevaluate a reopened PR even if its reopen webhook was lost");
+  assert.deepEqual(publications.map((entry) => entry[1]), ["pending", "success", "pending", "success"]);
+}
+
+{
+  const started = Date.now();
+  const stalled = runBoundedChild(
+    process.execPath,
+    ["-e", "setTimeout(() => {}, 10_000)"],
+    { cwd: process.cwd(), env: { ...process.env } },
+    150,
+  );
+  const fast = runBoundedChild(
+    process.execPath,
+    ["-e", "process.stdout.write('fast')"],
+    { cwd: process.cwd(), env: { ...process.env } },
+    2_000,
+  );
+  const [stalledResult, fastResult] = await Promise.allSettled([stalled, fast]);
+  assert.equal(fastResult.status, "fulfilled");
+  assert.equal(fastResult.value.stdout, "fast");
+  assert.equal(stalledResult.status, "rejected");
+  assert.match(String(stalledResult.reason?.message ?? stalledResult.reason), /timed out/);
+  assert.ok(Date.now() - started < 2_000,
+    "one stalled evaluator child must not indefinitely block another target");
 }
 
 console.log("Declarative CLI and V3 D0-A authority-service contracts passed.");
