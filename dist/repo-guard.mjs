@@ -236,4 +236,75 @@ async function evaluateAuthority(config, target, key) {
         execFileSync("git", ["check-ref-format", "--branch", baseRef], { stdio: "pipe" });
         git("init", "-q");
         git("remote", "add", "origin", `https://github.com/${target.repository}.git`);
-        git("fetch", "--no-tags", "--prune", "origin", `+refs/he
+        git("fetch", "--no-tags", "--prune", "origin", `+refs/heads/${baseRef}:refs/remotes/origin/${baseRef}`, `+refs/pull/${target.pr}/head:refs/remotes/pull/${target.pr}/head`, `+refs/pull/${target.pr}/merge:refs/remotes/pull/${target.pr}/merge`);
+        const merge = git("rev-parse", `refs/remotes/pull/${target.pr}/merge`);
+        if (git("rev-parse", `refs/remotes/origin/${baseRef}`) !== key.base || git("rev-parse", `refs/remotes/pull/${target.pr}/head`) !== key.head || git("rev-parse", `${merge}^1`) !== key.base || git("rev-parse", `${merge}^2`) !== key.head)
+            throw new Error("fetched transition changed");
+        git("checkout", "-q", "--detach", key.base);
+        const eventPath = join(runner, "event.json");
+        writeFileSync(eventPath, JSON.stringify({ pull_request: { number: target.pr, base: { sha: key.base, ref: baseRef }, head: { sha: key.head }, body: pr?.body ?? "" }, repository: { full_name: target.repository } }));
+        const execution = spawnSync(process.execPath, [resolve(config.evaluatorRoot, "dist/repo-guard.mjs"), "--repo-root", root, "--enforcement", "blocking", "check-pr", "--format", "json"], { cwd: root, encoding: "utf8", env: { ...env, GH_TOKEN: token, GITHUB_REPOSITORY: target.repository, GITHUB_EVENT_NAME: "repo_guard_service", RG_EVENT_PATH: eventPath, RUNNER_TEMP: runner, RG_AUTHORITY_PROVIDER: JSON.stringify({ format: AUTHORITY_FORMAT, appId: config.appId, installationId: target.installationId, repositoryId: target.repositoryId, evaluatorSha: config.evaluator }) } });
+        let report = null;
+        try {
+            report = JSON.parse(execution.stdout || "");
+        }
+        catch { }
+        return execution.status === 0 && report?.exitCode === 0 && ["passed", "passed_with_warnings"].includes(report?.result) ? "success" : "failure";
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+        rmSync(runner, { recursive: true, force: true });
+    }
+}
+async function page(config, path, token, extract) {
+    const values = [];
+    for (let n = 1; n <= 10; n++) {
+        const part = extract(await api(config, `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${n}`, token));
+        values.push(...part);
+        if (part.length < 100)
+            break;
+    }
+    return values;
+}
+async function repositoryTargets(config, installationId, repositoryId, repository) {
+    const token = await installationToken(config, installationId, repositoryId);
+    const pulls = await page(config, `/repos/${repository}/pulls?state=open`, token, (value) => Array.isArray(value) ? value : []);
+    return pulls.filter((pr) => pr?.draft !== true && pr?.base?.repo?.id === repositoryId && pr?.base?.repo?.full_name === repository && pr?.base?.ref === pr?.base?.repo?.default_branch).map((pr) => ({ installationId, repositoryId, repository, pr: positive(pr.number, "PR") }));
+}
+async function discoverAuthorityTargets(config) {
+    const installations = await page(config, "/app/installations", appJwt(config), (value) => Array.isArray(value) ? value : []), targets = [];
+    for (const installation of installations) {
+        const installationId = positive(installation?.id, "installation");
+        const token = await installationToken(config, installationId);
+        const repositories = await page(config, "/installation/repositories", token, (value) => Array.isArray(value?.repositories) ? value.repositories : []);
+        for (const repository of repositories)
+            targets.push(...await repositoryTargets(config, installationId, positive(repository.id, "repository"), exactRepo(repository.full_name)));
+    }
+    return targets;
+}
+export async function runTrustedService(roots, args = []) {
+    if (args.length)
+        throw new Error("trusted-service accepts no arguments");
+    const config = loadAuthorityConfig(roots.packageRoot), state = fileState(config.state), queues = new Map();
+    const deps = { observe: (target) => observeAuthority(config, target), publish: (target, head, status) => publishAuthority(config, target, head, status), evaluate: (target, key) => evaluateAuthority(config, target, key), get: state.get, put: state.put, remove: state.remove };
+    const enqueue = (target) => { const id = targetId(target), prior = queues.get(id) ?? Promise.resolve(); const next = prior.catch(() => undefined).then(() => reconcileAuthorityTarget(target, deps)).then(() => undefined).catch((error) => console.error(`trusted-service ${id}: ${error.message}`)).finally(() => { if (queues.get(id) === next)
+        queues.delete(id); }); queues.set(id, next); };
+    const reconcileAll = async () => { try {
+        for (const target of await discoverAuthorityTargets(config))
+            enqueue(target);
+    }
+    catch (error) {
+        console.error(`trusted-service reconcile: ${error.message}`);
+    } };
+    const server = createServer((request, response) => {
+        if (request.method === "GET" && request.url === "/healthz") {
+            response.writeHead(200).end("ok\n");
+            return;
+        }
+        if (request.method !== "POST" || request.url !== "/webhook") {
+            response.writeHead(404).end();
+            return;
+        }
+        const chunks = [];
+        let size = 0;
+        request.on("data", (chunk) => { size += chunk.length; if (size > 1
