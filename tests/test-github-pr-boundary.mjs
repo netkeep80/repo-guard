@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadAuthenticatedProviderBundle, loadGitHubEvent } from "../dist/github-pr.mjs";
+import { serviceEvaluatorEnvironment } from "../dist/repo-guard.mjs";
 
 const providerTransition = (repository, authorityBaseRevision, baseRevision, headRevision) => ({
   repository, authorityBaseRevision, baseRevision, headRevision,
@@ -774,4 +775,164 @@ it("#756 accepted ProtectedResource source is exact BASE-bound, not candidate HE
   assert.equal(result.trustPresent, false);
   assert.deepEqual(result.protectedResources, []);
   assert.ok(result.reasons.includes("A2:provider_workflow_source_not_exact_base"));
+});
+
+
+describe("#767 central GitHub App service provider boundary", () => {
+  const serviceInput = (overrides = {}) => {
+    const base = "a".repeat(40), head = "b".repeat(40);
+    return {
+      bundlePath: "",
+      eventName: "repo_guard_service",
+      repository: "external/consumer",
+      authorityProvider: {
+        format: "repo-guard/github-app-authority-v1",
+        appId: "1234",
+        installationId: 5678,
+        repositoryId: 9012,
+        evaluatorSha: "c".repeat(40),
+      },
+      event: {
+        repository: { id: 9012, full_name: "external/consumer" },
+        pull_request: { base: { sha: base }, head: { sha: head } },
+      },
+      authorityBaseRevision: base,
+      baseRevision: base,
+      headRevision: head,
+      ...overrides,
+    };
+  };
+
+  it("accepts exact central service TRUST without a consumer workflow or repository secret", () => {
+    const result = loadAuthenticatedProviderBundle(serviceInput());
+    assert.equal(result.ok, true, result.reasons.join(" | "));
+    assert.equal(result.trustPresent, true);
+    assert.deepEqual(result.protectedResources, []);
+    assert.equal(result.trust.source, "github-app-service");
+    assert.equal(result.provider.principal, "github-app:1234:installation:5678:repository:9012");
+    assert.equal(result.provider.producerSource, "repo-guard-service:" + "c".repeat(40));
+  });
+
+  it("fails closed for malformed service identity or stale transition identity", () => {
+    const malformed = loadAuthenticatedProviderBundle(serviceInput({
+      authorityProvider: {
+        format: "repo-guard/github-app-authority-v1",
+        appId: "candidate",
+        installationId: 5678,
+        repositoryId: 9012,
+        evaluatorSha: "c".repeat(40),
+      },
+    }));
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.trustPresent, false);
+    assert.ok(malformed.reasons.some((reason) => reason.startsWith("A2:provider_service_authority_invalid:")));
+
+
+    const wrongRepository = loadAuthenticatedProviderBundle(serviceInput({
+      event: {
+        repository: { id: 9999, full_name: "external/consumer" },
+        pull_request: { base: { sha: "a".repeat(40) }, head: { sha: "b".repeat(40) } },
+      },
+    }));
+    assert.equal(wrongRepository.ok, false);
+    assert.equal(wrongRepository.trustPresent, false);
+    assert.ok(wrongRepository.reasons.some((reason) => reason.includes("repositoryId does not match")));
+
+    const stale = loadAuthenticatedProviderBundle(serviceInput({
+      authorityBaseRevision: "d".repeat(40),
+    }));
+    assert.equal(stale.ok, false);
+    assert.equal(stale.trustPresent, false);
+    assert.ok(stale.reasons.includes("A2:provider_transition_mismatch"));
+  });
+
+  it("does not treat candidate pull_request execution as central service TRUST", () => {
+    const candidate = loadAuthenticatedProviderBundle(serviceInput({
+      eventName: "pull_request",
+    }));
+    assert.equal(candidate.ok, true);
+    assert.equal(candidate.trustPresent, false);
+    assert.deepEqual(candidate.protectedResources, []);
+  });
+
+  it("propagates observed repository identity through service environment into real native check-pr", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-767-service-e2e-"));
+    const runner = mkdtempSync(join(tmpdir(), "repo-guard-767-service-runner-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" }).trim();
+    const cli = fileURLToPath(new URL("../dist/repo-guard.mjs", import.meta.url));
+    mkdirSync(join(root, "requirements"), { recursive: true });
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "requirements", "APP-01.rg.yaml"), [
+      "format: repo-guard/requirement-v1",
+      "id: APP-01",
+      'normative: "Application source is governed."',
+      "relations:",
+      "  - predicates: [implemented_by]",
+      "    target:",
+      "      kind: artifact",
+      '      path: "src/a.txt"',
+      "",
+    ].join("\n"));
+    writeFileSync(join(root, "src", "a.txt"), "base\n");
+    try {
+      git("init", "-b", "main");
+      git("config", "user.email", "test@example.com");
+      git("config", "user.name", "Test");
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+      git("remote", "add", "origin", root);
+      git("checkout", "-q", "-b", "candidate");
+      writeFileSync(join(root, "src", "a.txt"), "head\n");
+      git("add", "src/a.txt");
+      git("commit", "-q", "-m", "candidate");
+      const head = git("rev-parse", "HEAD");
+      const body = [
+        "```repo-guard-yaml",
+        "change_type: bugfix",
+        "scope:",
+        "  - src/a.txt",
+        "budgets: {}",
+        "anchors:",
+        "  affects: [APP-01]",
+        "  implements: []",
+        "  verifies: []",
+        "must_touch: []",
+        "must_not_touch: []",
+        "expected_effects:",
+        "  - Exercise service to native evaluator identity propagation",
+        "```",
+      ].join("\n");
+      const eventPath = join(runner, "event.json");
+      writeFileSync(eventPath, JSON.stringify({
+        pull_request: { number: 7, base: { sha: base, ref: "main" }, head: { sha: head }, body },
+        repository: { id: 9012, full_name: "arbitrary/service-consumer" },
+      }));
+
+      const parentEnv = { ...process.env };
+      delete parentEnv.RG_SERVICE_REPOSITORY_ID;
+      const env = serviceEvaluatorEnvironment(
+        parentEnv,
+        parentEnv.GH_TOKEN || "",
+        { installationId: 5678, repositoryId: 9012, repository: "arbitrary/service-consumer", pr: 7 },
+        { appId: "1234", evaluator: "c".repeat(40) },
+        eventPath,
+        runner,
+      );
+      assert.equal(parentEnv.RG_SERVICE_REPOSITORY_ID, undefined);
+      assert.equal(env.RG_SERVICE_REPOSITORY_ID, "9012");
+
+      const result = spawnSync(process.execPath, [
+        cli, "--repo-root", root, "--enforcement", "blocking", "check-pr", "--format", "json",
+      ], { cwd: root, env, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stdout, /authenticated-provider-boundary/);
+      assert.match(result.stdout, /github-app-service/);
+      assert.match(result.stdout, /"result"\s*:\s*"passed(?:_with_warnings)?"/);
+      assert.doesNotMatch(result.stdout + result.stderr, /repositoryId does not match the observed repository/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(runner, { recursive: true, force: true });
+    }
+  });
 });
