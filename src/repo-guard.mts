@@ -143,4 +143,53 @@ async function api(config: AuthorityConfig, path: string, token: string, init: R
 async function installationToken(config: AuthorityConfig, installationId: number, repositoryId?: number, write = false) {
   const body: any = { permissions: { contents: "read", pull_requests: "read", issues: "read", ...(write ? { statuses: "write" } : {}) } };
   if (repositoryId) body.repository_ids = [repositoryId];
-  const result = await a
+  const result = await api(config, `/app/installations/${installationId}/access_tokens`, appJwt(config), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (typeof result?.token !== "string") throw new Error("installation token missing");
+  return result.token;
+}
+const gitEnv = (token: string): NodeJS.ProcessEnv => ({ ...process.env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`, GIT_TERMINAL_PROMPT: "0" });
+
+function loadAuthorityConfig(packageRoot: string): AuthorityConfig {
+  const need = (name: string) => { const v = process.env[name]?.trim(); if (!v) throw new Error(`${name} is required`); return v; };
+  const appId = need("RG_GITHUB_APP_ID"), webhookSecret = need("RG_GITHUB_WEBHOOK_SECRET"), evaluator = exactSha(need("RG_EVALUATOR_SHA"), "RG_EVALUATOR_SHA");
+  const keyPath = process.env.RG_GITHUB_APP_PRIVATE_KEY_FILE?.trim();
+  const key = process.env.RG_GITHUB_APP_PRIVATE_KEY || (keyPath ? readFileSync(keyPath, "utf8") : "");
+  if (!key) throw new Error("RG_GITHUB_APP_PRIVATE_KEY or RG_GITHUB_APP_PRIVATE_KEY_FILE is required");
+  const evaluatorRoot = resolve(process.env.RG_EVALUATOR_ROOT || packageRoot);
+  const actual = execFileSync("git", ["-C", evaluatorRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (actual !== evaluator) throw new Error(`evaluator checkout ${actual} != ${evaluator}`);
+  if (execFileSync("git", ["-C", evaluatorRoot, "status", "--porcelain=v1", "--untracked-files=no"], { encoding: "utf8" }).trim()) throw new Error("evaluator checkout has tracked modifications");
+  const port = Number(process.env.RG_SERVICE_PORT || "8787"), interval = Number(process.env.RG_RECONCILE_MS || "60000");
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535 || !Number.isSafeInteger(interval) || interval < 1000) throw new Error("invalid service port/reconcile interval");
+  return { appId, key, webhookSecret, evaluator, evaluatorRoot, state: resolve(process.env.RG_SERVICE_STATE_PATH || ".repo-guard-service-state.json"), work: resolve(process.env.RG_SERVICE_WORKSPACE_ROOT || tmpdir()), api: (process.env.RG_GITHUB_API_BASE || "https://api.github.com").replace(/\/$/, ""), host: process.env.RG_SERVICE_HOST || "0.0.0.0", port, interval };
+}
+function fileState(path: string) {
+  type State = { format: "repo-guard/authority-state-v1"; records: Record<string, AuthorityRecord> };
+  const read = (): State => existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : { format: "repo-guard/authority-state-v1", records: {} };
+  const write = (state: State) => { mkdirSync(dirname(path), { recursive: true }); const temp = `${path}.${process.pid}.tmp`; writeFileSync(temp, JSON.stringify(state) + "\n", { mode: 0o600 }); chmodSync(temp, 0o600); renameSync(temp, path); };
+  return {
+    get(target: AuthorityTarget) { return read().records[targetId(target)] ?? null; },
+    put(record: AuthorityRecord) { const state = read(); state.records[targetId(record.key)] = record; write(state); },
+    remove(target: AuthorityTarget) { const state = read(); delete state.records[targetId(target)]; write(state); },
+    list() { return Object.values(read().records); },
+  };
+}
+async function observeAuthority(config: AuthorityConfig, target: AuthorityTarget) {
+  const token = await installationToken(config, target.installationId, target.repositoryId);
+  const pr = await api(config, `/repos/${target.repository}/pulls/${target.pr}`, token);
+  if (positive(pr?.base?.repo?.id, "repository id") !== target.repositoryId || exactRepo(pr?.base?.repo?.full_name) !== target.repository) throw new Error("repository identity mismatch");
+  const body = typeof pr?.body === "string" ? pr.body : "";
+  const issues = [];
+  const refs = extractLinkedIssueReferences(body, target.repository).filter((ref) => ref.repository.toLowerCase() === target.repository.toLowerCase());
+  for (const ref of refs.length === 1 ? refs : []) {
+    const issue = await api(config, `/repos/${target.repository}/issues/${ref.number}`, token);
+    const login = typeof issue?.user?.login === "string" ? issue.user.login : null;
+    let permission = null;
+    if (login && issue?.user?.type !== "Bot") try { permission = (await api(config, `/repos/${target.repository}/collaborators/${encodeURIComponent(login)}/permission`, token))?.permission ?? null; } catch {}
+    issues.push({ number: ref.number, body: issue?.body ?? "", login, type: issue?.user?.type ?? null, association: issue?.author_association ?? null, permission });
+  }
+  const base = exactSha(pr?.base?.sha, "BASE"), head = exactSha(pr?.head?.sha, "HEAD");
+  return { active: pr?.state === "open" && pr?.draft !== true && pr?.base?.ref === pr?.base?.repo?.default_branch, key: { installationId: target.installationId, repositoryId: target.repositoryId, repository: target.repository, pr: target.pr, base, head, evaluator: config.evaluator, authorityDigest: createHash("sha256").update(JSON.stringify({ body, issues })).digest("hex") } };
+}
+async function publishAuthority(config: AuthorityConfig, target: AuthorityTarget, head: string, state: "pending" | "success" | "failure") {
+  const token = await 
