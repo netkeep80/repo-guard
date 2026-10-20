@@ -76,7 +76,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       });
     }
     for (const relation of requirement.relations) {
-      if (relation.target.kind === "requirement" && !(relation.target.id in native.index))
+      if (relation.target.kind === "requirement" && !Object.hasOwn(native.index, relation.target.id))
         diagnostics.push({ code: "missing_requirement_target", subject: requirement.id, detail: relation.target.id });
     }
   }
@@ -109,7 +109,9 @@ export function runLocalCheck(roots: { repoRoot: string }, args: string[]): numb
   if (!base || !head) throw new Error("check requires --base and --head");
   const format = option("--format") || "text";
   if (!["text", "json", "summary"].includes(format)) throw new Error("unsupported check format");
-  const remote = runGit(["config", "--get", "remote.origin.url"], { cwd: roots.repoRoot }).trim();
+  let remote = "";
+  try { remote = runGit(["config", "--get", "remote.origin.url"], { cwd: roots.repoRoot }).trim(); }
+  catch { /* A local Git repository does not need a remote. */ }
   const match = remote.match(/(?:github\.com[:/])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
   const repository = match?.[1] || "local/repository";
   const report = evaluateLocalCompiler({ root: roots.repoRoot, repository, base, head });
