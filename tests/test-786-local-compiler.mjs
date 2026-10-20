@@ -22,7 +22,8 @@ ${parent ? `  - predicates: [derives_from]
       kind: artifact
       path: "${target}"
 ` : ""}`;
-const evaluate = (base, head) => evaluateLocalCompiler({ root, repository: "fixture/c1", base, head });\nconst coreReq = ({ maxResources, maxLines, evidence = false, verifierRelation = true } = {}) => {
+const evaluate = (base, head) => evaluateLocalCompiler({ root, repository: "fixture/c1", base, head });
+const coreReq = ({ maxResources, maxLines, evidence = false, verifierRelation = true } = {}) => {
   let text = req("CORE", "src/a.txt");
   if (evidence && verifierRelation) text += `  - predicates: [verified_by]
     target:
