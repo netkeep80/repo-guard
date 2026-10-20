@@ -117,11 +117,13 @@ export async function reconcileAuthorityTarget(target, deps) {
             await deps.publish(target, before.key.head, "pending");
             deps.put({ key: before.key, state: "pending" });
         }
-        let result = "failure";
+        let result;
         try {
             result = await deps.evaluate(target, before.key);
         }
-        catch { }
+        catch {
+            return "pending";
+        }
         const after = await deps.observe(target);
         if (!after.active) {
             deps.remove(target);
@@ -155,7 +157,7 @@ const appJwt = (config) => {
     return `${unsigned}.${signer.sign(config.key).toString("base64url")}`;
 };
 async function api(config, path, token, init = {}) {
-    const response = await fetch(config.api + path, { ...init, headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28", ...(init.headers || {}) } });
+    const response = await fetch(config.api + path, { ...init, headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28", ...(init.headers || {}) }, signal: AbortSignal.timeout(30000) });
     const text = await response.text();
     if (!response.ok)
         throw new Error(`GitHub API ${response.status} ${path}: ${text.slice(0, 300)}`);
@@ -197,7 +199,7 @@ function fileState(path) {
         get(target) { return read().records[targetId(target)] ?? null; },
         put(record) { const state = read(); state.records[targetId(record.key)] = record; write(state); },
         remove(target) { const state = read(); delete state.records[targetId(target)]; write(state); },
-        list() { return Object.values(read().records); },
+        list() { return Object.values(read().records).map((record) => ({ installationId: record.key.installationId, repositoryId: record.key.repositoryId, repository: record.key.repository, pr: record.key.pr })); },
     };
 }
 async function observeAuthority(config, target) {
@@ -220,7 +222,7 @@ async function observeAuthority(config, target) {
         issues.push({ number: ref.number, body: issue?.body ?? "", login, type: issue?.user?.type ?? null, association: issue?.author_association ?? null, permission });
     }
     const base = exactSha(pr?.base?.sha, "BASE"), head = exactSha(pr?.head?.sha, "HEAD");
-    return { active: pr?.state === "open" && pr?.draft !== true && pr?.base?.ref === pr?.base?.repo?.default_branch, key: { installationId: target.installationId, repositoryId: target.repositoryId, repository: target.repository, pr: target.pr, base, head, evaluator: config.evaluator, authorityDigest: createHash("sha256").update(JSON.stringify({ body, issues })).digest("hex") } };
+    return { active: pr?.state === "open" && pr?.draft !== true && pr?.base?.ref === pr?.base?.repo?.default_branch, key: { installationId: target.installationId, repositoryId: target.repositoryId, repository: target.repository, pr: target.pr, authorityBase: base, base, head, evaluator: config.evaluator, authorityDigest: createHash("sha256").update(JSON.stringify({ body, issues })).digest("hex") } };
 }
 async function publishAuthority(config, target, head, state) {
     const token = await installationToken(config, target.installationId, target.repositoryId, true);
@@ -249,7 +251,13 @@ async function evaluateAuthority(config, target, key) {
             report = JSON.parse(execution.stdout || "");
         }
         catch { }
-        return execution.status === 0 && report?.exitCode === 0 && ["passed", "passed_with_warnings"].includes(report?.result) ? "success" : "failure";
+        if (!report || !Number.isInteger(report.exitCode) || report.result === "error")
+            throw new Error("native evaluator did not produce a policy verdict");
+        if (execution.status === 0 && report.exitCode === 0 && ["passed", "passed_with_warnings"].includes(report.result))
+            return "success";
+        if (report.result === "failed")
+            return "failure";
+        throw new Error("native evaluator result is inconsistent");
     }
     finally {
         rmSync(root, { recursive: true, force: true });
@@ -266,21 +274,13 @@ async function page(config, path, token, extract) {
     }
     return values;
 }
-async function repositoryTargets(config, installationId, repositoryId, repository) {
+async function repositoryTargets(config, installationId, repositoryId, repository, linkedIssue) {
     const token = await installationToken(config, installationId, repositoryId);
     const pulls = await page(config, `/repos/${repository}/pulls?state=open`, token, (value) => Array.isArray(value) ? value : []);
-    return pulls.filter((pr) => pr?.draft !== true && pr?.base?.repo?.id === repositoryId && pr?.base?.repo?.full_name === repository && pr?.base?.ref === pr?.base?.repo?.default_branch).map((pr) => ({ installationId, repositoryId, repository, pr: positive(pr.number, "PR") }));
-}
-async function discoverAuthorityTargets(config) {
-    const installations = await page(config, "/app/installations", appJwt(config), (value) => Array.isArray(value) ? value : []), targets = [];
-    for (const installation of installations) {
-        const installationId = positive(installation?.id, "installation");
-        const token = await installationToken(config, installationId);
-        const repositories = await page(config, "/installation/repositories", token, (value) => Array.isArray(value?.repositories) ? value.repositories : []);
-        for (const repository of repositories)
-            targets.push(...await repositoryTargets(config, installationId, positive(repository.id, "repository"), exactRepo(repository.full_name)));
-    }
-    return targets;
+    return pulls
+        .filter((pr) => pr?.draft !== true && pr?.base?.repo?.id === repositoryId && pr?.base?.repo?.full_name === repository && pr?.base?.ref === pr?.base?.repo?.default_branch)
+        .filter((pr) => !linkedIssue || extractLinkedIssueReferences(pr?.body ?? "", repository).some((ref) => ref.repository.toLowerCase() === repository.toLowerCase() && ref.number === linkedIssue))
+        .map((pr) => ({ installationId, repositoryId, repository, pr: positive(pr.number, "PR") }));
 }
 export async function runTrustedService(roots, args = []) {
     if (args.length)
@@ -289,13 +289,17 @@ export async function runTrustedService(roots, args = []) {
     const deps = { observe: (target) => observeAuthority(config, target), publish: (target, head, status) => publishAuthority(config, target, head, status), evaluate: (target, key) => evaluateAuthority(config, target, key), get: state.get, put: state.put, remove: state.remove };
     const enqueue = (target) => { const id = targetId(target), prior = queues.get(id) ?? Promise.resolve(); const next = prior.catch(() => undefined).then(() => reconcileAuthorityTarget(target, deps)).then(() => undefined).catch((error) => console.error(`trusted-service ${id}: ${error.message}`)).finally(() => { if (queues.get(id) === next)
         queues.delete(id); }); queues.set(id, next); };
-    const reconcileAll = async () => { try {
-        for (const target of await discoverAuthorityTargets(config))
+    const reconcileKnown = async () => { try {
+        for (const target of state.list())
             enqueue(target);
     }
     catch (error) {
         console.error(`trusted-service reconcile: ${error.message}`);
     } };
+    const enqueueRepository = async (installationId, repositoryId, repository, linkedIssue) => {
+        for (const target of await repositoryTargets(config, installationId, repositoryId, repository, linkedIssue))
+            enqueue(target);
+    };
     const server = createServer((request, response) => {
         if (request.method === "GET" && request.url === "/healthz") {
             response.writeHead(200).end("ok\n");
@@ -307,4 +311,48 @@ export async function runTrustedService(roots, args = []) {
         }
         const chunks = [];
         let size = 0;
-        request.on("data", (chunk) => { size += chunk.length; if (size > 1
+        request.on("data", (chunk) => { size += chunk.length; if (size > 1024 * 1024)
+            request.destroy();
+        else
+            chunks.push(chunk); });
+        request.on("error", () => { if (!response.headersSent)
+            response.writeHead(400).end(); });
+        request.on("end", () => {
+            const body = Buffer.concat(chunks), signature = Array.isArray(request.headers["x-hub-signature-256"]) ? request.headers["x-hub-signature-256"][0] : request.headers["x-hub-signature-256"];
+            if (!verifyAuthorityWebhook(config.webhookSecret, body, signature)) {
+                response.writeHead(401).end();
+                return;
+            }
+            let payload;
+            try {
+                payload = JSON.parse(body.toString("utf8"));
+            }
+            catch {
+                response.writeHead(400).end();
+                return;
+            }
+            const event = Array.isArray(request.headers["x-github-event"]) ? request.headers["x-github-event"][0] : request.headers["x-github-event"];
+            try {
+                if (event === "pull_request" && ["opened", "edited", "synchronize", "reopened", "ready_for_review"].includes(payload?.action) && payload?.pull_request?.number)
+                    enqueue({ installationId: positive(payload?.installation?.id, "installation"), repositoryId: positive(payload?.repository?.id, "repository"), repository: exactRepo(payload?.repository?.full_name), pr: positive(payload.pull_request.number, "PR") });
+                else if (event === "issues" && payload?.action === "edited" && payload?.changes?.body && payload?.issue?.number)
+                    void enqueueRepository(positive(payload?.installation?.id, "installation"), positive(payload?.repository?.id, "repository"), exactRepo(payload?.repository?.full_name), positive(payload.issue.number, "issue")).catch((error) => console.error(error.message));
+                else if (event === "installation" && payload?.action === "created")
+                    for (const repository of payload?.repositories ?? [])
+                        void enqueueRepository(positive(payload?.installation?.id, "installation"), positive(repository?.id, "repository"), exactRepo(repository?.full_name)).catch((error) => console.error(error.message));
+                else if (event === "installation_repositories")
+                    for (const repository of payload?.repositories_added ?? [])
+                        void enqueueRepository(positive(payload?.installation?.id, "installation"), positive(repository?.id, "repository"), exactRepo(repository?.full_name)).catch((error) => console.error(error.message));
+            }
+            catch (error) {
+                console.error(`trusted-service webhook: ${error.message}`);
+            }
+            response.writeHead(202).end();
+        });
+    });
+    server.listen(config.port, config.host);
+    setInterval(() => void reconcileKnown(), config.interval).unref();
+    await reconcileKnown();
+    console.log(`repo-guard trusted-service ${config.host}:${config.port}; gate=${AUTHORITY_CONTEXT}; evaluator=${config.evaluator}`);
+    return await new Promise((resolveResult) => { const stop = () => server.close(() => resolveResult(0)); process.once("SIGINT", stop); process.once("SIGTERM", stop); });
+}
