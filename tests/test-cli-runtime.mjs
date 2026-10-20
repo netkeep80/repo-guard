@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   COMMANDS,
   reconcileAuthorityTarget,
@@ -36,6 +37,23 @@ try {
 } finally {
   console.error = originalError;
 }
+
+const trustedServiceSource = readFileSync(new URL("../src/repo-guard.mts", import.meta.url), "utf8");
+assert.doesNotMatch(
+  trustedServiceSource,
+  /function discoverAuthorityTargets/,
+  "bounded recovery must not periodically enumerate every App installation/repository",
+);
+assert.match(
+  trustedServiceSource,
+  /for \(const target of state\.list\(\)\) enqueue\(target\)/,
+  "periodic recovery must revisit only durable known PR targets",
+);
+assert.match(
+  trustedServiceSource,
+  /repositoryTargets\(config, installationId, repositoryId, repository, linkedIssue\)/,
+  "issue refresh must remain repository/linked-issue scoped",
+);
 
 const sha = (char) => char.repeat(40);
 const target = { installationId: 11, repositoryId: 22, repository: "example/consumer", pr: 7 };
