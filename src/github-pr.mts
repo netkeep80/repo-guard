@@ -182,10 +182,11 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     ["head", input.headRevision],
   ] as const) if (!exactRevision.test(revision)) reasons.push("A2:provider_invalid_" + label + "_revision");
 
-  let eventBase = "", eventHead = "";
+  let eventBase = "", eventHead = "", eventRepositoryId: number | null = null;
   try {
     const event = providerObject(input.event, "provider event");
     const repository = providerObject(event.repository, "provider event.repository");
+    eventRepositoryId = Number.isSafeInteger(repository.id) && Number(repository.id) > 0 ? Number(repository.id) : null;
     const pr = providerObject(event.pull_request, "provider event.pull_request");
     const base = providerObject(pr.base, "provider event.pull_request.base");
     const head = providerObject(pr.head, "provider event.pull_request.head");
@@ -223,6 +224,8 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
           throw new Error("service authority " + field + " is invalid");
       if (typeof authority.evaluatorSha !== "string" || !exactRevision.test(authority.evaluatorSha))
         throw new Error("service authority evaluatorSha is invalid");
+      if (eventRepositoryId === null || Number(authority.repositoryId) !== eventRepositoryId)
+        throw new Error("service authority repositoryId does not match the observed repository");
       identity = [input.repository, appId, authority.installationId, authority.repositoryId, authority.evaluatorSha].join("\0");
       principal = "github-app:" + appId + ":installation:" + authority.installationId + ":repository:" + authority.repositoryId;
       producerSource = "repo-guard-service:" + authority.evaluatorSha;
@@ -452,7 +455,12 @@ function nativeProviderInputs(input: {
     workflowSha: process.env.GITHUB_WORKFLOW_SHA || "",
     authorityProvider: nativeAuthorityProvider(),
     event: {
-      repository: { full_name: input.repository },
+      repository: {
+        full_name: input.repository,
+        ...((process.env.GITHUB_EVENT_NAME || "") === "repo_guard_service"
+          ? { id: Number(process.env.RG_SERVICE_REPOSITORY_ID || 0) }
+          : {}),
+      },
       pull_request: {
         base: { sha: input.eventBaseRevision },
         head: { sha: input.eventHeadRevision },
