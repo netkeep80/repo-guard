@@ -1099,7 +1099,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
 
   const repository = "netkeep80/repo-guard";
   const tracked = gitRuntime.listTrackedFilesAtRef(revision, root).sort();
-  assert.equal(tracked.length, 359, "native self-host tracked tree must remain exact");
+  assert.equal(tracked.length, 362, "native self-host tracked tree must remain exact");
 
   const native = canonicalRuntime.loadNativeRequirements({
     repository,
@@ -1161,7 +1161,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     resolver,
   });
   assert.equal(j1.ok, true, JSON.stringify(j1.errors));
-  assert.equal(j1.justified.length, 359);
+  assert.equal(j1.justified.length, 362);
   assert.equal(j1.unjustified.length, 0);
 
   const relationCounts = { implemented_by: 0, verified_by: 0, documents: 0, total: 0 };
