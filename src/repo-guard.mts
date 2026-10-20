@@ -192,4 +192,46 @@ async function observeAuthority(config: AuthorityConfig, target: AuthorityTarget
   return { active: pr?.state === "open" && pr?.draft !== true && pr?.base?.ref === pr?.base?.repo?.default_branch, key: { installationId: target.installationId, repositoryId: target.repositoryId, repository: target.repository, pr: target.pr, base, head, evaluator: config.evaluator, authorityDigest: createHash("sha256").update(JSON.stringify({ body, issues })).digest("hex") } };
 }
 async function publishAuthority(config: AuthorityConfig, target: AuthorityTarget, head: string, state: "pending" | "success" | "failure") {
-  const token = await 
+  const token = await installationToken(config, target.installationId, target.repositoryId, true);
+  await api(config, `/repos/${target.repository}/statuses/${exactSha(head, "status HEAD")}`, token, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ state, context: AUTHORITY_CONTEXT, description: state === "pending" ? "repo-guard reevaluation required" : state === "success" ? "repo-guard approved this exact transition" : "repo-guard rejected this exact transition" }) });
+}
+async function evaluateAuthority(config: AuthorityConfig, target: AuthorityTarget, key: AuthorityEvaluationKey): Promise<"success" | "failure"> {
+  mkdirSync(config.work, { recursive: true }); const root = mkdtempSync(join(config.work, "rg-service-")), runner = mkdtempSync(join(config.work, "rg-runner-"));
+  const token = await installationToken(config, target.installationId, target.repositoryId), env = gitEnv(token);
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: "pipe" }).trim();
+  try {
+    const pr = await api(config, `/repos/${target.repository}/pulls/${target.pr}`, token), baseRef = String(pr?.base?.ref || "");
+    execFileSync("git", ["check-ref-format", "--branch", baseRef], { stdio: "pipe" });
+    git("init", "-q"); git("remote", "add", "origin", `https://github.com/${target.repository}.git`);
+    git("fetch", "--no-tags", "--prune", "origin", `+refs/heads/${baseRef}:refs/remotes/origin/${baseRef}`, `+refs/pull/${target.pr}/head:refs/remotes/pull/${target.pr}/head`, `+refs/pull/${target.pr}/merge:refs/remotes/pull/${target.pr}/merge`);
+    const merge = git("rev-parse", `refs/remotes/pull/${target.pr}/merge`);
+    if (git("rev-parse", `refs/remotes/origin/${baseRef}`) !== key.base || git("rev-parse", `refs/remotes/pull/${target.pr}/head`) !== key.head || git("rev-parse", `${merge}^1`) !== key.base || git("rev-parse", `${merge}^2`) !== key.head) throw new Error("fetched transition changed");
+    git("checkout", "-q", "--detach", key.base);
+    const eventPath = join(runner, "event.json"); writeFileSync(eventPath, JSON.stringify({ pull_request: { number: target.pr, base: { sha: key.base, ref: baseRef }, head: { sha: key.head }, body: pr?.body ?? "" }, repository: { full_name: target.repository } }));
+    const execution = spawnSync(process.execPath, [resolve(config.evaluatorRoot, "dist/repo-guard.mjs"), "--repo-root", root, "--enforcement", "blocking", "check-pr", "--format", "json"], { cwd: root, encoding: "utf8", env: { ...env, GH_TOKEN: token, GITHUB_REPOSITORY: target.repository, GITHUB_EVENT_NAME: "repo_guard_service", RG_EVENT_PATH: eventPath, RUNNER_TEMP: runner, RG_AUTHORITY_PROVIDER: JSON.stringify({ format: AUTHORITY_FORMAT, appId: config.appId, installationId: target.installationId, repositoryId: target.repositoryId, evaluatorSha: config.evaluator }) } });
+    let report: any = null; try { report = JSON.parse(execution.stdout || ""); } catch {}
+    return execution.status === 0 && report?.exitCode === 0 && ["passed", "passed_with_warnings"].includes(report?.result) ? "success" : "failure";
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(runner, { recursive: true, force: true }); }
+}
+async function page(config: AuthorityConfig, path: string, token: string, extract: (value: any) => any[]) {
+  const values = []; for (let n = 1; n <= 10; n++) { const part = extract(await api(config, `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${n}`, token)); values.push(...part); if (part.length < 100) break; } return values;
+}
+async function repositoryTargets(config: AuthorityConfig, installationId: number, repositoryId: number, repository: string) {
+  const token = await installationToken(config, installationId, repositoryId);
+  const pulls = await page(config, `/repos/${repository}/pulls?state=open`, token, (value) => Array.isArray(value) ? value : []);
+  return pulls.filter((pr) => pr?.draft !== true && pr?.base?.repo?.id === repositoryId && pr?.base?.repo?.full_name === repository && pr?.base?.ref === pr?.base?.repo?.default_branch).map((pr) => ({ installationId, repositoryId, repository, pr: positive(pr.number, "PR") }));
+}
+async function discoverAuthorityTargets(config: AuthorityConfig) {
+  const installations = await page(config, "/app/installations", appJwt(config), (value) => Array.isArray(value) ? value : []), targets: AuthorityTarget[] = [];
+  for (const installation of installations) {
+    const installationId = positive(installation?.id, "installation");
+    const token = await installationToken(config, installationId);
+    const repositories = await page(config, "/installation/repositories", token, (value) => Array.isArray(value?.repositories) ? value.repositories : []);
+    for (const repository of repositories) targets.push(...await repositoryTargets(config, installationId, positive(repository.id, "repository"), exactRepo(repository.full_name)));
+  }
+  return targets;
+}
+
+export async function runTrustedService(roots: { packageRoot: string }, args: string[] = []): Promise<number> {
+  if (args.length) throw new Error("trusted-service accepts no arguments");
+  const config = loadAuthorityConfig(roots.packageRoot), state = fileState(config.state), queues = new Map
