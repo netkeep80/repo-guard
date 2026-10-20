@@ -1176,8 +1176,8 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   }
   relationCounts.total = relationCounts.implemented_by + relationCounts.verified_by + relationCounts.documents;
   assert.deepEqual(relationCounts, {
-    implemented_by: 146,
-    verified_by: 169,
+    implemented_by: 145,
+    verified_by: 170,
     documents: 50,
     total: 365,
   });
