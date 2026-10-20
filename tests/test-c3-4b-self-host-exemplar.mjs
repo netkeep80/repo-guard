@@ -142,7 +142,7 @@ describe("C3.4b canonical self-host exemplar", () => {
     for (const command of COMMANDS) {
       assert.ok(observedCommands.has(command) || commandExceptions.has(command), `command is neither self-hosted nor excepted: ${command}`);
     }
-    assert.deepEqual([...commandExceptions].sort(), ["init"]);
+    assert.deepEqual([...commandExceptions].sort(), ["init", "trusted-service"]);
 
     const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
     const packs = new Set(listBuiltInPacks());
