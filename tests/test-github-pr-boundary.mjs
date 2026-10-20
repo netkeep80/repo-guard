@@ -792,7 +792,7 @@ describe("#767 central GitHub App service provider boundary", () => {
         evaluatorSha: "c".repeat(40),
       },
       event: {
-        repository: { full_name: "external/consumer" },
+        repository: { id: 9012, full_name: "external/consumer" },
         pull_request: { base: { sha: base }, head: { sha: head } },
       },
       authorityBaseRevision: base,
@@ -825,6 +825,17 @@ describe("#767 central GitHub App service provider boundary", () => {
     assert.equal(malformed.ok, false);
     assert.equal(malformed.trustPresent, false);
     assert.ok(malformed.reasons.some((reason) => reason.startsWith("A2:provider_service_authority_invalid:")));
+
+
+    const wrongRepository = loadAuthenticatedProviderBundle(serviceInput({
+      event: {
+        repository: { id: 9999, full_name: "external/consumer" },
+        pull_request: { base: { sha: "a".repeat(40) }, head: { sha: "b".repeat(40) } },
+      },
+    }));
+    assert.equal(wrongRepository.ok, false);
+    assert.equal(wrongRepository.trustPresent, false);
+    assert.ok(wrongRepository.reasons.some((reason) => reason.includes("repositoryId does not match")));
 
     const stale = loadAuthenticatedProviderBundle(serviceInput({
       authorityBaseRevision: "d".repeat(40),
