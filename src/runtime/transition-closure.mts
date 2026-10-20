@@ -80,6 +80,7 @@ export type LifecycleValue = null | boolean | number | string;
 export type LifecycleState = Readonly<Record<string, Readonly<Record<string, LifecycleValue>>>>;
 export interface TransitionClosureInput {
   repository: string;
+  mode?: "trusted" | "compiler";
   base: TransitionState;
   head: TransitionState;
   trustedAuthorityBase: TrustedAuthorityState;
@@ -763,7 +764,7 @@ function evaluateScopedObligations(
                     problems.push("I7:missing_observation:" + id + ":" + rule.id + ":" + String(rule.metric));
                 }
                 if (observed !== null && observed > rule.max) {
-                    if (granted(input, receipts, token)) verdict = "WAIVED";
+                    if (input.mode !== "compiler" && granted(input, receipts, token)) verdict = "WAIVED";
                     else {
                         verdict = "RED";
                         problems.push("I7:constraint_exceeded:" + id + ":" + rule.id + ":" + observed + ">" + rule.max);
@@ -779,26 +780,36 @@ function evaluateScopedObligations(
                                 (input.head.j1.owners[spec.verifierPath] || []).includes(id);
                         });
                     })();
-                    const structurallyCompatible = facts.filter(f => f.key === spec.key && f.requirementId === id &&
-                        (spec.providerId === undefined || f.providerId === spec.providerId) &&
-                        f.authorityBaseRevision === input.trustedAuthorityBase.revision &&
-                        f.baseRevision === input.base.revision && f.headRevision === input.head.revision &&
-                        Array.isArray(f.subjectPaths) && f.subjectPaths.every(path => typeof path === "string") &&
-                        stable(sorted(f.subjectPaths)) === stable(touched) &&
-                        (spec.kind !== "execution" || (f.verifierPath === spec.verifierPath && f.verifierRevision === input.head.revision)));
-                    const compatible = structurallyCompatible.filter(f => capabilityMode
-                        ? evidenceProviderAuthorized(input, providerState.grants, f, spec, id, touched)
-                        : (spec.providerId !== undefined && f.providerId === spec.providerId && providers.has(spec.providerId)));
-                    if (capabilityMode && structurallyCompatible.length > 0 && compatible.length === 0)
-                        problems.push("I7:unauthorized_evidence_provider:" + id + ":" + rule.id);
-                    const statuses = new Set(compatible.map(f => f.status));
-                    if (statuses.size > 1) {
-                        verdict = "RED";
-                        problems.push("I7:conflicting_evidence:" + id + ":" + rule.id);
-                    }
-                    if (!verifierValid || statuses.size !== 1 || !statuses.has("pass")) {
-                        verdict = "RED";
-                        problems.push("I7:missing_evidence:" + id + ":" + rule.id + ":" + spec.key);
+                    if (input.mode === "compiler") {
+                        // Compiler mode validates traceability only. Actual execution/domain truth is an ordinary CI responsibility.
+                        if (!verifierValid) {
+                            verdict = "RED";
+                            problems.push("I7:invalid_external_verifier:" + id + ":" + rule.id + ":" + spec.key);
+                        } else {
+                            verdict = "DELEGATED";
+                        }
+                    } else {
+                        const structurallyCompatible = facts.filter(f => f.key === spec.key && f.requirementId === id &&
+                            (spec.providerId === undefined || f.providerId === spec.providerId) &&
+                            f.authorityBaseRevision === input.trustedAuthorityBase.revision &&
+                            f.baseRevision === input.base.revision && f.headRevision === input.head.revision &&
+                            Array.isArray(f.subjectPaths) && f.subjectPaths.every(path => typeof path === "string") &&
+                            stable(sorted(f.subjectPaths)) === stable(touched) &&
+                            (spec.kind !== "execution" || (f.verifierPath === spec.verifierPath && f.verifierRevision === input.head.revision)));
+                        const compatible = structurallyCompatible.filter(f => capabilityMode
+                            ? evidenceProviderAuthorized(input, providerState.grants, f, spec, id, touched)
+                            : (spec.providerId !== undefined && f.providerId === spec.providerId && providers.has(spec.providerId)));
+                        if (capabilityMode && structurallyCompatible.length > 0 && compatible.length === 0)
+                            problems.push("I7:unauthorized_evidence_provider:" + id + ":" + rule.id);
+                        const statuses = new Set(compatible.map(f => f.status));
+                        if (statuses.size > 1) {
+                            verdict = "RED";
+                            problems.push("I7:conflicting_evidence:" + id + ":" + rule.id);
+                        }
+                        if (!verifierValid || statuses.size !== 1 || !statuses.has("pass")) {
+                            verdict = "RED";
+                            problems.push("I7:missing_evidence:" + id + ":" + rule.id + ":" + spec.key);
+                        }
                     }
                 }
                 explanations.push({ requirementId: id, constraintId: rule.id, basis: v.label,
@@ -854,16 +865,19 @@ export function evaluateTransitionCauseClosure(input: TransitionClosureInput) {
     for(const id of structural) directApplicableAll.add(id);
     const candidates=new Set(structural); for(const rule of matchedRules)candidates.add(rule.requirementId);
     const candidateIds=sorted(candidates);
-    const causes=candidateIds.filter(id=>addresses.has(id)&&(authorityRooted.has(id)||granted(input,receiptState.receipts,"requirement:"+id)));
+    const causes=input.mode === "compiler"
+      ? candidateIds
+      : candidateIds.filter(id=>addresses.has(id)&&(authorityRooted.has(id)||granted(input,receiptState.receipts,"requirement:"+id)));
     for(const id of causes) selectedCausesAll.add(id);
-    if(!causes.length) reasons.push("J3:no_cause:"+delta.id);
+    if(input.mode !== "compiler" && !causes.length) reasons.push("J3:no_cause:"+delta.id);
 
-    const permissions=authorityPermissions(delta,input,protectedSet);
+    const permissions=input.mode === "compiler" ? [] : authorityPermissions(delta,input,protectedSet);
     for(const permission of permissions) if(!granted(input,receiptState.receipts,permission)) reasons.push(`J3:missing_authority:${permission}:${delta.id}`);
 
-    const evidenceKeys=sorted(matchedRules.flatMap(rule=>rule.evidenceKeys||[]));
+    const evidenceKeys=input.mode === "compiler" ? [] : sorted(matchedRules.flatMap(rule=>rule.evidenceKeys||[]));
     for(const key of evidenceKeys) if(!evidencePass(input,evidenceState.facts,key)) reasons.push(`J3:missing_evidence:${key}:${delta.id}`);
-    for(const rule of matchedRules) if(rule.requireAddressed===true && !addresses.has(rule.requirementId)) reasons.push(`J3:unacknowledged_impact:${rule.requirementId}:${delta.id}`);
+    if(input.mode !== "compiler")
+      for(const rule of matchedRules) if(rule.requireAddressed===true && !addresses.has(rule.requirementId)) reasons.push(`J3:unacknowledged_impact:${rule.requirementId}:${delta.id}`);
 
     whyChanged.push({id:delta.id,kind:delta.kind,subject:delta.subject,affected:affectedIds,applicable:sorted(new Set([...affectedIds,...matchedRules.map(r=>r.requirementId)])),
       directApplicable:sorted(structural), reverseImpact:affectedIds.filter(id=>!structural.has(id)),
