@@ -144,7 +144,7 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
     trust: null,
   });
   const bundlePath = typeof input.bundlePath === "string" ? input.bundlePath.trim() : "";
-  if (!bundlePath && input.eventName !== "pull_request_target") return empty();
+  if (!bundlePath) return empty(["F4_RESEARCH_CONFLICT_SENTINEL"]);
 
   const reasons: string[] = [];
   if (!REPO.test(input.repository)) reasons.push("A2:provider_invalid_repository");
