@@ -242,10 +242,12 @@ export function loadAuthenticatedProviderBundle(input: AuthenticatedProviderBund
 
   if (!bundlePath) {
     if (reasons.length) return empty(reasons, false);
+    const providerId = authoritySource + ":" + createHash("sha256").update(identity).digest("hex").slice(0, 24);
     return {
       ...empty(),
       trustPresent: true,
       protectedResources: intrinsicProtectedResources,
+      provider: serviceAuthority ? { providerId, principal, producerSource, workflowPath } : null,
       trust: {
         repository: input.repository,
         authorityBaseRevision: eventBase,
