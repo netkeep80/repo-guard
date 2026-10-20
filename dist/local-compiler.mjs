@@ -1,4 +1,5 @@
-import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef, runGit } from "./git.mjs";
+import { listTrackedEntriesAtRef, readFileAtRef, runGit } from "./git.mjs";
+import { parseNameStatusZ } from "./diff/parser.mjs";
 import { loadNativeRequirements } from "./runtime/canonical-requirements.mjs";
 import { lowerNativeRequirements } from "./runtime/pipeline.mjs";
 import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
@@ -63,7 +64,7 @@ export function evaluateLocalCompiler(input) {
     };
     const base = resolveCommit(input.root, input.base), head = resolveCommit(input.root, input.head);
     const before = open(base), after = open(head);
-    const diff = getExactDiffIdentity(base, head, input.root);
+    const diff = parseNameStatusZ(runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", base, head], { cwd: input.root }));
     const headPaths = new Set(after.entries.map(e => e.path));
     const headOwners = after.j1?.owners || {};
     const native = snapshots.get(head);
