@@ -80,6 +80,8 @@ const key = (overrides = {}) => ({
   authorityDigest: sha("d"),
   ...overrides,
 });
+const carrier = sha("f");
+const observation = (value, merge = carrier, active = true) => ({ active, key: value, merge });
 const keyId = (value) => [value.installationId, value.repositoryId, value.pr].join(":");
 const inMemoryDeps = ({ observed, evaluation = "success", publications = [], evaluations = [] }) => {
   const records = new Map();
@@ -90,13 +92,13 @@ const inMemoryDeps = ({ observed, evaluation = "success", publications = [], eva
       observe: async () => {
         const value = observed[Math.min(observationIndex, observed.length - 1)];
         observationIndex += 1;
-        return { active: true, key: value };
+        return value?.key ? value : observation(value);
       },
-      publish: async (_target, _head, state) => publications.push(state),
-      evaluate: async (_target, value) => {
-        evaluations.push(value);
+      publish: async (_target, value, state) => publications.push([value, state]),
+      evaluate: async (_target, value, merge) => {
+        evaluations.push({ key: value, merge });
         if (evaluation instanceof Error) throw evaluation;
-        return typeof evaluation === "function" ? evaluation(value) : evaluation;
+        return typeof evaluation === "function" ? evaluation(value, merge) : evaluation;
       },
       get: (current) => records.get([current.installationId, current.repositoryId, current.pr].join(":")) ?? null,
       put: (record) => records.set(keyId(record.key), record),
@@ -115,45 +117,127 @@ const inMemoryDeps = ({ observed, evaluation = "success", publications = [], eva
 
 {
   assert.equal(sameAuthorityEvaluationKey(key(), key()), true);
+  assert.equal(sameAuthorityEvaluationKey(key(), key({ pr: 99 })), true,
+    "PR number is routing metadata, not transition identity");
+  assert.equal(sameAuthorityEvaluationKey(key(), key({ repositoryId: 23 })), false);
+  assert.equal(sameAuthorityEvaluationKey(key(), key({ authorityBase: sha("e") })), false);
+  assert.equal(sameAuthorityEvaluationKey(key(), key({ base: sha("e") })), false);
+  assert.equal(sameAuthorityEvaluationKey(key(), key({ head: sha("e") })), false);
+  assert.equal(sameAuthorityEvaluationKey(key(), key({ evaluator: sha("e") })), false);
   assert.equal(sameAuthorityEvaluationKey(key(), key({ authorityDigest: sha("e") })), false);
-  assert.equal(sameAuthorityEvaluationKey(key(), key({ authorityBase: sha("f") })), false);
 }
 
 {
   const publications = [], evaluations = [];
   const fixture = inMemoryDeps({ observed: [key(), key(), key()], publications, evaluations });
   assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
-  assert.deepEqual(publications, ["pending", "success"]);
+  assert.deepEqual(publications, [
+    [key().head, "pending"],
+    [carrier, "pending"],
+    [carrier, "success"],
+  ]);
   assert.equal(evaluations.length, 1);
+  assert.equal(evaluations[0].merge, carrier);
   assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "skipped");
-  assert.deepEqual(publications, ["pending", "success"], "duplicate current-key delivery must be idempotent");
-  assert.equal(evaluations.length, 1);
+  assert.equal(publications.length, 3, "duplicate current transition must be idempotent");
+  assert.ok(publications.filter(([value, state]) => value === key().head && state !== "pending").length === 0,
+    "HEAD is a permanent fail-closed sentinel and never receives a terminal result");
 }
 
 {
   const publications = [], evaluations = [];
   const oldKey = key(), newKey = key({ authorityDigest: sha("e") });
-  const fixture = inMemoryDeps({ observed: [oldKey, newKey, newKey, newKey], publications, evaluations });
+  const fixture = inMemoryDeps({
+    observed: [oldKey, oldKey, newKey, newKey],
+    publications,
+    evaluations,
+  });
   assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
-  assert.deepEqual(publications, ["pending", "pending", "success"],
-    "same-HEAD authority mutation must invalidate before the fresh terminal verdict");
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.deepEqual(publications.slice(-2), [[carrier, "pending"], [carrier, "success"]],
+    "authorityDigest change must invalidate the current carrier before fresh terminal GREEN");
+  assert.equal(evaluations.at(-1).key.authorityDigest, sha("e"));
+}
+
+{
+  const publications = [];
+  const oldKey = key(), newKey = key({ evaluator: sha("e") });
+  const fixture = inMemoryDeps({ observed: [oldKey, oldKey, newKey, newKey], publications });
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.deepEqual(publications.slice(-2), [[carrier, "pending"], [carrier, "success"]],
+    "evaluator change must invalidate the current carrier before fresh terminal GREEN");
+}
+
+{
+  const publications = [];
+  const oldKey = key(), newKey = key({ authorityBase: sha("e"), base: sha("e") });
+  const newCarrier = sha("a");
+  const fixture = inMemoryDeps({
+    observed: [observation(oldKey), observation(oldKey), observation(newKey, newCarrier), observation(newKey, newCarrier)],
+    publications,
+  });
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.deepEqual(publications.slice(-2), [[newCarrier, "pending"], [newCarrier, "success"]],
+    "same HEAD with a different BASE must use a fresh transition carrier");
+  assert.equal(publications.filter(([value, state]) => value === oldKey.head && state !== "pending").length, 0);
+}
+
+{
+  const publications = [];
+  const oldKey = key(), newKey = key({ head: sha("e") });
+  const newCarrier = sha("a");
+  const fixture = inMemoryDeps({
+    observed: [observation(oldKey), observation(oldKey), observation(newKey, newCarrier), observation(newKey, newCarrier)],
+    publications,
+  });
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.deepEqual(publications.slice(-3), [
+    [newKey.head, "pending"],
+    [newCarrier, "pending"],
+    [newCarrier, "success"],
+  ], "different HEAD must get a new pending sentinel and a fresh transition carrier");
+}
+
+{
+  const publications = [], evaluations = [];
+  const regeneratedCarrier = sha("a");
+  const fixture = inMemoryDeps({
+    observed: [observation(key()), observation(key()), observation(key(), regeneratedCarrier), observation(key(), regeneratedCarrier)],
+    publications,
+    evaluations,
+  });
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "success");
+  assert.deepEqual(publications.slice(-2), [[regeneratedCarrier, "pending"], [regeneratedCarrier, "success"]],
+    "regenerated test-merge carrier must receive a fresh verdict even for the same semantic transition");
   assert.equal(evaluations.length, 2);
-  assert.equal(evaluations[0].authorityDigest, sha("d"));
-  assert.equal(evaluations[1].authorityDigest, sha("e"));
+}
+
+{
+  const publications = [], evaluations = [];
+  const fixture = inMemoryDeps({ observed: [observation(key(), null)], publications, evaluations });
+  assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "pending");
+  assert.deepEqual(publications, [[key().head, "pending"]],
+    "missing test-merge ref must fall back only to the pending HEAD sentinel");
+  assert.equal(evaluations.length, 0);
 }
 
 {
   const publications = [];
   const fixture = inMemoryDeps({ observed: [key()], publications, evaluation: new Error("dependency failed") });
   assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "pending");
-  assert.deepEqual(publications, ["pending"], "service/evaluator failure must never produce terminal GREEN");
+  assert.deepEqual(publications, [[key().head, "pending"], [carrier, "pending"]],
+    "service/evaluator failure must leave both fallback and current carrier fail-closed");
 }
 
 {
   const publications = [];
   const fixture = inMemoryDeps({ observed: [key(), key(), key()], publications, evaluation: "failure" });
   assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "failure");
-  assert.deepEqual(publications, ["pending", "failure"]);
+  assert.deepEqual(publications, [[key().head, "pending"], [carrier, "pending"], [carrier, "failure"]]);
   assert.equal(await reconcileAuthorityTarget(target, fixture.deps), "skipped");
 }
 
@@ -161,12 +245,12 @@ const inMemoryDeps = ({ observed, evaluation = "success", publications = [], eva
   const publications = [];
   const records = new Map();
   const deps = {
-    observe: async (current) => ({ active: true, key: key({
+    observe: async (current) => observation(key({
       repositoryId: current.repositoryId,
       repository: current.repository,
       pr: current.pr,
-    }) }),
-    publish: async (current, _head, state) => publications.push([current.repository, state]),
+    })),
+    publish: async (current, value, state) => publications.push([current.repository, value, state]),
     evaluate: async () => "success",
     get: (current) => records.get([current.installationId, current.repositoryId, current.pr].join(":")) ?? null,
     put: (record) => records.set(keyId(record.key), record),
@@ -175,40 +259,45 @@ const inMemoryDeps = ({ observed, evaluation = "success", publications = [], eva
   const second = { installationId: 11, repositoryId: 23, repository: "example/other", pr: 9 };
   assert.equal(await reconcileAuthorityTarget(target, deps), "success");
   assert.equal(await reconcileAuthorityTarget(second, deps), "success");
-  assert.deepEqual(publications.map((entry) => entry[1]), ["pending", "success", "pending", "success"]);
   assert.equal(records.size, 2, "one service runtime must keep independent state for multiple repositories");
+  assert.equal(publications.filter(([repository,, state]) => repository === "example/consumer" && state === "success").length, 1);
+  assert.equal(publications.filter(([repository,, state]) => repository === "example/other" && state === "success").length, 1);
 }
-
 
 {
   const publications = [], records = new Map();
-  let phase = "active-old";
-  let removeCalls = 0;
-  const oldKey = key(), refreshedKey = key({ authorityDigest: sha("e") });
+  let phase = "active";
   const deps = {
-    observe: async () => ({
-      active: phase !== "inactive",
-      key: phase === "active-old" ? oldKey : refreshedKey,
-    }),
-    publish: async (_target, _head, state) => publications.push([phase, state]),
+    observe: async () => observation(key(), carrier, phase === "active"),
+    publish: async (_target, value, state) => publications.push([value, state]),
     evaluate: async () => "success",
     get: (current) => records.get([current.installationId, current.repositoryId, current.pr].join(":")) ?? null,
     put: (record) => records.set(keyId(record.key), record),
-    remove: () => { removeCalls += 1; },
+    remove: () => assert.fail("inactive PR must remain durably known"),
   };
   assert.equal(await reconcileAuthorityTarget(target, deps), "success");
   phase = "inactive";
   assert.equal(await reconcileAuthorityTarget(target, deps), "inactive");
-  assert.equal(removeCalls, 0, "inactive PR must stay durably known for bounded recovery");
-  assert.equal(records.get(keyId(refreshedKey)).state, "pending");
-  assert.deepEqual(publications.map((entry) => entry[1]), ["pending", "success", "pending"],
-    "closing/drafting a previously GREEN PR must invalidate the old HEAD before dormancy");
+  assert.deepEqual(publications.slice(-1), [[carrier, "pending"]],
+    "closing/drafting a previously GREEN transition must invalidate its carrier");
+  assert.equal(records.get(keyId(key())).state, "pending");
 
-  phase = "active-new";
+  phase = "active";
   assert.equal(await reconcileAuthorityTarget(target, deps), "success",
     "periodic recovery must reevaluate a reopened PR even if its reopen webhook was lost");
-  assert.deepEqual(publications.map((entry) => entry[1]), ["pending", "success", "pending", "success"]);
+  assert.deepEqual(publications.slice(-1), [[carrier, "success"]]);
 }
+
+assert.doesNotMatch(
+  trustedServiceSource,
+  /deps\.publish\(target,\s*(?:before|after)\.key\.head,\s*result\)/,
+  "terminal verdicts must never be published to HEAD",
+);
+assert.match(
+  trustedServiceSource,
+  /deps\.publish\(target, before\.merge, result\)/,
+  "terminal verdict must be published to the verified current test-merge carrier",
+);
 
 {
   const started = Date.now();
