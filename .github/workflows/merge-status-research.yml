@@ -1,0 +1,93 @@
+name: D1 merge-status research publisher
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize]
+    branches:
+      - experiment/767-merge-status-publisher
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  publish:
+    if: ${{ github.event.pull_request.head.ref == 'experiment/767-merge-status-trigger' }}
+    environment: trusted-enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout research base
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: experiment/767-merge-status-publisher
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve exact target and merge evidence
+        id: evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TARGET_PR="$(jq -r '.target_pr' .github/merge-status-research.json)"
+          HEAD_STATE="$(jq -r '.head_state' .github/merge-status-research.json)"
+          MERGE_STATE="$(jq -r '.merge_state' .github/merge-status-research.json)"
+          [[ "$TARGET_PR" =~ ^[1-9][0-9]*$ ]]
+          [[ "$HEAD_STATE" =~ ^(skip|pending|success|failure)$ ]]
+          [[ "$MERGE_STATE" =~ ^(skip|pending|success|failure)$ ]]
+
+          PR_JSON="$RUNNER_TEMP/target-pr.json"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$TARGET_PR" > "$PR_JSON"
+          test "$(jq -r '.state' "$PR_JSON")" = "open"
+          test "$(jq -r '.draft' "$PR_JSON")" = "false"
+          test "$(jq -r '.base.ref' "$PR_JSON")" = "main"
+          BASE_SHA="$(jq -r '.base.sha' "$PR_JSON")"
+          HEAD_SHA="$(jq -r '.head.sha' "$PR_JSON")"
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          git fetch --no-tags --prune origin             "+refs/heads/main:refs/remotes/origin/main"             "+refs/pull/$TARGET_PR/head:refs/remotes/pull/$TARGET_PR/head"             "+refs/pull/$TARGET_PR/merge:refs/remotes/pull/$TARGET_PR/merge"
+
+          MERGE_SHA="$(git rev-parse refs/remotes/pull/$TARGET_PR/merge)"
+          MERGE_BASE="$(git rev-parse "$MERGE_SHA^1")"
+          MERGE_HEAD="$(git rev-parse "$MERGE_SHA^2")"
+          OBSERVED_HEAD="$(git rev-parse refs/remotes/pull/$TARGET_PR/head)"
+          CURRENT_BASE="$(git rev-parse refs/remotes/origin/main)"
+
+          test "$OBSERVED_HEAD" = "$HEAD_SHA"
+          test "$CURRENT_BASE" = "$BASE_SHA"
+          test "$MERGE_BASE" = "$BASE_SHA"
+          test "$MERGE_HEAD" = "$HEAD_SHA"
+
+          echo "target_pr=$TARGET_PR" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_state=$HEAD_STATE" >> "$GITHUB_OUTPUT"
+          echo "merge_state=$MERGE_STATE" >> "$GITHUB_OUTPUT"
+
+      - name: Mint dedicated trusted-enforcement App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.TRUSTED_ENFORCEMENT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRUSTED_ENFORCEMENT_APP_PRIVATE_KEY }}
+          permission-statuses: write
+
+      - name: Publish research statuses
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_PR: ${{ steps.evidence.outputs.target_pr }}
+          HEAD_SHA: ${{ steps.evidence.outputs.head_sha }}
+          MERGE_SHA: ${{ steps.evidence.outputs.merge_sha }}
+          HEAD_STATE: ${{ steps.evidence.outputs.head_state }}
+          MERGE_STATE: ${{ steps.evidence.outputs.merge_state }}
+        run: |
+          set -euo pipefail
+          publish() {
+            local sha="$1" state="$2" label="$3"
+            if [[ "$state" == "skip" ]]; then return 0; fi
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$sha"               -f state="$state"               -f context=trusted-enforcement               -f description="D1 merge-status research: PR #$TARGET_PR $label=$state"               -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          }
+          publish "$HEAD_SHA" "$HEAD_STATE" "head"
+          publish "$MERGE_SHA" "$MERGE_STATE" "merge"
+          printf 'TARGET_PR=%s\nHEAD_SHA=%s\nMERGE_SHA=%s\nHEAD_STATE=%s\nMERGE_STATE=%s\n'             "$TARGET_PR" "$HEAD_SHA" "$MERGE_SHA" "$HEAD_STATE" "$MERGE_STATE"
