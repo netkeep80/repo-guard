@@ -61,7 +61,43 @@ try {
   put("requirements/child.rg.yaml", req("CHILD", undefined, "CORE"));
   const detached = commit("remove relation atomically");
   assert.equal(evaluate(atom, detached).ok, true, "delete resource and remove relation GREEN");
-  console.log("C1 local compiler basic witnesses: PASS");
+  put("requirements/core.rg.yaml", req("CORE", "src/a.txt").replace('"testable CORE"', '"amended CORE"'));
+  const normative = commit("normative change");
+  assert.equal(evaluate(detached, normative).ok, true, "valid normative text change must not require a grant");
+
+  put("requirements/duplicate.rg.yaml", req("CORE"));
+  const duplicate = commit("duplicate Requirement identity");
+  assert.equal(evaluate(normative, duplicate).ok, false, "duplicate Requirement IDs RED");
+  git("rm", "-q", "requirements/duplicate.rg.yaml");
+
+  put("requirements/invalid.rg.yaml", "format: repo-guard/requirement-v1\\nid: INVALID\\n");
+  const malformed = commit("malformed Requirement");
+  assert.equal(evaluate(normative, malformed).ok, false, "malformed Requirement RED");
+  git("rm", "-q", "requirements/invalid.rg.yaml");
+
+  put("requirements/child.rg.yaml", req("CHILD", "src/nonexistent.txt", "CORE"));
+  const dangling = commit("dangling resource relation");
+  assert.equal(evaluate(normative, dangling).ok, false, "missing Resource target RED");
+
+  put("requirements/child.rg.yaml", req("CHILD", undefined, "CORE"));
+  put("requirements/core.rg.yaml", req("CORE", "src/a.txt", "CHILD"));
+  const multiCycle = commit("multi-node cycle");
+  assert.equal(evaluate(normative, multiCycle).ok, false, "multi-node Requirement cycle RED");
+
+  put("requirements/core.rg.yaml", req("CORE", "src/a.txt"));
+  const restored = commit("restore rooted Requirement graph");
+  assert.equal(evaluate(normative, restored).ok, true, "restored graph GREEN");
+
+  // No GitHub event, issue, App, authentication or remote is necessary for this executable CLI.
+  const cli = execFileSync(process.execPath, [
+    new URL("../dist/repo-guard.mjs", import.meta.url).pathname,
+    "--repo-root", root, "check", "--base", normative, "--head", restored, "--format", "json",
+  ], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH } });
+  const report = JSON.parse(cli);
+  assert.equal(report.ok, true, "local CLI should agree with direct evaluator");
+  assert.equal(report.base, normative);
+  assert.equal(report.head, restored);
+  console.log("C1 local compiler structural witnesses: PASS");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
