@@ -132,9 +132,19 @@ try {
   assert.equal(report.base, normative);
   assert.equal(report.head, restored);
 
+  git("mv", "src/a.txt", "src/renamed.txt");
+  put("requirements/core.rg.yaml", req("CORE", "src/renamed.txt"));
+  const renamed = commit("atomic implementation rename");
+  assert.equal(evaluate(restored, renamed).ok, true, "atomic justified rename GREEN");
+
+  git("mv", "src/renamed.txt", "src/a.txt");
+  put("requirements/core.rg.yaml", req("CORE", "src/a.txt"));
+  const renameRestored = commit("atomic rename back");
+  assert.equal(evaluate(renamed, renameRestored).ok, true, "rename back remains deterministic");
+
   put("requirements/core.rg.yaml", coreReq({ maxResources: 0 }));
   const resourceLimitBase = commit("add deterministic resource constraint");
-  assert.equal(evaluate(restored, resourceLimitBase).ok, true, "adding deterministic constraint without scoped resource change GREEN");
+  assert.equal(evaluate(renameRestored, resourceLimitBase).ok, true, "adding deterministic constraint without scoped resource change GREEN");
 
   put("src/a.txt", "resource-limit-red\n");
   const resourceLimitRed = commit("exceed resource constraint");
