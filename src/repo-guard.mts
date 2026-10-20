@@ -57,3 +57,90 @@ async function dispatch(roots: CliRoots) { const parsed = parseCommand(roots.arg
 export async function runCli(args: string[] = process.argv.slice(2)) { try { return await dispatch(resolveRoots([...args])); } catch (error: unknown) { console.error(`ERROR: ${(error as Error).message}`); return 1; } }
 const isMain = process.argv[1] && sameEntrypointPath(process.argv[1], resolve(__dirname, "repo-guard.mjs"));
 if (isMain) process.exit(await runCli());
+
+export interface AuthorityEvaluationKey {
+  installationId: number; repositoryId: number; repository: string; pr: number;
+  base: string; head: string; evaluator: string; authorityDigest: string;
+}
+export interface AuthorityTarget { installationId: number; repositoryId: number; repository: string; pr: number; }
+export interface AuthorityRecord { key: AuthorityEvaluationKey; state: "pending" | "success" | "failure"; }
+export interface AuthorityDependencies {
+  observe(target: AuthorityTarget): Promise<{ active: boolean; key: AuthorityEvaluationKey }>;
+  publish(target: AuthorityTarget, head: string, state: "pending" | "success" | "failure"): Promise<void>;
+  evaluate(target: AuthorityTarget, key: AuthorityEvaluationKey): Promise<"success" | "failure">;
+  get(target: AuthorityTarget): AuthorityRecord | null;
+  put(record: AuthorityRecord): void;
+  remove(target: AuthorityTarget): void;
+}
+
+const AUTHORITY_CONTEXT = "trusted-enforcement";
+const AUTHORITY_FORMAT = "repo-guard/github-app-authority-v1";
+const SHA40 = /^[0-9a-f]{40}$/;
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const positive = (value: unknown, label: string) => {
+  const n = Number(value); if (!Number.isSafeInteger(n) || n <= 0) throw new Error(`${label} must be a positive integer`); return n;
+};
+const exactSha = (value: unknown, label: string) => {
+  if (typeof value !== "string" || !SHA40.test(value)) throw new Error(`${label} must be a 40-hex SHA`); return value;
+};
+const exactRepo = (value: unknown) => {
+  if (typeof value !== "string" || !REPOSITORY.test(value)) throw new Error("repository must be owner/name"); return value;
+};
+const targetId = (target: AuthorityTarget) => `${target.installationId}:${target.repositoryId}:${target.pr}`;
+export function sameAuthorityEvaluationKey(a?: AuthorityEvaluationKey | null, b?: AuthorityEvaluationKey | null): boolean {
+  return Boolean(a && b && JSON.stringify(a) === JSON.stringify(b));
+}
+export async function reconcileAuthorityTarget(target: AuthorityTarget, deps: AuthorityDependencies): Promise<"inactive" | "skipped" | "success" | "failure"> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = await deps.observe(target);
+    if (!before.active) { deps.remove(target); return "inactive"; }
+    const previous = deps.get(target);
+    if (previous && previous.state !== "pending" && sameAuthorityEvaluationKey(previous.key, before.key)) return "skipped";
+    const alreadyPending = previous?.state === "pending" && sameAuthorityEvaluationKey(previous.key, before.key);
+    if (!alreadyPending) {
+      await deps.publish(target, before.key.head, "pending");
+      deps.put({ key: before.key, state: "pending" });
+    }
+    let result: "success" | "failure" = "failure";
+    try { result = await deps.evaluate(target, before.key); } catch {}
+    const after = await deps.observe(target);
+    if (!after.active) { deps.remove(target); return "inactive"; }
+    if (!sameAuthorityEvaluationKey(before.key, after.key)) {
+      await deps.publish(target, after.key.head, "pending");
+      deps.put({ key: after.key, state: "pending" });
+      continue;
+    }
+    await deps.publish(target, after.key.head, result);
+    deps.put({ key: after.key, state: result });
+    return result;
+  }
+  throw new Error("authority inputs did not stabilize");
+}
+export function verifyAuthorityWebhook(secret: string, body: Buffer, signature: string | undefined): boolean {
+  if (!secret || !signature?.startsWith("sha256=")) return false;
+  const expected = Buffer.from("sha256=" + createHmac("sha256", secret).update(body).digest("hex"));
+  const actual = Buffer.from(signature);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+interface AuthorityConfig {
+  appId: string; key: string; webhookSecret: string; evaluator: string; evaluatorRoot: string;
+  state: string; work: string; api: string; host: string; port: number; interval: number;
+}
+const appJwt = (config: AuthorityConfig) => {
+  const now = Math.floor(Date.now() / 1000);
+  const enc = (v: string) => Buffer.from(v).toString("base64url");
+  const unsigned = `${enc(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${enc(JSON.stringify({ iat: now - 60, exp: now + 480, iss: config.appId }))}`;
+  const signer = createSign("RSA-SHA256"); signer.update(unsigned); signer.end();
+  return `${unsigned}.${signer.sign(config.key).toString("base64url")}`;
+};
+async function api(config: AuthorityConfig, path: string, token: string, init: RequestInit = {}): Promise<any> {
+  const response = await fetch(config.api + path, { ...init, headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28", ...(init.headers || {}) } });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`GitHub API ${response.status} ${path}: ${text.slice(0, 300)}`);
+  return text ? JSON.parse(text) : null;
+}
+async function installationToken(config: AuthorityConfig, installationId: number, repositoryId?: number, write = false) {
+  const body: any = { permissions: { contents: "read", pull_requests: "read", issues: "read", ...(write ? { statuses: "write" } : {}) } };
+  if (repositoryId) body.repository_ids = [repositoryId];
+  const result = await a
