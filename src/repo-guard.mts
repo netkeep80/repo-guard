@@ -148,7 +148,13 @@ async function installationToken(config: AuthorityConfig, installationId: number
   if (typeof result?.token !== "string") throw new Error("installation token missing");
   return result.token;
 }
-const gitEnv = (token: string): NodeJS.ProcessEnv => ({ ...process.env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`, GIT_TERMINAL_PROMPT: "0" });
+const gitEnv = (token: string): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.RG_GITHUB_APP_PRIVATE_KEY;
+  delete env.RG_GITHUB_APP_PRIVATE_KEY_FILE;
+  delete env.RG_GITHUB_WEBHOOK_SECRET;
+  return { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`, GIT_TERMINAL_PROMPT: "0" };
+};
 
 function loadAuthorityConfig(packageRoot: string): AuthorityConfig {
   const need = (name: string) => { const v = process.env[name]?.trim(); if (!v) throw new Error(`${name} is required`); return v; };
