@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   analyzeProjection,
-  analyzeProjectionCurrent,
-  analyzeProjectionOwnership,
   normalizeProjectionModel,
   projectionModelIdentity,
 } from "../dist/projection-api.mjs";
+import { analyzeProjectionCurrent } from "../dist/projection-analysis.mjs";
+import { analyzeProjectionOwnership } from "../dist/projection-ownership.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
