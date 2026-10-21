@@ -75,6 +75,11 @@ export function projectionSourceContentFact(
   source: ProjectionSourceDependency,
 ): Extract<FactRef, { source: "repository" }> {
   if (source.kind === "repository_content") return contentIdentity(source.path);
+  if (!source.representation) {
+    throw new Error(
+      `Projection subject "${source.id}" requires runtime SubjectRef resolution before content-fact lowering`,
+    );
+  }
   return contentIdentity(
     source.representation.path,
     documentPointerRegion(
