@@ -51,9 +51,43 @@ export type {
   ProjectionTargetLocator,
 } from "./projection-model.mjs";
 
-export { analyzeProjection } from "./projection-analysis.mjs";
+export {
+  analyzeProjection,
+  analyzeProjectionCurrent,
+} from "./projection-analysis.mjs";
 export type {
   ProjectionAnalysis,
+  ProjectionCurrentAnalysis,
+  ProjectionCurrentGeneratorIdentity,
   ProjectionFreshness,
   ProjectionImpact,
+  ProjectionResolvedSourceIdentity,
+  ProjectionResolvedSources,
 } from "./projection-analysis.mjs";
+
+export {
+  analyzeProjectionOwnership,
+} from "./projection-ownership.mjs";
+export type {
+  ProjectionInventoryState,
+  ProjectionObservedCandidate,
+  ProjectionOwnershipConflict,
+  ProjectionOwnershipConflictCode,
+  ProjectionOwnershipInput,
+  ProjectionOwnershipReport,
+} from "./projection-ownership.mjs";
+
+export {
+  evaluateProjectionCheck,
+  parseProjectionCheckState,
+} from "./projection-check.mjs";
+export type {
+  ProjectionCheckDiagnostic,
+  ProjectionCheckEntry,
+  ProjectionCheckLiveEntry,
+  ProjectionCheckReport,
+  ProjectionCheckRetainedEntry,
+  ProjectionCheckState,
+  ProjectionRequirementResolution,
+  ProjectionRequirementResolver,
+} from "./projection-check.mjs";
