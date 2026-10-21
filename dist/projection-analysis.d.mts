@@ -9,3 +9,16 @@ export interface ProjectionAnalysis {
     affected_sources: string[];
 }
 export declare function analyzeProjection(modelValue: unknown, buildValue: unknown, facts: FactReadContext): ProjectionAnalysis;
+export interface ProjectionCurrentGeneratorIdentity {
+    tool_identity: string;
+    configuration_digest: string;
+}
+export interface ProjectionCurrentAnalysis extends ProjectionAnalysis {
+    reasons: string[];
+    impact_scope: "declared-file-exact" | "file-conservative";
+    verification_scope: {
+        causal_inputs: "declared-only";
+        renderer_semantics: "not-proven";
+    };
+}
+export declare function analyzeProjectionCurrent(modelValue: unknown, buildValue: unknown, facts: FactReadContext, current: ProjectionCurrentGeneratorIdentity): ProjectionCurrentAnalysis;
