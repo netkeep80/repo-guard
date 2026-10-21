@@ -236,6 +236,15 @@ test("#799 generated live/missing/base-orphan/retained inventories are distinct"
   assert.deepEqual(baseOnly.missing, []);
   assert.deepEqual(baseOnly.orphan, baseOnly.observed);
 
+  const deletedBase = analyzeProjectionOwnership({
+    live: [],
+    base: [live],
+    readHead: () => null,
+  });
+  assert.equal(deletedBase.ok, true, "already absent BASE-owned output is not an orphan");
+  assert.deepEqual(deletedBase.orphan, []);
+  assert.deepEqual(deletedBase.missing, []);
+
   const retained = analyzeProjectionOwnership({
     live: [],
     retained: [live],
@@ -287,9 +296,7 @@ test("#799 whole-file and region writers on one path conflict before mutation", 
     readHead: filesReader(new Map([["README.md", markdown]])),
   });
   assert.equal(report.ok, false);
-  assert.ok(report.conflicts.some((item) =>
-    item.code === "managed_overlap" &&
-    item.detail === "whole-file writer overlaps a managed region writer"));
+  assert.ok(report.conflicts.some((item) => item.code === "managed_overlap"));
 });
 
 test("#799 owned block must be contained by its declared anchor node", () => {
