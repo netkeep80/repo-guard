@@ -225,6 +225,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "src/projection-check.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "src/reporting/anchor-diagnostics.mts"
   - predicates: [implemented_by]
     target:
