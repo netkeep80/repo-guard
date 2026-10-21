@@ -40,7 +40,7 @@ function changedSourceFact(path: string): FactRef {
 }
 
 function projectionSourcePath(source: ProjectionSourceDependency): string {
-  return source.kind === "repository_content" ? source.path : source.subject.path;
+  return source.kind === "repository_content" ? source.path : source.representation.path;
 }
 
 function impactOf(
