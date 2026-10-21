@@ -1099,7 +1099,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
 
   const repository = "netkeep80/repo-guard";
   const tracked = gitRuntime.listTrackedFilesAtRef(revision, root).sort();
-  assert.equal(tracked.length, 374, "native self-host tracked tree must remain exact");
+  assert.equal(tracked.length, 376, "native self-host tracked tree must remain exact");
 
   const native = canonicalRuntime.loadNativeRequirements({
     repository,
