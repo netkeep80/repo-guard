@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeDocumentFact } from "./document-facts.mjs";
+import { normalizeSubjectRef } from "./runtime/subject-relations.mjs";
 function fail(label, message) {
     throw new Error(`${label}: ${message}`);
 }
@@ -62,16 +63,35 @@ function array(value, label) {
 function normalizeSource(value, index) {
     const label = `ProjectionModel.sources[${index}]`;
     const input = object(value, label);
-    fields(input, ["id", "kind", "path", "algorithm"], label);
-    if (input.kind !== "repository_content") {
-        fail(`${label}.kind`, 'must be "repository_content"');
+    if (input.kind === "repository_content") {
+        fields(input, ["id", "kind", "path", "algorithm"], label);
+        return {
+            id: identifier(input.id, `${label}.id`),
+            kind: "repository_content",
+            path: repositoryPath(input.path, `${label}.path`),
+            algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
+        };
     }
-    return {
-        id: identifier(input.id, `${label}.id`),
-        kind: "repository_content",
-        path: repositoryPath(input.path, `${label}.path`),
-        algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
-    };
+    if (input.kind === "repository_subject") {
+        fields(input, ["id", "kind", "subject", "algorithm"], label);
+        let subject;
+        try {
+            subject = normalizeSubjectRef(input.subject);
+        }
+        catch (error) {
+            fail(`${label}.subject`, error instanceof Error ? error.message : String(error));
+        }
+        if (subject.kind !== "resource") {
+            fail(`${label}.subject`, "projection source must resolve to a repository Resource SubjectRef");
+        }
+        return {
+            id: identifier(input.id, `${label}.id`),
+            kind: "repository_subject",
+            subject,
+            algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
+        };
+    }
+    fail(`${label}.kind`, 'must be "repository_content" or "repository_subject"');
 }
 function normalizeTarget(value) {
     const label = "ProjectionModel.target";
