@@ -35,16 +35,15 @@ function contentIdentity(
 
 function scalarIdentityRelation(
   relationId: string,
-  path: string,
+  fact: Extract<FactRef, { source: "repository" }>,
   expectedDigest: string,
   metadata: Record<string, unknown>,
-  region?: ProjectionIdentityRegion,
 ): PrimitiveRelation {
   return {
     relation_id: relationId,
     primitive: "scalar_equals_literal",
     operands: {
-      source: contentIdentity(path, region),
+      source: fact,
     },
     parameters: {
       value: expectedDigest,
@@ -72,21 +71,38 @@ function documentPointerRegion(
   return { kind: "document_pointer", format, pointer };
 }
 
-function projectionSourceIdentity(
+export function projectionSourceContentFact(
   source: ProjectionSourceDependency,
-): { path: string; region?: ProjectionIdentityRegion } {
-  if (source.kind === "repository_content") return { path: source.path };
-  return {
-    path: source.representation.path,
-    ...(source.representation.pointer !== undefined
-      ? {
-          region: documentPointerRegion(
-            source.representation.path,
-            source.representation.pointer,
-          ),
-        }
-      : {}),
-  };
+): Extract<FactRef, { source: "repository" }> {
+  if (source.kind === "repository_content") return contentIdentity(source.path);
+  return contentIdentity(
+    source.representation.path,
+    documentPointerRegion(
+      source.representation.path,
+      source.representation.pointer,
+    ),
+  );
+}
+
+export function projectionTargetContentFact(
+  model: ProjectionModel,
+): Extract<FactRef, { source: "repository" }> {
+  let region: MarkdownOwnedBlockIdentityRegion | undefined;
+  if (model.target.ownership === "hybrid") {
+    if (model.target.locator?.kind !== "markdown_owned_block") {
+      throw new Error(
+        `ProjectionModel "${model.id}" hybrid target requires a markdown_owned_block locator for address-local identity`,
+      );
+    }
+    region = {
+      kind: "markdown_owned_block",
+      anchor_id: model.target.locator.anchor_id,
+      block_id: model.target.locator.block_id,
+      begin_marker: model.target.locator.begin_marker,
+      end_marker: model.target.locator.end_marker,
+    };
+  }
+  return contentIdentity(model.target.path, region);
 }
 
 function buildRecordFor(
@@ -109,45 +125,26 @@ export function lowerProjectionVerification(
     if (!identity) {
       throw new Error(`ProjectionBuildRecord missing normalized source identity "${source.id}"`);
     }
-    const sourceIdentity = projectionSourceIdentity(source);
     return scalarIdentityRelation(
       `${model.id}:source:${source.id}`,
-      sourceIdentity.path,
+      projectionSourceContentFact(source),
       identity.digest,
       {
         projection_id: model.id,
         projection_role: "source",
         source_id: source.id,
       },
-      sourceIdentity.region,
     );
   });
 
-  let targetRegion: MarkdownOwnedBlockIdentityRegion | undefined;
-  if (model.target.ownership === "hybrid") {
-    if (model.target.locator?.kind !== "markdown_owned_block") {
-      throw new Error(
-        `ProjectionModel "${model.id}" hybrid target requires a markdown_owned_block locator for address-local identity`,
-      );
-    }
-    targetRegion = {
-      kind: "markdown_owned_block",
-      anchor_id: model.target.locator.anchor_id,
-      block_id: model.target.locator.block_id,
-      begin_marker: model.target.locator.begin_marker,
-      end_marker: model.target.locator.end_marker,
-    };
-  }
-
   relations.push(scalarIdentityRelation(
     `${model.id}:target`,
-    model.target.path,
+    projectionTargetContentFact(model),
     build.output_identity.digest,
     {
       projection_id: model.id,
       projection_role: "target",
     },
-    targetRegion,
   ));
 
   return relations;
