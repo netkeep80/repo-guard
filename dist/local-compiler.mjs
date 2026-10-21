@@ -6,6 +6,7 @@ import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "./runtime/resource-closure.mjs";
 import { createResourceResolver } from "./runtime/resource-resolver.mjs";
 import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff } from "./runtime/transition-closure.mjs";
+import { evaluateProjectionCheck } from "./projection-check.mjs";
 const sha40 = /^[0-9a-f]{40}$/;
 function resolveCommit(root, ref) {
     if (!ref || ref.startsWith("-") || /[\s\x00-\x1f]/.test(ref))
@@ -136,6 +137,25 @@ export function evaluateLocalCompiler(input) {
     const before = open(base);
     const after = open(head);
     const diff = parseNameStatusZ(runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", base, head], { cwd: input.root }));
+    const projectionPath = ".repo-guard/projections.json";
+    const projectionReport = evaluateProjectionCheck({
+        baseRaw: readFileAtRef(base, projectionPath, input.root),
+        headRaw: readFileAtRef(head, projectionPath, input.root),
+        readHead: (path) => readFileAtRef(head, path, input.root),
+        facts: {
+            readFile: (path) => readFileAtRef(head, path, input.root),
+            diff: { files: { checked: diff } },
+        },
+    });
+    if (projectionReport.present) {
+        for (const diagnostic of projectionReport.diagnostics) {
+            diagnostics.push({
+                code: diagnostic.code,
+                subject: diagnostic.subject,
+                ...(diagnostic.detail ? { detail: diagnostic.detail } : {}),
+            });
+        }
+    }
     const transition = evaluateTransitionCauseClosure({
         mode: "compiler",
         repository: input.repository,
@@ -175,7 +195,11 @@ export function evaluateLocalCompiler(input) {
         repository: input.repository,
         base,
         head,
-        ok: diagnostics.length === 0 && before.j1.ok && after.j1.ok && transition.ok,
+        ok: diagnostics.length === 0
+            && before.j1.ok
+            && after.j1.ok
+            && transition.ok
+            && (!projectionReport.present || projectionReport.ok),
         j1: {
             base: before.j1.ok,
             head: after.j1.ok,
@@ -195,6 +219,7 @@ export function evaluateLocalCompiler(input) {
             constraints: transition.explanations.constraints,
         },
         diagnostics,
+        ...(projectionReport.present ? { projections: projectionReport } : {}),
     };
 }
 export function runLocalCheck(roots, args) {
@@ -222,6 +247,13 @@ export function runLocalCheck(roots, args) {
     else {
         console.log(`RepoGuard check: ${report.ok ? "GREEN" : "RED"}; BASE=${report.base}; HEAD=${report.head}`);
         console.log(`J1 ${report.j1.justified}/${report.j1.tracked}; J2 ${report.j2.rooted}; J3 changes ${report.j3.changed}; diagnostics ${report.diagnostics.length}`);
+        if (report.projections) {
+            const projections = report.projections;
+            const current = projections.analyses.filter((item) => item.freshness === "CURRENT").length;
+            const stale = projections.analyses.filter((item) => item.freshness === "STALE").length;
+            const broken = projections.analyses.filter((item) => item.freshness === "BROKEN").length;
+            console.log(`P current ${current}; stale ${stale}; broken ${broken}; ownership ${projections.ownership.ok ? "GREEN" : "RED"}; coverage ${projections.ownership.coverage.status}`);
+        }
         if (format === "text")
             for (const item of report.diagnostics)
                 console.log(`${item.code}: ${item.subject}${item.detail ? " (" + item.detail + ")" : ""}`);
