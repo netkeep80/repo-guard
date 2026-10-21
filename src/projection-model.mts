@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeDocumentFact } from "./document-facts.mjs";
-import { normalizeSubjectRef } from "./runtime/subject-relations.mjs";
+import { normalizeSubjectRef, type SubjectRef } from "./runtime/subject-relations.mjs";
 
 export interface ProjectionRepositoryContentSourceDependency {
   id: string;
@@ -9,16 +9,13 @@ export interface ProjectionRepositoryContentSourceDependency {
   algorithm: "sha256";
 }
 
-export interface ProjectionRepositoryResourceSubject {
-  kind: "resource";
-  path: string;
-  pointer?: string;
-}
+export type ProjectionRepositoryResourceSubject = Extract<SubjectRef, { kind: "resource" }>;
 
 export interface ProjectionRepositorySubjectSourceDependency {
   id: string;
   kind: "repository_subject";
-  subject: ProjectionRepositoryResourceSubject;
+  subject: SubjectRef;
+  representation: ProjectionRepositoryResourceSubject;
   algorithm: "sha256";
 }
 
@@ -168,20 +165,50 @@ function normalizeSource(value: unknown, index: number): ProjectionSourceDepende
     };
   }
   if (input.kind === "repository_subject") {
-    fields(input, ["id", "kind", "subject", "algorithm"], label);
-    let subject;
+    fields(input, ["id", "kind", "subject", "representation", "algorithm"], label);
+    let subject: SubjectRef;
     try {
-      subject = normalizeSubjectRef(input.subject as ProjectionRepositoryResourceSubject);
+      subject = normalizeSubjectRef(input.subject as SubjectRef);
     } catch (error) {
       fail(`${label}.subject`, error instanceof Error ? error.message : String(error));
     }
-    if (subject.kind !== "resource") {
-      fail(`${label}.subject`, "projection source must resolve to a repository Resource SubjectRef");
+
+    let representation: ProjectionRepositoryResourceSubject;
+    if (input.representation === undefined) {
+      if (subject.kind !== "resource") {
+        fail(
+          `${label}.representation`,
+          "Requirement/Relation subjects require an exact repository Resource representation",
+        );
+      }
+      representation = subject;
+    } else {
+      let normalized;
+      try {
+        normalized = normalizeSubjectRef(input.representation as SubjectRef);
+      } catch (error) {
+        fail(`${label}.representation`, error instanceof Error ? error.message : String(error));
+      }
+      if (normalized.kind !== "resource") {
+        fail(`${label}.representation`, "must be a repository Resource SubjectRef");
+      }
+      representation = normalized;
+      if (
+        subject.kind === "resource"
+        && JSON.stringify(subject) !== JSON.stringify(representation)
+      ) {
+        fail(
+          `${label}.representation`,
+          "Resource SubjectRef representation must be the same exact resource locator",
+        );
+      }
     }
+
     return {
       id: identifier(input.id, `${label}.id`),
       kind: "repository_subject",
       subject,
+      representation,
       algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
     };
   }
