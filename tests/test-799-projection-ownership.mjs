@@ -1426,7 +1426,9 @@ test("#799 duplicate native RequirementId makes dependent Projection BROKEN in r
     assert.ok(dependent, "dependent Projection must be included in local compiler report");
     assert.equal(dependent.freshness, "BROKEN");
     assert.notEqual(dependent.freshness, "CURRENT");
-    assert.ok(dependent.reasons.includes("source_unresolved:normative"));
+    assert.ok(report.diagnostics.some((item) =>
+      item.code === "projection_subject_unresolved"
+      && item.subject === model.id + ":source:normative"));
     assert.equal(git("status", "--porcelain=v1"), "", "read-only check must not mutate fixture");
   } finally {
     rmSync(root, { recursive: true, force: true });
