@@ -97,3 +97,4 @@ try {
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
+// C2 live probe: harmless Requirement-owned verifier comment; no legacy PR metadata.
