@@ -229,7 +229,23 @@ export function parseYaml(content: string): unknown {
 }
 
 export function parseJson(content: string): unknown {
-  return JSON.parse(content);
+  // JSON.parse silently applies last-key-wins semantics. Durable pointers cannot
+  // use an ambiguous representation, so preserve JSON value semantics while
+  // independently rejecting duplicate keys.
+  const parsed = JSON.parse(content);
+  const document = parseDocument(content, {
+    prettyErrors: false,
+    uniqueKeys: true,
+    merge: false,
+    schema: "core",
+  });
+  const diagnostics = [...document.errors, ...document.warnings];
+  if (diagnostics.length) {
+    throw new Error(
+      `invalid JSON: ${diagnostics.map((e) => collapseMessage(e.message)).join("; ")}`,
+    );
+  }
+  return parsed;
 }
 
 function decodeJsonPointerSegment(raw: string, pointer: string): string {
