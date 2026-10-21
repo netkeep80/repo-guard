@@ -35,10 +35,10 @@ export interface ProjectionRequirementResolution {
     path: string;
 }
 export type ProjectionRequirementResolver = (requirementId: string) => ProjectionRequirementResolution | null;
-export declare function parseProjectionCheckState(raw: string | Buffer | null | undefined): ProjectionCheckState;
+export declare function parseProjectionCheckState(raw: string | Uint8Array | null | undefined): ProjectionCheckState;
 export declare function evaluateProjectionCheck(input: {
-    baseRaw: string | Buffer | null | undefined;
-    headRaw: string | Buffer | null | undefined;
+    baseRaw: string | Uint8Array | null | undefined;
+    headRaw: string | Uint8Array | null | undefined;
     readHead: (path: string) => unknown;
     facts: FactReadContext;
     resolveRequirement?: ProjectionRequirementResolver;
