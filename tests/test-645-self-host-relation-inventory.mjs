@@ -1176,10 +1176,10 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   }
   relationCounts.total = relationCounts.implemented_by + relationCounts.verified_by + relationCounts.documents;
   assert.deepEqual(relationCounts, {
-    implemented_by: 154,
+    implemented_by: 156,
     verified_by: 173,
     documents: 50,
-    total: 377,
+    total: 379,
   });
   assert.equal(Object.values(j1.owners).filter((owners) => owners.length > 1).length, 11);
   assert.equal(blanketRequires, 0, "native representation must not restore blanket requires");
