@@ -31,6 +31,7 @@ export type {
 
 export {
   normalizeProjectionBuildRecord,
+  normalizeProjectionBuildRecordDetached,
   normalizeProjectionModel,
   projectionModelIdentity,
 } from "./projection-model.mjs";
