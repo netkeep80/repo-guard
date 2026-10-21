@@ -69,7 +69,15 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "dist/projection-ownership.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/projection-check.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-check.d.mts"
   - predicates: [implemented_by]
     target:
       kind: artifact
