@@ -69,6 +69,22 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "dist/projection-check.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-ownership.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/runtime/canonical-requirements.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/runtime/subject-relations.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/reporting/anchor-diagnostics.mjs"
   - predicates: [implemented_by]
     target:
