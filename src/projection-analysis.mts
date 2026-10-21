@@ -4,6 +4,7 @@ import { lowerProjectionVerification } from "./projection-lowering.mjs";
 import {
   normalizeProjectionModel,
   type ProjectionModel,
+  type ProjectionSourceDependency,
 } from "./projection-model.mjs";
 
 export type ProjectionFreshness = "CURRENT" | "STALE" | "BROKEN";
@@ -38,13 +39,17 @@ function changedSourceFact(path: string): FactRef {
   };
 }
 
+function projectionSourcePath(source: ProjectionSourceDependency): string {
+  return source.kind === "repository_content" ? source.path : source.subject.path;
+}
+
 function impactOf(
   model: ProjectionModel,
   facts: FactReadContext,
 ): { impact: ProjectionImpact; affected_sources: string[] } {
   const affectedSources: string[] = [];
   for (const source of model.sources) {
-    const changed = readFact(facts, changedSourceFact(source.path));
+    const changed = readFact(facts, changedSourceFact(projectionSourcePath(source)));
     if (!changed.ok) {
       throw new Error(
         `Projection analysis impact unavailable for "${model.id}": ${changed.error.message}`,
