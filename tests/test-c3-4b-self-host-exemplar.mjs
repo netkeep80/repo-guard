@@ -22,7 +22,7 @@ const validateSteps = workflow.jobs.validate.steps;
 const smokeSteps = workflow.jobs["smoke-pack"].steps;
 const validateRuns = validateSteps.map((step) => step.run || "").join("\n");
 const smokeRuns = smokeSteps.map((step) => step.run || "").join("\n");
-const expectedSelfCheckCommand = "node dist/repo-guard.mjs --enforcement blocking check-pr --format json";
+const compilerGate = parseYaml(read(".github/workflows/compiler-gate.yml"));
 const selfCheckStep = validateSteps.find((step) => step.name === "Run PR policy check");
 const action = parseYaml(read("action.yml"));
 const actionSteps = action.runs?.steps || [];
@@ -36,7 +36,8 @@ const observedCommands = new Set([
   ...(validateRuns.includes("repo-guard doctor") ? ["doctor"] : []),
   ...(validateRuns.includes("check-diff") ? ["check-diff"] : []),
   ...(validateRuns.includes("dist/repo-guard.mjs check") ? ["check"] : []),
-  ...(selfCheckStep?.run === expectedSelfCheckCommand ? ["check-pr"] : []),
+  // Legacy check-pr remains available through the optional Action, not required validate.
+  ...(actionRuns.includes("check-pr") ? ["check-pr"] : []),
 ]);
 
 const expectedGovernanceAdditions = [
@@ -125,10 +126,12 @@ describe("C3.4b canonical self-host exemplar", () => {
     assert.match(validateRuns, /npx repo-guard(?:\n|$)/);
     assert.match(validateRuns, /npx repo-guard doctor/);
     assert.match(validateRuns, /node tests\/run\.mjs/);
-    assert.ok(selfCheckStep);
-    assert.equal(selfCheckStep.uses, undefined);
-    assert.equal(selfCheckStep.run, expectedSelfCheckCommand);
-    assert.equal(selfCheckStep.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+    assert.equal(selfCheckStep, undefined, "required validate must not execute legacy check-pr");
+    assert.ok(compilerGate.on?.pull_request_target, "compiler gate must be base-owned");
+    const gateSteps = compilerGate.jobs?.["compiler-gate"]?.steps ?? [];
+    assert.ok(gateSteps.some((step) => step.with?.ref === "${{ github.event.pull_request.base.sha }}"));
+    assert.ok(gateSteps.some((step) => /node dist\/repo-guard\.mjs check/.test(step.run ?? "")));
+    assert.match(actionRuns, /check-pr/, "legacy CLI remains available outside required validate");
     assert.ok(actionSteps.some((step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-node@")));
     assert.match(actionRuns, /npm install --omit=dev --silent/);
     assert.match(validateRuns, /--enforcement advisory check-diff/);

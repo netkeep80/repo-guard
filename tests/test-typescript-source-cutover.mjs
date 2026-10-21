@@ -15,6 +15,8 @@ const resolvedPolicy = resolvePolicyPacks(policy);
 const runtimePolicy = resolvedPolicy.ok ? resolvedPolicy.policy : policy;
 const workflowText = read(".github/workflows/ci.yml");
 const workflow = parseYaml(workflowText);
+const compilerGate = parseYaml(read(".github/workflows/compiler-gate.yml"));
+
 const coverage = json("docs/self-hosting-coverage.json");
 const exceptions = coverage.exceptions || {};
 const testFiles = readdirSync(resolve(projectRoot, "tests")).filter((name) => name.endsWith(".mjs")).sort();
@@ -35,13 +37,13 @@ function selfFacts() {
 }
 
 describe("repo-guard self-hosting security boundary", () => {
-  it("checks ready PRs through the exact local candidate CLI in blocking mode", () => {
+  it("checks ready PRs through the accepted BASE-owned compiler gate", () => {
     const step = workflow.jobs.validate.steps.find((item) => item.name === "Run PR policy check");
-    assert.ok(step);
-    assert.equal(step.uses, undefined);
-    assert.equal(step.run, "node dist/repo-guard.mjs --enforcement blocking check-pr --format json");
-    assert.equal(step.if, "github.event_name == 'pull_request' && !github.event.pull_request.draft");
-    assert.equal(step.env.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+    assert.equal(step, undefined, "legacy candidate check-pr must not block required validate");
+    assert.ok(compilerGate.on?.pull_request_target);
+    const gateSteps = compilerGate.jobs?.["compiler-gate"]?.steps ?? [];
+    assert.ok(gateSteps.some((item) => item.with?.ref === "${{ github.event.pull_request.base.sha }}"));
+    assert.ok(gateSteps.some((item) => /node dist\/repo-guard\.mjs check/.test(item.run ?? "")));
   });
 
   it("keeps governance files inside the checked surface", () => {
@@ -84,7 +86,7 @@ describe("derived test inventory", () => {
 
 describe("derived capability inventory", () => {
   it("derives commands from the CLI registry and finds real evidence or an explicit exception", () => {
-    const corpus = `${workflowText}\n${testFiles.join("\n")}\n${read(".github/PULL_REQUEST_TEMPLATE.md")}`;
+    const corpus = `${workflowText}\n${read("action.yml")}\n${testFiles.join("\n")}\n${read(".github/PULL_REQUEST_TEMPLATE.md")}`;
     for (const command of COMMANDS) {
       if (command === "validate") assert.match(workflowText, /Validate repo-policy\.json/);
       else if (command === "init") assert.ok(testFiles.includes("test-init.mjs"));
@@ -146,9 +148,9 @@ describe("self-hosted policy and documentation", () => {
       "Validate repo-policy.json",
       "Run doctor diagnostics on self",
       "Run discovered test suite",
-      "Run PR policy check",
     ]) assert.ok(steps.some((step) => step.name === name), `missing self-hosting step ${name}`);
     assert.ok(workflow.jobs["smoke-pack"]);
+    assert.ok(compilerGate.jobs?.["compiler-gate"], "compiler gate is the independent PR semantic authority");
   });
 
   it("uses YAML ChangeIntent blocks itself and keeps the alternative format as an explicit exception", () => {

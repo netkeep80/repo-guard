@@ -70,12 +70,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run PR policy check
-        if: github.event_name == 'pull_request' && !github.event.pull_request.draft
-        run: node dist/repo-guard.mjs --enforcement blocking check-pr --format json
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Publish repo-guard summary
         if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
         run: echo "### repo-guard" >> "$GITHUB_STEP_SUMMARY"
