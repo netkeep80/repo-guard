@@ -15,7 +15,7 @@ export interface ProjectionRepositorySubjectSourceDependency {
   id: string;
   kind: "repository_subject";
   subject: SubjectRef;
-  representation: ProjectionRepositoryResourceSubject;
+  representation?: ProjectionRepositoryResourceSubject;
   algorithm: "sha256";
 }
 
@@ -173,16 +173,42 @@ function normalizeSource(value: unknown, index: number): ProjectionSourceDepende
       fail(`${label}.subject`, error instanceof Error ? error.message : String(error));
     }
 
-    let representation: ProjectionRepositoryResourceSubject;
-    if (input.representation === undefined) {
-      if (subject.kind !== "resource") {
+    let representation: ProjectionRepositoryResourceSubject | undefined;
+    if (subject.kind === "resource") {
+      if (input.representation === undefined) {
+        representation = subject;
+      } else {
+        let normalized;
+        try {
+          normalized = normalizeSubjectRef(input.representation as SubjectRef);
+        } catch (error) {
+          fail(`${label}.representation`, error instanceof Error ? error.message : String(error));
+        }
+        if (normalized.kind !== "resource") {
+          fail(`${label}.representation`, "must be a repository Resource SubjectRef");
+        }
+        representation = normalized;
+        if (JSON.stringify(subject) !== JSON.stringify(representation)) {
+          fail(
+            `${label}.representation`,
+            "Resource SubjectRef representation must be the same exact resource locator",
+          );
+        }
+      }
+    } else if (subject.kind === "requirement") {
+      if (input.representation !== undefined) {
         fail(
           `${label}.representation`,
-          "Requirement/Relation subjects require an exact repository Resource representation",
+          "Requirement representation is resolved from the canonical native Requirement index and must not be redeclared",
         );
       }
-      representation = subject;
     } else {
+      if (input.representation === undefined) {
+        fail(
+          `${label}.representation`,
+          "Relation subjects require an exact repository Resource representation",
+        );
+      }
       let normalized;
       try {
         normalized = normalizeSubjectRef(input.representation as SubjectRef);
@@ -193,22 +219,13 @@ function normalizeSource(value: unknown, index: number): ProjectionSourceDepende
         fail(`${label}.representation`, "must be a repository Resource SubjectRef");
       }
       representation = normalized;
-      if (
-        subject.kind === "resource"
-        && JSON.stringify(subject) !== JSON.stringify(representation)
-      ) {
-        fail(
-          `${label}.representation`,
-          "Resource SubjectRef representation must be the same exact resource locator",
-        );
-      }
     }
 
     return {
       id: identifier(input.id, `${label}.id`),
       kind: "repository_subject",
       subject,
-      representation,
+      ...(representation ? { representation } : {}),
       algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
     };
   }
