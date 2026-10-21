@@ -251,7 +251,9 @@ function canonicalIdentityJson(value) {
     return failDocumentFact("fact_type_mismatch", "document pointer identity requires JSON-compatible content");
 }
 export function readDurableDocumentIdentity(content, format, pointer = "") {
-    const text = Buffer.isBuffer(content) ? content.toString("utf8") : content;
+    const text = typeof content === "string"
+        ? content
+        : Buffer.from(content).toString("utf8");
     const document = format === "json" ? parseDurableJson(text) : parseYaml(text);
     const value = resolveJsonPointer(document, pointer);
     const canonicalValue = canonicalIdentityJson(value);
