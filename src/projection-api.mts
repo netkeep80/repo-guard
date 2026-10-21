@@ -31,7 +31,6 @@ export type {
 
 export {
   normalizeProjectionBuildRecord,
-  normalizeProjectionBuildRecordDetached,
   normalizeProjectionModel,
   projectionModelIdentity,
 } from "./projection-model.mjs";
@@ -79,7 +78,6 @@ export type {
 
 export {
   evaluateProjectionCheck,
-  parseProjectionCheckState,
 } from "./projection-check.mjs";
 export type {
   ProjectionCheckDiagnostic,
@@ -87,7 +85,6 @@ export type {
   ProjectionCheckLiveEntry,
   ProjectionCheckReport,
   ProjectionCheckRetainedEntry,
-  ProjectionCheckState,
   ProjectionRequirementResolution,
   ProjectionRequirementResolver,
 } from "./projection-check.mjs";
