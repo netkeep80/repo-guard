@@ -33,6 +33,11 @@ export interface MarkdownOwnedBlockIdentityRegion {
     begin_marker: string;
     end_marker: string;
 }
+export interface DocumentPointerIdentityRegion {
+    kind: "document_pointer";
+    format: "json" | "yaml";
+    pointer: string;
+}
 export type DiffFactSelector = {
     kind: "changed_paths";
     patterns: readonly string[];
@@ -66,7 +71,7 @@ export type RepositoryFactSelector = {
     path: string;
     snapshot: FactSnapshot;
     algorithm: "sha256";
-    region?: MarkdownOwnedBlockIdentityRegion;
+    region?: MarkdownOwnedBlockIdentityRegion | DocumentPointerIdentityRegion;
 } | {
     kind: "tracked_paths";
 };
