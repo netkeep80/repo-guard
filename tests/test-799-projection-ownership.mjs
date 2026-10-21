@@ -1163,3 +1163,156 @@ test("#799 global ownership conflict prevents a local CURRENT verdict", () => {
   assert.equal(report.analyses.every((item) => item.freshness === "BROKEN"), true);
   assert.equal(report.analyses.every((item) => item.reasons.includes("ownership_conflict")), true);
 });
+
+
+test("#799 real CLI resolves RequirementId independently of file representation", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-799-requirement-cli-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const put = (path, text) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  };
+  const commit = (message) => {
+    git("add", "-A");
+    git("-c", "user.name=#799 Requirement Fixture", "-c", "user.email=799-req@example.invalid", "commit", "-qm", message);
+    return git("rev-parse", "HEAD");
+  };
+  const normativeV1 = "stable normative statement";
+  const normativeV2 = "changed normative statement";
+  const semanticDigest = (value) => sha256(JSON.stringify(value));
+  const requirementText = (normative, variant = "base") => {
+    const optional = variant === "relation"
+      ? `  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "derived/output.txt"
+`
+      : "";
+    return `format: repo-guard/requirement-v1
+id: CORE
+normative: ${JSON.stringify(normative)}
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".repo-guard/projections.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "derived/output.txt"
+${optional}`;
+  };
+  const output = "derived\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.requirement.cli",
+    sources: [{
+      id: "requirement",
+      kind: "repository_subject",
+      subject: { kind: "requirement", id: "CORE" },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/output.txt", ownership: "generated" },
+    generator: { contract_id: "requirement-renderer/v1" },
+    required_evidence: [],
+  });
+  const state = JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [{
+      state: "live",
+      model,
+      build: {
+        schema: "repo-guard/projection-build-record/v0",
+        projection_id: model.id,
+        model_identity: projectionModelIdentity(model),
+        source_identities: [{
+          source_id: "requirement",
+          algorithm: "sha256",
+          digest: semanticDigest(normativeV1),
+        }],
+        generator: {
+          contract_id: "requirement-renderer/v1",
+          tool_identity: "requirement-renderer@1",
+        },
+        configuration_digest: sha256("config:1"),
+        output_identity: {
+          algorithm: "sha256",
+          digest: sha256(output),
+        },
+        evidence: [],
+      },
+      current_generator: {
+        tool_identity: "requirement-renderer@1",
+        configuration_digest: sha256("config:1"),
+      },
+    }],
+  }, null, 2) + "\n";
+  const cliPath = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+  const check = (base, head) => {
+    let stdout = "";
+    let status = 0;
+    try {
+      stdout = execFileSync(process.execPath, [
+        cliPath,
+        "--repo-root", root,
+        "check",
+        "--base", base,
+        "--head", head,
+        "--format", "json",
+      ], {
+        cwd: root,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH },
+      });
+    } catch (error) {
+      status = error.status ?? 1;
+      stdout = String(error.stdout || "");
+    }
+    return { status, report: JSON.parse(stdout) };
+  };
+
+  try {
+    git("init", "-q");
+    put("requirements/CORE.rg.yaml", requirementText(normativeV1));
+    put(".repo-guard/projections.json", state);
+    put("derived/output.txt", output);
+    const base = commit("canonical Requirement projection baseline");
+
+    const current = check(base, base);
+    assert.equal(current.status, 0);
+    assert.equal(current.report.projections.analyses[0].freshness, "CURRENT");
+
+    put("requirements/CORE.rg.yaml", [
+      "# formatting-only comment",
+      "",
+      requirementText(normativeV1),
+    ].join("\n"));
+    const formatting = commit("format Requirement representation only");
+    const formatCheck = check(base, formatting);
+    assert.equal(formatCheck.status, 0);
+    assert.equal(
+      formatCheck.report.projections.analyses[0].freshness,
+      "CURRENT",
+      "Requirement path/file bytes are not the normative Subject identity",
+    );
+
+    put("requirements/CORE.rg.yaml", requirementText(normativeV1, "relation"));
+    const relationOnly = commit("change Requirement relation only");
+    const relationCheck = check(formatting, relationOnly);
+    assert.equal(relationCheck.status, 0);
+    assert.equal(
+      relationCheck.report.projections.analyses[0].freshness,
+      "CURRENT",
+      "Projection depending only on Requirement normative Subject ignores relation-only drift",
+    );
+
+    put("requirements/CORE.rg.yaml", requirementText(normativeV2, "relation"));
+    const normativeChanged = commit("change normative Requirement subject");
+    const stale = check(relationOnly, normativeChanged);
+    assert.notEqual(stale.status, 0);
+    assert.equal(stale.report.projections.analyses[0].freshness, "STALE");
+    assert.ok(stale.report.projections.analyses[0].reasons.includes("source_changed:requirement"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
