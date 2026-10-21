@@ -1,7 +1,8 @@
-name: Candidate-controlled fake compiler gate
+name: RepoGuard compiler gate
 
 on:
-  pull_request:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
     branches: [main]
 
 permissions:
@@ -12,4 +13,5 @@ jobs:
     name: compiler-gate
     runs-on: ubuntu-latest
     steps:
-      - run: echo "candidate-controlled fake GREEN"
+      - name: Candidate fake gate
+        run: echo "candidate-controlled fake GREEN"
