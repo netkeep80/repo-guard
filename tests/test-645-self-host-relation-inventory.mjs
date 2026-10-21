@@ -1161,7 +1161,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     resolver,
   });
   assert.equal(j1.ok, true, JSON.stringify(j1.errors));
-  assert.equal(j1.justified.length, 374);
+  assert.equal(j1.justified.length, 376);
   assert.equal(j1.unjustified.length, 0);
 
   const relationCounts = { implemented_by: 0, verified_by: 0, documents: 0, total: 0 };
