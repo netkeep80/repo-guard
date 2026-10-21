@@ -13,13 +13,20 @@ function changedSourceFact(path) {
         type: "repository_path_set",
     };
 }
-function projectionSourcePath(source) {
-    return source.kind === "repository_content" ? source.path : source.representation.path;
+function projectionSourcePath(source, resolved = {}) {
+    if (source.kind === "repository_content")
+        return source.path;
+    const resolvedSource = resolved[source.id];
+    if (resolvedSource)
+        return resolvedSource.path;
+    if (source.representation)
+        return source.representation.path;
+    throw new Error(`Projection SubjectRef source "${source.id}" is unresolved`);
 }
-function impactOf(model, facts) {
+function impactOf(model, facts, resolved = {}) {
     const affectedSources = [];
     for (const source of model.sources) {
-        const changed = readFact(facts, changedSourceFact(projectionSourcePath(source)));
+        const changed = readFact(facts, changedSourceFact(projectionSourcePath(source, resolved)));
         if (!changed.ok) {
             throw new Error(`Projection analysis impact unavailable for "${model.id}": ${changed.error.message}`);
         }
@@ -100,7 +107,8 @@ export function analyzeProjection(modelValue, buildValue, facts) {
 }
 function currentImpactScope(model) {
     return model.sources.some((source) => source.kind === "repository_subject"
-        && source.representation.pointer !== undefined)
+        && (source.subject.kind !== "resource"
+            || source.representation?.pointer !== undefined))
         ? "file-conservative"
         : "declared-file-exact";
 }
@@ -119,7 +127,7 @@ function requiredEvidenceMissing(model, build) {
     const present = new Set(build.evidence.map((item) => item.class));
     return model.required_evidence.filter((required) => !present.has(required)).sort();
 }
-export function analyzeProjectionCurrent(modelValue, buildValue, facts, current) {
+export function analyzeProjectionCurrent(modelValue, buildValue, facts, current, resolvedSources = {}) {
     let model;
     try {
         model = normalizeProjectionModel(modelValue);
@@ -140,7 +148,7 @@ export function analyzeProjectionCurrent(modelValue, buildValue, facts, current)
     }
     let impact;
     try {
-        impact = impactOf(model, facts);
+        impact = impactOf(model, facts, resolvedSources);
     }
     catch {
         return {
@@ -206,11 +214,17 @@ export function analyzeProjectionCurrent(modelValue, buildValue, facts, current)
     const currentSourceIds = new Set(model.sources.map((source) => source.id));
     for (const source of model.sources) {
         let identity;
-        try {
-            identity = readIdentity(facts, projectionSourceContentFact(source));
+        const resolved = resolvedSources[source.id];
+        if (resolved) {
+            identity = { ok: true, digest: resolved.digest };
         }
-        catch {
-            identity = { ok: false };
+        else {
+            try {
+                identity = readIdentity(facts, projectionSourceContentFact(source));
+            }
+            catch {
+                identity = { ok: false };
+            }
         }
         if (!identity.ok) {
             broken = true;
