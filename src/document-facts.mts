@@ -428,6 +428,21 @@ function canonicalIdentityJson(value: unknown): string {
   );
 }
 
+export function readDurableDocumentIdentity(
+  content: string | Buffer,
+  format: "json" | "yaml",
+  pointer = "",
+): { value: unknown; digest: string } {
+  const text = Buffer.isBuffer(content) ? content.toString("utf8") : content;
+  const document = format === "json" ? parseDurableJson(text) : parseYaml(text);
+  const value = resolveJsonPointer(document, pointer);
+  const canonicalValue = canonicalIdentityJson(value);
+  return {
+    value,
+    digest: createHash("sha256").update(canonicalValue, "utf8").digest("hex"),
+  };
+}
+
 function contentIdentityFactSource(
   context: FactReadContext,
   selector: Extract<RepositoryFactSelector, { kind: "content_identity" }>,
