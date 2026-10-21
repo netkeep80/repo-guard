@@ -433,9 +433,165 @@ test("#799 ownership analysis is deterministic and read-only", () => {
   assert.deepEqual(first, second);
   assert.equal(first.ok, true);
   assert.equal(files.get("docs/stable.md"), before, "read-only analysis must not mutate target bytes");
+  assert.equal(first.ownership_closed, false, "incomplete enumeration must never claim global ownership closure");
   assert.deepEqual(first.coverage, {
+    status: "incomplete",
     expected_from: "live-and-retained-declarations",
     observed_from: "live-retained-and-base-declarations",
+    candidate_marker_detection: "caller-supplied-only",
     arbitrary_undeclared_marker_scan: false,
   });
+});
+
+
+test("#799 named Relation may be a logical Projection input through an exact representation", () => {
+  const relationV1 = { id: "R_CORE", meaning: "depends_on", source: "A", target: "B" };
+  const relationV2 = { id: "R_CORE", meaning: "depends_on", source: "A", target: "C" };
+  const file = (relation) => JSON.stringify({ relations: { R_CORE: relation } });
+  const output = "derived\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.relation.input",
+    sources: [{
+      id: "relation",
+      kind: "repository_subject",
+      subject: { kind: "relation", id: "R_CORE" },
+      representation: {
+        kind: "resource",
+        path: "model/relations.json",
+        pointer: "/relations/R_CORE",
+      },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/relation.txt", ownership: "generated" },
+    generator: { contract_id: "relation-renderer/v1" },
+    required_evidence: [],
+  });
+  assert.deepEqual(model.sources[0].subject, { kind: "relation", id: "R_CORE" });
+  assert.deepEqual(model.sources[0].representation, {
+    kind: "resource",
+    path: "model/relations.json",
+    pointer: "/relations/R_CORE",
+  });
+
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: model.id,
+    model_identity: projectionModelIdentity(model),
+    source_identities: [{
+      source_id: "relation",
+      algorithm: "sha256",
+      digest: sha256(canonical(relationV1)),
+    }],
+    generator: {
+      contract_id: "relation-renderer/v1",
+      tool_identity: "fixture@accepted",
+    },
+    configuration_digest: sha256("config:v1"),
+    output_identity: { algorithm: "sha256", digest: sha256(output) },
+    evidence: [],
+  };
+  const context = (relation) => ({
+    readFile: (path) => {
+      if (path === "model/relations.json") return file(relation);
+      if (path === "derived/relation.txt") return output;
+      throw new Error("missing " + path);
+    },
+    diff: { files: { checked: [] } },
+  });
+
+  assert.equal(analyzeProjection(model, build, context(relationV1)).freshness, "CURRENT");
+  const stale = analyzeProjection(model, build, context(relationV2));
+  assert.equal(stale.freshness, "STALE");
+  assert.deepEqual(stale.failed_relations, ["projection.relation.input:source:relation"]);
+});
+
+test("#799 durable JSON subject lookup rejects duplicate keys", () => {
+  const ambiguous = '{"byId":{"core":{"value":1},"core":{"value":2}}}';
+  const output = "derived\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.strict-json",
+    sources: [{
+      id: "core",
+      kind: "repository_subject",
+      subject: {
+        kind: "resource",
+        path: "model/data.json",
+        pointer: "/byId/core",
+      },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/strict.txt", ownership: "generated" },
+    generator: { contract_id: "strict-json/v1" },
+    required_evidence: [],
+  });
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: model.id,
+    model_identity: projectionModelIdentity(model),
+    source_identities: [{
+      source_id: "core",
+      algorithm: "sha256",
+      digest: sha256(canonical({ value: 2 })),
+    }],
+    generator: { contract_id: "strict-json/v1", tool_identity: "fixture@accepted" },
+    configuration_digest: sha256("config:v1"),
+    output_identity: { algorithm: "sha256", digest: sha256(output) },
+    evidence: [],
+  };
+  const result = analyzeProjection(model, build, {
+    readFile: (path) => path === "model/data.json" ? ambiguous : output,
+    diff: { files: { checked: [] } },
+  });
+  assert.equal(result.freshness, "BROKEN");
+  assert.deepEqual(result.failed_relations, ["projection.strict-json:source:core"]);
+});
+
+test("#799 logical region identity is independent of marker spelling and conflicting aliases are RED", () => {
+  const aBegin = "<!-- rg:same:a:begin -->";
+  const aEnd = "<!-- rg:same:a:end -->";
+  const bBegin = "<!-- rg:same:b:begin -->";
+  const bEnd = "<!-- rg:same:b:end -->";
+  const markdown = [
+    '<a id="root"></a>',
+    "# Root",
+    aBegin,
+    "A",
+    aEnd,
+    bBegin,
+    "B",
+    bEnd,
+    "",
+  ].join("\n");
+  const a = owned("writer-a", "docs/alias.md", "root", "same", aBegin, aEnd);
+  const b = owned("writer-b", "docs/alias.md", "root", "same", bBegin, bEnd);
+  const report = analyzeProjectionOwnership({
+    live: [a, b],
+    readHead: filesReader(new Map([["docs/alias.md", markdown]])),
+  });
+  assert.equal(report.ok, false);
+  assert.equal(report.live_expected.length, 1, "marker spelling must not create a second logical region identity");
+  assert.ok(report.conflicts.some((item) => item.code === "multiple_writers"));
+  assert.ok(report.conflicts.some((item) => item.code === "locator_alias"));
+});
+
+test("#799 incomplete discovery cannot produce a false ownership-closed claim", () => {
+  const live = generated("known", "docs/known.md");
+  const report = analyzeProjectionOwnership({
+    live: [live],
+    observedCandidates: [{
+      identity: "candidate:unknown-block",
+      path: "docs/unknown.md",
+      detail: "consumer scanner found a managed-looking marker with no provenance",
+    }],
+    readHead: filesReader(new Map([
+      ["docs/known.md", "known\n"],
+      ["docs/unknown.md", "<!-- consumer:managed:begin -->\nunknown\n"],
+    ])),
+  });
+  assert.equal(report.ownership_closed, false);
+  assert.equal(report.coverage.status, "incomplete");
+  assert.deepEqual(report.unknown_origin, ["candidate:unknown-block"]);
+  assert.ok(report.conflicts.some((item) => item.code === "unknown_origin"));
 });
