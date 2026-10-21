@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   analyzeProjection,
   analyzeProjectionCurrent,
@@ -685,4 +689,150 @@ test("#799 current analysis separates model/tool/config staleness from output br
   assert.ok(broken.reasons.includes("output_changed"));
   assert.ok(broken.reasons.includes("tool_identity_changed"));
   assert.ok(broken.reasons.includes("configuration_changed"));
+});
+
+
+test("#799 repo-guard check consumes exact BASE/HEAD projection state without mutation", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-799-check-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const put = (path, text) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  };
+  const commit = (message) => {
+    git("add", "-A");
+    git("-c", "user.name=#799 Fixture", "-c", "user.email=799@example.invalid", "commit", "-qm", message);
+    return git("rev-parse", "HEAD");
+  };
+  const requirement = `format: repo-guard/requirement-v1
+id: CORE
+normative: "projection check fixture"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".repo-guard/projections.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "model/source.txt"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "derived/output.txt"
+`;
+  const model = {
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.cli.fixture",
+    sources: [{
+      id: "source",
+      kind: "repository_content",
+      path: "model/source.txt",
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/output.txt", ownership: "generated" },
+    generator: { contract_id: "fixture-generator/v1" },
+    required_evidence: [],
+  };
+  const state = (source, output) => JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [{
+      state: "live",
+      model,
+      build: {
+        schema: "repo-guard/projection-build-record/v0",
+        projection_id: model.id,
+        model_identity: projectionModelIdentity(model),
+        source_identities: [{
+          source_id: "source",
+          algorithm: "sha256",
+          digest: sha256(source),
+        }],
+        generator: {
+          contract_id: "fixture-generator/v1",
+          tool_identity: "fixture-generator@1",
+        },
+        configuration_digest: sha256("config:1"),
+        output_identity: {
+          algorithm: "sha256",
+          digest: sha256(output),
+        },
+        evidence: [],
+      },
+      current_generator: {
+        tool_identity: "fixture-generator@1",
+        configuration_digest: sha256("config:1"),
+      },
+    }],
+  }, null, 2) + "\n";
+  const cliPath = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+  const check = (base, head) => {
+    let stdout = "";
+    let status = 0;
+    try {
+      stdout = execFileSync(process.execPath, [
+        cliPath,
+        "--repo-root", root,
+        "check",
+        "--base", base,
+        "--head", head,
+        "--format", "json",
+      ], {
+        cwd: root,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH },
+      });
+    } catch (error) {
+      status = error.status ?? 1;
+      stdout = String(error.stdout || "");
+    }
+    return { status, report: JSON.parse(stdout) };
+  };
+
+  try {
+    git("init", "-q");
+    put("requirements/core.rg.yaml", requirement);
+    put("model/source.txt", "alpha\n");
+    put("derived/output.txt", "ALPHA\n");
+    put(".repo-guard/projections.json", state("alpha\n", "ALPHA\n"));
+    const base = commit("base");
+
+    const current = check(base, base);
+    assert.equal(current.status, 0);
+    assert.equal(current.report.ok, true);
+    assert.equal(current.report.projections.analyses[0].freshness, "CURRENT");
+    assert.equal(current.report.projections.ownership.coverage.status, "incomplete");
+
+    const before = execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" });
+    assert.equal(before, "", "fixture must be clean before read-only check");
+
+    put("model/source.txt", "beta\n");
+    const staleHead = commit("source changed without rebuild");
+    const stale = check(base, staleHead);
+    assert.notEqual(stale.status, 0);
+    assert.equal(stale.report.projections.analyses[0].freshness, "STALE");
+    assert.ok(stale.report.diagnostics.some((item) => item.code === "projection_stale"));
+
+    put("derived/output.txt", "BETA\n");
+    put(".repo-guard/projections.json", state("beta\n", "BETA\n"));
+    const rebuiltHead = commit("record deterministic rebuild");
+    const rebuilt = check(base, rebuiltHead);
+    assert.equal(rebuilt.status, 0);
+    assert.equal(rebuilt.report.projections.analyses[0].freshness, "CURRENT");
+
+    put("derived/output.txt", "MANUAL\n");
+    const brokenHead = commit("manual output drift");
+    const broken = check(rebuiltHead, brokenHead);
+    assert.notEqual(broken.status, 0);
+    assert.equal(broken.report.projections.analyses[0].freshness, "BROKEN");
+    assert.ok(broken.report.projections.analyses[0].reasons.includes("output_changed"));
+
+    assert.equal(
+      execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }),
+      "",
+      "repo-guard check must not mutate the repository",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
