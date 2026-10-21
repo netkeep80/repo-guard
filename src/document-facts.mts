@@ -429,11 +429,13 @@ function canonicalIdentityJson(value: unknown): string {
 }
 
 export function readDurableDocumentIdentity(
-  content: string | Buffer,
+  content: string | Uint8Array,
   format: "json" | "yaml",
   pointer = "",
 ): { value: unknown; digest: string } {
-  const text = Buffer.isBuffer(content) ? content.toString("utf8") : content;
+  const text = typeof content === "string"
+    ? content
+    : Buffer.from(content).toString("utf8");
   const document = format === "json" ? parseDurableJson(text) : parseYaml(text);
   const value = resolveJsonPointer(document, pointer);
   const canonicalValue = canonicalIdentityJson(value);
