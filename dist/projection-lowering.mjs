@@ -42,6 +42,9 @@ function documentPointerRegion(path, pointer) {
 export function projectionSourceContentFact(source) {
     if (source.kind === "repository_content")
         return contentIdentity(source.path);
+    if (!source.representation) {
+        throw new Error(`Projection subject "${source.id}" requires runtime SubjectRef resolution before content-fact lowering`);
+    }
     return contentIdentity(source.representation.path, documentPointerRegion(source.representation.path, source.representation.pointer));
 }
 export function projectionTargetContentFact(model) {
