@@ -42,6 +42,7 @@ export type {
   ProjectionModel,
   ProjectionOutputIdentity,
   ProjectionRepositoryContentSourceDependency,
+  ProjectionRepositoryResourceSubject,
   ProjectionRepositorySubjectSourceDependency,
   ProjectionSourceDependency,
   ProjectionSourceIdentity,
