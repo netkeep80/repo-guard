@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   analyzeProjection,
+  analyzeProjectionCurrent,
   analyzeProjectionOwnership,
   normalizeProjectionModel,
   projectionModelIdentity,
@@ -594,4 +595,94 @@ test("#799 incomplete discovery cannot produce a false ownership-closed claim", 
   assert.equal(report.coverage.status, "incomplete");
   assert.deepEqual(report.unknown_origin, ["candidate:unknown-block"]);
   assert.ok(report.conflicts.some((item) => item.code === "unknown_origin"));
+});
+
+
+test("#799 current analysis separates model/tool/config staleness from output breakage", () => {
+  const source = "source\n";
+  const output = "output\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.current.identity",
+    sources: [{
+      id: "source",
+      kind: "repository_content",
+      path: "model/source.txt",
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/output.txt", ownership: "generated" },
+    generator: { contract_id: "generator/v1" },
+    required_evidence: [],
+  });
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: model.id,
+    model_identity: projectionModelIdentity(model),
+    source_identities: [{
+      source_id: "source",
+      algorithm: "sha256",
+      digest: sha256(source),
+    }],
+    generator: {
+      contract_id: "generator/v1",
+      tool_identity: "generator@one",
+    },
+    configuration_digest: sha256("config:one"),
+    output_identity: { algorithm: "sha256", digest: sha256(output) },
+    evidence: [],
+  };
+  const context = (target = output) => ({
+    readFile: (path) => {
+      if (path === "model/source.txt") return source;
+      if (path === "derived/output.txt") return target;
+      throw new Error("missing " + path);
+    },
+    diff: { files: { checked: [] } },
+  });
+
+  const current = analyzeProjectionCurrent(model, build, context(), {
+    tool_identity: "generator@one",
+    configuration_digest: sha256("config:one"),
+  });
+  assert.equal(current.freshness, "CURRENT");
+  assert.deepEqual(current.reasons, []);
+  assert.deepEqual(current.verification_scope, {
+    causal_inputs: "declared-only",
+    renderer_semantics: "not-proven",
+  });
+
+  const toolStale = analyzeProjectionCurrent(model, build, context(), {
+    tool_identity: "generator@two",
+    configuration_digest: sha256("config:one"),
+  });
+  assert.equal(toolStale.freshness, "STALE");
+  assert.ok(toolStale.reasons.includes("tool_identity_changed"));
+
+  const configStale = analyzeProjectionCurrent(model, build, context(), {
+    tool_identity: "generator@one",
+    configuration_digest: sha256("config:two"),
+  });
+  assert.equal(configStale.freshness, "STALE");
+  assert.ok(configStale.reasons.includes("configuration_changed"));
+
+  const changedModel = {
+    ...model,
+    generator: { contract_id: "generator/v2" },
+  };
+  const modelStale = analyzeProjectionCurrent(changedModel, build, context(), {
+    tool_identity: "generator@one",
+    configuration_digest: sha256("config:one"),
+  });
+  assert.equal(modelStale.freshness, "STALE");
+  assert.ok(modelStale.reasons.includes("model_changed"));
+  assert.ok(modelStale.reasons.includes("generator_contract_changed"));
+
+  const broken = analyzeProjectionCurrent(model, build, context("manual\n"), {
+    tool_identity: "generator@two",
+    configuration_digest: sha256("config:two"),
+  });
+  assert.equal(broken.freshness, "BROKEN");
+  assert.ok(broken.reasons.includes("output_changed"));
+  assert.ok(broken.reasons.includes("tool_identity_changed"));
+  assert.ok(broken.reasons.includes("configuration_changed"));
 });
