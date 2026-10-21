@@ -786,7 +786,7 @@ relations:
       status = error.status ?? 1;
       stdout = String(error.stdout || "");
     }
-    return { status, report: JSON.parse(stdout) };
+    return { status, stdout, report: JSON.parse(stdout) };
   };
 
   try {
@@ -798,7 +798,13 @@ relations:
     const base = commit("base");
 
     const current = check(base, base);
+    const currentRepeat = check(base, base);
     assert.equal(current.status, 0);
+    assert.equal(
+      currentRepeat.stdout,
+      current.stdout,
+      "same exact BASE/HEAD must produce byte-identical JSON report",
+    );
     assert.equal(current.report.ok, true);
     assert.equal(current.report.projections.analyses[0].freshness, "CURRENT");
     assert.equal(current.report.projections.ownership.coverage.status, "incomplete");
