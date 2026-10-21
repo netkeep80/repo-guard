@@ -250,6 +250,16 @@ function canonicalIdentityJson(value) {
     }
     return failDocumentFact("fact_type_mismatch", "document pointer identity requires JSON-compatible content");
 }
+export function readDurableDocumentIdentity(content, format, pointer = "") {
+    const text = Buffer.isBuffer(content) ? content.toString("utf8") : content;
+    const document = format === "json" ? parseDurableJson(text) : parseYaml(text);
+    const value = resolveJsonPointer(document, pointer);
+    const canonicalValue = canonicalIdentityJson(value);
+    return {
+        value,
+        digest: createHash("sha256").update(canonicalValue, "utf8").digest("hex"),
+    };
+}
 function contentIdentityFactSource(context, selector) {
     const path = normalizeRepositoryPathFact(selector.path);
     if (selector.algorithm !== "sha256") {
