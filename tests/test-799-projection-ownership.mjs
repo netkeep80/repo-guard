@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   analyzeProjection,
+  evaluateProjectionCheck,
   normalizeProjectionModel,
   projectionModelIdentity,
 } from "../dist/projection-api.mjs";
@@ -914,4 +915,251 @@ relations:
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test("#799 Requirement SubjectRef resolves through canonical identity instead of redeclared path", () => {
+  const normative = "stable normative statement";
+  const output = "derived\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.requirement.input",
+    sources: [{
+      id: "requirement",
+      kind: "repository_subject",
+      subject: { kind: "requirement", id: "REQ-1" },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/requirement.txt", ownership: "generated" },
+    generator: { contract_id: "requirement-renderer/v1" },
+    required_evidence: [],
+  });
+  assert.equal(model.sources[0].representation, undefined);
+
+  assert.throws(
+    () => normalizeProjectionModel({
+      ...model,
+      sources: [{
+        id: "requirement",
+        kind: "repository_subject",
+        subject: { kind: "requirement", id: "REQ-1" },
+        representation: { kind: "resource", path: "requirements/wrong.rg.yaml" },
+        algorithm: "sha256",
+      }],
+    }),
+    /resolved from the canonical native Requirement index/,
+  );
+
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: model.id,
+    model_identity: projectionModelIdentity(model),
+    source_identities: [{
+      source_id: "requirement",
+      algorithm: "sha256",
+      digest: sha256(canonical(normative)),
+    }],
+    generator: {
+      contract_id: "requirement-renderer/v1",
+      tool_identity: "requirement-renderer@1",
+    },
+    configuration_digest: sha256("config:1"),
+    output_identity: { algorithm: "sha256", digest: sha256(output) },
+    evidence: [],
+  };
+  const raw = JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [{
+      state: "live",
+      model,
+      build,
+      current_generator: {
+        tool_identity: "requirement-renderer@1",
+        configuration_digest: sha256("config:1"),
+      },
+    }],
+  });
+
+  const current = evaluateProjectionCheck({
+    baseRaw: null,
+    headRaw: raw,
+    readHead: (path) => path === "derived/requirement.txt" ? output : null,
+    facts: {
+      readFile: (path) => path === "derived/requirement.txt" ? output : null,
+      diff: { files: { checked: [] } },
+    },
+    resolveRequirement: (id) => id === "REQ-1"
+      ? { digest: sha256(canonical(normative)), path: "requirements/REQ-1.rg.yaml" }
+      : null,
+  });
+  assert.equal(current.ok, true);
+  assert.equal(current.analyses[0].freshness, "CURRENT");
+  assert.equal(current.analyses[0].impact_scope, "file-conservative");
+
+  const missing = evaluateProjectionCheck({
+    baseRaw: null,
+    headRaw: raw,
+    readHead: (path) => path === "derived/requirement.txt" ? output : null,
+    facts: {
+      readFile: (path) => path === "derived/requirement.txt" ? output : null,
+      diff: { files: { checked: [] } },
+    },
+    resolveRequirement: () => null,
+  });
+  assert.equal(missing.ok, false);
+  assert.ok(missing.diagnostics.some((item) => item.code === "projection_subject_unresolved"));
+  assert.equal(missing.analyses[0].freshness, "BROKEN");
+});
+
+test("#799 named Relation binding rejects a representation of another relation", () => {
+  const relationOther = { id: "R_OTHER", meaning: "depends_on", source: "A", target: "B" };
+  const output = "derived\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.relation.binding",
+    sources: [{
+      id: "relation",
+      kind: "repository_subject",
+      subject: { kind: "relation", id: "R_CORE" },
+      representation: {
+        kind: "resource",
+        path: "model/relations.json",
+        pointer: "/relations/R_OTHER",
+      },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/relation-binding.txt", ownership: "generated" },
+    generator: { contract_id: "relation-renderer/v1" },
+    required_evidence: [],
+  });
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: model.id,
+    model_identity: projectionModelIdentity(model),
+    source_identities: [{
+      source_id: "relation",
+      algorithm: "sha256",
+      digest: sha256(canonical(relationOther)),
+    }],
+    generator: {
+      contract_id: "relation-renderer/v1",
+      tool_identity: "relation-renderer@1",
+    },
+    configuration_digest: sha256("config:1"),
+    output_identity: { algorithm: "sha256", digest: sha256(output) },
+    evidence: [],
+  };
+  const raw = JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [{
+      state: "live",
+      model,
+      build,
+      current_generator: {
+        tool_identity: "relation-renderer@1",
+        configuration_digest: sha256("config:1"),
+      },
+    }],
+  });
+  const report = evaluateProjectionCheck({
+    baseRaw: null,
+    headRaw: raw,
+    readHead: (path) => {
+      if (path === "model/relations.json") return JSON.stringify({ relations: { R_OTHER: relationOther } });
+      if (path === "derived/relation-binding.txt") return output;
+      return null;
+    },
+    facts: {
+      readFile: (path) => {
+        if (path === "model/relations.json") return JSON.stringify({ relations: { R_OTHER: relationOther } });
+        if (path === "derived/relation-binding.txt") return output;
+        return null;
+      },
+      diff: { files: { checked: [] } },
+    },
+  });
+  assert.equal(report.ok, false);
+  assert.ok(report.diagnostics.some((item) => item.code === "projection_subject_binding"));
+  assert.equal(report.analyses[0].freshness, "BROKEN");
+});
+
+test("#799 block_id is unique within a file even across different anchors", () => {
+  const aBegin = "<!-- rg:a:shared:begin -->";
+  const aEnd = "<!-- rg:a:shared:end -->";
+  const bBegin = "<!-- rg:b:shared:begin -->";
+  const bEnd = "<!-- rg:b:shared:end -->";
+  const markdown = [
+    '<a id="a"></a>',
+    "# A",
+    aBegin,
+    "A",
+    aEnd,
+    '<a id="b"></a>',
+    "# B",
+    bBegin,
+    "B",
+    bEnd,
+    "",
+  ].join("\n");
+  const report = analyzeProjectionOwnership({
+    live: [
+      owned("writer-a", "docs/blocks.md", "a", "shared", aBegin, aEnd),
+      owned("writer-b", "docs/blocks.md", "b", "shared", bBegin, bEnd),
+    ],
+    readHead: filesReader(new Map([["docs/blocks.md", markdown]])),
+  });
+  assert.equal(report.ok, false);
+  assert.ok(report.conflicts.some((item) => item.code === "duplicate_block_id"));
+  assert.deepEqual(report.invalid_projections, ["writer-a", "writer-b"]);
+});
+
+test("#799 global ownership conflict prevents a local CURRENT verdict", () => {
+  const output = "same\n";
+  const one = generated("writer.one", "docs/shared-current.md");
+  const two = generated("writer.two", "docs/shared-current.md");
+  const liveEntry = (model) => ({
+    state: "live",
+    model,
+    build: {
+      schema: "repo-guard/projection-build-record/v0",
+      projection_id: model.id,
+      model_identity: projectionModelIdentity(model),
+      source_identities: [{
+        source_id: "source",
+        algorithm: "sha256",
+        digest: sha256("source\n"),
+      }],
+      generator: {
+        contract_id: "fixture-generator/v1",
+        tool_identity: "fixture-generator@1",
+      },
+      configuration_digest: sha256("config:1"),
+      output_identity: { algorithm: "sha256", digest: sha256(output) },
+      evidence: [],
+    },
+    current_generator: {
+      tool_identity: "fixture-generator@1",
+      configuration_digest: sha256("config:1"),
+    },
+  });
+  const raw = JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [liveEntry(one), liveEntry(two)],
+  });
+  const report = evaluateProjectionCheck({
+    baseRaw: null,
+    headRaw: raw,
+    readHead: (path) => path === "docs/shared-current.md" ? output : null,
+    facts: {
+      readFile: (path) => {
+        if (path === "inputs/source.txt") return "source\n";
+        if (path === "docs/shared-current.md") return output;
+        return null;
+      },
+      diff: { files: { checked: [] } },
+    },
+  });
+  assert.equal(report.ok, false);
+  assert.equal(report.analyses.every((item) => item.freshness === "BROKEN"), true);
+  assert.equal(report.analyses.every((item) => item.reasons.includes("ownership_conflict")), true);
 });
