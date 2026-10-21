@@ -692,6 +692,72 @@ test("#799 current analysis separates model/tool/config staleness from output br
 });
 
 
+
+
+test("#799 fragment freshness is exact while file-level impact is explicitly conservative", () => {
+  const original = JSON.stringify({ byId: { core: { value: 1 }, other: { value: 1 } } });
+  const neighborChanged = JSON.stringify({ byId: { core: { value: 1 }, other: { value: 2 } } });
+  const output = "derived\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.fragment.impact-scope",
+    sources: [{
+      id: "core",
+      kind: "repository_subject",
+      subject: {
+        kind: "resource",
+        path: "model/data.json",
+        pointer: "/byId/core",
+      },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/fragment.txt", ownership: "generated" },
+    generator: { contract_id: "fragment-renderer/v1" },
+    required_evidence: [],
+  });
+  const build = {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: model.id,
+    model_identity: projectionModelIdentity(model),
+    source_identities: [{
+      source_id: "core",
+      algorithm: "sha256",
+      digest: sha256(canonical({ value: 1 })),
+    }],
+    generator: {
+      contract_id: "fragment-renderer/v1",
+      tool_identity: "fragment-renderer@1",
+    },
+    configuration_digest: sha256("config:1"),
+    output_identity: { algorithm: "sha256", digest: sha256(output) },
+    evidence: [],
+  };
+  const current = analyzeProjectionCurrent(model, build, {
+    readFile: (path) => {
+      if (path === "model/data.json") return neighborChanged;
+      if (path === "derived/fragment.txt") return output;
+      throw new Error("missing " + path);
+    },
+    diff: {
+      files: {
+        checked: [{
+          path: "model/data.json",
+          status: "modified",
+          addedLines: ["neighbor changed"],
+          deletedLines: ["neighbor old"],
+        }],
+      },
+    },
+  }, {
+    tool_identity: "fragment-renderer@1",
+    configuration_digest: sha256("config:1"),
+  });
+  assert.equal(current.freshness, "CURRENT", "unchanged selected fragment must remain fresh");
+  assert.equal(current.impact, "AFFECTED", "file change conservatively affects the transaction");
+  assert.equal(current.impact_scope, "file-conservative");
+  assert.deepEqual(current.affected_sources, ["core"]);
+});
+
 test("#799 repo-guard check consumes exact BASE/HEAD projection state without mutation", () => {
   const root = mkdtempSync(join(tmpdir(), "repo-guard-799-check-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
