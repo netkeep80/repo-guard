@@ -1,7 +1,5 @@
-import {
-  parseJson,
-  type FactReadContext,
-} from "./document-facts.mjs";
+import type { FactReadContext } from "./document-facts.mjs";
+import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
 import {
   analyzeProjectionCurrent,
   type ProjectionCurrentAnalysis,
@@ -137,7 +135,7 @@ export function parseProjectionCheckState(
     };
   }
   const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
-  const input = object(parseJson(text), "ProjectionCheck");
+  const input = object(strictCanonicalJson(text), "ProjectionCheck");
   fields(input, ["schema", "entries"], "ProjectionCheck");
   if (input.schema !== "repo-guard/projection-check/v0") {
     fail('ProjectionCheck.schema must be "repo-guard/projection-check/v0"');
