@@ -46,17 +46,25 @@ function changedSourceFact(path: string): FactRef {
   };
 }
 
-function projectionSourcePath(source: ProjectionSourceDependency): string {
-  return source.kind === "repository_content" ? source.path : source.representation.path;
+function projectionSourcePath(
+  source: ProjectionSourceDependency,
+  resolved: ProjectionResolvedSources = {},
+): string {
+  if (source.kind === "repository_content") return source.path;
+  const resolvedSource = resolved[source.id];
+  if (resolvedSource) return resolvedSource.path;
+  if (source.representation) return source.representation.path;
+  throw new Error(`Projection SubjectRef source "${source.id}" is unresolved`);
 }
 
 function impactOf(
   model: ProjectionModel,
   facts: FactReadContext,
+  resolved: ProjectionResolvedSources = {},
 ): { impact: ProjectionImpact; affected_sources: string[] } {
   const affectedSources: string[] = [];
   for (const source of model.sources) {
-    const changed = readFact(facts, changedSourceFact(projectionSourcePath(source)));
+    const changed = readFact(facts, changedSourceFact(projectionSourcePath(source, resolved)));
     if (!changed.ok) {
       throw new Error(
         `Projection analysis impact unavailable for "${model.id}": ${changed.error.message}`,
@@ -159,6 +167,14 @@ export interface ProjectionCurrentGeneratorIdentity {
   configuration_digest: string;
 }
 
+export interface ProjectionResolvedSourceIdentity {
+  digest: string;
+  path: string;
+}
+
+export type ProjectionResolvedSources =
+  Readonly<Record<string, ProjectionResolvedSourceIdentity>>;
+
 export interface ProjectionCurrentAnalysis extends ProjectionAnalysis {
   reasons: string[];
   impact_scope: "declared-file-exact" | "file-conservative";
@@ -172,7 +188,10 @@ function currentImpactScope(model: ProjectionModel): ProjectionCurrentAnalysis["
   return model.sources.some(
     (source) =>
       source.kind === "repository_subject"
-      && source.representation.pointer !== undefined,
+      && (
+        source.subject.kind !== "resource"
+        || source.representation?.pointer !== undefined
+      ),
   )
     ? "file-conservative"
     : "declared-file-exact";
@@ -204,6 +223,7 @@ export function analyzeProjectionCurrent(
   buildValue: unknown,
   facts: FactReadContext,
   current: ProjectionCurrentGeneratorIdentity,
+  resolvedSources: ProjectionResolvedSources = {},
 ): ProjectionCurrentAnalysis {
   let model: ProjectionModel;
   try {
@@ -225,7 +245,7 @@ export function analyzeProjectionCurrent(
 
   let impact: ReturnType<typeof impactOf>;
   try {
-    impact = impactOf(model, facts);
+    impact = impactOf(model, facts, resolvedSources);
   } catch {
     return {
       projection_id: model.id,
@@ -298,11 +318,16 @@ export function analyzeProjectionCurrent(
   const currentSourceIds = new Set(model.sources.map((source) => source.id));
 
   for (const source of model.sources) {
-    let identity;
-    try {
-      identity = readIdentity(facts, projectionSourceContentFact(source));
-    } catch {
-      identity = { ok: false } as const;
+    let identity: { ok: true; digest: string } | { ok: false };
+    const resolved = resolvedSources[source.id];
+    if (resolved) {
+      identity = { ok: true, digest: resolved.digest };
+    } else {
+      try {
+        identity = readIdentity(facts, projectionSourceContentFact(source));
+      } catch {
+        identity = { ok: false };
+      }
     }
     if (!identity.ok) {
       broken = true;
