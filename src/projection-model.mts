@@ -1,12 +1,24 @@
 import { createHash } from "node:crypto";
 import { normalizeDocumentFact } from "./document-facts.mjs";
+import { normalizeSubjectRef, type SubjectRef } from "./runtime/subject-relations.mjs";
 
-export interface ProjectionSourceDependency {
+export interface ProjectionRepositoryContentSourceDependency {
   id: string;
   kind: "repository_content";
   path: string;
   algorithm: "sha256";
 }
+
+export interface ProjectionRepositorySubjectSourceDependency {
+  id: string;
+  kind: "repository_subject";
+  subject: Extract<SubjectRef, { kind: "resource" }>;
+  algorithm: "sha256";
+}
+
+export type ProjectionSourceDependency =
+  | ProjectionRepositoryContentSourceDependency
+  | ProjectionRepositorySubjectSourceDependency;
 
 export type ProjectionTargetLocator =
   | {
@@ -140,16 +152,34 @@ function array(value: unknown, label: string): unknown[] {
 function normalizeSource(value: unknown, index: number): ProjectionSourceDependency {
   const label = `ProjectionModel.sources[${index}]`;
   const input = object(value, label);
-  fields(input, ["id", "kind", "path", "algorithm"], label);
-  if (input.kind !== "repository_content") {
-    fail(`${label}.kind`, 'must be "repository_content"');
+  if (input.kind === "repository_content") {
+    fields(input, ["id", "kind", "path", "algorithm"], label);
+    return {
+      id: identifier(input.id, `${label}.id`),
+      kind: "repository_content",
+      path: repositoryPath(input.path, `${label}.path`),
+      algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
+    };
   }
-  return {
-    id: identifier(input.id, `${label}.id`),
-    kind: "repository_content",
-    path: repositoryPath(input.path, `${label}.path`),
-    algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
-  };
+  if (input.kind === "repository_subject") {
+    fields(input, ["id", "kind", "subject", "algorithm"], label);
+    let subject: SubjectRef;
+    try {
+      subject = normalizeSubjectRef(input.subject as SubjectRef);
+    } catch (error) {
+      fail(`${label}.subject`, error instanceof Error ? error.message : String(error));
+    }
+    if (subject.kind !== "resource") {
+      fail(`${label}.subject`, "projection source must resolve to a repository Resource SubjectRef");
+    }
+    return {
+      id: identifier(input.id, `${label}.id`),
+      kind: "repository_subject",
+      subject,
+      algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
+    };
+  }
+  fail(`${label}.kind`, 'must be "repository_content" or "repository_subject"');
 }
 
 function normalizeTarget(value: unknown): ProjectionTarget {
