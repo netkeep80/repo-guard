@@ -5,6 +5,14 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: ".github/workflows/compiler-gate.yml"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-788-compiler-gate.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: ".github/workflows/trusted-enforcement.yml"
   - predicates: [implemented_by]
     target:
