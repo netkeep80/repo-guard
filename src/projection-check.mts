@@ -137,7 +137,7 @@ function entry(value: unknown, index: number): ProjectionCheckEntry {
 }
 
 export function parseProjectionCheckState(
-  raw: string | Buffer | null | undefined,
+  raw: string | Uint8Array | null | undefined,
 ): ProjectionCheckState {
   if (raw === null || raw === undefined) {
     return {
@@ -146,7 +146,9 @@ export function parseProjectionCheckState(
       present: false,
     };
   }
-  const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+  const text = typeof raw === "string"
+    ? raw
+    : Buffer.from(raw).toString("utf8");
   const input = object(strictCanonicalJson(text), "ProjectionCheck");
   fields(input, ["schema", "entries"], "ProjectionCheck");
   if (input.schema !== "repo-guard/projection-check/v0") {
@@ -275,8 +277,8 @@ function resolveProjectionSources(
 }
 
 export function evaluateProjectionCheck(input: {
-  baseRaw: string | Buffer | null | undefined;
-  headRaw: string | Buffer | null | undefined;
+  baseRaw: string | Uint8Array | null | undefined;
+  headRaw: string | Uint8Array | null | undefined;
   readHead: (path: string) => unknown;
   facts: FactReadContext;
   resolveRequirement?: ProjectionRequirementResolver;
