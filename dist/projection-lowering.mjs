@@ -25,6 +25,30 @@ function scalarIdentityRelation(relationId, path, expectedDigest, metadata, regi
         },
     };
 }
+function documentPointerRegion(path, pointer) {
+    if (pointer === undefined)
+        return undefined;
+    const lower = path.toLowerCase();
+    const format = lower.endsWith(".json")
+        ? "json"
+        : lower.endsWith(".yaml") || lower.endsWith(".yml")
+            ? "yaml"
+            : null;
+    if (!format) {
+        throw new Error(`Projection repository_subject pointer requires a JSON/YAML resource path: "${path}"`);
+    }
+    return { kind: "document_pointer", format, pointer };
+}
+function projectionSourceIdentity(source) {
+    if (source.kind === "repository_content")
+        return { path: source.path };
+    return {
+        path: source.subject.path,
+        ...(source.subject.pointer !== undefined
+            ? { region: documentPointerRegion(source.subject.path, source.subject.pointer) }
+            : {}),
+    };
+}
 function buildRecordFor(modelValue, buildValue) {
     const model = normalizeProjectionModel(modelValue);
     const build = normalizeProjectionBuildRecord(buildValue, model);
@@ -38,11 +62,12 @@ export function lowerProjectionVerification(modelValue, buildValue) {
         if (!identity) {
             throw new Error(`ProjectionBuildRecord missing normalized source identity "${source.id}"`);
         }
-        return scalarIdentityRelation(`${model.id}:source:${source.id}`, source.path, identity.digest, {
+        const sourceIdentity = projectionSourceIdentity(source);
+        return scalarIdentityRelation(`${model.id}:source:${source.id}`, sourceIdentity.path, identity.digest, {
             projection_id: model.id,
             projection_role: "source",
             source_id: source.id,
-        });
+        }, sourceIdentity.region);
     });
     let targetRegion;
     if (model.target.ownership === "hybrid") {
