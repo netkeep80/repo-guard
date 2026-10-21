@@ -229,9 +229,13 @@ export function parseYaml(content: string): unknown {
 }
 
 export function parseJson(content: string): unknown {
-  // JSON.parse silently applies last-key-wins semantics. Durable pointers cannot
-  // use an ambiguous representation, so preserve JSON value semantics while
-  // independently rejecting duplicate keys.
+  return JSON.parse(content);
+}
+
+function parseDurableJson(content: string): unknown {
+  // Generic document parsing intentionally preserves JSON.parse last-key-wins
+  // behavior. A durable pointer identity is stricter: duplicate object keys
+  // make the address ambiguous and therefore fail closed.
   const parsed = JSON.parse(content);
   const document = parseDocument(content, {
     prettyErrors: false,
@@ -491,7 +495,7 @@ function contentIdentityFactSource(
     bytes = Buffer.from(block.content, "utf8");
   } else if (selector.region?.kind === "document_pointer") {
     const text = bytes.toString("utf8");
-    const document = selector.region.format === "json" ? parseJson(text) : parseYaml(text);
+    const document = selector.region.format === "json" ? parseDurableJson(text) : parseYaml(text);
     const selected = resolveJsonPointer(document, selector.region.pointer);
     bytes = Buffer.from(canonicalIdentityJson(selected), "utf8");
   }
