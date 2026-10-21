@@ -13,10 +13,13 @@ function changedSourceFact(path) {
         type: "repository_path_set",
     };
 }
+function projectionSourcePath(source) {
+    return source.kind === "repository_content" ? source.path : source.subject.path;
+}
 function impactOf(model, facts) {
     const affectedSources = [];
     for (const source of model.sources) {
-        const changed = readFact(facts, changedSourceFact(source.path));
+        const changed = readFact(facts, changedSourceFact(projectionSourcePath(source)));
         if (!changed.ok) {
             throw new Error(`Projection analysis impact unavailable for "${model.id}": ${changed.error.message}`);
         }
