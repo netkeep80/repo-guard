@@ -319,36 +319,26 @@ export function projectionModelIdentity(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(normalized), "utf8").digest("hex");
 }
 
-function normalizeSourceIdentity(
+function normalizeDetachedSourceIdentity(
   value: unknown,
   index: number,
-  modelSources: Map<string, ProjectionSourceDependency>,
 ): ProjectionSourceIdentity {
   const label = `ProjectionBuildRecord.source_identities[${index}]`;
   const input = object(value, label);
   fields(input, ["source_id", "algorithm", "digest"], label);
-  const sourceId = identifier(input.source_id, `${label}.source_id`);
-  const source = modelSources.get(sourceId);
-  if (!source) fail(label, `unknown source identity "${sourceId}"`);
-  const algorithm = sha256Algorithm(input.algorithm, `${label}.algorithm`);
-  if (algorithm !== source.algorithm) fail(label, `algorithm differs from model source "${sourceId}"`);
   return {
-    source_id: sourceId,
-    algorithm,
+    source_id: identifier(input.source_id, `${label}.source_id`),
+    algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
     digest: sha256Digest(input.digest, `${label}.digest`),
   };
 }
 
-function normalizeBuildGenerator(value: unknown, model: ProjectionModel): ProjectionBuildGenerator {
+function normalizeDetachedBuildGenerator(value: unknown): ProjectionBuildGenerator {
   const label = "ProjectionBuildRecord.generator";
   const input = object(value, label);
   fields(input, ["contract_id", "tool_identity"], label);
-  const contractId = identifier(input.contract_id, `${label}.contract_id`);
-  if (contractId !== model.generator.contract_id) {
-    fail(label, `generator contract "${contractId}" does not match ProjectionModel`);
-  }
   return {
-    contract_id: contractId,
+    contract_id: identifier(input.contract_id, `${label}.contract_id`),
     tool_identity: stringValue(input.tool_identity, `${label}.tool_identity`),
   };
 }
@@ -363,8 +353,8 @@ function normalizeOutputIdentity(value: unknown): ProjectionOutputIdentity {
   };
 }
 
-function normalizeEvidence(value: unknown, required: readonly string[]): ProjectionEvidenceReference[] {
-  const evidence = array(value, "ProjectionBuildRecord.evidence").map((item, index) => {
+function normalizeDetachedEvidence(value: unknown): ProjectionEvidenceReference[] {
+  return array(value, "ProjectionBuildRecord.evidence").map((item, index) => {
     const label = `ProjectionBuildRecord.evidence[${index}]`;
     const input = object(item, label);
     fields(input, ["class", "ref"], label);
@@ -373,21 +363,11 @@ function normalizeEvidence(value: unknown, required: readonly string[]): Project
       ref: stringValue(input.ref, `${label}.ref`),
     };
   }).sort((left, right) => left.class.localeCompare(right.class) || left.ref.localeCompare(right.ref));
-
-  const present = new Set(evidence.map((item) => item.class));
-  for (const requiredClass of required) {
-    if (!present.has(requiredClass)) {
-      fail("ProjectionBuildRecord.evidence", `required evidence "${requiredClass}" is missing`);
-    }
-  }
-  return evidence;
 }
 
-export function normalizeProjectionBuildRecord(
+export function normalizeProjectionBuildRecordDetached(
   value: unknown,
-  modelValue: unknown,
 ): ProjectionBuildRecord {
-  const model = normalizeProjectionModel(modelValue);
   const input = object(value, "ProjectionBuildRecord");
   fields(input, [
     "schema",
@@ -404,20 +384,8 @@ export function normalizeProjectionBuildRecord(
     fail("ProjectionBuildRecord.schema", 'must be "repo-guard/projection-build-record/v0"');
   }
 
-  const projectionId = identifier(input.projection_id, "ProjectionBuildRecord.projection_id");
-  if (projectionId !== model.id) {
-    fail("ProjectionBuildRecord.projection_id", `does not match ProjectionModel id "${model.id}"`);
-  }
-
-  const expectedModelIdentity = projectionModelIdentity(model);
-  const modelIdentity = sha256Digest(input.model_identity, "ProjectionBuildRecord.model_identity");
-  if (modelIdentity !== expectedModelIdentity) {
-    fail("ProjectionBuildRecord.model_identity", "model identity does not match ProjectionModel");
-  }
-
-  const modelSources = new Map(model.sources.map((source) => [source.id, source]));
   const sourceIdentities = array(input.source_identities, "ProjectionBuildRecord.source_identities")
-    .map((item, index) => normalizeSourceIdentity(item, index, modelSources))
+    .map(normalizeDetachedSourceIdentity)
     .sort((left, right) => left.source_id.localeCompare(right.source_id));
 
   const seen = new Set<string>();
@@ -427,23 +395,78 @@ export function normalizeProjectionBuildRecord(
     }
     seen.add(source.source_id);
   }
+
+  return {
+    schema: "repo-guard/projection-build-record/v0",
+    projection_id: identifier(input.projection_id, "ProjectionBuildRecord.projection_id"),
+    model_identity: sha256Digest(input.model_identity, "ProjectionBuildRecord.model_identity"),
+    source_identities: sourceIdentities,
+    generator: normalizeDetachedBuildGenerator(input.generator),
+    configuration_digest: sha256Digest(
+      input.configuration_digest,
+      "ProjectionBuildRecord.configuration_digest",
+    ),
+    output_identity: normalizeOutputIdentity(input.output_identity),
+    evidence: normalizeDetachedEvidence(input.evidence),
+  };
+}
+
+export function normalizeProjectionBuildRecord(
+  value: unknown,
+  modelValue: unknown,
+): ProjectionBuildRecord {
+  const model = normalizeProjectionModel(modelValue);
+  const build = normalizeProjectionBuildRecordDetached(value);
+
+  if (build.projection_id !== model.id) {
+    fail("ProjectionBuildRecord.projection_id", `does not match ProjectionModel id "${model.id}"`);
+  }
+
+  const expectedModelIdentity = projectionModelIdentity(model);
+  if (build.model_identity !== expectedModelIdentity) {
+    fail("ProjectionBuildRecord.model_identity", "model identity does not match ProjectionModel");
+  }
+
+  const modelSources = new Map(model.sources.map((source) => [source.id, source]));
+  const seen = new Set<string>();
+  for (const source of build.source_identities) {
+    const modelSource = modelSources.get(source.source_id);
+    if (!modelSource) {
+      fail(
+        "ProjectionBuildRecord.source_identities",
+        `unknown source identity "${source.source_id}"`,
+      );
+    }
+    if (source.algorithm !== modelSource.algorithm) {
+      fail(
+        "ProjectionBuildRecord.source_identities",
+        `algorithm differs from model source "${source.source_id}"`,
+      );
+    }
+    seen.add(source.source_id);
+  }
   for (const source of model.sources) {
     if (!seen.has(source.id)) {
       fail("ProjectionBuildRecord.source_identities", `missing source identity "${source.id}"`);
     }
   }
 
-  return {
-    schema: "repo-guard/projection-build-record/v0",
-    projection_id: projectionId,
-    model_identity: modelIdentity,
-    source_identities: sourceIdentities,
-    generator: normalizeBuildGenerator(input.generator, model),
-    configuration_digest: sha256Digest(
-      input.configuration_digest,
-      "ProjectionBuildRecord.configuration_digest",
-    ),
-    output_identity: normalizeOutputIdentity(input.output_identity),
-    evidence: normalizeEvidence(input.evidence, model.required_evidence),
-  };
+  if (build.generator.contract_id !== model.generator.contract_id) {
+    fail(
+      "ProjectionBuildRecord.generator",
+      `generator contract "${build.generator.contract_id}" does not match ProjectionModel`,
+    );
+  }
+
+  const presentEvidence = new Set(build.evidence.map((item) => item.class));
+  for (const requiredClass of model.required_evidence) {
+    if (!presentEvidence.has(requiredClass)) {
+      fail(
+        "ProjectionBuildRecord.evidence",
+        `required evidence "${requiredClass}" is missing`,
+      );
+    }
+  }
+
+  return build;
 }
