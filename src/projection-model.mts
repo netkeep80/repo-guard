@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeDocumentFact } from "./document-facts.mjs";
-import { normalizeSubjectRef, type SubjectRef } from "./runtime/subject-relations.mjs";
+import { normalizeSubjectRef } from "./runtime/subject-relations.mjs";
 
 export interface ProjectionRepositoryContentSourceDependency {
   id: string;
@@ -9,10 +9,16 @@ export interface ProjectionRepositoryContentSourceDependency {
   algorithm: "sha256";
 }
 
+export interface ProjectionRepositoryResourceSubject {
+  kind: "resource";
+  path: string;
+  pointer?: string;
+}
+
 export interface ProjectionRepositorySubjectSourceDependency {
   id: string;
   kind: "repository_subject";
-  subject: Extract<SubjectRef, { kind: "resource" }>;
+  subject: ProjectionRepositoryResourceSubject;
   algorithm: "sha256";
 }
 
@@ -163,9 +169,9 @@ function normalizeSource(value: unknown, index: number): ProjectionSourceDepende
   }
   if (input.kind === "repository_subject") {
     fields(input, ["id", "kind", "subject", "algorithm"], label);
-    let subject: SubjectRef;
+    let subject;
     try {
-      subject = normalizeSubjectRef(input.subject as SubjectRef);
+      subject = normalizeSubjectRef(input.subject as ProjectionRepositoryResourceSubject);
     } catch (error) {
       fail(`${label}.subject`, error instanceof Error ? error.message : String(error));
     }
