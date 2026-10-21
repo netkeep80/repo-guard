@@ -73,10 +73,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/projection-ownership.d.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/runtime/canonical-requirements.d.mts"
   - predicates: [implemented_by]
     target:
