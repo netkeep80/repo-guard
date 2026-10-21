@@ -10,8 +10,6 @@ function targetKey(target) {
             path: target.path,
             anchor_id: target.locator.anchor_id,
             block_id: target.locator.block_id,
-            begin_marker: target.locator.begin_marker,
-            end_marker: target.locator.end_marker,
         });
     }
     return JSON.stringify({
@@ -19,6 +17,21 @@ function targetKey(target) {
         path: target.path,
         anchor_id: target.locator?.anchor_id ?? "",
     });
+}
+function locatorKey(target) {
+    if (target.ownership === "generated")
+        return targetKey(target);
+    if (target.locator?.kind === "markdown_owned_block") {
+        return JSON.stringify({
+            kind: "markdown_owned_block",
+            path: target.path,
+            anchor_id: target.locator.anchor_id,
+            block_id: target.locator.block_id,
+            begin_marker: target.locator.begin_marker,
+            end_marker: target.locator.end_marker,
+        });
+    }
+    return targetKey(target);
 }
 function normalizeEntries(values, state, conflicts) {
     const entries = [];
@@ -51,6 +64,7 @@ function normalizeEntries(values, state, conflicts) {
 function specs(entries) {
     return entries.map(({ state, model }) => ({
         key: targetKey(model.target),
+        locator_key: locatorKey(model.target),
         path: model.target.path,
         target: model.target,
         state,
@@ -115,7 +129,14 @@ function observeOwnedBlock(source, spec, conflicts) {
             return { observed: false };
         return {
             observed: true,
-            region: { key: spec.key, path: spec.path, start: block.start, end: block.end },
+            region: {
+                key: spec.key,
+                path: spec.path,
+                start: block.start,
+                end: block.end,
+                state: spec.state,
+                projection_id: spec.projection_id,
+            },
         };
     }
     if (!block)
@@ -130,7 +151,14 @@ function observeOwnedBlock(source, spec, conflicts) {
     }
     return {
         observed: true,
-        region: { key: spec.key, path: spec.path, start: block.start, end: block.end },
+        region: {
+            key: spec.key,
+            path: spec.path,
+            start: block.start,
+            end: block.end,
+            state: spec.state,
+            projection_id: spec.projection_id,
+        },
     };
 }
 function observeSpec(input, spec, conflicts) {
@@ -140,7 +168,14 @@ function observeSpec(input, spec, conflicts) {
     if (spec.target.ownership === "generated") {
         return {
             observed: true,
-            region: { key: spec.key, path: spec.path, start: 0, end: source.length },
+            region: {
+                key: spec.key,
+                path: spec.path,
+                start: 0,
+                end: source.length,
+                state: spec.state,
+                projection_id: spec.projection_id,
+            },
         };
     }
     if (spec.target.locator?.kind === "markdown_owned_block") {
@@ -156,11 +191,8 @@ function observeSpec(input, spec, conflicts) {
     if (!anchorId)
         return { observed: false };
     try {
-        const node = readMarkdownNode(source, anchorId);
-        return {
-            observed: true,
-            region: { key: spec.key, path: spec.path, start: node.start, end: node.end },
-        };
+        readMarkdownNode(source, anchorId);
+        return { observed: false };
     }
     catch (error) {
         conflicts.push({
@@ -176,17 +208,26 @@ function sorted(values) {
     return [...new Set(values)].sort((left, right) => left.localeCompare(right, "en"));
 }
 function pushDeclaredConflicts(allSpecs, conflicts) {
-    const live = allSpecs.filter((spec) => spec.state === "live");
-    const retained = allSpecs.filter((spec) => spec.state === "retained");
-    const writers = new Map();
-    for (const spec of live) {
-        const ids = writers.get(spec.key) || [];
-        ids.push(spec.projection_id);
-        writers.set(spec.key, ids);
+    const active = allSpecs.filter((spec) => spec.state !== "base");
+    const live = active.filter((spec) => spec.state === "live");
+    const retained = active.filter((spec) => spec.state === "retained");
+    const projectionStates = new Map();
+    for (const spec of active) {
+        const states = projectionStates.get(spec.projection_id) || new Set();
+        states.add(spec.state);
+        projectionStates.set(spec.projection_id, states);
     }
-    for (const [key, ids] of writers) {
-        const unique = sorted(ids);
-        if (unique.length > 1) {
+    for (const [projectionId, states] of projectionStates) {
+        if (states.size > 1) {
+            conflicts.push({
+                code: "duplicate_projection_id",
+                subject: projectionId,
+                detail: [...states].sort().join(","),
+            });
+        }
+    }
+    const byTarget = new Map();
+    for (const spec of active) {
             conflicts.push({
                 code: "multiple_writers",
                 subject: key,
