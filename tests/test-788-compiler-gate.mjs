@@ -94,6 +94,7 @@ try {
   assert.equal(JSON.parse(red.stdout).ok, false, "C2-02 semantic violation must be RED");
 
   console.log("C2 ordinary compiler gate adversarial matrix: PASS");
+  // C2 final merge-flow witness: harmless change to an already justified verifier.
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
