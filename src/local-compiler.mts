@@ -169,6 +169,15 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       readFile: (path) => readFileAtRef(head, path, input.root),
       diff: { files: { checked: diff } },
     },
+    resolveRequirement: (id) => {
+      const requirement = after.native.index[id];
+      return requirement
+        ? {
+            digest: requirement.semantic.digest,
+            path: requirement.source.path,
+          }
+        : null;
+    },
   });
   if (projectionReport.present) {
     for (const diagnostic of projectionReport.diagnostics) {
