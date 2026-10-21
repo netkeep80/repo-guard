@@ -69,7 +69,9 @@ export function parseProjectionCheckState(raw) {
             present: false,
         };
     }
-    const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+    const text = typeof raw === "string"
+        ? raw
+        : Buffer.from(raw).toString("utf8");
     const input = object(strictCanonicalJson(text), "ProjectionCheck");
     fields(input, ["schema", "entries"], "ProjectionCheck");
     if (input.schema !== "repo-guard/projection-check/v0") {
