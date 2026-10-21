@@ -13,6 +13,7 @@ import {
 } from "../dist/projection-api.mjs";
 import { analyzeProjectionCurrent } from "../dist/projection-analysis.mjs";
 import { analyzeProjectionOwnership } from "../dist/projection-ownership.mjs";
+import { loadNativeRequirements } from "../dist/runtime/canonical-requirements.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -1312,6 +1313,121 @@ ${optional}`;
     assert.notEqual(stale.status, 0);
     assert.equal(stale.report.projections.analyses[0].freshness, "STALE");
     assert.ok(stale.report.projections.analyses[0].reasons.includes("source_changed:requirement"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#799 duplicate native RequirementId makes dependent Projection BROKEN in real CLI", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-799-ambiguous-requirement-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const put = (path, content) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
+  };
+  const requirement = [
+    "format: repo-guard/requirement-v1",
+    "id: CORE",
+    "normative: X",
+    "relations:",
+    "  - predicates: [implemented_by]",
+    "    target:",
+    "      kind: artifact",
+    '      path: ".repo-guard/projections.json"',
+    "  - predicates: [implemented_by]",
+    "    target:",
+    "      kind: artifact",
+    '      path: "derived/output.txt"',
+    "",
+  ].join("\n");
+  const output = "stable derived output\n";
+  const model = normalizeProjectionModel({
+    schema: "repo-guard/projection-model/v0",
+    id: "projection.requirement.ambiguous",
+    sources: [{
+      id: "normative",
+      kind: "repository_subject",
+      subject: { kind: "requirement", id: "CORE" },
+      algorithm: "sha256",
+    }],
+    target: { path: "derived/output.txt", ownership: "generated" },
+    generator: { contract_id: "requirement-renderer/v1" },
+    required_evidence: [],
+  });
+  const state = JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [{
+      state: "live",
+      model,
+      build: {
+        schema: "repo-guard/projection-build-record/v0",
+        projection_id: model.id,
+        model_identity: projectionModelIdentity(model),
+        source_identities: [{
+          source_id: "normative",
+          algorithm: "sha256",
+          digest: sha256(canonical("X")),
+        }],
+        generator: {
+          contract_id: "requirement-renderer/v1",
+          tool_identity: "requirement-renderer@1",
+        },
+        configuration_digest: sha256("config:1"),
+        output_identity: { algorithm: "sha256", digest: sha256(output) },
+        evidence: [],
+      },
+      current_generator: {
+        tool_identity: "requirement-renderer@1",
+        configuration_digest: sha256("config:1"),
+      },
+    }],
+  }, null, 2) + "\n";
+
+  try {
+    git("init", "-q");
+    put("requirements/A.rg.yaml", requirement);
+    put("requirements/B.rg.yaml", requirement);
+    put(".repo-guard/projections.json", state);
+    put("derived/output.txt", output);
+    git("add", "-A");
+    git("-c", "user.name=#799 Duplicate Requirement", "-c", "user.email=799-dup@example.invalid",
+      "commit", "-qm", "two files claim one canonical RequirementId");
+    const revision = git("rev-parse", "HEAD");
+
+    // The canonical native loader itself rejects the ambiguous model.
+    const native = loadNativeRequirements({
+      repository: "local/repository",
+      revision,
+      paths: ["requirements/A.rg.yaml", "requirements/B.rg.yaml"],
+      readFile: (_sha, path) => path === "requirements/A.rg.yaml" || path === "requirements/B.rg.yaml"
+        ? requirement : null,
+    });
+    assert.equal(native.ok, false);
+    assert.ok(native.errors.some((item) => item.code === "duplicate_requirement_id"));
+
+    const cliPath = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+    let stdout = "";
+    let status = 0;
+    try {
+      stdout = execFileSync(process.execPath, [
+        cliPath, "--repo-root", root, "check",
+        "--base", revision, "--head", revision, "--format", "json",
+      ], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH } });
+    } catch (error) {
+      status = error.status ?? 1;
+      stdout = String(error.stdout || "");
+    }
+    const report = JSON.parse(stdout);
+    assert.notEqual(status, 0);
+    assert.equal(report.ok, false);
+    assert.ok(report.diagnostics.some((item) =>
+      item.code === "invalid_requirement" && /duplicate RequirementId CORE/.test(item.detail || "")));
+    const dependent = report.projections.analyses.find((item) => item.projection_id === model.id);
+    assert.ok(dependent, "dependent Projection must be included in local compiler report");
+    assert.equal(dependent.freshness, "BROKEN");
+    assert.notEqual(dependent.freshness, "CURRENT");
+    assert.ok(dependent.reasons.includes("source_unresolved:normative"));
+    assert.equal(git("status", "--porcelain=v1"), "", "read-only check must not mutate fixture");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

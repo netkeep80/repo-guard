@@ -153,6 +153,9 @@ export function evaluateLocalCompiler(input) {
             diff: { files: { checked: diff } },
         },
         resolveRequirement: (id) => {
+            // A partially populated native index is not authoritative on invalid snapshots.
+            if (!after.native.ok)
+                return null;
             const requirement = after.native.index[id];
             return requirement
                 ? {
