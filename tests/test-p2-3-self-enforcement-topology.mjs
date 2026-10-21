@@ -6,6 +6,7 @@ import { parseDocument } from "yaml";
 const root = resolve(".");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
 const actionSource = readFileSync(resolve(root, "action.yml"), "utf8");
+const compilerGateSource = readFileSync(resolve(root, ".github/workflows/compiler-gate.yml"), "utf8");
 const document = parseDocument(workflowSource);
 assert.equal(document.errors.length, 0);
 const workflow = document.toJS();
@@ -16,15 +17,16 @@ assert.ok(validate);
 assert.ok(smokePack);
 
 const selfCheck = validate.steps.find((step) => step.name === "Run PR policy check");
-assert.ok(selfCheck);
-assert.equal(selfCheck.uses, undefined, "self enforcement must not recurse through the composite Action");
-assert.equal(
-  selfCheck.run,
-  "node dist/repo-guard.mjs --enforcement blocking check-pr --format json",
-  "self enforcement must execute the exact checked-out candidate CLI directly",
-);
-assert.equal(selfCheck.if, "github.event_name == 'pull_request' && !github.event.pull_request.draft");
-assert.equal(selfCheck.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+assert.equal(selfCheck, undefined, "required validate must not invoke legacy PR semantic authority");
+assert.equal(validate.steps.some((step) => /\bcheck-pr\b/.test(step.run ?? "")), false);
+
+const gateDocument = parseDocument(compilerGateSource);
+assert.equal(gateDocument.errors.length, 0);
+const gate = gateDocument.toJS();
+assert.ok(gate.on?.pull_request_target, "compiler gate must be base-owned");
+const gateSteps = gate.jobs?.["compiler-gate"]?.steps ?? [];
+assert.ok(gateSteps.some((step) => step.with?.ref === "${{ github.event.pull_request.base.sha }}"));
+assert.ok(gateSteps.some((step) => /node dist\/repo-guard\.mjs check/.test(step.run ?? "")));
 
 const validateNodeSetups = validate.steps.filter(
   (step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-node@"),
