@@ -216,6 +216,23 @@ function snapshotFactSource(context, selector) {
     const exhaustive = selector.format;
     return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
+function canonicalIdentityJson(value) {
+    if (value === null || typeof value === "string" || typeof value === "boolean") {
+        return JSON.stringify(value);
+    }
+    if (typeof value === "number" && Number.isFinite(value))
+        return JSON.stringify(value);
+    if (Array.isArray(value))
+        return `[${value.map(canonicalIdentityJson).join(",")}]`;
+    if (value && typeof value === "object") {
+        const record = value;
+        return `{${Object.keys(record)
+            .sort()
+            .map((key) => `${JSON.stringify(key)}:${canonicalIdentityJson(record[key])}`)
+            .join(",")}}`;
+    }
+    return failDocumentFact("fact_type_mismatch", "document pointer identity requires JSON-compatible content");
+}
 function contentIdentityFactSource(context, selector) {
     const path = normalizeRepositoryPathFact(selector.path);
     if (selector.algorithm !== "sha256") {
@@ -262,7 +279,7 @@ function contentIdentityFactSource(context, selector) {
         return failDocumentFact("document_read_error", `content identity source "${path}" is unavailable`);
     }
     let bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf8");
-    if (selector.region) {
+    if (selector.region?.kind === "markdown_owned_block") {
         const text = bytes.toString("utf8");
         const node = readMarkdownNode(text, selector.region.anchor_id);
         const block = readOwnedMarkdownBlock(text, {
@@ -277,6 +294,12 @@ function contentIdentityFactSource(context, selector) {
             return failDocumentFact("document_read_error", `owned Markdown block "${selector.region.block_id}" is outside anchor "${selector.region.anchor_id}" node`);
         }
         bytes = Buffer.from(block.content, "utf8");
+    }
+    else if (selector.region?.kind === "document_pointer") {
+        const text = bytes.toString("utf8");
+        const document = selector.region.format === "json" ? parseJson(text) : parseYaml(text);
+        const selected = resolveJsonPointer(document, selector.region.pointer);
+        bytes = Buffer.from(canonicalIdentityJson(selected), "utf8");
     }
     return createHash("sha256").update(bytes).digest("hex");
 }
