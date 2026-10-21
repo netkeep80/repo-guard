@@ -41,6 +41,8 @@ export type {
   ProjectionGeneratorContract,
   ProjectionModel,
   ProjectionOutputIdentity,
+  ProjectionRepositoryContentSourceDependency,
+  ProjectionRepositorySubjectSourceDependency,
   ProjectionSourceDependency,
   ProjectionSourceIdentity,
   ProjectionTarget,
@@ -53,3 +55,13 @@ export type {
   ProjectionFreshness,
   ProjectionImpact,
 } from "./projection-analysis.mjs";
+
+
+export { analyzeProjectionOwnership } from "./projection-ownership.mjs";
+export type {
+  ProjectionInventoryState,
+  ProjectionOwnershipConflict,
+  ProjectionOwnershipConflictCode,
+  ProjectionOwnershipInput,
+  ProjectionOwnershipReport,
+} from "./projection-ownership.mjs";
