@@ -163,7 +163,8 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     headRaw: headProjectionPaths.has(projectionPath)
       ? readFileAtRef(head, projectionPath, input.root)
       : null,
-    readHead: (path) => readFileAtRef(head, path, input.root),
+    readHead: (path) =>
+      headProjectionPaths.has(path) ? readFileAtRef(head, path, input.root) : null,
     facts: {
       readFile: (path) => readFileAtRef(head, path, input.root),
       diff: { files: { checked: diff } },
