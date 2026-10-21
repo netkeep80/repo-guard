@@ -13,6 +13,11 @@ export interface ProjectionCurrentGeneratorIdentity {
     tool_identity: string;
     configuration_digest: string;
 }
+export interface ProjectionResolvedSourceIdentity {
+    digest: string;
+    path: string;
+}
+export type ProjectionResolvedSources = Readonly<Record<string, ProjectionResolvedSourceIdentity>>;
 export interface ProjectionCurrentAnalysis extends ProjectionAnalysis {
     reasons: string[];
     impact_scope: "declared-file-exact" | "file-conservative";
@@ -21,4 +26,4 @@ export interface ProjectionCurrentAnalysis extends ProjectionAnalysis {
         renderer_semantics: "not-proven";
     };
 }
-export declare function analyzeProjectionCurrent(modelValue: unknown, buildValue: unknown, facts: FactReadContext, current: ProjectionCurrentGeneratorIdentity): ProjectionCurrentAnalysis;
+export declare function analyzeProjectionCurrent(modelValue: unknown, buildValue: unknown, facts: FactReadContext, current: ProjectionCurrentGeneratorIdentity, resolvedSources?: ProjectionResolvedSources): ProjectionCurrentAnalysis;
