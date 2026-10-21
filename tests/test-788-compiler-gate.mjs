@@ -9,6 +9,19 @@ const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = resolve(project, ".github/workflows/compiler-gate.yml");
 const workflow = readFileSync(workflowPath, "utf8");
 
+// C2 convergence: the required validate path cannot call legacy blocking check-pr.
+const ordinaryCi = readFileSync(resolve(project, ".github/workflows/ci.yml"), "utf8");
+assert.doesNotMatch(
+  ordinaryCi,
+  /^\s*- name:\s*Run PR policy check\s*$/m,
+  "required validate must not contain the old semantic gate",
+);
+assert.doesNotMatch(
+  ordinaryCi,
+  /\b--enforcement\s+blocking\s+check-pr\b/,
+  "required CI must not execute the legacy blocking check-pr CLI",
+);
+
 // C2-04/C2-05/C2-07/C2-09: the required evaluator is base-owned and candidate code is data only.
 assert.match(workflow, /^\s{2}pull_request_target:\s*$/m);
 assert.doesNotMatch(workflow, /^\s{2}pull_request:\s*$/m);

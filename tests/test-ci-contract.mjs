@@ -88,13 +88,17 @@ const distStep = validate.steps.find((step) => step.name === "Verify generated d
 assert.ok(distStep);
 assert.equal(distStep.run, "npm run check:dist");
 
-const prPolicyStep = validate.steps.find(
-  (step) => step.name === "Run PR policy check",
+// C2: validate is build/test CI, never an independent PR semantic authority.
+assert.equal(
+  validate.steps.some((step) => step.name === "Run PR policy check"),
+  false,
+  "legacy blocking PR policy check must not run in required validate",
 );
-assert.ok(prPolicyStep);
-assert.equal(prPolicyStep.uses, undefined);
-assert.equal(prPolicyStep.run, "node dist/repo-guard.mjs --enforcement blocking check-pr --format json");
-assert.equal(prPolicyStep.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}");
+assert.equal(
+  validate.steps.some((step) => /\\bcheck-pr\\b/.test(step.run ?? "")),
+  false,
+  "check-pr must not be invoked by the required validate job",
+);
 
 const checkoutStep = validate.steps.find(
   (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
@@ -120,7 +124,6 @@ for (const name of [
   "Report architecture compression metrics",
   "Run doctor diagnostics on self",
   "Run discovered test suite",
-  "Run PR policy check",
 ]) {
   const index = validate.steps.findIndex((step) => step.name === name);
   assert.ok(index > evidenceIndex, `${name} must run after minimal Git evidence acquisition`);
