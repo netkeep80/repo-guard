@@ -183,7 +183,7 @@ export declare function normalizeDocumentFact(value: unknown, type: "boolean", p
 export declare function normalizeDocumentFact(value: unknown, type: "string_set" | "repository_path_set", pointer?: string): string[];
 export declare function normalizeDocumentFact(value: unknown, type: "repository_path", pointer?: string): string;
 export declare function normalizeDocumentFact(value: unknown, type: DocumentFactType, pointer?: string): NormalizedDocumentFact;
-export declare function readDurableDocumentIdentity(content: string | Buffer, format: "json" | "yaml", pointer?: string): {
+export declare function readDurableDocumentIdentity(content: string | Uint8Array, format: "json" | "yaml", pointer?: string): {
     value: unknown;
     digest: string;
 };
