@@ -17,6 +17,7 @@ export type ProjectionOwnershipConflictCode =
   | "multiple_writers"
   | "live_retained_overlap"
   | "locator_alias"
+  | "duplicate_block_id"
   | "locator_drift"
   | "insufficient_locator"
   | "unreadable_target"
@@ -56,6 +57,7 @@ export interface ProjectionOwnershipReport {
   missing: string[];
   orphan: string[];
   unknown_origin: string[];
+  invalid_projections: string[];
   conflicts: ProjectionOwnershipConflict[];
 }
 
@@ -385,6 +387,31 @@ function pushDeclaredConflicts(
     }
   }
 
+  const byBlockId = new Map<string, TargetSpec[]>();
+  for (const spec of active) {
+    if (
+      spec.target.ownership !== "hybrid"
+      || spec.target.locator?.kind !== "markdown_owned_block"
+    ) continue;
+    const blockKey = JSON.stringify({
+      path: spec.path,
+      block_id: spec.target.locator.block_id,
+    });
+    const values = byBlockId.get(blockKey) || [];
+    values.push(spec);
+    byBlockId.set(blockKey, values);
+  }
+  for (const [blockKey, values] of byBlockId) {
+    const logicalTargets = sorted(values.map((spec) => spec.key));
+    if (logicalTargets.length <= 1) continue;
+    conflicts.push({
+      code: "duplicate_block_id",
+      subject: blockKey,
+      path: values[0]?.path,
+      detail: "stable block_id must be unique within one repository path",
+    });
+  }
+
   const byPath = new Map<string, TargetSpec[]>();
   for (const spec of active) {
     const values = byPath.get(spec.path) || [];
@@ -538,6 +565,21 @@ export function analyzeProjectionOwnership(
       || (left.detail || "").localeCompare(right.detail || "", "en"),
   );
 
+  const activeSpecs = allSpecs.filter((spec) => spec.state !== "base");
+  const invalidProjectionIds = new Set<string>();
+  for (const conflict of conflicts) {
+    for (const spec of activeSpecs) {
+      if (
+        conflict.subject === spec.projection_id
+        || conflict.subject === spec.key
+        || conflict.subject.includes(spec.key)
+        || (conflict.path !== undefined && conflict.path === spec.path)
+      ) {
+        invalidProjectionIds.add(spec.projection_id);
+      }
+    }
+  }
+
   return {
     ok: conflicts.length === 0 && missing.length === 0 && orphan.length === 0,
     ownership_closed: false,
@@ -555,6 +597,7 @@ export function analyzeProjectionOwnership(
     missing,
     orphan,
     unknown_origin: unknownOrigin,
+    invalid_projections: sorted(invalidProjectionIds),
     conflicts,
   };
 }
