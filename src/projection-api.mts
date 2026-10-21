@@ -31,6 +31,7 @@ export type {
 
 export {
   normalizeProjectionBuildRecord,
+  normalizeProjectionBuildRecordDetached,
   normalizeProjectionModel,
   projectionModelIdentity,
 } from "./projection-model.mjs";
@@ -50,9 +51,11 @@ export type {
   ProjectionTargetLocator,
 } from "./projection-model.mjs";
 
-export { analyzeProjection } from "./projection-analysis.mjs";
+export { analyzeProjection, analyzeProjectionCurrent } from "./projection-analysis.mjs";
 export type {
   ProjectionAnalysis,
+  ProjectionCurrentAnalysis,
+  ProjectionCurrentGeneratorIdentity,
   ProjectionFreshness,
   ProjectionImpact,
 } from "./projection-analysis.mjs";
@@ -63,6 +66,7 @@ export type {
   ProjectionInventoryState,
   ProjectionOwnershipConflict,
   ProjectionOwnershipConflictCode,
+  ProjectionObservedCandidate,
   ProjectionOwnershipInput,
   ProjectionOwnershipReport,
 } from "./projection-ownership.mjs";
