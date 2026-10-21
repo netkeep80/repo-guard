@@ -322,6 +322,14 @@ export function analyzeProjectionCurrent(
     const resolved = resolvedSources[source.id];
     if (resolved) {
       identity = { ok: true, digest: resolved.digest };
+    } else if (
+      source.kind === "repository_subject"
+      && source.subject.kind !== "resource"
+    ) {
+      // Named semantic subjects are valid only after their logical identity
+      // has been bound to the exact snapshot representation. Never fall back
+      // to hashing an arbitrary representation for Requirement/Relation.
+      identity = { ok: false };
     } else {
       try {
         identity = readIdentity(facts, projectionSourceContentFact(source));
