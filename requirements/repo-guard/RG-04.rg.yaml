@@ -97,6 +97,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "dist/runtime/subject-relations.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/runtime/transition-closure.mjs"
   - predicates: [implemented_by]
     target:
@@ -245,6 +249,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "src/runtime/subject-relations.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "src/runtime/transition-closure.mts"
   - predicates: [implemented_by]
     target:
@@ -326,6 +334,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-707-i7-scoped-constraints.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-798-subject-relation-core.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
