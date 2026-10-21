@@ -66,6 +66,11 @@ function stable(value: unknown): string {
   throw new Error("non-canonical subject relation value");
 }
 
+function diagnosticKey(value: unknown): string {
+  try { return stable(value); }
+  catch { return "<invalid>"; }
+}
+
 function safePath(value: unknown): string {
   if (typeof value !== "string") throw new Error("resource path must be a string");
   const normalized = normalizeDocumentFact(value, "repository_path");
@@ -191,13 +196,14 @@ export function evaluateSubjectRelations(input: SubjectRelationInput): SubjectRe
       if (subjects.has(key)) errors.push({ code: "duplicate_subject", subject: key });
       else subjects.set(key, subject);
     } catch (error) {
-      errors.push({ code: "invalid_subject", subject: stable(raw), detail: (error as Error).message });
+      errors.push({ code: "invalid_subject", subject: diagnosticKey(raw), detail: (error as Error).message });
     }
   }
 
   const roles = [...new Set(input.roles || [])].sort();
   for (const role of roles)
-    if (!rolePattern.test(role)) errors.push({ code: "unknown_role", subject: role, detail: "role name is malformed" });
+    if (typeof role !== "string" || !rolePattern.test(role))
+      errors.push({ code: "unknown_role", subject: String(role), detail: "role name is malformed" });
   const roleSet = new Set(roles);
 
   const relationIds = new Map<string, SubjectRelation>();
@@ -218,7 +224,7 @@ export function evaluateSubjectRelations(input: SubjectRelationInput): SubjectRe
       source = normalizeSubjectRef(raw.source);
       target = normalizeSubjectRef(raw.target);
     } catch (error) {
-      errors.push({ code: "invalid_subject", subject: raw.id || relationKey(raw), detail: (error as Error).message });
+      errors.push({ code: "invalid_subject", subject: raw.id || diagnosticKey(raw), detail: (error as Error).message });
       continue;
     }
     if (typeof raw.meaning !== "string" || !meanings.has(raw.meaning as RelationMeaning)) {
