@@ -12,12 +12,12 @@ function contentIdentity(path, region) {
         type: "scalar",
     };
 }
-function scalarIdentityRelation(relationId, path, expectedDigest, metadata, region) {
+function scalarIdentityRelation(relationId, fact, expectedDigest, metadata) {
     return {
         relation_id: relationId,
         primitive: "scalar_equals_literal",
         operands: {
-            source: contentIdentity(path, region),
+            source: fact,
         },
         parameters: {
             value: expectedDigest,
@@ -39,15 +39,26 @@ function documentPointerRegion(path, pointer) {
     }
     return { kind: "document_pointer", format, pointer };
 }
-function projectionSourceIdentity(source) {
+export function projectionSourceContentFact(source) {
     if (source.kind === "repository_content")
-        return { path: source.path };
-    return {
-        path: source.subject.path,
-        ...(source.subject.pointer !== undefined
-            ? { region: documentPointerRegion(source.subject.path, source.subject.pointer) }
-            : {}),
-    };
+        return contentIdentity(source.path);
+    return contentIdentity(source.representation.path, documentPointerRegion(source.representation.path, source.representation.pointer));
+}
+export function projectionTargetContentFact(model) {
+    let region;
+    if (model.target.ownership === "hybrid") {
+        if (model.target.locator?.kind !== "markdown_owned_block") {
+            throw new Error(`ProjectionModel "${model.id}" hybrid target requires a markdown_owned_block locator for address-local identity`);
+        }
+        region = {
+            kind: "markdown_owned_block",
+            anchor_id: model.target.locator.anchor_id,
+            block_id: model.target.locator.block_id,
+            begin_marker: model.target.locator.begin_marker,
+            end_marker: model.target.locator.end_marker,
+        };
+    }
+    return contentIdentity(model.target.path, region);
 }
 function buildRecordFor(modelValue, buildValue) {
     const model = normalizeProjectionModel(modelValue);
@@ -62,29 +73,15 @@ export function lowerProjectionVerification(modelValue, buildValue) {
         if (!identity) {
             throw new Error(`ProjectionBuildRecord missing normalized source identity "${source.id}"`);
         }
-        const sourceIdentity = projectionSourceIdentity(source);
-        return scalarIdentityRelation(`${model.id}:source:${source.id}`, sourceIdentity.path, identity.digest, {
+        return scalarIdentityRelation(`${model.id}:source:${source.id}`, projectionSourceContentFact(source), identity.digest, {
             projection_id: model.id,
             projection_role: "source",
             source_id: source.id,
-        }, sourceIdentity.region);
+        });
     });
-    let targetRegion;
-    if (model.target.ownership === "hybrid") {
-        if (model.target.locator?.kind !== "markdown_owned_block") {
-            throw new Error(`ProjectionModel "${model.id}" hybrid target requires a markdown_owned_block locator for address-local identity`);
-        }
-        targetRegion = {
-            kind: "markdown_owned_block",
-            anchor_id: model.target.locator.anchor_id,
-            block_id: model.target.locator.block_id,
-            begin_marker: model.target.locator.begin_marker,
-            end_marker: model.target.locator.end_marker,
-        };
-    }
-    relations.push(scalarIdentityRelation(`${model.id}:target`, model.target.path, build.output_identity.digest, {
+    relations.push(scalarIdentityRelation(`${model.id}:target`, projectionTargetContentFact(model), build.output_identity.digest, {
         projection_id: model.id,
         projection_role: "target",
-    }, targetRegion));
+    }));
     return relations;
 }
