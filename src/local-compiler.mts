@@ -266,12 +266,13 @@ export function runLocalCheck(roots: { repoRoot: string }, args: string[]): numb
   } else {
     console.log(`RepoGuard check: ${report.ok ? "GREEN" : "RED"}; BASE=${report.base}; HEAD=${report.head}`);
     console.log(`J1 ${report.j1.justified}/${report.j1.tracked}; J2 ${report.j2.rooted}; J3 changes ${report.j3.changed}; diagnostics ${report.diagnostics.length}`);
-    if ("projections" in report) {
-      const current = report.projections.analyses.filter((item) => item.freshness === "CURRENT").length;
-      const stale = report.projections.analyses.filter((item) => item.freshness === "STALE").length;
-      const broken = report.projections.analyses.filter((item) => item.freshness === "BROKEN").length;
+    if (report.projections) {
+      const projections = report.projections;
+      const current = projections.analyses.filter((item) => item.freshness === "CURRENT").length;
+      const stale = projections.analyses.filter((item) => item.freshness === "STALE").length;
+      const broken = projections.analyses.filter((item) => item.freshness === "BROKEN").length;
       console.log(
-        `P current ${current}; stale ${stale}; broken ${broken}; ownership ${report.projections.ownership.ok ? "GREEN" : "RED"}; coverage ${report.projections.ownership.coverage.status}`,
+        `P current ${current}; stale ${stale}; broken ${broken}; ownership ${projections.ownership.ok ? "GREEN" : "RED"}; coverage ${projections.ownership.coverage.status}`,
       );
     }
     if (format === "text")
