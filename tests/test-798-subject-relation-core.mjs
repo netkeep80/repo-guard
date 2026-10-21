@@ -83,6 +83,26 @@ test("#798 named Relation is addressable without becoming a new ontology", () =>
   });
   assert.equal(duplicate.ok, false);
   assert.ok(duplicate.errors.some(error => error.code === "duplicate_relation_id"));
+
+  const missingRelation = evaluateSubjectRelations({
+    subjects: [A, verifier],
+    roles: ["evidence"],
+    relations: [
+      { id: "R_VERIFY", meaning: "trace", role: "evidence", source: verifier, target: relation("ABSENT") },
+    ],
+  });
+  assert.equal(missingRelation.ok, false, "unknown named relation target is RED");
+  assert.ok(missingRelation.errors.some(error => error.code === "missing_subject" && error.detail === "relation:ABSENT"));
+});
+
+test("#798 unknown finite meaning is RED", () => {
+  const A = resource("src/a.ts"), B = resource("src/b.ts");
+  const result = evaluateSubjectRelations({
+    subjects: [A, B],
+    relations: [{ meaning: "invented_semantics", source: A, target: B }],
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(error => error.code === "unknown_meaning"));
 });
 
 test("#798 project roles are declared data; unknown executable role is RED", () => {
@@ -128,6 +148,18 @@ test("#798 cycles are scoped: traceability cycle allowed, selected ordering cycl
   });
   assert.equal(orderCycle.ok, false);
   assert.ok(orderCycle.errors.some(error => error.code === "relation_cycle"));
+
+  const mixedRoleCycle = evaluateSubjectRelations({
+    subjects: [A, B],
+    roles: ["reader", "proof-premise"],
+    relations: [
+      { meaning: "depends_on", role: "reader", source: A, target: B },
+      { meaning: "depends_on", role: "proof-premise", source: B, target: A },
+    ],
+    acyclic: [{ meaning: "depends_on", roles: ["reader", "proof-premise"] }],
+  });
+  assert.equal(mixedRoleCycle.ok, false, "a mixed-role cycle is detected when the strict order selects both roles");
+  assert.ok(mixedRoleCycle.errors.some(error => error.code === "relation_cycle"));
 });
 
 test("#798 Requirement-only semantics remain normative", () => {
