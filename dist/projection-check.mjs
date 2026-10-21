@@ -1,3 +1,4 @@
+import { readDurableDocumentIdentity, } from "./document-facts.mjs";
 import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
 import { analyzeProjectionCurrent, } from "./projection-analysis.mjs";
 import { normalizeProjectionBuildRecordDetached, normalizeProjectionModel, } from "./projection-model.mjs";
@@ -84,6 +85,101 @@ export function parseProjectionCheckState(raw) {
         present: true,
     };
 }
+function representationFormat(path) {
+    const lower = path.toLowerCase();
+    if (lower.endsWith(".json"))
+        return "json";
+    if (lower.endsWith(".yaml") || lower.endsWith(".yml"))
+        return "yaml";
+    return null;
+}
+function resolveProjectionSources(model, input, diagnostics) {
+    const resolved = Object.create(null);
+    for (const source of model.sources) {
+        if (source.kind !== "repository_subject")
+            continue;
+        if (source.subject.kind === "requirement") {
+            const item = input.resolveRequirement?.(source.subject.id) || null;
+            if (!item) {
+                diagnostics.push({
+                    code: "projection_subject_unresolved",
+                    subject: model.id + ":source:" + source.id,
+                    detail: "Requirement " + source.subject.id + " is not available in the canonical native Requirement index",
+                });
+                continue;
+            }
+            resolved[source.id] = { digest: item.digest, path: item.path };
+            continue;
+        }
+        if (source.subject.kind !== "relation")
+            continue;
+        const representation = source.representation;
+        if (!representation) {
+            diagnostics.push({
+                code: "projection_subject_unresolved",
+                subject: model.id + ":source:" + source.id,
+                detail: "named Relation requires an exact repository representation",
+            });
+            continue;
+        }
+        const format = representationFormat(representation.path);
+        if (!format) {
+            diagnostics.push({
+                code: "projection_subject_binding",
+                subject: model.id + ":source:" + source.id,
+                detail: "named Relation representation must be JSON or YAML so its logical id can be verified",
+            });
+            continue;
+        }
+        let raw;
+        try {
+            raw = input.readHead(representation.path);
+        }
+        catch (error) {
+            diagnostics.push({
+                code: "projection_subject_unresolved",
+                subject: model.id + ":source:" + source.id,
+                detail: error instanceof Error ? error.message : String(error),
+            });
+            continue;
+        }
+        if (raw === null || raw === undefined) {
+            diagnostics.push({
+                code: "projection_subject_unresolved",
+                subject: model.id + ":source:" + source.id,
+                detail: "Relation representation is missing at exact HEAD",
+            });
+            continue;
+        }
+        try {
+            const identity = readDurableDocumentIdentity(Buffer.isBuffer(raw) ? raw : String(raw), format, representation.pointer || "");
+            const value = identity.value;
+            const id = value && typeof value === "object" && !Array.isArray(value)
+                ? value.id
+                : undefined;
+            if (id !== source.subject.id) {
+                diagnostics.push({
+                    code: "projection_subject_binding",
+                    subject: model.id + ":source:" + source.id,
+                    detail: `Relation SubjectRef "${source.subject.id}" does not match represented record id "${String(id ?? "<missing>")}"`,
+                });
+                continue;
+            }
+            resolved[source.id] = {
+                digest: identity.digest,
+                path: representation.path,
+            };
+        }
+        catch (error) {
+            diagnostics.push({
+                code: "projection_subject_unresolved",
+                subject: model.id + ":source:" + source.id,
+                detail: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+    return resolved;
+}
 export function evaluateProjectionCheck(input) {
     const diagnostics = [];
     let base;
@@ -139,7 +235,18 @@ export function evaluateProjectionCheck(input) {
     for (const key of ownership.orphan) {
         diagnostics.push({ code: "projection_orphan", subject: key });
     }
-    const analyses = live.map((item) => analyzeProjectionCurrent(item.model, item.build, input.facts, item.current_generator)).sort((left, right) => (left.projection_id || "").localeCompare(right.projection_id || "", "en"));
+    const invalidOwnership = new Set(ownership.invalid_projections);
+    const analyses = live.map((item) => {
+        const resolvedSources = resolveProjectionSources(item.model, input, diagnostics);
+        const analysis = analyzeProjectionCurrent(item.model, item.build, input.facts, item.current_generator, resolvedSources);
+        if (!invalidOwnership.has(item.model.id))
+            return analysis;
+        return {
+            ...analysis,
+            freshness: "BROKEN",
+            reasons: [...new Set([...analysis.reasons, "ownership_conflict"])].sort(),
+        };
+    }).sort((left, right) => (left.projection_id || "").localeCompare(right.projection_id || "", "en"));
     for (const analysis of analyses) {
         if (analysis.freshness === "CURRENT")
             continue;
