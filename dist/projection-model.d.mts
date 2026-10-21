@@ -1,9 +1,21 @@
-export interface ProjectionSourceDependency {
+import { type SubjectRef } from "./runtime/subject-relations.mjs";
+export interface ProjectionRepositoryContentSourceDependency {
     id: string;
     kind: "repository_content";
     path: string;
     algorithm: "sha256";
 }
+export type ProjectionRepositoryResourceSubject = Extract<SubjectRef, {
+    kind: "resource";
+}>;
+export interface ProjectionRepositorySubjectSourceDependency {
+    id: string;
+    kind: "repository_subject";
+    subject: SubjectRef;
+    representation: ProjectionRepositoryResourceSubject;
+    algorithm: "sha256";
+}
+export type ProjectionSourceDependency = ProjectionRepositoryContentSourceDependency | ProjectionRepositorySubjectSourceDependency;
 export type ProjectionTargetLocator = {
     kind: "markdown_anchor";
     anchor_id: string;
@@ -59,4 +71,5 @@ export interface ProjectionBuildRecord {
 }
 export declare function normalizeProjectionModel(value: unknown): ProjectionModel;
 export declare function projectionModelIdentity(value: unknown): string;
+export declare function normalizeProjectionBuildRecordDetached(value: unknown): ProjectionBuildRecord;
 export declare function normalizeProjectionBuildRecord(value: unknown, modelValue: unknown): ProjectionBuildRecord;
