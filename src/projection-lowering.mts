@@ -1,15 +1,24 @@
-import type { FactRef, MarkdownOwnedBlockIdentityRegion } from "./document-facts.mjs";
+import type {
+  DocumentPointerIdentityRegion,
+  FactRef,
+  MarkdownOwnedBlockIdentityRegion,
+} from "./document-facts.mjs";
 import type { PrimitiveRelation } from "./checks/relation-kernel.mjs";
 import {
   normalizeProjectionBuildRecord,
   normalizeProjectionModel,
   type ProjectionBuildRecord,
   type ProjectionModel,
+  type ProjectionSourceDependency,
 } from "./projection-model.mjs";
+
+type ProjectionIdentityRegion =
+  | MarkdownOwnedBlockIdentityRegion
+  | DocumentPointerIdentityRegion;
 
 function contentIdentity(
   path: string,
-  region?: MarkdownOwnedBlockIdentityRegion,
+  region?: ProjectionIdentityRegion,
 ): Extract<FactRef, { source: "repository" }> {
   return {
     source: "repository",
@@ -29,7 +38,7 @@ function scalarIdentityRelation(
   path: string,
   expectedDigest: string,
   metadata: Record<string, unknown>,
-  region?: MarkdownOwnedBlockIdentityRegion,
+  region?: ProjectionIdentityRegion,
 ): PrimitiveRelation {
   return {
     relation_id: relationId,
@@ -41,6 +50,37 @@ function scalarIdentityRelation(
       value: expectedDigest,
       ...metadata,
     },
+  };
+}
+
+function documentPointerRegion(
+  path: string,
+  pointer: string | undefined,
+): DocumentPointerIdentityRegion | undefined {
+  if (pointer === undefined) return undefined;
+  const lower = path.toLowerCase();
+  const format = lower.endsWith(".json")
+    ? "json"
+    : lower.endsWith(".yaml") || lower.endsWith(".yml")
+      ? "yaml"
+      : null;
+  if (!format) {
+    throw new Error(
+      `Projection repository_subject pointer requires a JSON/YAML resource path: "${path}"`,
+    );
+  }
+  return { kind: "document_pointer", format, pointer };
+}
+
+function projectionSourceIdentity(
+  source: ProjectionSourceDependency,
+): { path: string; region?: ProjectionIdentityRegion } {
+  if (source.kind === "repository_content") return { path: source.path };
+  return {
+    path: source.subject.path,
+    ...(source.subject.pointer !== undefined
+      ? { region: documentPointerRegion(source.subject.path, source.subject.pointer) }
+      : {}),
   };
 }
 
@@ -64,15 +104,17 @@ export function lowerProjectionVerification(
     if (!identity) {
       throw new Error(`ProjectionBuildRecord missing normalized source identity "${source.id}"`);
     }
+    const sourceIdentity = projectionSourceIdentity(source);
     return scalarIdentityRelation(
       `${model.id}:source:${source.id}`,
-      source.path,
+      sourceIdentity.path,
       identity.digest,
       {
         projection_id: model.id,
         projection_role: "source",
         source_id: source.id,
       },
+      sourceIdentity.region,
     );
   });
 
