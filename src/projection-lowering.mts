@@ -77,9 +77,14 @@ function projectionSourceIdentity(
 ): { path: string; region?: ProjectionIdentityRegion } {
   if (source.kind === "repository_content") return { path: source.path };
   return {
-    path: source.subject.path,
-    ...(source.subject.pointer !== undefined
-      ? { region: documentPointerRegion(source.subject.path, source.subject.pointer) }
+    path: source.representation.path,
+    ...(source.representation.pointer !== undefined
+      ? {
+          region: documentPointerRegion(
+            source.representation.path,
+            source.representation.pointer,
+          ),
+        }
       : {}),
   };
 }
