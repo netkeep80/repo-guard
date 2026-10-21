@@ -35,6 +35,18 @@ test("#798 Resource -> Resource depends_on is deterministic and reverse impact i
   assert.deepEqual(reverseImpact(first.relations, B, { roles: ["other"] }), [B, C]);
 });
 
+test("#798 malformed runtime input returns RED instead of throwing", () => {
+  let result;
+  assert.doesNotThrow(() => {
+    result = evaluateSubjectRelations({
+      subjects: [{ kind: "resource", path: undefined }],
+      relations: [{ meaning: "depends_on", source: { kind: "resource", path: undefined }, target: resource("src/a.ts") }],
+    });
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(error => error.code === "invalid_subject"));
+});
+
 test("#798 durable fragment SubjectRef and missing target fail closed", () => {
   const doc = resource("model/data.json", "/byId/core");
   const ok = evaluateSubjectRelations({
