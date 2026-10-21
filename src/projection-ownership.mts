@@ -16,11 +16,14 @@ export type ProjectionOwnershipConflictCode =
   | "duplicate_projection_id"
   | "multiple_writers"
   | "live_retained_overlap"
+  | "locator_alias"
+  | "locator_drift"
   | "insufficient_locator"
   | "unreadable_target"
   | "malformed_target"
   | "containment"
-  | "managed_overlap";
+  | "managed_overlap"
+  | "unknown_origin";
 
 export interface ProjectionOwnershipConflict {
   code: ProjectionOwnershipConflictCode;
@@ -29,11 +32,21 @@ export interface ProjectionOwnershipConflict {
   detail?: string;
 }
 
+export interface ProjectionObservedCandidate {
+  identity: string;
+  path: string;
+  target_key?: string;
+  detail?: string;
+}
+
 export interface ProjectionOwnershipReport {
   ok: boolean;
+  ownership_closed: false;
   coverage: {
+    status: "incomplete";
     expected_from: "live-and-retained-declarations";
     observed_from: "live-retained-and-base-declarations";
+    candidate_marker_detection: "caller-supplied-only";
     arbitrary_undeclared_marker_scan: false;
   };
   live_expected: string[];
@@ -42,6 +55,7 @@ export interface ProjectionOwnershipReport {
   observed: string[];
   missing: string[];
   orphan: string[];
+  unknown_origin: string[];
   conflicts: ProjectionOwnershipConflict[];
 }
 
@@ -49,6 +63,7 @@ export interface ProjectionOwnershipInput {
   live: readonly unknown[];
   retained?: readonly unknown[];
   base?: readonly unknown[];
+  observedCandidates?: readonly ProjectionObservedCandidate[];
   readHead: (path: string) => unknown;
 }
 
@@ -59,6 +74,7 @@ interface ModelEntry {
 
 interface TargetSpec {
   key: string;
+  locator_key: string;
   path: string;
   target: ProjectionTarget;
   state: ProjectionInventoryState;
@@ -70,6 +86,14 @@ interface ObservedRegion {
   path: string;
   start: number;
   end: number;
+  state: ProjectionInventoryState;
+  projection_id: string;
+}
+
+interface Observation {
+  spec: TargetSpec;
+  observed: boolean;
+  region?: ObservedRegion;
 }
 
 function targetKey(target: ProjectionTarget): string {
@@ -82,8 +106,6 @@ function targetKey(target: ProjectionTarget): string {
       path: target.path,
       anchor_id: target.locator.anchor_id,
       block_id: target.locator.block_id,
-      begin_marker: target.locator.begin_marker,
-      end_marker: target.locator.end_marker,
     });
   }
   return JSON.stringify({
@@ -91,6 +113,21 @@ function targetKey(target: ProjectionTarget): string {
     path: target.path,
     anchor_id: target.locator?.anchor_id ?? "",
   });
+}
+
+function locatorKey(target: ProjectionTarget): string {
+  if (target.ownership === "generated") return targetKey(target);
+  if (target.locator?.kind === "markdown_owned_block") {
+    return JSON.stringify({
+      kind: "markdown_owned_block",
+      path: target.path,
+      anchor_id: target.locator.anchor_id,
+      block_id: target.locator.block_id,
+      begin_marker: target.locator.begin_marker,
+      end_marker: target.locator.end_marker,
+    });
+  }
+  return targetKey(target);
 }
 
 function normalizeEntries(
@@ -128,6 +165,7 @@ function normalizeEntries(
 function specs(entries: readonly ModelEntry[]): TargetSpec[] {
   return entries.map(({ state, model }) => ({
     key: targetKey(model.target),
+    locator_key: locatorKey(model.target),
     path: model.target.path,
     target: model.target,
     state,
@@ -200,7 +238,14 @@ function observeOwnedBlock(
     if (!block) return { observed: false };
     return {
       observed: true,
-      region: { key: spec.key, path: spec.path, start: block.start, end: block.end },
+      region: {
+        key: spec.key,
+        path: spec.path,
+        start: block.start,
+        end: block.end,
+        state: spec.state,
+        projection_id: spec.projection_id,
+      },
     };
   }
 
@@ -215,7 +260,14 @@ function observeOwnedBlock(
   }
   return {
     observed: true,
-    region: { key: spec.key, path: spec.path, start: block.start, end: block.end },
+    region: {
+      key: spec.key,
+      path: spec.path,
+      start: block.start,
+      end: block.end,
+      state: spec.state,
+      projection_id: spec.projection_id,
+    },
   };
 }
 
@@ -230,7 +282,14 @@ function observeSpec(
   if (spec.target.ownership === "generated") {
     return {
       observed: true,
-      region: { key: spec.key, path: spec.path, start: 0, end: source.length },
+      region: {
+        key: spec.key,
+        path: spec.path,
+        start: 0,
+        end: source.length,
+        state: spec.state,
+        projection_id: spec.projection_id,
+      },
     };
   }
 
@@ -248,11 +307,8 @@ function observeSpec(
   const anchorId = spec.target.locator?.anchor_id;
   if (!anchorId) return { observed: false };
   try {
-    const node = readMarkdownNode(source, anchorId);
-    return {
-      observed: true,
-      region: { key: spec.key, path: spec.path, start: node.start, end: node.end },
-    };
+    readMarkdownNode(source, anchorId);
+    return { observed: false };
   } catch (error) {
     conflicts.push({
       code: "malformed_target",
@@ -272,65 +328,96 @@ function pushDeclaredConflicts(
   allSpecs: readonly TargetSpec[],
   conflicts: ProjectionOwnershipConflict[],
 ): void {
-  const live = allSpecs.filter((spec) => spec.state === "live");
-  const retained = allSpecs.filter((spec) => spec.state === "retained");
+  const active = allSpecs.filter((spec) => spec.state !== "base");
+  const live = active.filter((spec) => spec.state === "live");
+  const retained = active.filter((spec) => spec.state === "retained");
 
-  const writers = new Map<string, string[]>();
-  for (const spec of live) {
-    const ids = writers.get(spec.key) || [];
-    ids.push(spec.projection_id);
-    writers.set(spec.key, ids);
+  const projectionStates = new Map<string, Set<string>>();
+  for (const spec of active) {
+    const states = projectionStates.get(spec.projection_id) || new Set<string>();
+    states.add(spec.state);
+    projectionStates.set(spec.projection_id, states);
   }
-  for (const [key, ids] of writers) {
-    const unique = sorted(ids);
-    if (unique.length > 1) {
+  for (const [projectionId, states] of projectionStates) {
+    if (states.size > 1) {
+      conflicts.push({
+        code: "duplicate_projection_id",
+        subject: projectionId,
+        detail: [...states].sort().join(","),
+      });
+    }
+  }
+
+  const byTarget = new Map<string, TargetSpec[]>();
+  for (const spec of active) {
+    const values = byTarget.get(spec.key) || [];
+    values.push(spec);
+    byTarget.set(spec.key, values);
+  }
+
+  for (const [key, values] of byTarget) {
+    const liveValues = values.filter((spec) => spec.state === "live");
+    const liveWriters = sorted(liveValues.map((spec) => spec.projection_id));
+    if (liveWriters.length > 1) {
       conflicts.push({
         code: "multiple_writers",
         subject: key,
-        detail: unique.join(","),
+        detail: liveWriters.join(","),
       });
     }
-  }
 
-  const retainedKeys = new Set(retained.map((spec) => spec.key));
-  for (const spec of live) {
-    if (retainedKeys.has(spec.key)) {
+    if (liveValues.length && values.some((spec) => spec.state === "retained")) {
       conflicts.push({
         code: "live_retained_overlap",
-        subject: spec.key,
-        path: spec.path,
+        subject: key,
+        path: values[0]?.path,
+      });
+    }
+
+    const locatorVariants = sorted(values.map((spec) => spec.locator_key));
+    if (locatorVariants.length > 1) {
+      conflicts.push({
+        code: "locator_alias",
+        subject: key,
+        path: values[0]?.path,
+        detail: "same logical target is declared with multiple locator spellings",
       });
     }
   }
 
-  const liveByPath = new Map<string, TargetSpec[]>();
-  for (const spec of live) {
-    const list = liveByPath.get(spec.path) || [];
-    list.push(spec);
-    liveByPath.set(spec.path, list);
+  const byPath = new Map<string, TargetSpec[]>();
+  for (const spec of active) {
+    const values = byPath.get(spec.path) || [];
+    values.push(spec);
+    byPath.set(spec.path, values);
   }
-  for (const [path, pathSpecs] of liveByPath) {
-    const wholeFile = pathSpecs.filter((spec) => spec.target.ownership === "generated");
-    if (!wholeFile.length || pathSpecs.length === wholeFile.length) continue;
+  for (const [path, values] of byPath) {
+    const wholeFile = values.filter((spec) => spec.target.ownership === "generated");
+    if (!wholeFile.length || values.length === wholeFile.length) continue;
     conflicts.push({
       code: "managed_overlap",
       subject: path,
       path,
-      detail: "whole-file writer overlaps a managed region writer",
+      detail: "whole-file ownership conflicts with a managed region on the same path",
     });
   }
+
+  // Retention protects bytes even though it does not grant an active writer.
+  void retained;
 }
 
 function pushObservedOverlap(
   regions: readonly ObservedRegion[],
   conflicts: ProjectionOwnershipConflict[],
 ): void {
-  const ordered = [...regions].sort(
+  const protectedRegions = regions.filter((region) => region.state !== "base");
+  const ordered = [...protectedRegions].sort(
     (left, right) =>
       left.path.localeCompare(right.path, "en")
       || left.start - right.start
       || left.end - right.end
-      || left.key.localeCompare(right.key, "en"),
+      || left.key.localeCompare(right.key, "en")
+      || left.projection_id.localeCompare(right.projection_id, "en"),
   );
   for (let leftIndex = 0; leftIndex < ordered.length; leftIndex += 1) {
     const left = ordered[leftIndex]!;
@@ -338,7 +425,13 @@ function pushObservedOverlap(
       const right = ordered[rightIndex]!;
       if (right.path !== left.path) break;
       if (right.start >= left.end) break;
-      if (left.key === right.key) continue;
+      if (
+        left.key === right.key
+        && left.state === right.state
+        && left.projection_id === right.projection_id
+      ) {
+        continue;
+      }
       if (left.start < right.end && right.start < left.end) {
         conflicts.push({
           code: "managed_overlap",
@@ -373,25 +466,69 @@ export function analyzeProjectionOwnership(
     allSpecs.filter((spec) => spec.state === "base").map((spec) => spec.key),
   );
 
-  const uniqueSpecs = new Map<string, TargetSpec>();
-  for (const spec of allSpecs) {
-    if (!uniqueSpecs.has(spec.key)) uniqueSpecs.set(spec.key, spec);
-  }
-
-  const observed = new Set<string>();
+  const observations: Observation[] = [];
   const regions: ObservedRegion[] = [];
-  for (const spec of [...uniqueSpecs.values()].sort((a, b) => a.key.localeCompare(b.key, "en"))) {
+  for (const spec of [...allSpecs].sort(
+    (left, right) =>
+      left.state.localeCompare(right.state, "en")
+      || left.key.localeCompare(right.key, "en")
+      || left.locator_key.localeCompare(right.locator_key, "en")
+      || left.projection_id.localeCompare(right.projection_id, "en"),
+  )) {
     const result = observeSpec(input, spec, conflicts);
-    if (!result.observed) continue;
-    observed.add(spec.key);
+    observations.push({ spec, ...result });
     if (result.region) regions.push(result.region);
   }
   pushObservedOverlap(regions, conflicts);
 
+  const observedLive = new Set(
+    observations
+      .filter((item) => item.spec.state === "live" && item.observed)
+      .map((item) => item.spec.key),
+  );
+  const observedRetained = new Set(
+    observations
+      .filter((item) => item.spec.state === "retained" && item.observed)
+      .map((item) => item.spec.key),
+  );
+  const observedBase = new Set(
+    observations
+      .filter((item) => item.spec.state === "base" && item.observed)
+      .map((item) => item.spec.key),
+  );
+
+  const currentObserved = new Set([...observedLive, ...observedRetained]);
+  const observed = new Set([...currentObserved, ...observedBase]);
   const expected = new Set([...liveExpected, ...retained]);
-  const observedSorted = sorted(observed);
-  const missing = sorted([...expected].filter((key) => !observed.has(key)));
-  const orphan = sorted(observedSorted.filter((key) => !expected.has(key)));
+
+  const missing = sorted([...expected].filter((key) => !currentObserved.has(key)));
+  const orphan = sorted([...observedBase].filter((key) => !expected.has(key)));
+
+  for (const key of missing) {
+    if (observedBase.has(key)) {
+      conflicts.push({
+        code: "locator_drift",
+        subject: key,
+        detail: "BASE locator still resolves but current live/retained locator does not",
+      });
+    }
+  }
+
+  const knownKeys = new Set([...liveExpected, ...retained, ...base]);
+  const unknownOrigin = sorted(
+    (input.observedCandidates || [])
+      .filter((candidate) => !candidate.target_key || !knownKeys.has(candidate.target_key))
+      .map((candidate) => candidate.identity),
+  );
+  for (const candidate of input.observedCandidates || []) {
+    if (candidate.target_key && knownKeys.has(candidate.target_key)) continue;
+    conflicts.push({
+      code: "unknown_origin",
+      subject: candidate.identity,
+      path: candidate.path,
+      detail: candidate.detail || "managed-looking candidate has no live/retained/BASE ownership provenance",
+    });
+  }
 
   conflicts.sort(
     (left, right) =>
@@ -403,17 +540,21 @@ export function analyzeProjectionOwnership(
 
   return {
     ok: conflicts.length === 0 && missing.length === 0 && orphan.length === 0,
+    ownership_closed: false,
     coverage: {
+      status: "incomplete",
       expected_from: "live-and-retained-declarations",
       observed_from: "live-retained-and-base-declarations",
+      candidate_marker_detection: "caller-supplied-only",
       arbitrary_undeclared_marker_scan: false,
     },
     live_expected: liveExpected,
     retained,
     base,
-    observed: observedSorted,
+    observed: sorted(observed),
     missing,
     orphan,
+    unknown_origin: unknownOrigin,
     conflicts,
   };
 }
