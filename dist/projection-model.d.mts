@@ -12,7 +12,7 @@ export interface ProjectionRepositorySubjectSourceDependency {
     id: string;
     kind: "repository_subject";
     subject: SubjectRef;
-    representation: ProjectionRepositoryResourceSubject;
+    representation?: ProjectionRepositoryResourceSubject;
     algorithm: "sha256";
 }
 export type ProjectionSourceDependency = ProjectionRepositoryContentSourceDependency | ProjectionRepositorySubjectSourceDependency;
