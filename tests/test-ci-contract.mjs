@@ -95,7 +95,7 @@ assert.equal(
   "legacy blocking PR policy check must not run in required validate",
 );
 assert.equal(
-  validate.steps.some((step) => /\\bcheck-pr\\b/.test(step.run ?? "")),
+  validate.steps.some((step) => /\bcheck-pr\b/.test(step.run ?? "")),
   false,
   "check-pr must not be invoked by the required validate job",
 );
