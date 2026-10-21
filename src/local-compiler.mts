@@ -154,9 +154,15 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     { cwd: input.root },
   ));
   const projectionPath = ".repo-guard/projections.json";
+  const baseProjectionPaths = new Set(before.entries.map((entry) => entry.path));
+  const headProjectionPaths = new Set(after.entries.map((entry) => entry.path));
   const projectionReport = evaluateProjectionCheck({
-    baseRaw: readFileAtRef(base, projectionPath, input.root),
-    headRaw: readFileAtRef(head, projectionPath, input.root),
+    baseRaw: baseProjectionPaths.has(projectionPath)
+      ? readFileAtRef(base, projectionPath, input.root)
+      : null,
+    headRaw: headProjectionPaths.has(projectionPath)
+      ? readFileAtRef(head, projectionPath, input.root)
+      : null,
     readHead: (path) => readFileAtRef(head, path, input.root),
     facts: {
       readFile: (path) => readFileAtRef(head, path, input.root),
