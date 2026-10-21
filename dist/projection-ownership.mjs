@@ -228,46 +228,64 @@ function pushDeclaredConflicts(allSpecs, conflicts) {
     }
     const byTarget = new Map();
     for (const spec of active) {
+        const values = byTarget.get(spec.key) || [];
+        values.push(spec);
+        byTarget.set(spec.key, values);
+    }
+    for (const [key, values] of byTarget) {
+        const liveValues = values.filter((spec) => spec.state === "live");
+        const liveWriters = sorted(liveValues.map((spec) => spec.projection_id));
+        if (liveWriters.length > 1) {
             conflicts.push({
                 code: "multiple_writers",
                 subject: key,
-                detail: unique.join(","),
+                detail: liveWriters.join(","),
             });
         }
-    }
-    const retainedKeys = new Set(retained.map((spec) => spec.key));
-    for (const spec of live) {
-        if (retainedKeys.has(spec.key)) {
+        if (liveValues.length && values.some((spec) => spec.state === "retained")) {
             conflicts.push({
                 code: "live_retained_overlap",
-                subject: spec.key,
-                path: spec.path,
+                subject: key,
+                path: values[0]?.path,
+            });
+        }
+        const locatorVariants = sorted(values.map((spec) => spec.locator_key));
+        if (locatorVariants.length > 1) {
+            conflicts.push({
+                code: "locator_alias",
+                subject: key,
+                path: values[0]?.path,
+                detail: "same logical target is declared with multiple locator spellings",
             });
         }
     }
-    const liveByPath = new Map();
-    for (const spec of live) {
-        const list = liveByPath.get(spec.path) || [];
-        list.push(spec);
-        liveByPath.set(spec.path, list);
+    const byPath = new Map();
+    for (const spec of active) {
+        const values = byPath.get(spec.path) || [];
+        values.push(spec);
+        byPath.set(spec.path, values);
     }
-    for (const [path, pathSpecs] of liveByPath) {
-        const wholeFile = pathSpecs.filter((spec) => spec.target.ownership === "generated");
-        if (!wholeFile.length || pathSpecs.length === wholeFile.length)
+    for (const [path, values] of byPath) {
+        const wholeFile = values.filter((spec) => spec.target.ownership === "generated");
+        if (!wholeFile.length || values.length === wholeFile.length)
             continue;
         conflicts.push({
             code: "managed_overlap",
             subject: path,
             path,
-            detail: "whole-file writer overlaps a managed region writer",
+            detail: "whole-file ownership conflicts with a managed region on the same path",
         });
     }
+    // Retention protects bytes even though it does not grant an active writer.
+    void retained;
 }
 function pushObservedOverlap(regions, conflicts) {
-    const ordered = [...regions].sort((left, right) => left.path.localeCompare(right.path, "en")
+    const protectedRegions = regions.filter((region) => region.state !== "base");
+    const ordered = [...protectedRegions].sort((left, right) => left.path.localeCompare(right.path, "en")
         || left.start - right.start
         || left.end - right.end
-        || left.key.localeCompare(right.key, "en"));
+        || left.key.localeCompare(right.key, "en")
+        || left.projection_id.localeCompare(right.projection_id, "en"));
     for (let leftIndex = 0; leftIndex < ordered.length; leftIndex += 1) {
         const left = ordered[leftIndex];
         for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex += 1) {
@@ -276,8 +294,11 @@ function pushObservedOverlap(regions, conflicts) {
                 break;
             if (right.start >= left.end)
                 break;
-            if (left.key === right.key)
+            if (left.key === right.key
+                && left.state === right.state
+                && left.projection_id === right.projection_id) {
                 continue;
+            }
             if (left.start < right.end && right.start < left.end) {
                 conflicts.push({
                     code: "managed_overlap",
@@ -301,43 +322,76 @@ export function analyzeProjectionOwnership(input) {
     const liveExpected = sorted(allSpecs.filter((spec) => spec.state === "live").map((spec) => spec.key));
     const retained = sorted(allSpecs.filter((spec) => spec.state === "retained").map((spec) => spec.key));
     const base = sorted(allSpecs.filter((spec) => spec.state === "base").map((spec) => spec.key));
-    const uniqueSpecs = new Map();
-    for (const spec of allSpecs) {
-        if (!uniqueSpecs.has(spec.key))
-            uniqueSpecs.set(spec.key, spec);
-    }
-    const observed = new Set();
+    const observations = [];
     const regions = [];
-    for (const spec of [...uniqueSpecs.values()].sort((a, b) => a.key.localeCompare(b.key, "en"))) {
+    for (const spec of [...allSpecs].sort((left, right) => left.state.localeCompare(right.state, "en")
+        || left.key.localeCompare(right.key, "en")
+        || left.locator_key.localeCompare(right.locator_key, "en")
+        || left.projection_id.localeCompare(right.projection_id, "en"))) {
         const result = observeSpec(input, spec, conflicts);
-        if (!result.observed)
-            continue;
-        observed.add(spec.key);
+        observations.push({ spec, ...result });
         if (result.region)
             regions.push(result.region);
     }
     pushObservedOverlap(regions, conflicts);
+    const observedLive = new Set(observations
+        .filter((item) => item.spec.state === "live" && item.observed)
+        .map((item) => item.spec.key));
+    const observedRetained = new Set(observations
+        .filter((item) => item.spec.state === "retained" && item.observed)
+        .map((item) => item.spec.key));
+    const observedBase = new Set(observations
+        .filter((item) => item.spec.state === "base" && item.observed)
+        .map((item) => item.spec.key));
+    const currentObserved = new Set([...observedLive, ...observedRetained]);
+    const observed = new Set([...currentObserved, ...observedBase]);
     const expected = new Set([...liveExpected, ...retained]);
-    const observedSorted = sorted(observed);
-    const missing = sorted([...expected].filter((key) => !observed.has(key)));
-    const orphan = sorted(observedSorted.filter((key) => !expected.has(key)));
+    const missing = sorted([...expected].filter((key) => !currentObserved.has(key)));
+    const orphan = sorted([...observedBase].filter((key) => !expected.has(key)));
+    for (const key of missing) {
+        if (observedBase.has(key)) {
+            conflicts.push({
+                code: "locator_drift",
+                subject: key,
+                detail: "BASE locator still resolves but current live/retained locator does not",
+            });
+        }
+    }
+    const knownKeys = new Set([...liveExpected, ...retained, ...base]);
+    const unknownOrigin = sorted((input.observedCandidates || [])
+        .filter((candidate) => !candidate.target_key || !knownKeys.has(candidate.target_key))
+        .map((candidate) => candidate.identity));
+    for (const candidate of input.observedCandidates || []) {
+        if (candidate.target_key && knownKeys.has(candidate.target_key))
+            continue;
+        conflicts.push({
+            code: "unknown_origin",
+            subject: candidate.identity,
+            path: candidate.path,
+            detail: candidate.detail || "managed-looking candidate has no live/retained/BASE ownership provenance",
+        });
+    }
     conflicts.sort((left, right) => left.code.localeCompare(right.code, "en")
         || left.subject.localeCompare(right.subject, "en")
         || (left.path || "").localeCompare(right.path || "", "en")
         || (left.detail || "").localeCompare(right.detail || "", "en"));
     return {
         ok: conflicts.length === 0 && missing.length === 0 && orphan.length === 0,
+        ownership_closed: false,
         coverage: {
+            status: "incomplete",
             expected_from: "live-and-retained-declarations",
             observed_from: "live-retained-and-base-declarations",
+            candidate_marker_detection: "caller-supplied-only",
             arbitrary_undeclared_marker_scan: false,
         },
         live_expected: liveExpected,
         retained,
         base,
-        observed: observedSorted,
+        observed: sorted(observed),
         missing,
         orphan,
+        unknown_origin: unknownOrigin,
         conflicts,
     };
 }
