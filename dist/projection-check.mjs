@@ -42,14 +42,14 @@ function entry(value, index) {
     const input = object(value, label);
     fields(input, ["state", "model", "build", "current_generator"], label);
     const model = normalizeProjectionModel(input.model);
-    if (input.state === "retained") {
+    if (input.state === "retained" || input.state === "source") {
         if (input.build !== undefined || input.current_generator !== undefined) {
-            fail(label + " retained entry must not define build/current_generator");
+            fail(label + " non-live entry must not define build/current_generator");
         }
-        return { state: "retained", model };
+        return { state: input.state, model };
     }
     if (input.state !== "live") {
-        fail(label + '.state must be "live" or "retained"');
+        fail(label + '.state must be "live", "retained" or "source"');
     }
     if (input.build === undefined || input.current_generator === undefined) {
         fail(label + " live entry requires build and current_generator");
@@ -218,10 +218,31 @@ export function evaluateProjectionCheck(input) {
     }
     const live = head.entries.filter((item) => item.state === "live");
     const retained = head.entries.filter((item) => item.state === "retained");
+    // SOURCE is an explicit HEAD handoff, never a writer or a garbage-collection candidate.
+    // Its exact former target must be present in BASE; no second manifest is involved.
+    const sources = head.entries.filter((item) => item.state === "source");
+    const sourceTargets = new Set();
+    const allPreviousTargets = new Set(base.entries.map((item) => JSON.stringify(item.model.target)));
+    const activePaths = new Set([...live, ...retained].map((item) => item.model.target.path));
+    for (const item of sources) {
+        const key = JSON.stringify(item.model.target);
+        if (!allPreviousTargets.has(key)) {
+            diagnostics.push({ code: "projection_source_reclassification_invalid", subject: item.model.id,
+                detail: "SOURCE handoff must match an exact BASE Projection target" });
+            continue;
+        }
+        if (sourceTargets.has(key) || activePaths.has(item.model.target.path)) {
+            diagnostics.push({ code: "projection_source_reclassification_conflict", subject: item.model.id,
+                detail: "SOURCE target cannot also have a live/retained writer or duplicate handoff" });
+            continue;
+        }
+        sourceTargets.add(key);
+    }
     const ownership = analyzeProjectionOwnership({
         live: live.map((item) => item.model),
         retained: retained.map((item) => item.model),
-        base: base.entries.map((item) => item.model),
+        base: base.entries.filter((item) => !sourceTargets.has(JSON.stringify(item.model.target)))
+            .map((item) => item.model),
         readHead: input.readHead,
     });
     for (const conflict of ownership.conflicts) {

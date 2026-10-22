@@ -65,6 +65,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "dist/projection-materialize.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/projection-ownership.mjs"
   - predicates: [implemented_by]
     target:
@@ -241,6 +245,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "src/projection-materialize.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "src/projection-ownership.mts"
   - predicates: [implemented_by]
     target:
@@ -374,6 +382,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-799-projection-ownership.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-800-projection-materialize.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
