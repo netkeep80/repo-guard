@@ -1,0 +1,132 @@
+{
+  "schema": "repo-guard/projection-check/v0",
+  "entries": [
+    {
+      "state": "live",
+      "model": {
+        "schema": "repo-guard/projection-model/v0",
+        "id": "repo-guard.docs.self-host-coverage",
+        "sources": [
+          {
+            "id": "cli-runtime",
+            "kind": "repository_content",
+            "path": "dist/repo-guard.mjs",
+            "algorithm": "sha256"
+          },
+          {
+            "id": "renderer",
+            "kind": "repository_content",
+            "path": "scripts/self-host-docs.mjs",
+            "algorithm": "sha256"
+          }
+        ],
+        "target": {
+          "path": "docs/cli-reference.md",
+          "ownership": "generated"
+        },
+        "generator": {
+          "contract_id": "repo-guard-doc-self-host/v1"
+        },
+        "required_evidence": []
+      },
+      "build": {
+        "schema": "repo-guard/projection-build-record/v0",
+        "projection_id": "repo-guard.docs.self-host-coverage",
+        "model_identity": "fec2b814ed522e13fc2b4bb6f9022dd0239b668a413225d8d33772c583280eff",
+        "source_identities": [
+          {
+            "source_id": "cli-runtime",
+            "algorithm": "sha256",
+            "digest": "d6a7d330073a41c5c41285b43b48870cb483e2a061dec598f8a8c1d6e67a3913"
+          },
+          {
+            "source_id": "renderer",
+            "algorithm": "sha256",
+            "digest": "f587a204ad7e11aa9cb600cc9c6e1f7a5b67eda19721e50a609377ec5a367c27"
+          }
+        ],
+        "generator": {
+          "contract_id": "repo-guard-doc-self-host/v1",
+          "tool_identity": "repo-guard/docs-self-host@1"
+        },
+        "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6",
+        "output_identity": {
+          "algorithm": "sha256",
+          "digest": "4243bdaeab542acc2b7c2ad592beb7517839208856f9ef0939408e1bf01bc452"
+        },
+        "evidence": []
+      },
+      "current_generator": {
+        "tool_identity": "repo-guard/docs-self-host@1",
+        "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6"
+      }
+    },
+    {
+      "state": "live",
+      "model": {
+        "schema": "repo-guard/projection-model/v0",
+        "id": "repo-guard.docs.self-host-summary",
+        "sources": [
+          {
+            "id": "cli-runtime",
+            "kind": "repository_content",
+            "path": "dist/repo-guard.mjs",
+            "algorithm": "sha256"
+          },
+          {
+            "id": "renderer",
+            "kind": "repository_content",
+            "path": "scripts/self-host-docs.mjs",
+            "algorithm": "sha256"
+          }
+        ],
+        "target": {
+          "path": "README.md",
+          "ownership": "hybrid",
+          "locator": {
+            "kind": "markdown_owned_block",
+            "anchor_id": "rg-cli-commands",
+            "block_id": "rg-cli-commands",
+            "begin_marker": "<!-- repo-guard:cli:start -->",
+            "end_marker": "<!-- repo-guard:cli:end -->"
+          }
+        },
+        "generator": {
+          "contract_id": "repo-guard-doc-self-host/v1"
+        },
+        "required_evidence": []
+      },
+      "build": {
+        "schema": "repo-guard/projection-build-record/v0",
+        "projection_id": "repo-guard.docs.self-host-summary",
+        "model_identity": "7ae55b5cdc8a6685b3c71bf5e418bc773f53501841913f3c9b6af024e5768c89",
+        "source_identities": [
+          {
+            "source_id": "cli-runtime",
+            "algorithm": "sha256",
+            "digest": "d6a7d330073a41c5c41285b43b48870cb483e2a061dec598f8a8c1d6e67a3913"
+          },
+          {
+            "source_id": "renderer",
+            "algorithm": "sha256",
+            "digest": "f587a204ad7e11aa9cb600cc9c6e1f7a5b67eda19721e50a609377ec5a367c27"
+          }
+        ],
+        "generator": {
+          "contract_id": "repo-guard-doc-self-host/v1",
+          "tool_identity": "repo-guard/docs-self-host@1"
+        },
+        "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6",
+        "output_identity": {
+          "algorithm": "sha256",
+          "digest": "07eeef126b727b7f50d433fb62c335c2640f9e41f8259c8820d743bd79543fe6"
+        },
+        "evidence": []
+      },
+      "current_generator": {
+        "tool_identity": "repo-guard/docs-self-host@1",
+        "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6"
+      }
+    }
+  ]
+}

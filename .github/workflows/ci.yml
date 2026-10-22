@@ -45,6 +45,15 @@ jobs:
       - name: Verify generated dist freshness
         run: npm run check:dist
 
+      - name: Verify real local documentation projections
+        run: |
+          set -euo pipefail
+          node scripts/self-host-docs.mjs --check
+          node scripts/self-host-docs.mjs --outputs > "$RUNNER_TEMP/repo-guard-doc-outputs.json"
+          EXACT_SHA="$(git rev-parse HEAD)"
+          node dist/repo-guard.mjs build --base "$EXACT_SHA" --head "$EXACT_SHA" --outputs "$RUNNER_TEMP/repo-guard-doc-outputs.json"
+          test -z "$(git status --porcelain)"
+
       - name: Report architecture compression metrics
         run: npm run compression:metrics -- --compare 92432809fcddc290080beb51ba151e13a5761869
 

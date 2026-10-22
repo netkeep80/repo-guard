@@ -36,6 +36,7 @@ const observedCommands = new Set([
   ...(validateRuns.includes("repo-guard doctor") ? ["doctor"] : []),
   ...(validateRuns.includes("check-diff") ? ["check-diff"] : []),
   ...(validateRuns.includes("dist/repo-guard.mjs check") ? ["check"] : []),
+  ...(validateRuns.includes("dist/repo-guard.mjs build") ? ["build"] : []),
   // Legacy check-pr remains available through the optional Action, not required validate.
   ...(actionRuns.includes("check-pr") ? ["check-pr"] : []),
 ]);
@@ -146,7 +147,7 @@ describe("C3.4b canonical self-host exemplar", () => {
     for (const command of COMMANDS) {
       assert.ok(observedCommands.has(command) || commandExceptions.has(command), `command is neither self-hosted nor excepted: ${command}`);
     }
-    assert.deepEqual([...commandExceptions].sort(), ["build", "init", "trusted-service"]);
+    assert.deepEqual([...commandExceptions].sort(), ["init", "trusted-service"]);
 
     const ruleIds = new Set(defaultRuleFamilies.map((family) => family.id));
     const packs = new Set(listBuiltInPacks());

@@ -101,15 +101,12 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 [Требования продукта](docs/product-requirements.md) определяют точные гарантии и их границы. [Методика разработки](docs/contract-development.md) описывает применение без лишней церемонии.
 
+<a id="rg-cli-commands"></a>
 ## Команды
 
-| Команда | Назначение |
-| --- | --- |
-| `validate [change-intent.json]` | Проверить состояние и политику |
-| `check-diff --base main --head feature` | Проверить локальный `diff` |
-| `check-pr --format json` | Получить решение и машинный отчёт для PR |
-| `init --action-ref <ref>` | Создать начальную конфигурацию |
-| `doctor` | Проверить операционные предпосылки |
+<!-- repo-guard:cli:start -->
+Команды: `build`, `check`, `check-diff`, `check-pr`, `doctor`, `init`, `trusted-service`, `validate`. [Назначение и границы](docs/cli-reference.md).
+<!-- repo-guard:cli:end -->
 
 Канонические примеры находятся в [`examples/scenarios/`](examples/scenarios/), публичные формы данных — в [`schemas/`](schemas/).
 
