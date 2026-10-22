@@ -215,6 +215,26 @@ test("#800 W10: symlink and Git submodule are never writable", () => {
   }
 });
 
+test("#800 W10b: submodule ancestor and local .git metadata are never materialization targets", () => {
+  for (const target of ["deps/lib/derived.txt", ".git/private-data"]) {
+    environment(({ root, git, put, commit, build }) => {
+      const modelTarget = generated("g.prefix", target);
+      put(".repo-guard/projections.json", state([entry(modelTarget, "UNSAFE")]));
+      let revision = commit("versioned attempted output");
+      if (target.startsWith("deps/")) {
+        git("update-index", "--add", "--cacheinfo", "160000," + revision + ",deps/lib");
+        git("-c", "user.name=Projection Fixture", "-c", "user.email=projection@example.invalid",
+          "commit", "-qm", "add Git submodule parent");
+        revision = git("rev-parse", "HEAD");
+      }
+      const result = build(revision, revision, { [modelTarget.id]: "UNSAFE" });
+      assert.notEqual(result.status, 0, "unsupported parent must fail closed");
+      assert.ok(!readFileSync(join(root, ".git/HEAD"), "utf8").includes("UNSAFE"));
+      assert.equal(git("status", "--porcelain=v1"), "", "RED must not mutate the checkout");
+    });
+  }
+});
+
 test("#800 W13 W14: removing a Requirement never grants deletion; no network needed", () => {
   environment(({ root, put, commit, build }) => {
     const m = generated("g.shared");

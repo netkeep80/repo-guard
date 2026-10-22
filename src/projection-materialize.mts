@@ -26,7 +26,7 @@ function key(target) {
     anchor_id: locator.anchor_id, block_id: locator.block_id });
 }
 function safeRelative(path) {
-  if (typeof path !== "string" || path === "" || path.includes("\\") ||
+  if (typeof path !== "string" || path === "" || path === ".git" || path.startsWith(".git/") || path.includes("\\") ||
       isAbsolute(path) || path.startsWith("/") || path.split("/").some((p) => p === "." || p === ".." || !p)) {
     deny("unsafe materialization path: " + String(path));
   }
@@ -60,7 +60,14 @@ function validateLocalPath(root, path, before, after, expected) {
   // Inspect every ancestor; never follow a symlink to a target or its parent.
   let cursor = root;
   const parts = path.split("/");
+  let prefix = "";
   for (const part of parts.slice(0, -1)) {
+    prefix = prefix ? prefix + "/" + part : part;
+    for (const entry of [before.get(prefix), after.get(prefix)]) {
+      if (entry && (entry.type !== "blob" || !["100644", "100755"].includes(entry.mode))) {
+        deny("unsupported symlink/submodule ancestor in exact Git tree: " + path);
+      }
+    }
     cursor = join(cursor, part);
     if (!existsSync(cursor)) continue;
     const stat = lstatSync(cursor);
