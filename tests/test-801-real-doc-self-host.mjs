@@ -13,7 +13,7 @@ const runner = join(root, "dist/repo-guard.mjs");
 const renderer = join(root, "scripts/self-host-docs.mjs");
 const snapshotPaths = [
   "README.md", "RELEASING.md",
-  "docs/self-hosting-coverage.json", "docs/self-hosting-coverage.md",
+  "dist/repo-guard.mjs", "docs/cli-reference.md",
   ".repo-guard/projections.json", "scripts/self-host-docs.mjs",
 ];
 const original = JSON.parse(read(".repo-guard/projections.json"));

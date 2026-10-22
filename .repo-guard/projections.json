@@ -8,9 +8,9 @@
         "id": "repo-guard.docs.self-host-coverage",
         "sources": [
           {
-            "id": "coverage",
+            "id": "cli-runtime",
             "kind": "repository_content",
-            "path": "docs/self-hosting-coverage.json",
+            "path": "dist/repo-guard.mjs",
             "algorithm": "sha256"
           },
           {
@@ -21,7 +21,7 @@
           }
         ],
         "target": {
-          "path": "docs/self-hosting-coverage.md",
+          "path": "docs/cli-reference.md",
           "ownership": "generated"
         },
         "generator": {
@@ -32,17 +32,17 @@
       "build": {
         "schema": "repo-guard/projection-build-record/v0",
         "projection_id": "repo-guard.docs.self-host-coverage",
-        "model_identity": "7dd29d8f8ea33a2c29f6b9e0afbfd87c14783acbce991acea33769664b7a8313",
+        "model_identity": "fec2b814ed522e13fc2b4bb6f9022dd0239b668a413225d8d33772c583280eff",
         "source_identities": [
           {
-            "source_id": "coverage",
+            "source_id": "cli-runtime",
             "algorithm": "sha256",
-            "digest": "8474a7075ff7631b04a0b18ef764994cd9a1694d0ea424af66a371d276250b2c"
+            "digest": "d6a7d330073a41c5c41285b43b48870cb483e2a061dec598f8a8c1d6e67a3913"
           },
           {
             "source_id": "renderer",
             "algorithm": "sha256",
-            "digest": "70466c5fcdfad253f319da7f97fe20ae34ee509834d3b215464c26147d65054b"
+            "digest": "8e00a9370635ae0e3ba090ea67c79c68a4bb1007d30754e59367da2006395ea6"
           }
         ],
         "generator": {
@@ -52,7 +52,7 @@
         "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6",
         "output_identity": {
           "algorithm": "sha256",
-          "digest": "19482cf0938c486896a39602ab289f374fc9b68bc13b89e567d7dafe33ef44ef"
+          "digest": "623f127733f649c9e0e1c3eaea5b91a0a8e37435595ef2c2e8269453d4519a76"
         },
         "evidence": []
       },
@@ -68,9 +68,9 @@
         "id": "repo-guard.docs.self-host-summary",
         "sources": [
           {
-            "id": "coverage",
+            "id": "cli-runtime",
             "kind": "repository_content",
-            "path": "docs/self-hosting-coverage.json",
+            "path": "dist/repo-guard.mjs",
             "algorithm": "sha256"
           },
           {
@@ -85,10 +85,10 @@
           "ownership": "hybrid",
           "locator": {
             "kind": "markdown_owned_block",
-            "anchor_id": "rg-self-host-docs",
-            "block_id": "rg-self-host-summary",
-            "begin_marker": "<!-- repo-guard:self-host:start -->",
-            "end_marker": "<!-- repo-guard:self-host:end -->"
+            "anchor_id": "rg-cli-commands",
+            "block_id": "rg-cli-commands",
+            "begin_marker": "<!-- repo-guard:cli:start -->",
+            "end_marker": "<!-- repo-guard:cli:end -->"
           }
         },
         "generator": {
@@ -99,17 +99,17 @@
       "build": {
         "schema": "repo-guard/projection-build-record/v0",
         "projection_id": "repo-guard.docs.self-host-summary",
-        "model_identity": "81a9bad3863f20d434105a77ab37e4c688ba1aa2831a31c263f65c0b381e6e8d",
+        "model_identity": "7ae55b5cdc8a6685b3c71bf5e418bc773f53501841913f3c9b6af024e5768c89",
         "source_identities": [
           {
-            "source_id": "coverage",
+            "source_id": "cli-runtime",
             "algorithm": "sha256",
-            "digest": "8474a7075ff7631b04a0b18ef764994cd9a1694d0ea424af66a371d276250b2c"
+            "digest": "d6a7d330073a41c5c41285b43b48870cb483e2a061dec598f8a8c1d6e67a3913"
           },
           {
             "source_id": "renderer",
             "algorithm": "sha256",
-            "digest": "70466c5fcdfad253f319da7f97fe20ae34ee509834d3b215464c26147d65054b"
+            "digest": "8e00a9370635ae0e3ba090ea67c79c68a4bb1007d30754e59367da2006395ea6"
           }
         ],
         "generator": {
@@ -119,7 +119,7 @@
         "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6",
         "output_identity": {
           "algorithm": "sha256",
-          "digest": "1c82c2025a9579faff97f1c2fb39a55c9d86117abc8b11c7ffe1b9028ef321a5"
+          "digest": "07eeef126b727b7f50d433fb62c335c2640f9e41f8259c8820d743bd79543fe6"
         },
         "evidence": []
       },

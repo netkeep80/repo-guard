@@ -41,7 +41,7 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
-      path: "docs/self-hosting-coverage.md"
+      path: "docs/cli-reference.md"
   - predicates: [documents]
     target:
       kind: artifact

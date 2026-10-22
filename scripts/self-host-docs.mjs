@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeProjectionModel, projectionModelIdentity } from "../dist/projection-model.mjs";
 import { readOwnedMarkdownBlock } from "../dist/markdown-structure.mjs";
+import { COMMANDS } from "../dist/repo-guard.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(resolve(root, path), "utf8");
@@ -16,24 +17,30 @@ const contract = "repo-guard-doc-self-host/v1";
 const tool = "repo-guard/docs-self-host@1";
 
 function render() {
-  const registry = JSON.parse(read("docs/self-hosting-coverage.json"));
-  if (registry.schema_version !== "2.0.0" || !registry.exceptions ||
-      typeof registry.exceptions !== "object" || Array.isArray(registry.exceptions)) {
-    throw new Error("invalid canonical self-host exception registry");
+  const descriptions = {
+    build: "Без сетевых вызовов применяет только явные live Projection targets к готовым renderer bytes; orphan cleanup опирается на BASE.",
+    check: "Локально проверяет точные BASE/HEAD, Requirement relations, Projection freshness и ownership без записи.",
+    "check-diff": "Проверяет границы изменения локального Git diff.",
+    "check-pr": "Представляет оценку PR; применяется лишь в соответствующем адаптере CI.",
+    doctor: "Диагностирует наблюдаемые условия самоприменения и конфигурации.",
+    init: "Формирует стартовую конфигурацию нового потребительского репозитория.",
+    "trusted-service": "Исторический операторский режим; не требуется для обычного compiler-only CI.",
+    validate: "Проверяет версионированную политику и локальные ограничения репозитория.",
+  };
+  const commands = [...COMMANDS].sort();
+  if (commands.some((name) => !Object.hasOwn(descriptions, name)) ||
+      Object.keys(descriptions).some((name) => !commands.includes(name))) {
+    throw new Error("CLI command inventory and authored help text diverged");
   }
-  const exceptions = Object.entries(registry.exceptions).sort(([a], [b]) => a.localeCompare(b, "en"));
-  if (exceptions.some(([k, v]) => !k || typeof v !== "string" || !v.trim())) {
-    throw new Error("invalid self-host exception");
-  }
-  const summary = "Исключения самоприменения: **" + exceptions.length +
-    "**. Их основания находятся в [производном справочнике](docs/self-hosting-coverage.md); " +
-    "исходные решения — в [JSON-реестре](docs/self-hosting-coverage.json).";
+  const quote = (text) => String.fromCharCode(96) + text + String.fromCharCode(96);
+  const summary = "Команды: " + commands.map(quote).join(", ") +
+    ". [Назначение и границы](docs/cli-reference.md).";
   const coverage = [
-    "# Исключения самоприменения RepoGuard",
+    "# Команды RepoGuard",
     "",
-    "Этот справочник выводится из \x60docs/self-hosting-coverage.json\x60. Он не является отдельным источником полномочий или требований.",
+    "Список команд выводится из фактического CLI; пояснения принадлежат проектному renderer-у. Этот файл не создаёт прав записи или новой authority требований.",
     "",
-    ...exceptions.flatMap(([key, reason]) => ["## " + String.fromCharCode(96) + key + String.fromCharCode(96), "", reason, ""]),
+    ...commands.flatMap((name) => ["## " + quote(name), "", descriptions[name], ""]),
   ].join("\n") + "\n";
   return { [summaryId]: summary, [coverageId]: coverage };
 }

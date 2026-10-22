@@ -101,15 +101,12 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 [Требования продукта](docs/product-requirements.md) определяют точные гарантии и их границы. [Методика разработки](docs/contract-development.md) описывает применение без лишней церемонии.
 
+<a id="rg-cli-commands"></a>
 ## Команды
 
-| Команда | Назначение |
-| --- | --- |
-| `validate [change-intent.json]` | Проверить состояние и политику |
-| `check-diff --base main --head feature` | Проверить локальный `diff` |
-| `check-pr --format json` | Получить решение и машинный отчёт для PR |
-| `init --action-ref <ref>` | Создать начальную конфигурацию |
-| `doctor` | Проверить операционные предпосылки |
+<!-- repo-guard:cli:start -->
+Команды: `build`, `check`, `check-diff`, `check-pr`, `doctor`, `init`, `trusted-service`, `validate`. [Назначение и границы](docs/cli-reference.md).
+<!-- repo-guard:cli:end -->
 
 Канонические примеры находятся в [`examples/scenarios/`](examples/scenarios/), публичные формы данных — в [`schemas/`](schemas/).
 
@@ -119,7 +116,6 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 Типизированный API проекций доступен через `repo-guard/dist/projection-api.mjs`; контракт — в [методике](docs/contract-development.md#библиотечная-поверхность-проекций).
 
-<a id="rg-self-host-docs"></a>
 ## Разработка самого repo-guard
 
 ```bash
@@ -130,9 +126,5 @@ npm run compression:metrics
 ```
 
 Самоприменение: [`tests/test-c3-4b-self-host-exemplar.mjs`](tests/test-c3-4b-self-host-exemplar.mjs); исключения: [`docs/self-hosting-coverage.json`](docs/self-hosting-coverage.json).
-
-<!-- repo-guard:self-host:start -->
-Исключения самоприменения: **7**. Их основания находятся в [производном справочнике](docs/self-hosting-coverage.md); исходные решения — в [JSON-реестре](docs/self-hosting-coverage.json).
-<!-- repo-guard:self-host:end -->
 
 Новая блокирующая возможность должна начинаться с реального контрпримера и требования продукта. Удаление лишней проверки — такое же улучшение, как добавление нужной. Единый план развития — [#518](https://github.com/netkeep80/repo-guard/issues/518).
