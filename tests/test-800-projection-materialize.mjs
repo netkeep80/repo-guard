@@ -227,10 +227,11 @@ test("#800 W10b: submodule ancestor and local .git metadata are never materializ
           "commit", "-qm", "add Git submodule parent");
         revision = git("rev-parse", "HEAD");
       }
+      const statusBefore = git("status", "--porcelain=v1");
       const result = build(revision, revision, { [modelTarget.id]: "UNSAFE" });
       assert.notEqual(result.status, 0, "unsupported parent must fail closed");
       assert.ok(!readFileSync(join(root, ".git/HEAD"), "utf8").includes("UNSAFE"));
-      assert.equal(git("status", "--porcelain=v1"), "", "RED must not mutate the checkout");
+      assert.equal(git("status", "--porcelain=v1"), statusBefore, "RED must not mutate the checkout");
     });
   }
 });
