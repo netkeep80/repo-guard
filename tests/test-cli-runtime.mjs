@@ -29,8 +29,8 @@ const cases = [
   [["check-diff", "--change-intent"], /--change-intent requires a value/],
   [["check-diff", "--contract", "legacy.json"], /Unknown option for check-diff/],
   [["check-pr", "extra"], /Unexpected argument for check-pr/],
-  [["trusted-service", "--bogus"], /Unknown option for validate/]
-  [["trusted-service", "extra"], /Unexpected argument for validate/]
+  [["trusted-service", "--bogus"], /Unknown option for validate/],
+  [["trusted-service", "extra"], /Unexpected argument for validate/],
   [["validate", "one.json", "two.json"], /Unexpected argument for validate/],
   [["init", "--bogus"], /Unknown option for init/],
 ];
