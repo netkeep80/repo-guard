@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import * as publicRuntime from "../dist/repo-guard.mjs";
 import { readFileSync } from "node:fs";
 import {
   COMMANDS,
@@ -10,9 +11,13 @@ import {
   verifyAuthorityWebhook,
 } from "../dist/repo-guard.mjs";
 
+// #810 negative control: accepted baseline must fail while trusted-service is public.
+assert.equal(COMMANDS.includes("trusted-service"), false, "4.0 CLI must not publish trusted-service");
+assert.equal(Object.hasOwn(publicRuntime, "runTrustedService"), false, "historical service must not remain a package main export");
+
 assert.deepEqual(
   [...COMMANDS].sort(),
-  ["validate", "check-diff", "check-pr", "check", "build", "trusted-service", "init", "doctor"].sort(),
+  ["validate", "check-diff", "check-pr", "check", "build", "init", "doctor"].sort(),
 );
 
 const originalError = console.error, errors = [];
@@ -24,8 +29,8 @@ const cases = [
   [["check-diff", "--change-intent"], /--change-intent requires a value/],
   [["check-diff", "--contract", "legacy.json"], /Unknown option for check-diff/],
   [["check-pr", "extra"], /Unexpected argument for check-pr/],
-  [["trusted-service", "--bogus"], /Unknown option for trusted-service/],
-  [["trusted-service", "extra"], /Unexpected argument for trusted-service/],
+  [["trusted-service", "--bogus"], /Unknown option for validate/],
+  [["trusted-service", "extra"], /Unexpected argument for validate/],
   [["validate", "one.json", "two.json"], /Unexpected argument for validate/],
   [["init", "--bogus"], /Unknown option for init/],
 ];

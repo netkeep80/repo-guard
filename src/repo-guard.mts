@@ -20,7 +20,6 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   "check-pr": { options: valueOptions("--format"), positionals: 0, run: async (roots, args) => (await import("./github-pr.mjs")).runCheckPR(roots, args) },
   check: { options: valueOptions("--base", "--head", "--format"), positionals: 0, run: async (roots, args) => (await import("./local-compiler.mjs")).runLocalCheck(roots, args) },
   build: { options: valueOptions("--base", "--head", "--outputs"), positionals: 0, run: async (roots, args) => (await import("./projection-materialize.mjs")).runProjectionBuild(roots, args) },
-  "trusted-service": { options: {}, positionals: 0, run: async (roots, args) => runTrustedService(roots, args) },
   init: { options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0, run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args) },
   doctor: { options: valueOptions("--format"), positionals: 0, run: async (roots) => ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0) },
 };
@@ -339,7 +338,7 @@ async function repositoryTargets(config: AuthorityConfig, installationId: number
     .map((pr) => ({ installationId, repositoryId, repository, pr: positive(pr.number, "PR") }));
 }
 
-export async function runTrustedService(roots: { packageRoot: string }, args: string[] = []): Promise<number> {
+async function runTrustedService(roots: { packageRoot: string }, args: string[] = []): Promise<number> {
   if (args.length) throw new Error("trusted-service accepts no arguments");
   const config = loadAuthorityConfig(roots.packageRoot), state = fileState(config.state), queues = new Map<string, Promise<void>>();
   const deps: AuthorityDependencies = { observe: (target) => observeAuthority(config, target), publish: (target, sha, status) => publishAuthority(config, target, sha, status), evaluate: (target, key, merge) => evaluateAuthority(config, target, key, merge), get: state.get, put: state.put, remove: state.remove };

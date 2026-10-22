@@ -105,7 +105,7 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 ## Команды
 
 <!-- repo-guard:cli:start -->
-Команды: `build`, `check`, `check-diff`, `check-pr`, `doctor`, `init`, `trusted-service`, `validate`. [Назначение и границы](docs/cli-reference.md).
+Команды: `build`, `check`, `check-diff`, `check-pr`, `doctor`, `init`, `validate`. [Назначение и границы](docs/cli-reference.md).
 <!-- repo-guard:cli:end -->
 
 Канонические примеры находятся в [`examples/scenarios/`](examples/scenarios/), публичные формы данных — в [`schemas/`](schemas/).
