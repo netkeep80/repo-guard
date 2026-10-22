@@ -334,26 +334,49 @@ export function evaluateProjectionCheck(input: {
     (item): item is ProjectionCheckSourceEntry => item.state === "source",
   );
   const sourceTargets = new Set<string>();
-  const allPreviousTargets = new Set(base.entries.map((item) => JSON.stringify(item.model.target)));
-  const activePaths = new Set([...live, ...retained].map((item) => item.model.target.path));
+  const previousTargets = new Set(base.entries.map((item) => JSON.stringify(item.model.target)));
+  const activeTargets = new Set([...live, ...retained].map((item) => JSON.stringify(item.model.target)));
+  const activeIds = new Set([...live, ...retained].map((item) => item.model.id));
   for (const item of sources) {
     const key = JSON.stringify(item.model.target);
-    if (!allPreviousTargets.has(key)) {
+    if (!previousTargets.has(key)) {
       diagnostics.push({ code: "projection_source_reclassification_invalid", subject: item.model.id,
         detail: "SOURCE handoff must match an exact BASE Projection target" });
       continue;
     }
-    if (sourceTargets.has(key) || activePaths.has(item.model.target.path)) {
+    if (sourceTargets.has(key) || activeTargets.has(key) || activeIds.has(item.model.id)) {
       diagnostics.push({ code: "projection_source_reclassification_conflict", subject: item.model.id,
-        detail: "SOURCE target cannot also have a live/retained writer or duplicate handoff" });
+        detail: "SOURCE target/ProjectionId cannot compete with a live/retained target or another SOURCE handoff" });
       continue;
     }
     sourceTargets.add(key);
   }
+
+  // Reuse accepted #799 region/whole-file conflict semantics, treating SOURCE
+  // only as a non-writer protected interval for this transient collision check.
+  // Do not add SOURCE to the real retained inventory or make its marker permanent.
+  if (sources.length > 0) {
+    const sourceOverlap = analyzeProjectionOwnership({
+      live: live.map((item) => item.model),
+      retained: [...retained, ...sources].map((item) => item.model),
+      base: [],
+      readHead: input.readHead,
+    });
+    for (const conflict of sourceOverlap.conflicts) {
+      diagnostics.push({
+        code: "projection_source_reclassification_conflict",
+        subject: conflict.subject,
+        detail: conflict.code + (conflict.detail ? ": " + conflict.detail : ""),
+      });
+    }
+  }
   const ownership = analyzeProjectionOwnership({
     live: live.map((item) => item.model),
     retained: retained.map((item) => item.model),
-    base: base.entries.filter((item) => !sourceTargets.has(JSON.stringify(item.model.target)))
+    // Only former live entries constitute BASE write provenance. Historical
+    // SOURCE/retained entries can retire without resurrecting orphan cleanup.
+    base: base.entries.filter((item) => item.state === "live"
+      && !sourceTargets.has(JSON.stringify(item.model.target)))
       .map((item) => item.model),
     readHead: input.readHead,
   });

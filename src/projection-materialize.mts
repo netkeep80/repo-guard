@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { runGit, listTrackedEntriesAtRef, readFileAtRef } from "./git.mjs";
 import { parseProjectionCheckState, evaluateProjectionCheck } from "./projection-check.mjs";
 import { replaceOwnedMarkdownBlock, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
-import { loadNativeRequirements } from "./runtime/canonical-requirements.mjs";
+import { loadNativeRequirements, strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
 
 const hex40 = /^[a-f0-9]{40}$/;
 const hex64 = /^[a-f0-9]{64}$/;
@@ -26,7 +26,7 @@ function key(target) {
     anchor_id: locator.anchor_id, block_id: locator.block_id });
 }
 function safeRelative(path) {
-  if (typeof path !== "string" || path === "" || path === ".git" || path.startsWith(".git/") || path.includes("\\") ||
+  if (typeof path !== "string" || path === "" || path.split("/")[0]?.toLowerCase() === ".git" || path.includes("\\") ||
       isAbsolute(path) || path.startsWith("/") || path.split("/").some((p) => p === "." || p === ".." || !p)) {
     deny("unsafe materialization path: " + String(path));
   }
@@ -151,9 +151,6 @@ function stagesFor(input) {
   const rawHead = headTree.has(statePath) ? readFileAtRef(head, statePath, root) : null;
   const prior = parseProjectionCheckState(rawBase);
   const current = parseProjectionCheckState(rawHead);
-  const sourceTargets = new Set(current.entries.filter((e) => e.state === "source")
-    .map((e) => JSON.stringify(e.model.target)));
-  const baseModels = prior.entries.filter((e) => !sourceTargets.has(JSON.stringify(e.model.target)));
   const view = (path) => headTree.has(path) ? readFileAtRef(head, path, root) : null;
   const report = evaluateProjectionCheck({
     baseRaw: rawBase, headRaw: rawHead, readHead: view,
@@ -196,15 +193,11 @@ function stagesFor(input) {
 
   const oldLive = prior.entries.filter((e) => e.state === "live");
   const orphanKeys = new Set(report.ownership.orphan);
-  const liveOrRetainedPaths = new Set([...live, ...retained].map((e) => e.model.target.path));
   const native = nativeIndex(root, head, headTree);
   for (const item of oldLive) {
     const model = item.model;
     const p = model.target.path;
     if (!orphanKeys.has(key(model.target))) continue;
-    if (liveOrRetainedPaths.has(p) || sourceTargets.has(JSON.stringify(model.target))) {
-      deny("orphan output is still retained/owned: " + p);
-    }
     const change = stage(p);
     priorOrphanIntegrity(model, change.after, item);
     change.after = removeOwned(change.after, model);
@@ -239,7 +232,7 @@ export function runProjectionBuild(roots, args) {
   function opt(name) { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; }
   const base = opt("--base"), head = opt("--head"), outputsPath = opt("--outputs");
   if (!base || !head || !outputsPath) deny("build requires --base, --head and --outputs");
-  const outputs = JSON.parse(readFileSync(resolve(roots.repoRoot, outputsPath), "utf8"));
+  const outputs = strictCanonicalJson(readFileSync(resolve(roots.repoRoot, outputsPath), "utf8"));
   const plan = stagesFor({ repoRoot: roots.repoRoot, base, head, outputs });
   const applied = [];
   const createdDirs = [];

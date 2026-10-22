@@ -50,7 +50,7 @@ function environment(fn) {
   };
   const build = (base, head, outputs = {}) => {
     const payload = join(tmpdir(), "projection-output-" + Date.now() + "-" + Math.random() + ".json");
-    writeFileSync(payload, JSON.stringify(outputs));
+    writeFileSync(payload, typeof outputs === "string" ? outputs : JSON.stringify(outputs));
     let stdout = "", status = 0, stderr = "";
     try {
       stdout = execFileSync(process.execPath, [cli, "--repo-root", root, "build",
@@ -281,4 +281,180 @@ test("#800 orphan cleanup follows BASE Projection ownership, never Requirement t
     assert.equal(repeat.status, 0, repeat.stderr);
     assert.equal(repeat.result.idempotent, true);
   });
+});
+
+function pairedHybridFixture() {
+  const a = hybrid("h.alpha", "alpha", "block-a");
+  const b = hybrid("h.beta", "beta", "block-b");
+  const authored = [
+    '<a id="alpha"></a>', "# Alpha", "Authored alpha ☀", "",
+    '<a id="beta"></a>', "# Beta", "Authored beta 🎓", "",
+  ].join("\n");
+  const first = content(a, authored, "PAYLOAD-A");
+  const second = content(b, first.target, "PAYLOAD-B");
+  const oldBlock = readOwnedMarkdownBlock(second.target, {
+    blockId: a.target.locator.block_id,
+    beginMarker: a.target.locator.begin_marker,
+    endMarker: a.target.locator.end_marker,
+  });
+  assert.ok(oldBlock);
+  return {
+    a, b, baseline: second.target,
+    oldFragment: first.fragment, liveFragment: second.fragment,
+    removedA: second.target.slice(0, oldBlock.start) + second.target.slice(oldBlock.end),
+  };
+}
+
+test("#800 F23: duplicate --outputs IDs are RED before any GENERATED writes", () => {
+  for (const raw of [
+    '{"g.one":"NEW","g.one":"INJECTED"}',
+    '{"g.one":"NEW","nested":{"id":1,"id":2}}',
+  ]) {
+    environment(({ root, git, put, commit, build }) => {
+      const g = generated("g.one");
+      put("docs/output.txt", "ORIGINAL");
+      put(".repo-guard/projections.json", state([entry(g, "NEW")]));
+      const head = commit("versioned single generator");
+      const before = git("status", "--porcelain=v1");
+      const attempt = build(head, head, raw);
+      assert.notEqual(attempt.status, 0);
+      assert.match(attempt.stderr, /duplicate JSON key/i);
+      assert.equal(readFileSync(join(root, "docs/output.txt"), "utf8"), "ORIGINAL");
+      assert.equal(git("status", "--porcelain=v1"), before);
+    });
+  }
+});
+
+test("#800 F26: disjoint BASE HYBRID orphan is removed beside live HYBRID same path", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const f = pairedHybridFixture();
+    put("docs/story.md", f.baseline);
+    put(".repo-guard/projections.json", state([entry(f.a, f.oldFragment), entry(f.b, f.liveFragment)]));
+    const base = commit("two accepted disjoint owned blocks");
+    put(".repo-guard/projections.json", state([entry(f.b, f.liveFragment)]));
+    const head = commit("remove only alpha declaration");
+    const result = build(base, head, { [f.b.id]: "PAYLOAD-B" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(join(root, "docs/story.md"), "utf8"), f.removedA);
+    assert.ok(readFileSync(join(root, "docs/story.md"), "utf8").includes(f.b.target.locator.begin_marker));
+    assert.equal(git("status", "--porcelain=v1"), "M docs/story.md");
+    const again = build(base, head, { [f.b.id]: "PAYLOAD-B" });
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(again.result.idempotent, true);
+  });
+});
+
+test("#800 F10: disjoint same-file SOURCE handoff coexists with live writer and retires", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const f = pairedHybridFixture();
+    put("docs/story.md", f.baseline);
+    put(".repo-guard/projections.json", state([entry(f.a, f.oldFragment), entry(f.b, f.liveFragment)]));
+    const base = commit("two accepted disjoint blocks");
+    const source = { state: "source", model: f.a };
+    put(".repo-guard/projections.json", state([source, entry(f.b, f.liveFragment)]));
+    const handoff = commit("alpha handoff, beta stays live");
+    const buildHandoff = build(base, handoff, { [f.b.id]: "PAYLOAD-B" });
+    assert.equal(buildHandoff.status, 0, buildHandoff.stderr);
+    assert.equal(readFileSync(join(root, "docs/story.md"), "utf8"), f.baseline);
+    assert.equal(git("status", "--porcelain=v1"), "");
+
+    const declaredReport = evaluateProjectionCheck({
+      baseRaw: state([entry(f.a, f.oldFragment), entry(f.b, f.liveFragment)]),
+      headRaw: state([source, entry(f.b, f.liveFragment)]),
+      readHead: p => p === "docs/story.md" ? f.baseline : null,
+      facts: { readFile: p => p === "docs/story.md" ? f.baseline : null, diff: { files: { checked: [] } } },
+    });
+    assert.equal(declaredReport.ownership.orphan.length, 0);
+    assert.equal(declaredReport.ownership.conflicts.length, 0);
+
+    // SOURCE is a one-way handoff, not a permanent managed tombstone.
+    put(".repo-guard/projections.json", state([entry(f.b, f.liveFragment)]));
+    const retired = commit("remove obsolete SOURCE handoff");
+    const buildRetired = build(handoff, retired, { [f.b.id]: "PAYLOAD-B" });
+    assert.equal(buildRetired.status, 0, buildRetired.stderr);
+    assert.equal(buildRetired.result.idempotent, true);
+    assert.equal(readFileSync(join(root, "docs/story.md"), "utf8"), f.baseline);
+    assert.equal(git("status", "--porcelain=v1"), "");
+  });
+});
+
+test("#800 F10: SOURCE/active exact-target collision RED with zero mutation", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const f = pairedHybridFixture();
+    put("docs/story.md", f.baseline);
+    put(".repo-guard/projections.json", state([entry(f.a, f.oldFragment)]));
+    const base = commit("accepted alpha owner");
+    put(".repo-guard/projections.json", state([
+      { state: "source", model: f.a },
+      entry(hybrid("h.duplicate", "alpha", "block-a"), f.oldFragment),
+    ]));
+    const head = commit("conflicting active writer for SOURCE target");
+    const status = git("status", "--porcelain=v1");
+    const red = build(base, head, { "h.duplicate": "PAYLOAD-A" });
+    assert.notEqual(red.status, 0);
+    assert.equal(git("status", "--porcelain=v1"), status);
+    assert.equal(readFileSync(join(root, "docs/story.md"), "utf8"), f.baseline);
+  });
+});
+
+test("#800 F24: same-file owned-block relocation is exact and preserves authored bytes", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const before = hybrid("h.move", "alpha", "block-a");
+    const after = hybrid("h.move", "beta", "block-moved");
+    const authored = '<a id="alpha"></a>\n# Alpha\nText A\n\n<a id="beta"></a>\n# Beta\nText B\n';
+    const first = content(before, authored, "OLD");
+    const moved = content(after, first.target, "NEW");
+    const oldBlock = readOwnedMarkdownBlock(moved.target, {
+      blockId: before.target.locator.block_id,
+      beginMarker: before.target.locator.begin_marker,
+      endMarker: before.target.locator.end_marker,
+    });
+    const expected = moved.target.slice(0, oldBlock.start) + moved.target.slice(oldBlock.end);
+    put("docs/story.md", first.target);
+    put(".repo-guard/projections.json", state([entry(before, first.fragment)]));
+    const base = commit("old alpha target");
+    put(".repo-guard/projections.json", state([entry(after, moved.fragment)]));
+    const head = commit("same-path new block target");
+    const result = build(base, head, { [after.id]: "NEW" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(join(root, "docs/story.md"), "utf8"), expected);
+    assert.match(readFileSync(join(root, "docs/story.md"), "utf8"), /Text A/);
+    assert.match(readFileSync(join(root, "docs/story.md"), "utf8"), /Text B/);
+    assert.equal(git("status", "--porcelain=v1"), "M docs/story.md");
+  });
+});
+
+test("#800 F04: valid + valid + invalid prospective outputs cause zero writes", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const good1 = generated("g.1", "docs/1.txt");
+    const good2 = generated("g.2", "docs/2.txt");
+    const invalid = generated("g.3", "docs/3.txt");
+    for (const path of ["docs/1.txt", "docs/2.txt", "docs/3.txt"]) put(path, "ORIGINAL");
+    put(".repo-guard/projections.json", state([
+      entry(good1, "NEW1"), entry(good2, "NEW2"), entry(invalid, "NEW3"),
+    ]));
+    const head = commit("three anticipated generated outputs");
+    const was = git("status", "--porcelain=v1");
+    const red = build(head, head, { "g.1": "NEW1", "g.2": "NEW2", "g.3": "WRONG" });
+    assert.notEqual(red.status, 0);
+    for (const path of ["docs/1.txt", "docs/2.txt", "docs/3.txt"]) {
+      assert.equal(readFileSync(join(root, path), "utf8"), "ORIGINAL");
+    }
+    assert.equal(git("status", "--porcelain=v1"), was);
+  });
+});
+
+test("#800 F17: case-insensitive Git metadata aliases RED", () => {
+  for (const path of [".git/private-data", ".GIT/private-data", ".GiT/private-data"]) {
+    environment(({ root, git, put, commit, build }) => {
+      const unsafe = generated("g.git", path);
+      put(".repo-guard/projections.json", state([entry(unsafe, "UNSAFE")]));
+      const head = commit("unsafe metadata alias declaration");
+      const before = git("status", "--porcelain=v1");
+      const red = build(head, head, { [unsafe.id]: "UNSAFE" });
+      assert.notEqual(red.status, 0);
+      assert.equal(git("status", "--porcelain=v1"), before);
+      assert.equal(existsSync(join(root, path)), false);
+    });
+  }
 });
