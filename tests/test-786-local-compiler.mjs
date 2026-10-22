@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "repo-guard-c1-"));
@@ -132,6 +132,27 @@ try {
   assert.equal(report.ok, true, "local CLI should agree with direct evaluator");
   assert.equal(report.base, normative);
   assert.equal(report.head, restored);
+
+  // #806: clone-local remote configuration is not a versioned compiler input.
+  // This must fail on the pre-fix baseline: owner/repository differs by Git remote.
+  const sameSnapshotCheck = () => {
+    const result = spawnSync(process.execPath, [
+      new URL("../dist/repo-guard.mjs", import.meta.url).pathname,
+      "--repo-root", root, "check", "--base", normative, "--head", restored, "--format", "json",
+    ], { cwd: root, env: { PATH: process.env.PATH }, encoding: null });
+    assert.equal(result.error, undefined);
+    return result;
+  };
+  const snapshotHead = git("rev-parse", "HEAD");
+  git("remote", "add", "origin", "https://github.com/example/a.git");
+  const remoteA = sameSnapshotCheck();
+  git("remote", "set-url", "origin", "https://github.com/example/b.git");
+  const remoteB = sameSnapshotCheck();
+  assert.equal(git("rev-parse", "HEAD"), snapshotHead, "remote changes cannot alter HEAD");
+  assert.equal(remoteA.status, 0, "remote A must pass semantic check");
+  assert.equal(remoteB.status, remoteA.status, "remote must not affect exit code");
+  assert.deepEqual(remoteB.stdout, remoteA.stdout, "#806 entire JSON report must be byte-identical");
+  assert.equal(JSON.parse(remoteA.stdout.toString("utf8")).repository, "local/repository");
 
   git("mv", "src/a.txt", "src/renamed.txt");
   put("requirements/core.rg.yaml", req("CORE", "src/renamed.txt"));
