@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { normalizeDocumentFact } from "./document-facts.mjs";
+import { normalizeSubjectRef } from "./runtime/subject-relations.mjs";
 function fail(label, message) {
     throw new Error(`${label}: ${message}`);
 }
@@ -62,16 +63,76 @@ function array(value, label) {
 function normalizeSource(value, index) {
     const label = `ProjectionModel.sources[${index}]`;
     const input = object(value, label);
-    fields(input, ["id", "kind", "path", "algorithm"], label);
-    if (input.kind !== "repository_content") {
-        fail(`${label}.kind`, 'must be "repository_content"');
+    if (input.kind === "repository_content") {
+        fields(input, ["id", "kind", "path", "algorithm"], label);
+        return {
+            id: identifier(input.id, `${label}.id`),
+            kind: "repository_content",
+            path: repositoryPath(input.path, `${label}.path`),
+            algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
+        };
     }
-    return {
-        id: identifier(input.id, `${label}.id`),
-        kind: "repository_content",
-        path: repositoryPath(input.path, `${label}.path`),
-        algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
-    };
+    if (input.kind === "repository_subject") {
+        fields(input, ["id", "kind", "subject", "representation", "algorithm"], label);
+        let subject;
+        try {
+            subject = normalizeSubjectRef(input.subject);
+        }
+        catch (error) {
+            fail(`${label}.subject`, error instanceof Error ? error.message : String(error));
+        }
+        let representation;
+        if (subject.kind === "resource") {
+            if (input.representation === undefined) {
+                representation = subject;
+            }
+            else {
+                let normalized;
+                try {
+                    normalized = normalizeSubjectRef(input.representation);
+                }
+                catch (error) {
+                    fail(`${label}.representation`, error instanceof Error ? error.message : String(error));
+                }
+                if (normalized.kind !== "resource") {
+                    fail(`${label}.representation`, "must be a repository Resource SubjectRef");
+                }
+                representation = normalized;
+                if (JSON.stringify(subject) !== JSON.stringify(representation)) {
+                    fail(`${label}.representation`, "Resource SubjectRef representation must be the same exact resource locator");
+                }
+            }
+        }
+        else if (subject.kind === "requirement") {
+            if (input.representation !== undefined) {
+                fail(`${label}.representation`, "Requirement representation is resolved from the canonical native Requirement index and must not be redeclared");
+            }
+        }
+        else {
+            if (input.representation === undefined) {
+                fail(`${label}.representation`, "Relation subjects require an exact repository Resource representation");
+            }
+            let normalized;
+            try {
+                normalized = normalizeSubjectRef(input.representation);
+            }
+            catch (error) {
+                fail(`${label}.representation`, error instanceof Error ? error.message : String(error));
+            }
+            if (normalized.kind !== "resource") {
+                fail(`${label}.representation`, "must be a repository Resource SubjectRef");
+            }
+            representation = normalized;
+        }
+        return {
+            id: identifier(input.id, `${label}.id`),
+            kind: "repository_subject",
+            subject,
+            ...(representation ? { representation } : {}),
+            algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
+        };
+    }
+    fail(`${label}.kind`, 'must be "repository_content" or "repository_subject"');
 }
 function normalizeTarget(value) {
     const label = "ProjectionModel.target";
@@ -167,33 +228,22 @@ export function projectionModelIdentity(value) {
     const normalized = normalizeProjectionModel(value);
     return createHash("sha256").update(JSON.stringify(normalized), "utf8").digest("hex");
 }
-function normalizeSourceIdentity(value, index, modelSources) {
+function normalizeDetachedSourceIdentity(value, index) {
     const label = `ProjectionBuildRecord.source_identities[${index}]`;
     const input = object(value, label);
     fields(input, ["source_id", "algorithm", "digest"], label);
-    const sourceId = identifier(input.source_id, `${label}.source_id`);
-    const source = modelSources.get(sourceId);
-    if (!source)
-        fail(label, `unknown source identity "${sourceId}"`);
-    const algorithm = sha256Algorithm(input.algorithm, `${label}.algorithm`);
-    if (algorithm !== source.algorithm)
-        fail(label, `algorithm differs from model source "${sourceId}"`);
     return {
-        source_id: sourceId,
-        algorithm,
+        source_id: identifier(input.source_id, `${label}.source_id`),
+        algorithm: sha256Algorithm(input.algorithm, `${label}.algorithm`),
         digest: sha256Digest(input.digest, `${label}.digest`),
     };
 }
-function normalizeBuildGenerator(value, model) {
+function normalizeDetachedBuildGenerator(value) {
     const label = "ProjectionBuildRecord.generator";
     const input = object(value, label);
     fields(input, ["contract_id", "tool_identity"], label);
-    const contractId = identifier(input.contract_id, `${label}.contract_id`);
-    if (contractId !== model.generator.contract_id) {
-        fail(label, `generator contract "${contractId}" does not match ProjectionModel`);
-    }
     return {
-        contract_id: contractId,
+        contract_id: identifier(input.contract_id, `${label}.contract_id`),
         tool_identity: stringValue(input.tool_identity, `${label}.tool_identity`),
     };
 }
@@ -206,8 +256,8 @@ function normalizeOutputIdentity(value) {
         digest: sha256Digest(input.digest, `${label}.digest`),
     };
 }
-function normalizeEvidence(value, required) {
-    const evidence = array(value, "ProjectionBuildRecord.evidence").map((item, index) => {
+function normalizeDetachedEvidence(value) {
+    return array(value, "ProjectionBuildRecord.evidence").map((item, index) => {
         const label = `ProjectionBuildRecord.evidence[${index}]`;
         const input = object(item, label);
         fields(input, ["class", "ref"], label);
@@ -216,16 +266,8 @@ function normalizeEvidence(value, required) {
             ref: stringValue(input.ref, `${label}.ref`),
         };
     }).sort((left, right) => left.class.localeCompare(right.class) || left.ref.localeCompare(right.ref));
-    const present = new Set(evidence.map((item) => item.class));
-    for (const requiredClass of required) {
-        if (!present.has(requiredClass)) {
-            fail("ProjectionBuildRecord.evidence", `required evidence "${requiredClass}" is missing`);
-        }
-    }
-    return evidence;
 }
-export function normalizeProjectionBuildRecord(value, modelValue) {
-    const model = normalizeProjectionModel(modelValue);
+export function normalizeProjectionBuildRecordDetached(value) {
     const input = object(value, "ProjectionBuildRecord");
     fields(input, [
         "schema",
@@ -240,18 +282,8 @@ export function normalizeProjectionBuildRecord(value, modelValue) {
     if (input.schema !== "repo-guard/projection-build-record/v0") {
         fail("ProjectionBuildRecord.schema", 'must be "repo-guard/projection-build-record/v0"');
     }
-    const projectionId = identifier(input.projection_id, "ProjectionBuildRecord.projection_id");
-    if (projectionId !== model.id) {
-        fail("ProjectionBuildRecord.projection_id", `does not match ProjectionModel id "${model.id}"`);
-    }
-    const expectedModelIdentity = projectionModelIdentity(model);
-    const modelIdentity = sha256Digest(input.model_identity, "ProjectionBuildRecord.model_identity");
-    if (modelIdentity !== expectedModelIdentity) {
-        fail("ProjectionBuildRecord.model_identity", "model identity does not match ProjectionModel");
-    }
-    const modelSources = new Map(model.sources.map((source) => [source.id, source]));
     const sourceIdentities = array(input.source_identities, "ProjectionBuildRecord.source_identities")
-        .map((item, index) => normalizeSourceIdentity(item, index, modelSources))
+        .map(normalizeDetachedSourceIdentity)
         .sort((left, right) => left.source_id.localeCompare(right.source_id));
     const seen = new Set();
     for (const source of sourceIdentities) {
@@ -260,19 +292,52 @@ export function normalizeProjectionBuildRecord(value, modelValue) {
         }
         seen.add(source.source_id);
     }
+    return {
+        schema: "repo-guard/projection-build-record/v0",
+        projection_id: identifier(input.projection_id, "ProjectionBuildRecord.projection_id"),
+        model_identity: sha256Digest(input.model_identity, "ProjectionBuildRecord.model_identity"),
+        source_identities: sourceIdentities,
+        generator: normalizeDetachedBuildGenerator(input.generator),
+        configuration_digest: sha256Digest(input.configuration_digest, "ProjectionBuildRecord.configuration_digest"),
+        output_identity: normalizeOutputIdentity(input.output_identity),
+        evidence: normalizeDetachedEvidence(input.evidence),
+    };
+}
+export function normalizeProjectionBuildRecord(value, modelValue) {
+    const model = normalizeProjectionModel(modelValue);
+    const build = normalizeProjectionBuildRecordDetached(value);
+    if (build.projection_id !== model.id) {
+        fail("ProjectionBuildRecord.projection_id", `does not match ProjectionModel id "${model.id}"`);
+    }
+    const expectedModelIdentity = projectionModelIdentity(model);
+    if (build.model_identity !== expectedModelIdentity) {
+        fail("ProjectionBuildRecord.model_identity", "model identity does not match ProjectionModel");
+    }
+    const modelSources = new Map(model.sources.map((source) => [source.id, source]));
+    const seen = new Set();
+    for (const source of build.source_identities) {
+        const modelSource = modelSources.get(source.source_id);
+        if (!modelSource) {
+            fail("ProjectionBuildRecord.source_identities", `unknown source identity "${source.source_id}"`);
+        }
+        if (source.algorithm !== modelSource.algorithm) {
+            fail("ProjectionBuildRecord.source_identities", `algorithm differs from model source "${source.source_id}"`);
+        }
+        seen.add(source.source_id);
+    }
     for (const source of model.sources) {
         if (!seen.has(source.id)) {
             fail("ProjectionBuildRecord.source_identities", `missing source identity "${source.id}"`);
         }
     }
-    return {
-        schema: "repo-guard/projection-build-record/v0",
-        projection_id: projectionId,
-        model_identity: modelIdentity,
-        source_identities: sourceIdentities,
-        generator: normalizeBuildGenerator(input.generator, model),
-        configuration_digest: sha256Digest(input.configuration_digest, "ProjectionBuildRecord.configuration_digest"),
-        output_identity: normalizeOutputIdentity(input.output_identity),
-        evidence: normalizeEvidence(input.evidence, model.required_evidence),
-    };
+    if (build.generator.contract_id !== model.generator.contract_id) {
+        fail("ProjectionBuildRecord.generator", `generator contract "${build.generator.contract_id}" does not match ProjectionModel`);
+    }
+    const presentEvidence = new Set(build.evidence.map((item) => item.class));
+    for (const requiredClass of model.required_evidence) {
+        if (!presentEvidence.has(requiredClass)) {
+            fail("ProjectionBuildRecord.evidence", `required evidence "${requiredClass}" is missing`);
+        }
+    }
+    return build;
 }

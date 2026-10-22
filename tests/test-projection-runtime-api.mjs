@@ -3,6 +3,9 @@ import * as api from "../dist/projection-api.mjs";
 
 const expectedRuntimeExports = [
   "analyzeProjection",
+  "analyzeProjectionCurrent",
+  "analyzeProjectionOwnership",
+  "evaluateProjectionCheck",
   "insertMarkdownChild",
   "listMarkdownAnchorIds",
   "listMarkdownChildren",

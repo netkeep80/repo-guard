@@ -65,6 +65,30 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "dist/projection-ownership.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-ownership.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-check.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/projection-check.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/runtime/canonical-requirements.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/runtime/subject-relations.d.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/reporting/anchor-diagnostics.mjs"
   - predicates: [implemented_by]
     target:
@@ -217,6 +241,14 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "src/projection-ownership.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/projection-check.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "src/reporting/anchor-diagnostics.mts"
   - predicates: [implemented_by]
     target:
@@ -338,6 +370,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-798-subject-relation-core.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-799-projection-ownership.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

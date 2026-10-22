@@ -41,15 +41,50 @@ export type {
   ProjectionGeneratorContract,
   ProjectionModel,
   ProjectionOutputIdentity,
+  ProjectionRepositoryContentSourceDependency,
+  ProjectionRepositoryResourceSubject,
+  ProjectionRepositorySubjectSourceDependency,
   ProjectionSourceDependency,
   ProjectionSourceIdentity,
   ProjectionTarget,
   ProjectionTargetLocator,
 } from "./projection-model.mjs";
 
-export { analyzeProjection } from "./projection-analysis.mjs";
+export {
+  analyzeProjection,
+  analyzeProjectionCurrent,
+} from "./projection-analysis.mjs";
 export type {
   ProjectionAnalysis,
+  ProjectionCurrentAnalysis,
+  ProjectionCurrentGeneratorIdentity,
   ProjectionFreshness,
   ProjectionImpact,
+  ProjectionResolvedSourceIdentity,
+  ProjectionResolvedSources,
 } from "./projection-analysis.mjs";
+
+export {
+  analyzeProjectionOwnership,
+} from "./projection-ownership.mjs";
+export type {
+  ProjectionInventoryState,
+  ProjectionObservedCandidate,
+  ProjectionOwnershipConflict,
+  ProjectionOwnershipConflictCode,
+  ProjectionOwnershipInput,
+  ProjectionOwnershipReport,
+} from "./projection-ownership.mjs";
+
+export {
+  evaluateProjectionCheck,
+} from "./projection-check.mjs";
+export type {
+  ProjectionCheckDiagnostic,
+  ProjectionCheckEntry,
+  ProjectionCheckLiveEntry,
+  ProjectionCheckReport,
+  ProjectionCheckRetainedEntry,
+  ProjectionRequirementResolution,
+  ProjectionRequirementResolver,
+} from "./projection-check.mjs";
