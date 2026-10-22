@@ -272,11 +272,7 @@ export function runLocalCheck(roots: { repoRoot: string }, args: string[]): numb
   const format = option("--format") || "text";
   if (!["text", "json", "summary"].includes(format)) throw new Error("unsupported check format");
 
-  let remote = "";
-  try { remote = runGit(["config", "--get", "remote.origin.url"], { cwd: roots.repoRoot }).trim(); }
-  catch { /* A local Git repository does not need a remote. */ }
-  const match = remote.match(/(?:github\.com[:/])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
-  const repository = match?.[1] || "local/repository";
+  const repository = "local/repository";
   const report = evaluateLocalCompiler({ root: roots.repoRoot, repository, base, head });
 
   if (format === "json") {
