@@ -41,6 +41,10 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
+      path: "docs/self-hosting-coverage.md"
+  - predicates: [documents]
+    target:
+      kind: artifact
       path: "docs/self-hosting-coverage.json"
   - predicates: [implemented_by]
     target:
@@ -162,6 +166,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-self-hosting.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/self-host-docs.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact

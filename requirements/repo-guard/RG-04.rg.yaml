@@ -245,6 +245,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: ".repo-guard/projections.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "src/projection-materialize.mts"
   - predicates: [implemented_by]
     target:
@@ -382,6 +386,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-799-projection-ownership.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-801-real-doc-self-host.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

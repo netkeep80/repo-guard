@@ -119,6 +119,7 @@ node dist/repo-guard.mjs --repo-root "$CONSUMER_ROOT" doctor
 
 Типизированный API проекций доступен через `repo-guard/dist/projection-api.mjs`; контракт — в [методике](docs/contract-development.md#библиотечная-поверхность-проекций).
 
+<a id="rg-self-host-docs"></a>
 ## Разработка самого repo-guard
 
 ```bash
@@ -129,5 +130,9 @@ npm run compression:metrics
 ```
 
 Самоприменение: [`tests/test-c3-4b-self-host-exemplar.mjs`](tests/test-c3-4b-self-host-exemplar.mjs); исключения: [`docs/self-hosting-coverage.json`](docs/self-hosting-coverage.json).
+
+<!-- repo-guard:self-host:start -->
+Исключения самоприменения: **7**. Их основания находятся в [производном справочнике](docs/self-hosting-coverage.md); исходные решения — в [JSON-реестре](docs/self-hosting-coverage.json).
+<!-- repo-guard:self-host:end -->
 
 Новая блокирующая возможность должна начинаться с реального контрпримера и требования продукта. Удаление лишней проверки — такое же улучшение, как добавление нужной. Единый план развития — [#518](https://github.com/netkeep80/repo-guard/issues/518).
