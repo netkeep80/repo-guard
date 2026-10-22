@@ -42,7 +42,7 @@
           {
             "source_id": "renderer",
             "algorithm": "sha256",
-            "digest": "8e00a9370635ae0e3ba090ea67c79c68a4bb1007d30754e59367da2006395ea6"
+            "digest": "f587a204ad7e11aa9cb600cc9c6e1f7a5b67eda19721e50a609377ec5a367c27"
           }
         ],
         "generator": {
@@ -52,7 +52,7 @@
         "configuration_digest": "180645ac68cb68cc7e89213c78eb14ae69d357d8a2f403d5396f626cdefd3df6",
         "output_identity": {
           "algorithm": "sha256",
-          "digest": "623f127733f649c9e0e1c3eaea5b91a0a8e37435595ef2c2e8269453d4519a76"
+          "digest": "4243bdaeab542acc2b7c2ad592beb7517839208856f9ef0939408e1bf01bc452"
         },
         "evidence": []
       },
@@ -109,7 +109,7 @@
           {
             "source_id": "renderer",
             "algorithm": "sha256",
-            "digest": "8e00a9370635ae0e3ba090ea67c79c68a4bb1007d30754e59367da2006395ea6"
+            "digest": "f587a204ad7e11aa9cb600cc9c6e1f7a5b67eda19721e50a609377ec5a367c27"
           }
         ],
         "generator": {
