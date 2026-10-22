@@ -10,6 +10,9 @@ import {
   verifyAuthorityWebhook,
 } from "../dist/repo-guard.mjs";
 
+// #810 negative control: accepted baseline must fail while trusted-service is public.
+assert.equal(COMMANDS.includes("trusted-service"), false, "4.0 CLI must not publish trusted-service");
+
 assert.deepEqual(
   [...COMMANDS].sort(),
   ["validate", "check-diff", "check-pr", "check", "build", "trusted-service", "init", "doctor"].sort(),
