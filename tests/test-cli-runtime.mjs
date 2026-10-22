@@ -12,7 +12,7 @@ import {
 
 assert.deepEqual(
   [...COMMANDS].sort(),
-  ["validate", "check-diff", "check-pr", "check", "trusted-service", "init", "doctor"].sort(),
+  ["validate", "check-diff", "check-pr", "check", "build", "trusted-service", "init", "doctor"].sort(),
 );
 
 const originalError = console.error, errors = [];
