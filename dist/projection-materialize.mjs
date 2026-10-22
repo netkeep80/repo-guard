@@ -231,15 +231,13 @@ function stagesFor(input) {
     const orphanKeys = new Set(report.ownership.orphan);
     const liveOrRetainedPaths = new Set([...live, ...retained].map((e) => e.model.target.path));
     const native = nativeIndex(root, head, headTree);
-    const requiredPaths = new Set(native.requirements.flatMap((r) => r.relations
-        .filter((rel) => rel.target.kind === "artifact").map((rel) => rel.target.path)));
     for (const item of oldLive) {
         const model = item.model;
         const p = model.target.path;
         if (!orphanKeys.has(key(model.target)))
             continue;
-        if (requiredPaths.has(p) || liveOrRetainedPaths.has(p) || sourceTargets.has(JSON.stringify(model.target))) {
-            deny("orphan output is still justified/retained/owned: " + p);
+        if (liveOrRetainedPaths.has(p) || sourceTargets.has(JSON.stringify(model.target))) {
+            deny("orphan output is still retained/owned: " + p);
         }
         const change = stage(p);
         priorOrphanIntegrity(model, change.after, item);

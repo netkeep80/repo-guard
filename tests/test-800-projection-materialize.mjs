@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { normalizeProjectionModel, projectionModelIdentity } from "../dist/projection-model.mjs";
@@ -236,21 +236,49 @@ test("#800 W10b: submodule ancestor and local .git metadata are never materializ
   }
 });
 
-test("#800 W13 W14: removing a Requirement never grants deletion; no network needed", () => {
-  environment(({ root, put, commit, build }) => {
+test("#800 W13 W14: removing a Requirement never deletes a live-owned output; no network required", () => {
+  environment(({ root, git, put, commit, build }) => {
     const m = generated("g.shared");
-    put("docs/output.txt", "GEN");
-    put(".repo-guard/projections.json", state([entry(m, "GEN")]));
-    const base = commit("managed output");
     const req = (id) => ['format: repo-guard/requirement-v1', 'id: ' + id,
       'normative: keep output', 'relations:', '  - predicates: [documents]',
       '    target:', '      kind: artifact', '      path: "docs/output.txt"', ""].join("\n");
+
+    put("docs/output.txt", "GEN");
+    put(".repo-guard/projections.json", state([entry(m, "GEN")]));
     put("requirements/A.rg.yaml", req("A"));
     put("requirements/B.rg.yaml", req("B"));
-    put(".repo-guard/projections.json", state([]));
-    const head = commit("remove writer with remaining Requirement justification");
-    const denied = build(base, head, {});
-    assert.notEqual(denied.status, 0);
+    const base = commit("two Requirements refer to a live-owned generated output");
+
+    rmSync(join(root, "requirements/A.rg.yaml"));
+    const head = commit("remove one Requirement; Projection stays live");
+    const result = build(base, head, { [m.id]: "GEN" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.result.idempotent, true);
     assert.equal(readFileSync(join(root, "docs/output.txt"), "utf8"), "GEN");
+    assert.equal(git("status", "--porcelain=v1"), "");
+  });
+});
+
+test("#800 orphan cleanup follows BASE Projection ownership, never Requirement traceability", () => {
+  environment(({ root, put, commit, build }) => {
+    const m = generated("g.orphan");
+    const req = ['format: repo-guard/requirement-v1', 'id: Q',
+      'normative: points to output', 'relations:', '  - predicates: [documents]',
+      '    target:', '      kind: artifact', '      path: "docs/output.txt"', ""].join("\n");
+    put("docs/output.txt", "GEN");
+    put("requirements/Q.rg.yaml", req);
+    put(".repo-guard/projections.json", state([entry(m, "GEN")]));
+    const base = commit("accepted generated output with Requirement traceability");
+
+    // Only removing the explicit BASE writer makes this output an orphan.
+    // A still-present Requirement relation is neither writer authority nor a cleanup veto.
+    put(".repo-guard/projections.json", state([]));
+    const head = commit("remove old Projection writer, keep unrelated documents relation");
+    const result = build(base, head, {});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(join(root, "docs/output.txt")), false);
+    const repeat = build(base, head, {});
+    assert.equal(repeat.status, 0, repeat.stderr);
+    assert.equal(repeat.result.idempotent, true);
   });
 });
