@@ -310,7 +310,13 @@ function contentIdentityFactSource(context, selector) {
     let bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf8");
     if (selector.region?.kind === "markdown_owned_block") {
         const text = bytes.toString("utf8");
-        const node = readMarkdownNode(text, selector.region.anchor_id);
+        const node = readMarkdownNode(text, selector.region.anchor_id, {
+            transparentOwnedBlocks: [{
+                    blockId: selector.region.block_id,
+                    beginMarker: selector.region.begin_marker,
+                    endMarker: selector.region.end_marker,
+                }],
+        });
         const block = readOwnedMarkdownBlock(text, {
             blockId: selector.region.block_id,
             beginMarker: selector.region.begin_marker,
