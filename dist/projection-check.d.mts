@@ -12,7 +12,11 @@ export interface ProjectionCheckRetainedEntry {
     state: "retained";
     model: ProjectionModel;
 }
-export type ProjectionCheckEntry = ProjectionCheckLiveEntry | ProjectionCheckRetainedEntry;
+export interface ProjectionCheckSourceEntry {
+    state: "source";
+    model: ProjectionModel;
+}
+export type ProjectionCheckEntry = ProjectionCheckLiveEntry | ProjectionCheckRetainedEntry | ProjectionCheckSourceEntry;
 export interface ProjectionCheckState {
     schema: "repo-guard/projection-check/v0";
     entries: ProjectionCheckEntry[];

@@ -120,6 +120,7 @@ const externalIntegrationParallel = [
   "test-786-local-compiler.mjs",
   "test-788-compiler-gate.mjs",
   "test-799-projection-ownership.mjs",
+  "test-800-projection-materialize.mjs",
   "test-c3-4b-self-host-exemplar.mjs",
   "test-c3-9g-doctor-git-evidence.mjs",
   "test-p2-2-lazy-trust-lookup.mjs",

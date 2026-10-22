@@ -14,6 +14,7 @@ const COMMAND_SPECS = {
     "check-diff": { options: valueOptions("--base", "--head", "--change-intent", "--format"), positionals: 0, run: async (roots, args) => (await import("./check-diff.mjs")).runCheckDiff(roots, args) },
     "check-pr": { options: valueOptions("--format"), positionals: 0, run: async (roots, args) => (await import("./github-pr.mjs")).runCheckPR(roots, args) },
     check: { options: valueOptions("--base", "--head", "--format"), positionals: 0, run: async (roots, args) => (await import("./local-compiler.mjs")).runLocalCheck(roots, args) },
+    build: { options: valueOptions("--base", "--head", "--outputs"), positionals: 0, run: async (roots, args) => (await import("./projection-materialize.mjs")).runProjectionBuild(roots, args) },
     "trusted-service": { options: {}, positionals: 0, run: async (roots, args) => runTrustedService(roots, args) },
     init: { options: { ...valueOptions("--preset", "--mode", "--action-ref"), "--help": false }, positionals: 0, run: async (roots, args) => (await import("./init.mjs")).runInit(roots, args) },
     doctor: { options: valueOptions("--format"), positionals: 0, run: async (roots) => ((await import("./doctor.mjs")).runDoctor(roots).fails > 0 ? 1 : 0) },

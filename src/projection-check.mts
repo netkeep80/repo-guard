@@ -34,9 +34,15 @@ export interface ProjectionCheckRetainedEntry {
   model: ProjectionModel;
 }
 
+export interface ProjectionCheckSourceEntry {
+  state: "source";
+  model: ProjectionModel;
+}
+
 export type ProjectionCheckEntry =
   | ProjectionCheckLiveEntry
-  | ProjectionCheckRetainedEntry;
+  | ProjectionCheckRetainedEntry
+  | ProjectionCheckSourceEntry;
 
 export interface ProjectionCheckState {
   schema: "repo-guard/projection-check/v0";
@@ -112,15 +118,15 @@ function entry(value: unknown, index: number): ProjectionCheckEntry {
   fields(input, ["state", "model", "build", "current_generator"], label);
   const model = normalizeProjectionModel(input.model);
 
-  if (input.state === "retained") {
+  if (input.state === "retained" || input.state === "source") {
     if (input.build !== undefined || input.current_generator !== undefined) {
-      fail(label + " retained entry must not define build/current_generator");
+      fail(label + " non-live entry must not define build/current_generator");
     }
-    return { state: "retained", model };
+    return { state: input.state, model };
   }
 
   if (input.state !== "live") {
-    fail(label + '.state must be "live" or "retained"');
+    fail(label + '.state must be "live", "retained" or "source"');
   }
   if (input.build === undefined || input.current_generator === undefined) {
     fail(label + " live entry requires build and current_generator");
@@ -322,10 +328,56 @@ export function evaluateProjectionCheck(input: {
     (item): item is ProjectionCheckRetainedEntry => item.state === "retained",
   );
 
+  // SOURCE is an explicit HEAD handoff, never a writer or a garbage-collection candidate.
+  // Its exact former target must be present in BASE; no second manifest is involved.
+  const sources = head.entries.filter(
+    (item): item is ProjectionCheckSourceEntry => item.state === "source",
+  );
+  const sourceTargets = new Set<string>();
+  const previousTargets = new Set(base.entries.map((item) => JSON.stringify(item.model.target)));
+  const activeTargets = new Set([...live, ...retained].map((item) => JSON.stringify(item.model.target)));
+  const activeIds = new Set([...live, ...retained].map((item) => item.model.id));
+  for (const item of sources) {
+    const key = JSON.stringify(item.model.target);
+    if (!previousTargets.has(key)) {
+      diagnostics.push({ code: "projection_source_reclassification_invalid", subject: item.model.id,
+        detail: "SOURCE handoff must match an exact BASE Projection target" });
+      continue;
+    }
+    if (sourceTargets.has(key) || activeTargets.has(key) || activeIds.has(item.model.id)) {
+      diagnostics.push({ code: "projection_source_reclassification_conflict", subject: item.model.id,
+        detail: "SOURCE target/ProjectionId cannot compete with a live/retained target or another SOURCE handoff" });
+      continue;
+    }
+    sourceTargets.add(key);
+  }
+
+  // Reuse accepted #799 region/whole-file conflict semantics, treating SOURCE
+  // only as a non-writer protected interval for this transient collision check.
+  // Do not add SOURCE to the real retained inventory or make its marker permanent.
+  if (sources.length > 0) {
+    const sourceOverlap = analyzeProjectionOwnership({
+      live: live.map((item) => item.model),
+      retained: [...retained, ...sources].map((item) => item.model),
+      base: [],
+      readHead: input.readHead,
+    });
+    for (const conflict of sourceOverlap.conflicts) {
+      diagnostics.push({
+        code: "projection_source_reclassification_conflict",
+        subject: conflict.subject,
+        detail: conflict.code + (conflict.detail ? ": " + conflict.detail : ""),
+      });
+    }
+  }
   const ownership = analyzeProjectionOwnership({
     live: live.map((item) => item.model),
     retained: retained.map((item) => item.model),
-    base: base.entries.map((item) => item.model),
+    // Only former live entries constitute BASE write provenance. Historical
+    // SOURCE/retained entries can retire without resurrecting orphan cleanup.
+    base: base.entries.filter((item) => item.state === "live"
+      && !sourceTargets.has(JSON.stringify(item.model.target)))
+      .map((item) => item.model),
     readHead: input.readHead,
   });
 
