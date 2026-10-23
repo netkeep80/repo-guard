@@ -48,15 +48,6 @@ inputs:
     required: false
     default: ""
 
-  authenticated-provider-bundle:
-    description: >
-      Absolute path under RUNNER_TEMP to a runtime-generated
-      repo-guard/provider-bundle-v1 JSON document. Native check-pr accepts it
-      only from an exact pull_request_target workflow source at the PR base.
-      Never point this input at candidate repository content.
-    required: false
-    default: ""
-
   node-version:
     description: "Node.js version to use when running repo-guard."
     required: false
@@ -129,7 +120,7 @@ runs:
             ;;
         esac
 
-        if [ "${#ARGS[@]}" -gt 3 ]; then
+        if [ "$RG_MODE" = "check" ] || [ "$RG_MODE" = "check-diff" ]; then
           "${ARGS[@]}" > "$REPORT_FILE"
           CLI_EXIT=$?
         fi
