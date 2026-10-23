@@ -66,13 +66,15 @@ assert.ok(
 const read = (path) => readFileSync(resolve(projectRoot, path), "utf-8");
 const readme = read("README.md");
 assert.doesNotMatch(readme, /Constraint IR|contract\.overrides/, "README не должен описывать переходную архитектуру");
-for (const marker of ["Constraint Program", "repo-guard-grant", "GovernanceGrant", "schemas/governance-grant.schema.json", "primitive_relation"]) assert.match(readme, new RegExp(marker.replaceAll(".", "\\.")), `README должен содержать ${marker}`);
+for (const marker of ["Constraint Program", "GovernanceGrant", "primitive_relation"]) assert.match(readme, new RegExp(marker.replaceAll(".", "\\.")), `README должен содержать ${marker}`);
+assert.doesNotMatch(readme, /repo-guard-grant|schemas\/governance-grant\.schema\.json/, "4.0 README не должен предписывать legacy GovernanceGrant");
 for (const retired of ["validate-integration", "doctor --integration", "repo-policy.integration"]) assert.doesNotMatch(readme, new RegExp(retired.replaceAll(".", "\\.")), `README не должен содержать удалённую поверхность ${retired}`);
 assert.equal(existsSync(resolve(projectRoot, "docs/removing-bespoke-validators.md")), false, "удалённое руководство по integration DSL не должно оставаться публичной документацией");
 assert.doesNotMatch(read("RELEASING.md"), /parallel-migration|v2-migration|v2\.1\.0|параллельного выпуска/, "RELEASING не должен описывать удалённый v2/parallel rollout");
 const scaffold = renderInitScaffold({ preset: "application", mode: "blocking", actionRef: "0123456789abcdef0123456789abcdef01234567" });
-assert.match(scaffold[".github/ISSUE_TEMPLATE/change-intent.yml"], /repo-guard-grant/, "generated issue template должен показывать отдельный GovernanceGrant");
-assert.doesNotMatch(scaffold[".github/PULL_REQUEST_TEMPLATE.md"], /```repo-guard-grant/, "generated PR template не должен выдавать GovernanceGrant");
+assert.equal(Object.hasOwn(scaffold, ".github/ISSUE_TEMPLATE/change-intent.yml"), false, "compiler-only init не создаёт GovernanceGrant template");
+assert.equal(Object.hasOwn(scaffold, ".github/PULL_REQUEST_TEMPLATE.md"), false, "compiler-only init не создаёт ChangeIntent template");
+assert.match(scaffold[".github/workflows/repo-guard.yml"], /mode: check/, "init должен использовать канонический компилятор");
 assert.match(read(".github/workflows/ci.yml"), /--compare 92432809fcddc290080beb51ba151e13a5761869/, "CI должен измерять Compression 3.0 от канонического C3.0 baseline");
 
 console.log(`Проверено Markdown-файлов: ${markdownFiles.length}. Язык и архитектурные инварианты актуальны.`);

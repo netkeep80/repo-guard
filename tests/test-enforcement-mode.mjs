@@ -131,27 +131,11 @@ console.log("\n--- CLI enforcement overrides policy config ---");
   rmSync(repo.dir, { recursive: true });
 }
 
-console.log("\n--- check-pr missing ChangeIntent is advisory when requested ---");
+// The removed public check-pr command has no advisory authority path in 4.0.
 {
   const repo = makeRepo();
-  const eventPath = join(repo.dir, "event.json");
-  writeFileSync(eventPath, JSON.stringify({
-    pull_request: {
-      number: 123,
-      base: { sha: repo.base },
-      head: { sha: repo.head },
-      body: "No ChangeIntent here.",
-    },
-    repository: { full_name: "owner/repo" },
-  }));
-  const result = await runCliCaptured([
-    "--repo-root", repo.dir,
-    "--enforcement", "advisory",
-    "check-pr",
-  ], { env: { GITHUB_EVENT_PATH: eventPath } });
-  expect("check-pr advisory missing ChangeIntent exit code", result.code, 0);
-  expectIncludes("check-pr missing ChangeIntent warning", result.output, "WARN: change-intent");
-  expectIncludes("check-pr advisory summary", result.output, "advisory violation");
+  const result = await runCliCaptured(["--repo-root", repo.dir, "--enforcement", "advisory", "check-pr"]);
+  expect("retired check-pr is not a public advisory command", result.code, 1);
   rmSync(repo.dir, { recursive: true });
 }
 

@@ -18,8 +18,6 @@ const git = (dir, ...args) => execFileSync("git", args, { cwd: dir, encoding: "u
 const scaffoldPaths = [
   "repo-policy.json",
   ".github/workflows/repo-guard.yml",
-  ".github/PULL_REQUEST_TEMPLATE.md",
-  ".github/ISSUE_TEMPLATE/change-intent.yml",
 ];
 
 describe("repo-guard init", () => {
@@ -42,26 +40,22 @@ describe("repo-guard init", () => {
     assert.equal(validate(policy), true);
   });
 
-  it("pins the generated workflow to the exact explicit SHA and keeps intent/grant templates separate", () => {
+  it("pins the compiler-only workflow to exact BASE/HEAD without PR authority templates", () => {
     const dir = temp(); runInit(dir);
     const workflow = readFileSync(join(dir, ".github/workflows/repo-guard.yml"), "utf-8");
     assert.match(workflow, new RegExp(`netkeep80/repo-guard@${immutableSha}`));
     assert.doesNotMatch(workflow, /netkeep80\/repo-guard@main/);
     assert.match(workflow, /fetch-depth: 0/);
-    assert.match(workflow, /mode: check-pr/);
+    assert.match(workflow, /mode: check/);
     assert.ok(workflow.includes("types: [opened, edited, synchronize, reopened, ready_for_review]"));
-    assert.match(workflow, /GH_TOKEN/);
-    assert.ok(workflow.includes("permissions:\n  contents: read\n  pull-requests: read\n  issues: read"));
+    assert.doesNotMatch(workflow, /GH_TOKEN|ChangeIntent|GovernanceGrant/);
+    assert.match(workflow, /github.event.pull_request.base.sha/);
+    assert.match(workflow, /github.event.pull_request.head.sha/);
+    assert.ok(workflow.includes("permissions:\n  contents: read"));
     assert.doesNotMatch(workflow, /(?:actions|checks|statuses): write/);
     assert.doesNotMatch(workflow, /pull-requests: write/);
-    const pr = readFileSync(join(dir, ".github/PULL_REQUEST_TEMPLATE.md"), "utf-8");
-    assert.match(pr, /Намерение изменения/);
-    assert.match(pr, /repo-guard-yaml/);
-    assert.doesNotMatch(pr, /repo-guard-grant/);
-    const issue = readFileSync(join(dir, ".github/ISSUE_TEMPLATE/change-intent.yml"), "utf-8");
-    assert.match(issue, /label: ChangeIntent/);
-    assert.match(issue, /repo-guard-grant/);
-    assert.match(issue, /GovernanceGrant/);
+    assert.equal(existsSync(join(dir, ".github/PULL_REQUEST_TEMPLATE.md")), false);
+    assert.equal(existsSync(join(dir, ".github/ISSUE_TEMPLATE/change-intent.yml")), false);
   });
 
   it("accepts only the package-matching strict release tag", () => {

@@ -38,7 +38,7 @@ const actionRun = action.runs?.steps?.find((step) => step.name === "Run repo-gua
 assert.match(actionRun, /machineResult === "error"/, "valid machine errors need a dedicated summary branch");
 assert.match(actionRun, /report\?\.reasonCode/, "Action summary must preserve structured error reasonCode");
 assert.match(actionRun, /report\?\.message/, "Action summary must preserve structured error message");
-assert.match(actionRun, /replace\(\/\\\\s\+\/g, " "\)/, "Action summary diagnostics must remain single-line");
+assert.ok(actionRun.includes('value.replace(/\\s+/g, " ")'), "Action summary diagnostics must remain single-line");
 assert.match(actionRun, /structured report unavailable or inconsistent/, "invalid reports must keep the generic fail-closed adapter error");
 
 const trusted = yaml(".github/workflows/trusted-enforcement.yml");

@@ -33,6 +33,6 @@ describe("strict TypeScript source cutover", () => {
   });
 
   it("keeps the built CLI command inventory explicit", () => {
-    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check-pr", "check", "build", "init", "doctor"]);
+    assert.deepEqual(COMMANDS, ["validate", "check-diff", "check", "build", "init", "doctor"]);
   });
 });

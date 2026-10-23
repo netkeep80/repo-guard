@@ -72,7 +72,7 @@ const expectedRelations = [
     id: "action-default-mode",
     kind: "scalar_equals_literal",
     source: { document: "action", pointer: "/inputs/mode/default", type: "string" },
-    value: "check-pr",
+    value: "check",
   },
   {
     id: "action-default-enforcement",
@@ -132,7 +132,8 @@ describe("C3.4b canonical self-host exemplar", () => {
     const gateSteps = compilerGate.jobs?.["compiler-gate"]?.steps ?? [];
     assert.ok(gateSteps.some((step) => step.with?.ref === "${{ github.event.pull_request.base.sha }}"));
     assert.ok(gateSteps.some((step) => /node dist\/repo-guard\.mjs check/.test(step.run ?? "")));
-    assert.match(actionRuns, /check-pr/, "legacy CLI remains available outside required validate");
+    assert.doesNotMatch(actionRuns, /check-pr/, "4.0 Action must not expose old authority path");
+    assert.match(actionRuns, /check --base/, "Action must dispatch exact local compiler");
     assert.ok(actionSteps.some((step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-node@")));
     assert.match(actionRuns, /npm install --omit=dev --silent/);
     assert.match(validateRuns, /--enforcement advisory check-diff/);
@@ -179,7 +180,7 @@ describe("C3.4b canonical self-host exemplar", () => {
     const consumerWorkflow = parseYaml(scaffold[".github/workflows/repo-guard.yml"]);
     const steps = Object.values(consumerWorkflow.jobs || {}).flatMap((job) => job.steps || []);
     assert.ok(steps.some((step) => step.uses === "actions/checkout@v6"));
-    assert.deepEqual(consumerWorkflow.permissions, { contents: "read", "pull-requests": "read", issues: "read" });
+    assert.deepEqual(consumerWorkflow.permissions, { contents: "read" });
     assert.match(scaffold[".github/workflows/repo-guard.yml"], /fetch-depth: 0/);
     assert.doesNotMatch(Object.values(scaffold).join("\n"), /surface_debt/);
   });

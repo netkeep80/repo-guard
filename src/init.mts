@@ -43,8 +43,6 @@ on:
     branches: [main]
 permissions:
   contents: read
-  pull-requests: read
-  issues: read
 jobs:
   policy-check:
     runs-on: ubuntu-latest
@@ -53,9 +51,11 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Проверить политику репозитория
         uses: ${ACTION}@${ref}
-        with: { mode: check-pr, enforcement: ${mode} }
-        env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: check
+          base: \${{ github.event.pull_request.base.sha }}
+          head: \${{ github.event.pull_request.head.sha }}
+          enforcement: ${mode}
 `;
 const prTemplate = () => `## Краткое описание
 
@@ -117,8 +117,6 @@ export function renderInitScaffold({ preset, mode, actionRef }: RenderInitScaffo
   return {
     "repo-policy.json": `${JSON.stringify(buildPolicy(preset, mode), null, 2)}\n`,
     ".github/workflows/repo-guard.yml": workflow(mode, actionRef),
-    ".github/PULL_REQUEST_TEMPLATE.md": prTemplate(),
-    ".github/ISSUE_TEMPLATE/change-intent.yml": issueTemplate(),
   };
 }
 

@@ -17,7 +17,7 @@ assert.equal(Object.hasOwn(publicRuntime, "runTrustedService"), false, "historic
 
 assert.deepEqual(
   [...COMMANDS].sort(),
-  ["validate", "check-diff", "check-pr", "check", "build", "init", "doctor"].sort(),
+  ["validate", "check-diff", "check", "build", "init", "doctor"].sort(),
 );
 
 const originalError = console.error, errors = [];
@@ -28,7 +28,7 @@ const cases = [
   [["check-diff", "--base"], /--base requires a value/],
   [["check-diff", "--change-intent"], /--change-intent requires a value/],
   [["check-diff", "--contract", "legacy.json"], /Unknown option for check-diff/],
-  [["check-pr", "extra"], /Unexpected argument for check-pr/],
+  [["check-pr", "extra"], /Unexpected argument for validate/],
   [["trusted-service", "--bogus"], /Unknown option for validate/],
   [["trusted-service", "extra"], /Unexpected argument for validate/],
   [["validate", "one.json", "two.json"], /Unexpected argument for validate/],

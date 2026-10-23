@@ -26,7 +26,7 @@ describe("C3.9f single consumer scaffold authority", () => {
 
   it("generates the current checkout and explicit permissions boundary", () => {
     assert.match(workflow, /uses: actions\/checkout@v6/);
-    assert.match(workflow, /permissions:\n  contents: read\n  pull-requests: read\n  issues: read/);
+    assert.match(workflow, /permissions:\n  contents: read/);
     assert.match(workflow, /fetch-depth: 0/);
     assert.doesNotMatch(workflow, /actions\/checkout@v4/);
   });

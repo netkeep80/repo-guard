@@ -8,7 +8,7 @@ const root = resolve(new URL(".", import.meta.url).pathname, "..");
 const read = (path) => readFileSync(resolve(root, path), "utf-8");
 
 assert.deepEqual(COMMANDS, [
-  "validate", "check-diff", "check-pr", "check", "build", "init", "doctor",
+  "validate", "check-diff", "check", "build", "init", "doctor",
 ]);
 for (const path of [
   "src/agent-lifecycle.mts", "src/status.mts", "src/migrate.mts",

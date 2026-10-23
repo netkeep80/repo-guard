@@ -197,21 +197,17 @@ function writeIntent(dir) {
 
 {
   const roots = resolveRoots(["--repo-root", "/tmp/some-repo"]);
-  expect("check-pr receives repoRoot through roots", roots.repoRoot, resolve("/tmp/some-repo"));
-  expect("check-pr receives packageRoot through roots", roots.packageRoot, projectRoot);
+  expect("CLI roots keep repoRoot", roots.repoRoot, resolve("/tmp/some-repo"));
+  expect("CLI roots keep packageRoot", roots.packageRoot, projectRoot);
 }
 
-// Regression for issue #15: pre-command --repo-root reaches check-pr rather than being treated as validate input.
+// The retired PR command cannot be entered through the shipped CLI.
 {
-  const tmp = mkdtempSync(join(tmpdir(), "rg-precommand-pr-"));
+  const tmp = mkdtempSync(join(tmpdir(), "rg-retired-pr-command-"));
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy()));
-  const result = await runCliCaptured(["--repo-root", tmp, "check-pr", "--format", "json"], {
-    env: { GITHUB_EVENT_PATH: null },
-  });
-  let report = null;
-  try { report = JSON.parse(result.stdout.trim()); } catch {}
-  expect("pre-command --repo-root check-pr enters check-pr mode", report?.command, "check-pr");
-  expect("pre-command --repo-root check-pr returns structured configuration error", report?.result, "error");
+  const result = await runCliCaptured(["--repo-root", tmp, "check-pr", "--format", "json"]);
+  expect("retired check-pr has no public dispatch", result.code, 1);
+  expect("retired check-pr does not return a legacy PR report", result.stdout.includes('"command": "check-pr"'), false);
   rmSync(tmp, { recursive: true });
 }
 
