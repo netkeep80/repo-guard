@@ -207,7 +207,7 @@ function writeIntent(dir) {
   writeFileSync(join(tmp, "repo-policy.json"), JSON.stringify(policy()));
   const result = await runCliCaptured(["--repo-root", tmp, "check-pr", "--format", "json"]);
   expect("retired check-pr has no public dispatch", result.code, 1);
-  expect("retired check-pr is not parsed as a public command", result.stderr.includes("check-pr"), false);
+  expect("retired check-pr does not return a legacy PR report", result.stdout.includes('"command": "check-pr"'), false);
   rmSync(tmp, { recursive: true });
 }
 
