@@ -27,7 +27,7 @@ function runFile(file) {
         ...process.env,
         REPO_GUARD_TEST_OBSERVATION_CACHE_DIR: observationCacheDir,
         // Retain historical CLI regression witnesses only inside the test runner.
-        NODE_OPTIONS: [process.env.NODE_OPTIONS || "", `--import=${new URL("./support/legacy-pr-test-entry.mjs", import.meta.url).href}`].filter(Boolean).join(" "),
+        NODE_OPTIONS: [process.env.NODE_OPTIONS || "", `--import=${new URL("./support/test-runner.mjs", import.meta.url).href}`].filter(Boolean).join(" "),
       },
     });
     let stdout = "";
