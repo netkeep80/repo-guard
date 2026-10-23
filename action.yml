@@ -132,6 +132,7 @@ runs:
         let report = null;
         try { report = JSON.parse(readFileSync(reportPath, "utf8")); } catch {}
         const compiler = report?.format === "repo-guard/local-compiler-v1";
+        const machineResult = report?.result;
         const legacy = ["passed", "failed", "error", "passed_with_warnings"].includes(report?.result);
         const validCompiler = compiler && typeof report.ok === "boolean"
           && report.base && report.head && cliExit === (report.ok ? 0 : 1);
@@ -141,11 +142,15 @@ runs:
         const result = invalid ? "error" : compiler
           ? (report.ok ? "passed" : "failed")
           : report.result === "passed_with_warnings" ? "passed" : report.result;
+        const oneLine = (value, fallback) => typeof value === "string" && value.trim()
+          ? value.replace(/\s+/g, " ").trim() : fallback;
         const summary = invalid
-          ? "repo-guard: error; machine report unavailable or inconsistent"
+          ? "repo-guard: error; structured report unavailable or inconsistent"
           : compiler
             ? `repo-guard: ${result}; J1 ${report.j1?.justified}/${report.j1?.tracked}; J2 ${report.j2?.rooted}; diagnostics ${report.diagnostics?.length}`
-            : `repo-guard: ${result}; legacy check-diff; ${report.violationCount ?? 0} violation(s)`;
+            : machineResult === "error"
+              ? `repo-guard: error; ${oneLine(report?.reasonCode, "unknown_reason")}; ${oneLine(report?.message, "no diagnostic message")}`
+              : `repo-guard: ${result}; legacy check-diff; ${report.violationCount ?? 0} violation(s)`;
         appendFileSync(outputPath, `result=${result}\nsummary=${summary}\n`);
         if (invalid) process.exitCode = 1;
         else if (requestedEnforcement === "advisory" && result === "failed") process.exitCode = 0;
