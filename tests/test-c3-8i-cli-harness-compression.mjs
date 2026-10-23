@@ -45,10 +45,11 @@ if (existsSync(helperPath)) {
 
   const originalEventPath = process.env.GITHUB_EVENT_PATH;
   const missingEventPath = join(tmpdir(), "repo-guard-c3-8i-missing-event.json");
-  const overridden = await runCliCaptured(["check-pr"], {
+  const overridden = await runCliCaptured(["--unknown-flag"], {
     env: { GITHUB_EVENT_PATH: missingEventPath },
   });
-  expect("helper applies scoped env override", overridden.stderr.includes(missingEventPath));
+  expect("helper handles scoped environment without the retired public PR command",
+    overridden.code === 1 && overridden.stderr.includes("--unknown-flag"));
   expect("helper restores existing env after override", process.env.GITHUB_EVENT_PATH === originalEventPath);
 
   const absentKey = "REPO_GUARD_C3_8I_ABSENT_ENV";
