@@ -195,6 +195,7 @@ export function evaluateLocalCompiler(input) {
             revision: base,
             requirements: before.requirements,
             j2: before.j2,
+            j1: before.j1,
             resourceRelations: before.resourceRelations,
         },
         resourceDeltas: resourceDeltasFromParsedDiff(diff),

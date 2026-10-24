@@ -1,8 +1,15 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
-import type { CanonicalRequirementsResult } from "./canonical-requirements.mjs";
+import { strictCanonicalJson, type CanonicalRequirementsResult } from "./canonical-requirements.mjs";
 import type { RootedRequirementResult } from "./requirement-closure.mjs";
 
 export interface ResourceLink { from: string; kind: "generates"; to: string; }
+export interface ResourceCollectionOwnership {
+  owner: string;
+  predicate: string;
+  manifest: string;
+  schema: "repo-guard/resource-collection/v0";
+  members: readonly string[];
+}
 export interface ResourceClosureInput {
   repository: string; revision: string;
   requirements: CanonicalRequirementsResult;
@@ -13,22 +20,41 @@ export interface ResourceClosureInput {
 }
 export interface ResourceClosureError { code: string; path: string; target?: string; }
 const direct = new Set(["requires","implemented_by","verified_by","documents","generates"]);
+const collectionDirect = new Set(["requires","implemented_by","verified_by","documents"]);
+const collectionSchema = "repo-guard/resource-collection/v0" as const;
 const norm = (path: unknown): string => {
-  if (typeof path !== "string") throw new Error("path must be string");
+  if (typeof path !== "string" || path.length === 0) throw new Error("path must be non-empty string");
   const normalized = normalizeDocumentFact(path,"repository_path");
   if (normalized !== path || /[*?\[\]{}]/.test(path) || path.endsWith("/"))
     throw new Error("noncanonical or wildcard resource target");
   return path;
 };
-const exactArtifact = (input: ResourceClosureInput, path: string): boolean => {
-  const resolved=input.resolver.resolve({kind:"artifact",path});
-  if(!resolved.ok) return false;
-  const result=resolved.value as { representation?: {repository?:string;revision?:string;path?:string} } | undefined;
-  return result?.representation?.repository===input.repository &&
-    result.representation.revision===input.revision && result.representation.path===path;
-};
 const obj = (v: unknown): Record<string,unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string,unknown> : null;
+const resolvedArtifact = (input: ResourceClosureInput, path: string): Record<string,unknown> | null => {
+  const resolved=input.resolver.resolve({kind:"artifact",path});
+  if(!resolved.ok) return null;
+  const result=obj(resolved.value), representation=obj(result?.representation);
+  if(result?.kind!=="resolved_artifact" || representation?.repository!==input.repository ||
+    representation.revision!==input.revision || representation.path!==path) return null;
+  return result;
+};
+const exactArtifact = (input: ResourceClosureInput, path: string): boolean =>
+  resolvedArtifact(input,path)!==null;
+const artifactText = (input: ResourceClosureInput, path: string): string | null => {
+  const bytes=resolvedArtifact(input,path)?.bytes;
+  if(typeof bytes==="string")return bytes;
+  if(Buffer.isBuffer(bytes))return bytes.toString("utf8");
+  return null;
+};
+const typedCollectionBytes = (raw: string): boolean => {
+  try {
+    const parsed=obj(JSON.parse(raw));
+    return parsed?.schema===collectionSchema;
+  } catch {
+    return false;
+  }
+};
 const score=(v:string[])=>v.length.toString().padStart(8,"0")+"\0"+v.join("\0");
 export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
   const errors:ResourceClosureError[]=[];
@@ -39,6 +65,62 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
   const just=new Map<string,string[]>();
   const owners=new Map<string,Set<string>>();
   const links=new Map<string,{kind:string;to:string}[]>();
+  const collections:ResourceCollectionOwnership[]=[];
+  const collectionCache=new Map<string,
+    {ok:true;members:string[]} |
+    {ok:false;code:"invalid_resource_collection"|"missing_resource_target"|"nested_resource_collection";target?:string}>();
+  const parseCollection=(manifest:string) => {
+    const cached=collectionCache.get(manifest);
+    if(cached)return cached;
+    const raw=artifactText(input,manifest);
+    if(raw===null) {
+      const failure={ok:false as const,code:"invalid_resource_collection" as const,target:manifest};
+      collectionCache.set(manifest,failure); return failure;
+    }
+    let root:Record<string,unknown>|null=null;
+    try {root=obj(strictCanonicalJson(raw));} catch {
+      const failure={ok:false as const,code:"invalid_resource_collection" as const,target:manifest};
+      collectionCache.set(manifest,failure); return failure;
+    }
+    if(!root || Object.keys(root).sort().join(",")!=="members,schema" ||
+      root.schema!==collectionSchema || !Array.isArray(root.members) ||
+      root.members.length>tracked.size || root.members.some(member=>typeof member!=="string")) {
+      const failure={ok:false as const,code:"invalid_resource_collection" as const,target:manifest};
+      collectionCache.set(manifest,failure); return failure;
+    }
+    const members:string[]=[];
+    for(const rawMember of root.members as unknown[]) {
+      let member:string;
+      try {member=norm(rawMember);} catch {
+        const failure={ok:false as const,code:"invalid_resource_collection" as const,target:String(rawMember)};
+        collectionCache.set(manifest,failure); return failure;
+      }
+      members.push(member);
+    }
+    if(new Set(members).size!==members.length ||
+      members.some((member,index)=>index>0 && members[index-1]!.localeCompare(member,"en")>=0)) {
+      const failure={ok:false as const,code:"invalid_resource_collection" as const,target:manifest};
+      collectionCache.set(manifest,failure); return failure;
+    }
+    for(const member of members) {
+      if(member===manifest) {
+        const failure={ok:false as const,code:"nested_resource_collection" as const,target:member};
+        collectionCache.set(manifest,failure); return failure;
+      }
+      if(!tracked.has(member)||!exactArtifact(input,member)) {
+        const failure={ok:false as const,code:"missing_resource_target" as const,target:member};
+        collectionCache.set(manifest,failure); return failure;
+      }
+      const memberText=artifactText(input,member);
+      if(memberText!==null && typedCollectionBytes(memberText)) {
+        const failure={ok:false as const,code:"nested_resource_collection" as const,target:member};
+        collectionCache.set(manifest,failure); return failure;
+      }
+    }
+    const result={ok:true as const,members};
+    collectionCache.set(manifest,result);
+    return result;
+  };
   const add=(path:string,proof:string[],owner:string)=>{
     const prior=just.get(path);
     if(!prior || score(proof)<score(prior))just.set(path,proof);
@@ -63,14 +145,34 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
       for(const key of Object.keys(relations||{}).sort()) {
         const relation=obj(relations![key]);
         if(!relation || !direct.has(String(relation.predicate)))continue;
+        if(relation.collection!==undefined && typeof relation.collection!=="boolean") {
+          errors.push({code:"invalid_resource_collection",path:id,target:key}); continue;
+        }
         const target=obj(relation.target);
-        if(!target || target.kind!=="artifact")continue;
+        if(!target || target.kind!=="artifact") {
+          if(relation.collection===true)errors.push({code:"invalid_resource_collection",path:id,target:key});
+          continue;
+        }
         let path:string;
         try {path=norm(target.path)}catch {errors.push({code:"unsafe_resource_target",path:id,target:key});continue}
         if(!tracked.has(path) || !exactArtifact(input,path)) {
           errors.push({code:"missing_resource_target",path:id,target:path});continue;
         }
-        add(path,[...proof,String(relation.predicate)+":"+path],id);
+        const predicate=String(relation.predicate);
+        const directProof=[...proof,predicate+":"+path];
+        add(path,directProof,id);
+        if(relation.collection===true) {
+          if(!collectionDirect.has(predicate)) {
+            errors.push({code:"invalid_resource_collection",path:id,target:key}); continue;
+          }
+          const parsed=parseCollection(path);
+          if(!parsed.ok) {
+            errors.push({code:parsed.code,path,target:parsed.target}); continue;
+          }
+          collections.push({owner:id,predicate,manifest:path,schema:collectionSchema,members:[...parsed.members]});
+          for(const member of parsed.members)
+            add(member,[...directProof,"collection:"+collectionSchema,"member:"+member],id);
+        }
       }
     }
     for(const edge of input.resourceRelations||[]) {
@@ -103,7 +205,12 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
   const justified=[...tracked].filter(x=>just.has(x)).sort();
   const unjustified=[...tracked].filter(x=>!just.has(x)).sort();
   errors.sort((a,b)=>a.path.localeCompare(b.path)||a.code.localeCompare(b.code)||(a.target||"").localeCompare(b.target||""));
+  collections.sort((a,b)=>
+    a.owner.localeCompare(b.owner,"en") ||
+    a.predicate.localeCompare(b.predicate,"en") ||
+    a.manifest.localeCompare(b.manifest,"en"));
   return {ok:errors.length===0&&unjustified.length===0,justified,unjustified,errors,
     explanations:Object.fromEntries([...just.entries()].sort(([a],[b])=>a.localeCompare(b))),
-    owners:Object.fromEntries([...owners.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,[...v].sort()]))};
+    owners:Object.fromEntries([...owners.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,[...v].sort()])),
+    collections};
 }

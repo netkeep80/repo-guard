@@ -160,7 +160,11 @@ export function lowerNativeRequirements(native) {
                 continue;
             }
             const label = "native_" + String(relationIndex++).padStart(6, "0");
-            relations[label] = { predicate: relation.predicate, target: relation.target };
+            relations[label] = {
+                predicate: relation.predicate,
+                target: relation.target,
+                ...(relation.collection === true ? { collection: true } : {}),
+            };
         }
         const constraints = item.constraints.map(constraint => ({
             id: constraint.id,
@@ -378,6 +382,7 @@ export function evaluateRepoGuardNativeBlockingSnapshot(input) {
             revision: authority.revision,
             requirements: authority.requirements,
             j2: authority.j2,
+            j1: authority.j1,
             resourceRelations: authority.resourceRelations,
         },
         resourceDeltas: resourceDeltasFromParsedDiff(exactDiff),
@@ -1538,7 +1543,7 @@ export function evaluateRepoGuardSelfHost(input) {
         repository: input.repository,
         base: { revision: base.revision, requirements: base.requirements, j2: base.j2, j1: base.j1 },
         head: { revision: head.revision, requirements: head.requirements, j2: head.j2, j1: head.j1 },
-        trustedAuthorityBase: { revision: authority.revision, requirements: authority.requirements, j2: authority.j2 },
+        trustedAuthorityBase: { revision: authority.revision, requirements: authority.requirements, j2: authority.j2, j1: authority.j1 },
         resourceDeltas: resourceDeltasFromParsedDiff(input.observedDiffFiles),
         workIntent: input.workIntent || null,
         trustedReceipts: input.trustedReceipts || [],
@@ -1775,6 +1780,7 @@ export function evaluateRepositoryShadowReplay(input) {
             revision: authority.revision,
             requirements: authority.requirements,
             j2: authority.j2,
+            j1: authority.j1,
             resourceRelations: authority.resourceRelations,
         },
         base: {
