@@ -650,6 +650,7 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
     const derive = (state, id, rule, fallbackEdges) => {
         const paths = new Map();
         const direct = obj(root(state, id)?.relations);
+        const expectedCollections = [];
         const put = (path, proof) => {
             const old = paths.get(path);
             if (!old || proof.length < old.length || (proof.length === old.length && proof.join("\0") < old.join("\0")))
@@ -662,6 +663,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
             try {
                 const path = normPath(target.path);
                 put(path, [id, String(rel.predicate) + ":" + path]);
+                if (rel.collection === true)
+                    expectedCollections.push({ predicate: String(rel.predicate), manifest: path });
             }
             catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);
@@ -671,6 +674,10 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
             .filter((collection) => collection.owner === id && rule.relations.includes(collection.predicate))
             .slice().sort((a, b) => a.manifest.localeCompare(b.manifest, "en") ||
             a.predicate.localeCompare(b.predicate, "en"));
+        for (const expected of expectedCollections) {
+            if (!collections.some(collection => collection.predicate === expected.predicate && collection.manifest === expected.manifest))
+                problems.push("I7:missing_collection_scope:" + id + ":" + expected.manifest);
+        }
         for (const collection of collections) {
             if (!paths.has(collection.manifest)) {
                 problems.push("I7:invalid_collection_scope:" + id + ":" + collection.manifest);

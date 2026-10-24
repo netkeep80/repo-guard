@@ -655,6 +655,7 @@ function evaluateScopedObligations(
     const derive = (state: any, id: string, rule: any, fallbackEdges: readonly TransitionResourceLink[]) => {
         const paths = new Map<string, string[]>();
         const direct = obj(root(state, id)?.relations);
+        const expectedCollections:{predicate:string;manifest:string}[]=[];
         const put = (path: string, proof: string[]) => {
             const old = paths.get(path);
             if (!old || proof.length < old.length || (proof.length === old.length && proof.join("\0") < old.join("\0")))
@@ -666,6 +667,8 @@ function evaluateScopedObligations(
             try {
                 const path = normPath(target.path);
                 put(path, [id, String(rel.predicate) + ":" + path]);
+                if (rel.collection === true)
+                    expectedCollections.push({predicate:String(rel.predicate),manifest:path});
             } catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);
             }
@@ -675,6 +678,11 @@ function evaluateScopedObligations(
             .slice().sort((a, b) =>
               a.manifest.localeCompare(b.manifest, "en") ||
               a.predicate.localeCompare(b.predicate, "en"));
+        for (const expected of expectedCollections) {
+            if (!collections.some(collection =>
+              collection.predicate === expected.predicate && collection.manifest === expected.manifest))
+                problems.push("I7:missing_collection_scope:" + id + ":" + expected.manifest);
+        }
         for (const collection of collections) {
             if (!paths.has(collection.manifest)) {
                 problems.push("I7:invalid_collection_scope:" + id + ":" + collection.manifest);
