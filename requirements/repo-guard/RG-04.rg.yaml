@@ -369,6 +369,10 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
+      path: "tests/test-814-resource-collection.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
       path: "tests/test-707-i5-j3-transition-closure.mjs"
   - predicates: [verified_by]
     target:
