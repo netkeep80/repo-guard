@@ -97,6 +97,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       errors: [{ code: "j2_not_rooted", path: "" }],
       explanations: {},
       owners: {},
+      collections: [],
     };
     if (lowered.requirements.ok && j2.ok) {
       const resolver = createResourceResolver({
