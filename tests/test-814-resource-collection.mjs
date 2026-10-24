@@ -117,6 +117,7 @@ test("#814 N1 unlisted neighbor remains unjustified", () => {
 test("#814 N2/N3 missing unsafe wildcard alias and directory members fail closed", () => {
   for (const [label, member] of [
     ["missing", "tests/missing.test.ts"],
+    ["empty", ""],
     ["wildcard", "tests/**"],
     ["alias", "tests/../tests/a.test.ts"],
     ["directory", "tests/"],
@@ -354,6 +355,57 @@ test("#814 N13 scoped Constraint reaches exact collection members but not neighb
   } finally {
     f.cleanup();
   }
+});
+
+test("#814 N11 wrong-revision member resolution fails closed", () => {
+  const doc = canonicalRequirement("R", "inventory/tests.resources.json");
+  const requirementPath = "requirements/R.json";
+  const requirements = loadCanonicalRequirements({
+    repository,
+    revision,
+    paths: [requirementPath],
+    readFile: (_, path) => path === requirementPath ? JSON.stringify(doc) : null,
+  });
+  const j2 = evaluateRootedRequirements({
+    requirements,
+    trustedRoots: [requirements.index.R.semantic],
+  });
+  const wrongRevision = "b".repeat(40);
+  const resolver = {
+    resolve(ref) {
+      const value = ref && typeof ref === "object" ? ref : null;
+      if (value?.kind !== "artifact" || typeof value.path !== "string") return { ok: false };
+      const path = value.path;
+      if (path === "inventory/tests.resources.json") return {
+        ok: true,
+        value: {
+          kind: "resolved_artifact",
+          representation: { repository, revision, path },
+          bytes: manifest(["tests/a.test.ts"]),
+        },
+      };
+      if (path === "tests/a.test.ts") return {
+        ok: true,
+        value: {
+          kind: "resolved_artifact",
+          representation: { repository, revision: wrongRevision, path },
+          bytes: "wrong revision\n",
+        },
+      };
+      return { ok: false };
+    },
+  };
+  const result = evaluateTrackedResourceClosure({
+    repository,
+    revision,
+    requirements,
+    j2,
+    trackedPaths: [requirementPath, "inventory/tests.resources.json", "tests/a.test.ts"],
+    resolver,
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) =>
+    error.code === "missing_resource_target" && error.target === "tests/a.test.ts"));
 });
 
 test("#814 N11/N14 exact snapshot ignores working tree and verdict is deterministic offline", () => {
