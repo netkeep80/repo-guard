@@ -2,6 +2,7 @@ import { normalizeDocumentFact } from "../document-facts.mjs";
 import type { CanonicalRequirementsResult } from "./canonical-requirements.mjs";
 import type { RootedRequirementResult } from "./requirement-closure.mjs";
 import type { ParsedDiffFile } from "../diff/parser.mjs";
+import type { ResourceCollectionOwnership } from "./resource-closure.mjs";
 
 export type TransitionDeltaKind =
   | "requirement_add" | "requirement_modify" | "requirement_remove" | "requirement_relocate"
@@ -67,13 +68,22 @@ export interface TransitionState {
   revision: string;
   requirements: CanonicalRequirementsResult;
   j2: RootedRequirementResult;
-  j1: { ok: boolean; owners: Readonly<Record<string, readonly string[]>> };
+  j1: {
+    ok: boolean;
+    owners: Readonly<Record<string, readonly string[]>>;
+    collections?: readonly ResourceCollectionOwnership[];
+  };
   resourceRelations?: readonly TransitionResourceLink[];
 }
 export interface TrustedAuthorityState {
   revision: string;
   requirements: CanonicalRequirementsResult;
   j2: RootedRequirementResult;
+  j1?: {
+    ok: boolean;
+    owners: Readonly<Record<string, readonly string[]>>;
+    collections?: readonly ResourceCollectionOwnership[];
+  };
   resourceRelations?: readonly TransitionResourceLink[];
 }
 export type LifecycleValue = null | boolean | number | string;
@@ -104,6 +114,7 @@ interface RelationFact {
   targetKey: string;
   targetRequirement?: string;
   targetPath?: string;
+  collection?: boolean;
 }
 interface Delta {
   id: string;
@@ -169,7 +180,13 @@ function targetIdentity(value: unknown): { key: string; requirement?: string; pa
   return { key: stable(target) };
 }
 function relationFactKey(fact: Omit<RelationFact,"key">): string {
-  return stable({ origin: fact.origin, from: fact.from, predicate: fact.predicate, target: fact.targetKey });
+  return stable({
+    origin: fact.origin,
+    from: fact.from,
+    predicate: fact.predicate,
+    target: fact.targetKey,
+    ...(fact.collection === true ? { collection: true } : {}),
+  });
 }
 function relations(state: TransitionState): { facts: RelationFact[]; errors: string[] } {
   const facts: RelationFact[] = [], errors: string[] = [];
@@ -189,7 +206,8 @@ function relations(state: TransitionState): { facts: RelationFact[]; errors: str
       try {
         const target = targetIdentity(item.target);
         const factBase = { origin: "requirement" as const, from: id, predicate: item.predicate, targetKey: target.key,
-          ...(target.requirement ? { targetRequirement: target.requirement } : {}), ...(target.path ? { targetPath: target.path } : {}) };
+          ...(target.requirement ? { targetRequirement: target.requirement } : {}), ...(target.path ? { targetPath: target.path } : {}),
+          ...(item.collection === true ? { collection: true } : {}) };
         facts.push({ ...factBase, key: relationFactKey(factBase) });
       } catch (error) {
         errors.push(`invalid_relation:${id}:${label}:${(error as Error).message}`);
@@ -637,6 +655,7 @@ function evaluateScopedObligations(
     const derive = (state: any, id: string, rule: any, fallbackEdges: readonly TransitionResourceLink[]) => {
         const paths = new Map<string, string[]>();
         const direct = obj(root(state, id)?.relations);
+        const expectedCollections:{predicate:string;manifest:string}[]=[];
         const put = (path: string, proof: string[]) => {
             const old = paths.get(path);
             if (!old || proof.length < old.length || (proof.length === old.length && proof.join("\0") < old.join("\0")))
@@ -648,8 +667,30 @@ function evaluateScopedObligations(
             try {
                 const path = normPath(target.path);
                 put(path, [id, String(rel.predicate) + ":" + path]);
+                if (rel.collection === true)
+                    expectedCollections.push({predicate:String(rel.predicate),manifest:path});
             } catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);
+            }
+        }
+        const collections = ((state.j1?.collections || []) as readonly ResourceCollectionOwnership[])
+            .filter((collection) => collection.owner === id && rule.relations.includes(collection.predicate))
+            .slice().sort((a, b) =>
+              a.manifest.localeCompare(b.manifest, "en") ||
+              a.predicate.localeCompare(b.predicate, "en"));
+        for (const expected of expectedCollections) {
+            if (!collections.some(collection =>
+              collection.predicate === expected.predicate && collection.manifest === expected.manifest))
+                problems.push("I7:missing_collection_scope:" + id + ":" + expected.manifest);
+        }
+        for (const collection of collections) {
+            if (!paths.has(collection.manifest)) {
+                problems.push("I7:invalid_collection_scope:" + id + ":" + collection.manifest);
+                continue;
+            }
+            const manifestProof = paths.get(collection.manifest)!;
+            for (const member of collection.members) {
+                put(member, [...manifestProof, "collection:" + collection.schema, "member:" + member]);
             }
         }
         if (rule.includeGenerated === true) {

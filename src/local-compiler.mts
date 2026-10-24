@@ -97,6 +97,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       errors: [{ code: "j2_not_rooted", path: "" }],
       explanations: {},
       owners: {},
+      collections: [],
     };
     if (lowered.requirements.ok && j2.ok) {
       const resolver = createResourceResolver({
@@ -212,6 +213,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       revision: base,
       requirements: before.requirements,
       j2: before.j2,
+      j1: before.j1,
       resourceRelations: before.resourceRelations,
     },
     resourceDeltas: resourceDeltasFromParsedDiff(diff),

@@ -118,6 +118,7 @@ const processLocalParallel = [
 
 const externalIntegrationParallel = [
   "test-786-local-compiler.mjs",
+  "test-814-resource-collection.mjs",
   "test-788-compiler-gate.mjs",
   "test-799-projection-ownership.mjs",
   "test-800-projection-materialize.mjs",

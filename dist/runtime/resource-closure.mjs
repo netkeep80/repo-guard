@@ -1,22 +1,45 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
+import { strictCanonicalJson } from "./canonical-requirements.mjs";
 const direct = new Set(["requires", "implemented_by", "verified_by", "documents", "generates"]);
+const collectionDirect = new Set(["requires", "implemented_by", "verified_by", "documents"]);
+const collectionSchema = "repo-guard/resource-collection/v0";
 const norm = (path) => {
-    if (typeof path !== "string")
-        throw new Error("path must be string");
+    if (typeof path !== "string" || path.length === 0)
+        throw new Error("path must be non-empty string");
     const normalized = normalizeDocumentFact(path, "repository_path");
     if (normalized !== path || /[*?\[\]{}]/.test(path) || path.endsWith("/"))
         throw new Error("noncanonical or wildcard resource target");
     return path;
 };
-const exactArtifact = (input, path) => {
+const obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
+const resolvedArtifact = (input, path) => {
     const resolved = input.resolver.resolve({ kind: "artifact", path });
     if (!resolved.ok)
-        return false;
-    const result = resolved.value;
-    return result?.representation?.repository === input.repository &&
-        result.representation.revision === input.revision && result.representation.path === path;
+        return null;
+    const result = obj(resolved.value), representation = obj(result?.representation);
+    if (result?.kind !== "resolved_artifact" || representation?.repository !== input.repository ||
+        representation.revision !== input.revision || representation.path !== path)
+        return null;
+    return result;
 };
-const obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
+const exactArtifact = (input, path) => resolvedArtifact(input, path) !== null;
+const artifactText = (input, path) => {
+    const bytes = resolvedArtifact(input, path)?.bytes;
+    if (typeof bytes === "string")
+        return bytes;
+    if (Buffer.isBuffer(bytes))
+        return bytes.toString("utf8");
+    return null;
+};
+const typedCollectionBytes = (raw) => {
+    try {
+        const parsed = obj(JSON.parse(raw));
+        return parsed?.schema === collectionSchema;
+    }
+    catch {
+        return false;
+    }
+};
 const score = (v) => v.length.toString().padStart(8, "0") + "\0" + v.join("\0");
 export function evaluateTrackedResourceClosure(input) {
     const errors = [];
@@ -32,6 +55,75 @@ export function evaluateTrackedResourceClosure(input) {
     const just = new Map();
     const owners = new Map();
     const links = new Map();
+    const collections = [];
+    const collectionCache = new Map();
+    const parseCollection = (manifest) => {
+        const cached = collectionCache.get(manifest);
+        if (cached)
+            return cached;
+        const raw = artifactText(input, manifest);
+        if (raw === null) {
+            const failure = { ok: false, code: "invalid_resource_collection", target: manifest };
+            collectionCache.set(manifest, failure);
+            return failure;
+        }
+        let root = null;
+        try {
+            root = obj(strictCanonicalJson(raw));
+        }
+        catch {
+            const failure = { ok: false, code: "invalid_resource_collection", target: manifest };
+            collectionCache.set(manifest, failure);
+            return failure;
+        }
+        if (!root || Object.keys(root).sort().join(",") !== "members,schema" ||
+            root.schema !== collectionSchema || !Array.isArray(root.members) ||
+            root.members.length > tracked.size || root.members.some(member => typeof member !== "string")) {
+            const failure = { ok: false, code: "invalid_resource_collection", target: manifest };
+            collectionCache.set(manifest, failure);
+            return failure;
+        }
+        const members = [];
+        for (const rawMember of root.members) {
+            let member;
+            try {
+                member = norm(rawMember);
+            }
+            catch {
+                const failure = { ok: false, code: "invalid_resource_collection", target: String(rawMember) };
+                collectionCache.set(manifest, failure);
+                return failure;
+            }
+            members.push(member);
+        }
+        if (new Set(members).size !== members.length ||
+            members.some((member, index) => index > 0 && members[index - 1].localeCompare(member, "en") >= 0)) {
+            const failure = { ok: false, code: "invalid_resource_collection", target: manifest };
+            collectionCache.set(manifest, failure);
+            return failure;
+        }
+        for (const member of members) {
+            if (member === manifest) {
+                const failure = { ok: false, code: "nested_resource_collection", target: member };
+                collectionCache.set(manifest, failure);
+                return failure;
+            }
+            if (!tracked.has(member) || !exactArtifact(input, member)) {
+                const failure = { ok: false, code: "missing_resource_target", target: member };
+                collectionCache.set(manifest, failure);
+                return failure;
+            }
+            const memberText = artifactText(input, member);
+            if (memberText !== null && typedCollectionBytes(memberText)) {
+                const failure = { ok: false, code: "nested_resource_collection", target: member };
+                collectionCache.set(manifest, failure);
+                return failure;
+            }
+        }
+        const result = { ok: true, members };
+        collectionCache.set(manifest, result);
+        return result;
+    };
     const add = (path, proof, owner) => {
         const prior = just.get(path);
         if (!prior || score(proof) < score(prior))
@@ -62,9 +154,16 @@ export function evaluateTrackedResourceClosure(input) {
                 const relation = obj(relations[key]);
                 if (!relation || !direct.has(String(relation.predicate)))
                     continue;
-                const target = obj(relation.target);
-                if (!target || target.kind !== "artifact")
+                if (relation.collection !== undefined && typeof relation.collection !== "boolean") {
+                    errors.push({ code: "invalid_resource_collection", path: id, target: key });
                     continue;
+                }
+                const target = obj(relation.target);
+                if (!target || target.kind !== "artifact") {
+                    if (relation.collection === true)
+                        errors.push({ code: "invalid_resource_collection", path: id, target: key });
+                    continue;
+                }
                 let path;
                 try {
                     path = norm(target.path);
@@ -77,7 +176,23 @@ export function evaluateTrackedResourceClosure(input) {
                     errors.push({ code: "missing_resource_target", path: id, target: path });
                     continue;
                 }
-                add(path, [...proof, String(relation.predicate) + ":" + path], id);
+                const predicate = String(relation.predicate);
+                const directProof = [...proof, predicate + ":" + path];
+                add(path, directProof, id);
+                if (relation.collection === true) {
+                    if (!collectionDirect.has(predicate)) {
+                        errors.push({ code: "invalid_resource_collection", path: id, target: key });
+                        continue;
+                    }
+                    const parsed = parseCollection(path);
+                    if (!parsed.ok) {
+                        errors.push({ code: parsed.code, path, target: parsed.target });
+                        continue;
+                    }
+                    collections.push({ owner: id, predicate, manifest: path, schema: collectionSchema, members: [...parsed.members] });
+                    for (const member of parsed.members)
+                        add(member, [...directProof, "collection:" + collectionSchema, "member:" + member], id);
+                }
             }
         }
         for (const edge of input.resourceRelations || []) {
@@ -128,7 +243,11 @@ export function evaluateTrackedResourceClosure(input) {
     const justified = [...tracked].filter(x => just.has(x)).sort();
     const unjustified = [...tracked].filter(x => !just.has(x)).sort();
     errors.sort((a, b) => a.path.localeCompare(b.path) || a.code.localeCompare(b.code) || (a.target || "").localeCompare(b.target || ""));
+    collections.sort((a, b) => a.owner.localeCompare(b.owner, "en") ||
+        a.predicate.localeCompare(b.predicate, "en") ||
+        a.manifest.localeCompare(b.manifest, "en"));
     return { ok: errors.length === 0 && unjustified.length === 0, justified, unjustified, errors,
         explanations: Object.fromEntries([...just.entries()].sort(([a], [b]) => a.localeCompare(b))),
-        owners: Object.fromEntries([...owners.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, [...v].sort()])) };
+        owners: Object.fromEntries([...owners.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, [...v].sort()])),
+        collections };
 }

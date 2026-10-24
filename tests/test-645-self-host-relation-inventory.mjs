@@ -1099,7 +1099,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
 
   const repository = "netkeep80/repo-guard";
   const tracked = gitRuntime.listTrackedFilesAtRef(revision, root).sort();
-  assert.equal(tracked.length, 383, "native self-host tracked tree must remain exact");
+  assert.equal(tracked.length, 384, "native self-host tracked tree must remain exact");
 
   const native = canonicalRuntime.loadNativeRequirements({
     repository,
@@ -1161,7 +1161,7 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
     resolver,
   });
   assert.equal(j1.ok, true, JSON.stringify(j1.errors));
-  assert.equal(j1.justified.length, 383);
+  assert.equal(j1.justified.length, 384);
   assert.equal(j1.unjustified.length, 0);
 
   const relationCounts = { implemented_by: 0, verified_by: 0, documents: 0, total: 0 };
@@ -1177,9 +1177,9 @@ console.log("\n--- #723 I8 GREEN: real vNext self-host SH01-SH40 ---");
   relationCounts.total = relationCounts.implemented_by + relationCounts.verified_by + relationCounts.documents;
   assert.deepEqual(relationCounts, {
     implemented_by: 160,
-    verified_by: 175,
+    verified_by: 176,
     documents: 51,
-    total: 386,
+    total: 387,
   });
   assert.equal(Object.values(j1.owners).filter((owners) => owners.length > 1).length, 11);
   assert.equal(blanketRequires, 0, "native representation must not restore blanket requires");

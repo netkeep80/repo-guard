@@ -54,7 +54,13 @@ function targetIdentity(value) {
     return { key: stable(target) };
 }
 function relationFactKey(fact) {
-    return stable({ origin: fact.origin, from: fact.from, predicate: fact.predicate, target: fact.targetKey });
+    return stable({
+        origin: fact.origin,
+        from: fact.from,
+        predicate: fact.predicate,
+        target: fact.targetKey,
+        ...(fact.collection === true ? { collection: true } : {}),
+    });
 }
 function relations(state) {
     const facts = [], errors = [];
@@ -74,7 +80,8 @@ function relations(state) {
             try {
                 const target = targetIdentity(item.target);
                 const factBase = { origin: "requirement", from: id, predicate: item.predicate, targetKey: target.key,
-                    ...(target.requirement ? { targetRequirement: target.requirement } : {}), ...(target.path ? { targetPath: target.path } : {}) };
+                    ...(target.requirement ? { targetRequirement: target.requirement } : {}), ...(target.path ? { targetPath: target.path } : {}),
+                    ...(item.collection === true ? { collection: true } : {}) };
                 facts.push({ ...factBase, key: relationFactKey(factBase) });
             }
             catch (error) {
@@ -643,6 +650,7 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
     const derive = (state, id, rule, fallbackEdges) => {
         const paths = new Map();
         const direct = obj(root(state, id)?.relations);
+        const expectedCollections = [];
         const put = (path, proof) => {
             const old = paths.get(path);
             if (!old || proof.length < old.length || (proof.length === old.length && proof.join("\0") < old.join("\0")))
@@ -655,9 +663,29 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
             try {
                 const path = normPath(target.path);
                 put(path, [id, String(rel.predicate) + ":" + path]);
+                if (rel.collection === true)
+                    expectedCollections.push({ predicate: String(rel.predicate), manifest: path });
             }
             catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);
+            }
+        }
+        const collections = (state.j1?.collections || [])
+            .filter((collection) => collection.owner === id && rule.relations.includes(collection.predicate))
+            .slice().sort((a, b) => a.manifest.localeCompare(b.manifest, "en") ||
+            a.predicate.localeCompare(b.predicate, "en"));
+        for (const expected of expectedCollections) {
+            if (!collections.some(collection => collection.predicate === expected.predicate && collection.manifest === expected.manifest))
+                problems.push("I7:missing_collection_scope:" + id + ":" + expected.manifest);
+        }
+        for (const collection of collections) {
+            if (!paths.has(collection.manifest)) {
+                problems.push("I7:invalid_collection_scope:" + id + ":" + collection.manifest);
+                continue;
+            }
+            const manifestProof = paths.get(collection.manifest);
+            for (const member of collection.members) {
+                put(member, [...manifestProof, "collection:" + collection.schema, "member:" + member]);
             }
         }
         if (rule.includeGenerated === true) {

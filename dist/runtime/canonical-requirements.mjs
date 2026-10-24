@@ -270,7 +270,9 @@ function nativeRelations(value, requirementId) {
     const seen = new Set();
     for (let index = 0; index < declarations.length; index += 1) {
         const declaration = nativeObject(declarations[index], "relations[" + index + "]");
-        nativeExactFields(declaration, ["source", "predicates", "target"], "relations[" + index + "]");
+        nativeExactFields(declaration, ["source", "predicates", "target", "collection"], "relations[" + index + "]");
+        if (declaration.collection !== undefined && typeof declaration.collection !== "boolean")
+            return nativeFailure("invalid_relation", "relations[" + index + "].collection must be boolean");
         if (!Array.isArray(declaration.predicates) || declaration.predicates.length === 0)
             return nativeFailure("invalid_relation", "relations[" + index + "].predicates must be a non-empty array");
         const predicateValues = declaration.predicates;
@@ -290,11 +292,18 @@ function nativeRelations(value, requirementId) {
             ? { kind: "requirement", id: requirementId }
             : nativeResourceRef(declaration.source, "relations[" + index + "].source");
         const target = nativeResourceRef(declaration.target, "relations[" + index + "].target");
+        const collection = declaration.collection === true;
         if (declaration.source !== undefined && predicates.some(predicate => predicate !== "generates"))
             nativeFailure("invalid_relation", "explicit relation source is only supported for generates in native v1");
+        if (collection) {
+            if (target.kind !== "artifact")
+                nativeFailure("invalid_relation", "collection:true requires an exact local ArtifactRef target");
+            if (predicates.some(predicate => !["requires", "implemented_by", "verified_by", "documents"].includes(predicate)))
+                nativeFailure("invalid_relation", "collection:true requires a J1 direct Requirement-to-Artifact predicate");
+        }
         for (const predicate of predicates) {
             nativeRelationDomain(source, predicate, target);
-            const fact = { source, predicate, target };
+            const fact = { source, predicate, target, ...(collection ? { collection: true } : {}) };
             const key = nativeRefKey(source) + "\0" + predicate + "\0" + nativeRefKey(target);
             if (seen.has(key))
                 nativeFailure("duplicate_relation", "duplicate normalized Relation fact");

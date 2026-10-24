@@ -81,6 +81,7 @@ export interface NativeRelationFact {
     source: NativeResourceRef;
     predicate: NativeRelationPredicate;
     target: NativeResourceRef;
+    collection?: boolean;
 }
 export interface NativeLifecycle {
     accepted: boolean;
