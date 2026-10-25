@@ -536,18 +536,8 @@ function evaluateScopedObligations(
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
                 o.authorityBaseRevision !== input.trustedAuthorityBase.revision || o.baseRevision !== input.base.revision ||
                 o.headRevision !== input.head.revision || o.metric !== "changed_lines" ||
-                typeof o.providerId !== "string" || !o.providerId ||
                 !Number.isSafeInteger(o.value) || o.value < 0) {
                 problems.push("I7:invalid_observation:" + path);
-                continue;
-            }
-            const providerAuthorized = capabilityMode
-                ? observationProviderAuthorized(input, providerState.grants, o, path)
-                : providers.has(o.providerId);
-            if (!providerAuthorized) {
-                problems.push(capabilityMode
-                    ? "I7:unauthorized_observation_provider:" + path + ":" + o.metric
-                    : "I7:invalid_observation:" + path);
                 continue;
             }
             const key = o.metric + "\0" + path;
