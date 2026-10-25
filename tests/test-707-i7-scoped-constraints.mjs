@@ -5,7 +5,7 @@ import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
 import { evaluateTransitionCauseClosure } from "../dist/runtime/transition-closure.mjs";
-import { lowerNativeRequirements } from "../dist/runtime/pipeline.mjs";
+import { lowerNativeRequirements } from "../dist/runtime/canonical-requirements.mjs";
 
 const repo="netkeep80/repo-guard", A="a".repeat(40), B="b".repeat(40), C="c".repeat(40), D="d".repeat(40);
 const art=(predicate,path)=>({predicate,target:{kind:"artifact",path}});
