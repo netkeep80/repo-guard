@@ -230,7 +230,6 @@ assert.deepEqual(
   first.scenarios.map((item) => item.id).sort(),
   [
     "contract-evidence",
-    "governance-cutover",
     "minimal-diff-policy",
     "surgical-change",
     "version-transition",
