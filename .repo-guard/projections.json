@@ -37,7 +37,7 @@
           {
             "source_id": "cli-runtime",
             "algorithm": "sha256",
-            "digest": "bc99807f8c2ece4cf9589a5b46a1e75ec09b4e8d5ce059accb1b78816a5b6b65"
+            "digest": "1aa627e0bd0ddd13ffcfaf8d8d3920289fee6c2a54f2a45ab30fc14a0a0d7a3c"
           },
           {
             "source_id": "renderer",
@@ -104,7 +104,7 @@
           {
             "source_id": "cli-runtime",
             "algorithm": "sha256",
-            "digest": "bc99807f8c2ece4cf9589a5b46a1e75ec09b4e8d5ce059accb1b78816a5b6b65"
+            "digest": "1aa627e0bd0ddd13ffcfaf8d8d3920289fee6c2a54f2a45ab30fc14a0a0d7a3c"
           },
           {
             "source_id": "renderer",
