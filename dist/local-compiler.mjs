@@ -59,7 +59,6 @@ function localObservations(root, repository, base, head) {
         path,
         metric: "changed_lines",
         value,
-        providerId: "local-git",
     }));
 }
 export function evaluateLocalCompiler(input) {
@@ -175,7 +174,6 @@ export function evaluateLocalCompiler(input) {
         }
     }
     const transition = evaluateTransitionCauseClosure({
-        mode: "compiler",
         repository: input.repository,
         base: {
             revision: base,
@@ -202,7 +200,6 @@ export function evaluateLocalCompiler(input) {
         baseLifecycle: before.lifecycle,
         headLifecycle: after.lifecycle,
         observationFacts: localObservations(input.root, input.repository, base, head),
-        trustedEvidenceProviders: ["local-git"],
     });
     for (const reason of transition.reasons)
         diagnostics.push({ code: "j3", subject: reason });

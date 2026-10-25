@@ -1,7 +1,5 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
 const sha = /^[0-9a-f]{40}$/;
-const strongRequirementRelations = new Set(["derives_from", "depends_on", "constrains", "supersedes"]);
-const protectedLifecycleFields = new Set(["accepted", "current", "published"]);
 const allDeltaKinds = new Set([
     "requirement_add", "requirement_modify", "requirement_remove", "requirement_relocate",
     "relation_add", "relation_remove", "relation_replace",
@@ -31,7 +29,6 @@ function stable(value) {
 }
 const sorted = (values) => [...new Set(values)].sort((a, b) => a.localeCompare(b, "en"));
 const exactRevision = (value) => typeof value === "string" && sha.test(value);
-const permissionToken = (value) => typeof value === "string" && value.length > 0 && value !== "*";
 function requirementCore(value) {
     const root = obj(value);
     if (!root)
@@ -358,7 +355,7 @@ function matchesRule(rule, delta) {
 }
 function transitionRules(authority) {
     const rules = [], errors = [];
-    const allowed = new Set(["deltaKinds", "relationPredicates", "paths", "requireAddressed", "evidenceKeys"]);
+    const allowed = new Set(["deltaKinds", "relationPredicates", "paths"]);
     for (const requirementId of authority.j2.rooted.slice().sort((a, b) => a.localeCompare(b, "en"))) {
         const requirement = authority.requirements.index[requirementId];
         const raw = obj(obj(requirement?.value)?.transition);
@@ -386,14 +383,6 @@ function transitionRules(authority) {
             errors.push("invalid_transition_rule:" + requirementId + ":paths");
             continue;
         }
-        if (raw.requireAddressed !== undefined && typeof raw.requireAddressed !== "boolean") {
-            errors.push("invalid_transition_rule:" + requirementId + ":requireAddressed");
-            continue;
-        }
-        if (raw.evidenceKeys !== undefined && !arrayOfStrings(raw.evidenceKeys)) {
-            errors.push("invalid_transition_rule:" + requirementId + ":evidenceKeys");
-            continue;
-        }
         if (raw.deltaKinds === undefined && raw.relationPredicates === undefined && raw.paths === undefined) {
             errors.push("invalid_transition_rule:" + requirementId + ":unscoped");
             continue;
@@ -410,191 +399,9 @@ function transitionRules(authority) {
             ...(raw.deltaKinds !== undefined ? { deltaKinds: [...raw.deltaKinds] } : {}),
             ...(raw.relationPredicates !== undefined ? { relationPredicates: [...raw.relationPredicates] } : {}),
             ...(raw.paths !== undefined ? { paths: [...raw.paths] } : {}),
-            ...(raw.requireAddressed !== undefined ? { requireAddressed: raw.requireAddressed } : {}),
-            ...(raw.evidenceKeys !== undefined ? { evidenceKeys: [...raw.evidenceKeys] } : {}),
         });
     }
     return { rules: rules.sort((a, b) => a.requirementId.localeCompare(b.requirementId, "en")), errors: sorted(errors) };
-}
-function workIntentAddresses(value) {
-    if (value === null || value === undefined)
-        return { addresses: [], errors: [] };
-    if (!Array.isArray(value.addresses) || value.addresses.some(id => typeof id !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(id)))
-        return { addresses: [], errors: ["invalid_work_intent_addresses"] };
-    return { addresses: sorted(value.addresses), errors: [] };
-}
-function validReceipts(input) {
-    const receipts = [], errors = [];
-    for (const item of input.trustedReceipts || []) {
-        if (!exactRevision(item.authorityBaseRevision) || !exactRevision(item.baseRevision) || !exactRevision(item.headRevision) ||
-            !Array.isArray(item.permissions) || item.permissions.some(x => !permissionToken(x))) {
-            errors.push("invalid_trusted_receipt");
-            continue;
-        }
-        receipts.push(item);
-    }
-    return { receipts, errors: sorted(errors) };
-}
-function granted(input, receipts, permission) {
-    return receipts.some(receipt => receipt.authorityBaseRevision === input.trustedAuthorityBase.revision && receipt.baseRevision === input.base.revision &&
-        receipt.headRevision === input.head.revision && receipt.permissions.includes(permission));
-}
-function validEvidence(input) {
-    const facts = [], errors = [];
-    for (const item of input.evidenceFacts || []) {
-        if (!exactRevision(item.authorityBaseRevision) || !exactRevision(item.baseRevision) || !exactRevision(item.headRevision) ||
-            typeof item.key !== "string" || !item.key || !['pass', 'fail'].includes(item.status)) {
-            errors.push("invalid_evidence_fact");
-            continue;
-        }
-        facts.push(item);
-    }
-    return { facts, errors: sorted(errors) };
-}
-function evidencePass(input, facts, key) {
-    return facts.some(fact => fact.authorityBaseRevision === input.trustedAuthorityBase.revision && fact.baseRevision === input.base.revision &&
-        fact.headRevision === input.head.revision && fact.key === key && fact.status === "pass");
-}
-function providerSubjectPaths(value) {
-    if (!Array.isArray(value) || value.some(path => typeof path !== "string"))
-        return null;
-    try {
-        const paths = value.map(path => normPath(path));
-        if (new Set(paths).size !== paths.length)
-            return null;
-        return sorted(paths);
-    }
-    catch {
-        return null;
-    }
-}
-function validProviderGrants(input) {
-    const grants = [], errors = [];
-    for (const raw of input.authenticatedProviderGrants || []) {
-        const item = obj(raw), capability = obj(item?.capability);
-        const common = !!item && !!capability &&
-            typeof item.repository === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(item.repository) &&
-            exactRevision(item.authorityBaseRevision) && exactRevision(item.baseRevision) && exactRevision(item.headRevision) &&
-            typeof item.providerId === "string" && item.providerId.length > 0 && item.providerId !== "*" &&
-            typeof item.principal === "string" && item.principal.length > 0 && item.principal !== "*" &&
-            typeof item.producerSource === "string" && item.producerSource.length > 0 && item.producerSource !== "*" &&
-            (item.boundary === "observation" || item.boundary === "domain");
-        if (!common) {
-            errors.push("invalid_provider_grant");
-            continue;
-        }
-        const subjects = providerSubjectPaths(capability.subjectPaths);
-        if (!subjects || typeof capability.key !== "string" || !capability.key || capability.key === "*") {
-            errors.push("invalid_provider_grant");
-            continue;
-        }
-        if (capability.kind === "metric") {
-            if (item.boundary !== "observation" || Object.keys(capability).some(k => !["kind", "key", "subjectPaths"].includes(k))) {
-                errors.push("invalid_provider_grant");
-                continue;
-            }
-        }
-        else if (capability.kind === "evidence") {
-            if (item.boundary !== "domain" || (capability.class !== "execution" && capability.class !== "domain") ||
-                typeof capability.requirementId !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(capability.requirementId) ||
-                Object.keys(capability).some(k => !["kind", "class", "key", "requirementId", "subjectPaths", "verifierPath", "verifierRevision"].includes(k))) {
-                errors.push("invalid_provider_grant");
-                continue;
-            }
-            const hasVerifier = capability.verifierPath !== undefined || capability.verifierRevision !== undefined;
-            if (capability.class === "execution" && !hasVerifier) {
-                errors.push("invalid_provider_grant");
-                continue;
-            }
-            if (hasVerifier) {
-                if (typeof capability.verifierPath !== "string" || !exactRevision(capability.verifierRevision)) {
-                    errors.push("invalid_provider_grant");
-                    continue;
-                }
-                try {
-                    normPath(capability.verifierPath);
-                }
-                catch {
-                    errors.push("invalid_provider_grant");
-                    continue;
-                }
-            }
-        }
-        else {
-            errors.push("invalid_provider_grant");
-            continue;
-        }
-        grants.push(raw);
-    }
-    const identities = new Map(), conflicted = new Set();
-    for (const grant of grants) {
-        const identity = grant.principal + "\0" + grant.producerSource;
-        const prior = identities.get(grant.providerId);
-        if (prior !== undefined && prior !== identity)
-            conflicted.add(grant.providerId);
-        else
-            identities.set(grant.providerId, identity);
-    }
-    if (conflicted.size)
-        errors.push("invalid_provider_grant");
-    return { grants: grants.filter(grant => !conflicted.has(grant.providerId)), errors: sorted(errors) };
-}
-const grantTransitionMatches = (input, grant) => grant.repository === input.repository &&
-    grant.authorityBaseRevision === input.trustedAuthorityBase.revision &&
-    grant.baseRevision === input.base.revision &&
-    grant.headRevision === input.head.revision;
-const metricAuthorityKey = (metric) => metric === "changed_lines" ? "git.changed_lines" : metric;
-function observationProviderAuthorized(input, grants, fact, path) {
-    return grants.some(grant => {
-        if (!grantTransitionMatches(input, grant) || grant.providerId !== fact.providerId || grant.boundary !== "observation" || grant.capability.kind !== "metric")
-            return false;
-        return grant.capability.key === metricAuthorityKey(fact.metric) &&
-            stable(providerSubjectPaths(grant.capability.subjectPaths) || []) === stable([path]);
-    });
-}
-function evidenceProviderAuthorized(input, grants, fact, spec, requirementId, touched) {
-    if (typeof fact.providerId !== "string" || !fact.providerId)
-        return false;
-    return grants.some(grant => {
-        if (!grantTransitionMatches(input, grant) || grant.providerId !== fact.providerId || grant.boundary !== "domain" || grant.capability.kind !== "evidence")
-            return false;
-        const capability = grant.capability;
-        if (capability.class !== spec.kind || capability.key !== spec.key || capability.requirementId !== requirementId)
-            return false;
-        if (stable(providerSubjectPaths(capability.subjectPaths) || []) !== stable(touched))
-            return false;
-        if (capability.class === "execution")
-            return capability.verifierPath === spec.verifierPath && capability.verifierRevision === input.head.revision;
-        if (capability.verifierPath !== undefined || capability.verifierRevision !== undefined)
-            return capability.verifierPath === fact.verifierPath && capability.verifierRevision === fact.verifierRevision;
-        return true;
-    });
-}
-function authorityPermissions(delta, input, protectedSet) {
-    const result = new Set();
-    if (delta.kind === "requirement_add" || delta.kind === "requirement_modify" || delta.kind === "requirement_remove")
-        result.add("requirement:" + delta.subject);
-    if (delta.kind.startsWith("constraint_") && delta.requirementId && delta.constraintId)
-        result.add("constraint_definition:" + delta.requirementId + ":" + delta.constraintId);
-    if (delta.kind.startsWith("relation_")) {
-        const facts = [delta.beforeRelation, delta.afterRelation, delta.relation].filter(Boolean);
-        // Each actual relation transition is evaluated against BOTH exact states.
-        // A strong BASE obligation cannot disappear merely because HEAD supplies a weak trace.
-        // Descriptive changes remain subject to J1/J2/J3, never to a blanket removal grant.
-        for (const fact of facts) {
-            if (fact.origin === "requirement" && (fact.predicate === "requires" || strongRequirementRelations.has(fact.predicate)))
-                result.add("requirement:" + fact.from);
-            if (fact.origin === "resource" && fact.predicate === "generates" &&
-                (delta.kind === "relation_remove" || delta.kind === "relation_replace"))
-                result.add("resource:" + fact.from);
-        }
-    }
-    if (delta.kind === "lifecycle" && delta.field && protectedLifecycleFields.has(delta.field) && (delta.before === true || delta.after === true))
-        result.add(`lifecycle:${delta.subject}:${delta.field}`);
-    for (const path of deltaPaths(delta))
-        if (protectedSet.has(path) && delta.kind.startsWith("resource_"))
-            result.add("resource:" + path);
-    return sorted(result);
 }
 function snapshotErrors(label, state, repository) {
     const errors = [];
@@ -611,7 +418,7 @@ function snapshotErrors(label, state, repository) {
         errors.push(`${label}:j2_not_rooted`);
     return errors;
 }
-function evaluateScopedObligations(input, deltas, receipts, facts, applicability) {
+function evaluateScopedObligations(input, deltas, applicability) {
     const problems = [], explanations = [];
     const root = (state, id) => obj(state.requirements.index[id]?.value);
     const parseRules = (state, label, id) => {
@@ -718,10 +525,6 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
         { label: "HEAD", state: input.head },
     ];
     const ids = sorted(new Set(versions.flatMap(v => Object.keys(v.state.requirements.index))));
-    const providers = new Set(input.trustedEvidenceProviders || []);
-    const providerState = validProviderGrants(input);
-    problems.push(...providerState.errors.map(error => "I7:" + error));
-    const capabilityMode = input.authenticatedProviderGrants !== undefined;
     const observation = input.observationFacts || [];
     const observationMap = new Map();
     for (const o of observation) {
@@ -734,18 +537,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
                 o.authorityBaseRevision !== input.trustedAuthorityBase.revision || o.baseRevision !== input.base.revision ||
                 o.headRevision !== input.head.revision || o.metric !== "changed_lines" ||
-                typeof o.providerId !== "string" || !o.providerId ||
                 !Number.isSafeInteger(o.value) || o.value < 0) {
                 problems.push("I7:invalid_observation:" + path);
-                continue;
-            }
-            const providerAuthorized = capabilityMode
-                ? observationProviderAuthorized(input, providerState.grants, o, path)
-                : providers.has(o.providerId);
-            if (!providerAuthorized) {
-                problems.push(capabilityMode
-                    ? "I7:unauthorized_observation_provider:" + path + ":" + o.metric
-                    : "I7:invalid_observation:" + path);
                 continue;
             }
             const key = o.metric + "\0" + path;
@@ -789,7 +582,6 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
                 const touched = sorted(new Set(selected.map(d => d.afterPath || d.beforePath || d.subject)));
                 const activation = rule.activation === "requirement_cause" ? "requirement_cause" : "scoped_change";
                 const active = activation === "requirement_cause" ? applicability.direct.has(id) : selected.length > 0;
-                const token = "constraint:" + id + ":" + rule.id;
                 let observed = null, verdict = active ? "PASS" : "NOT_APPLICABLE";
                 if (active && rule.metric === "changed_resources") {
                     observed = selected.length;
@@ -817,12 +609,8 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
                     problems.push("I7:missing_observation:" + id + ":" + rule.id + ":" + String(rule.metric));
                 }
                 if (observed !== null && observed > rule.max) {
-                    if (input.mode !== "compiler" && granted(input, receipts, token))
-                        verdict = "WAIVED";
-                    else {
-                        verdict = "RED";
-                        problems.push("I7:constraint_exceeded:" + id + ":" + rule.id + ":" + observed + ">" + rule.max);
-                    }
+                    verdict = "RED";
+                    problems.push("I7:constraint_exceeded:" + id + ":" + rule.id + ":" + observed + ">" + rule.max);
                 }
                 if (active && rule.evidence !== undefined) {
                     const spec = rule.evidence;
@@ -834,38 +622,12 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
                                 (input.head.j1.owners[spec.verifierPath] || []).includes(id);
                         });
                     })();
-                    if (input.mode === "compiler") {
-                        // Compiler mode validates traceability only. Actual execution/domain truth is an ordinary CI responsibility.
-                        if (!verifierValid) {
-                            verdict = "RED";
-                            problems.push("I7:invalid_external_verifier:" + id + ":" + rule.id + ":" + spec.key);
-                        }
-                        else {
-                            verdict = "DELEGATED";
-                        }
+                    if (!verifierValid) {
+                        verdict = "RED";
+                        problems.push("I7:invalid_external_verifier:" + id + ":" + rule.id + ":" + spec.key);
                     }
                     else {
-                        const structurallyCompatible = facts.filter(f => f.key === spec.key && f.requirementId === id &&
-                            (spec.providerId === undefined || f.providerId === spec.providerId) &&
-                            f.authorityBaseRevision === input.trustedAuthorityBase.revision &&
-                            f.baseRevision === input.base.revision && f.headRevision === input.head.revision &&
-                            Array.isArray(f.subjectPaths) && f.subjectPaths.every(path => typeof path === "string") &&
-                            stable(sorted(f.subjectPaths)) === stable(touched) &&
-                            (spec.kind !== "execution" || (f.verifierPath === spec.verifierPath && f.verifierRevision === input.head.revision)));
-                        const compatible = structurallyCompatible.filter(f => capabilityMode
-                            ? evidenceProviderAuthorized(input, providerState.grants, f, spec, id, touched)
-                            : (spec.providerId !== undefined && f.providerId === spec.providerId && providers.has(spec.providerId)));
-                        if (capabilityMode && structurallyCompatible.length > 0 && compatible.length === 0)
-                            problems.push("I7:unauthorized_evidence_provider:" + id + ":" + rule.id);
-                        const statuses = new Set(compatible.map(f => f.status));
-                        if (statuses.size > 1) {
-                            verdict = "RED";
-                            problems.push("I7:conflicting_evidence:" + id + ":" + rule.id);
-                        }
-                        if (!verifierValid || statuses.size !== 1 || !statuses.has("pass")) {
-                            verdict = "RED";
-                            problems.push("I7:missing_evidence:" + id + ":" + rule.id + ":" + spec.key);
-                        }
+                        verdict = "DELEGATED";
                     }
                 }
                 explanations.push({ requirementId: id, constraintId: rule.id, basis: v.label,
@@ -875,11 +637,9 @@ function evaluateScopedObligations(input, deltas, receipts, facts, applicability
                     exactTransition: { authorityBaseRevision: input.trustedAuthorityBase.revision, baseRevision: input.base.revision, headRevision: input.head.revision }, metric: rule.metric || null,
                     max: rule.max === undefined ? null : rule.max, scope, scopeProofs: Object.fromEntries([...proof.entries()].sort(([a], [b]) => a.localeCompare(b))),
                     touched, observed, observationSources: touched.filter(path => observationMap.has("changed_lines\0" + path)).map(path => ({
-                        path, metric: "changed_lines", value: observationMap.get("changed_lines\0" + path),
-                        providerId: observation.find(o => o.path === path && o.metric === "changed_lines")?.providerId || null
+                        path, metric: "changed_lines", value: observationMap.get("changed_lines\0" + path)
                     })),
-                    requiredEvidence: rule.evidence || null,
-                    requiredAuthority: { requirementId: id, constraintId: rule.id, permission: token }, verdict });
+                    requiredEvidence: rule.evidence || null, verdict });
             }
         }
     }
@@ -896,15 +656,6 @@ export function evaluateTransitionCauseClosure(input) {
         reasons.push("head:j1_not_closed");
     const normalizedResources = resourceDeltas(input.resourceDeltas || []);
     reasons.push(...normalizedResources.errors.map(x => "input:" + x));
-    const protectedSet = new Set();
-    for (const raw of input.protectedResources || []) {
-        try {
-            protectedSet.add(normPath(raw));
-        }
-        catch (error) {
-            reasons.push("input:invalid_protected_resource:" + String(raw) + ":" + error.message);
-        }
-    }
     const baseRelationState = relations(input.base), headRelationState = relations(input.head);
     reasons.push(...baseRelationState.errors.map(x => "base:" + x), ...headRelationState.errors.map(x => "head:" + x));
     const baseRelations = baseRelationState.facts, headRelations = headRelationState.facts;
@@ -913,10 +664,6 @@ export function evaluateTransitionCauseClosure(input) {
         ...lifecycleDeltas(input.baseLifecycle || {}, input.headLifecycle || {})].sort((a, b) => a.id.localeCompare(b.id, "en"));
     const ruleState = transitionRules(input.trustedAuthorityBase), rules = ruleState.rules;
     reasons.push(...ruleState.errors.map(x => "authority_base:" + x));
-    const receiptState = validReceipts(input), evidenceState = validEvidence(input), intentState = workIntentAddresses(input.workIntent);
-    reasons.push(...receiptState.errors.map(x => "input:" + x), ...evidenceState.errors.map(x => "input:" + x), ...intentState.errors.map(x => "input:" + x));
-    const addresses = new Set(intentState.addresses);
-    const authorityRooted = new Set(input.trustedAuthorityBase.j2.rooted);
     const whyChanged = [];
     const affectedAll = new Set();
     const directApplicableAll = new Set(), selectedCausesAll = new Set();
@@ -932,31 +679,17 @@ export function evaluateTransitionCauseClosure(input) {
         for (const rule of matchedRules)
             candidates.add(rule.requirementId);
         const candidateIds = sorted(candidates);
-        const causes = input.mode === "compiler"
-            ? candidateIds
-            : candidateIds.filter(id => addresses.has(id) && (authorityRooted.has(id) || granted(input, receiptState.receipts, "requirement:" + id)));
+        const causes = candidateIds;
         for (const id of causes)
             selectedCausesAll.add(id);
-        if (input.mode !== "compiler" && !causes.length)
+        if (!causes.length)
             reasons.push("J3:no_cause:" + delta.id);
-        const permissions = input.mode === "compiler" ? [] : authorityPermissions(delta, input, protectedSet);
-        for (const permission of permissions)
-            if (!granted(input, receiptState.receipts, permission))
-                reasons.push(`J3:missing_authority:${permission}:${delta.id}`);
-        const evidenceKeys = input.mode === "compiler" ? [] : sorted(matchedRules.flatMap(rule => rule.evidenceKeys || []));
-        for (const key of evidenceKeys)
-            if (!evidencePass(input, evidenceState.facts, key))
-                reasons.push(`J3:missing_evidence:${key}:${delta.id}`);
-        if (input.mode !== "compiler")
-            for (const rule of matchedRules)
-                if (rule.requireAddressed === true && !addresses.has(rule.requirementId))
-                    reasons.push(`J3:unacknowledged_impact:${rule.requirementId}:${delta.id}`);
         whyChanged.push({ id: delta.id, kind: delta.kind, subject: delta.subject, affected: affectedIds, applicable: sorted(new Set([...affectedIds, ...matchedRules.map(r => r.requirementId)])),
             directApplicable: sorted(structural), reverseImpact: affectedIds.filter(id => !structural.has(id)),
-            causalCandidates: candidateIds, causes: sorted(causes), requiredAuthority: permissions, requiredEvidence: evidenceKeys });
+            causalCandidates: candidateIds, causes: sorted(causes) });
     }
     const reverseOnly = new Set([...affectedAll].filter(id => !directApplicableAll.has(id)));
-    const scoped = evaluateScopedObligations(input, normalizedResources.deltas, receiptState.receipts, evidenceState.facts, { direct: directApplicableAll, selected: selectedCausesAll, reverseOnly });
+    const scoped = evaluateScopedObligations(input, normalizedResources.deltas, { direct: directApplicableAll, selected: selectedCausesAll, reverseOnly });
     reasons.push(...scoped.reasons);
     const normalizedReasons = sorted(reasons);
     return { ok: normalizedReasons.length === 0, reasons: normalizedReasons, deltas: deltas.map(delta => ({ id: delta.id, kind: delta.kind, subject: delta.subject,

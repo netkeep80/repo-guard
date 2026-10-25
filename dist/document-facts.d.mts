@@ -25,7 +25,7 @@ export type DocumentScalar = string | number | boolean | null;
 export type NormalizedDocumentFact = DocumentScalar | string[];
 export type FactSnapshot = "state" | "base" | "head";
 export type FactFormat = "json" | "yaml" | "plain_text";
-export type FactSource = "document" | "diff" | "repository" | "change_intent";
+export type FactSource = "document" | "diff" | "repository";
 export interface MarkdownOwnedBlockIdentityRegion {
     kind: "markdown_owned_block";
     anchor_id: string;
@@ -75,10 +75,6 @@ export type RepositoryFactSelector = {
 } | {
     kind: "tracked_paths";
 };
-export type ChangeIntentFactSelector = {
-    pointer: string;
-    projection?: DocumentProjection;
-};
 export type DocumentFactErrorCode = "malformed_pointer" | "missing_pointer_segment" | "projection_type_mismatch" | "fact_type_mismatch" | "invalid_repository_path" | "document_read_error" | "unsupported_document_type";
 export type FactRef = {
     source: "document";
@@ -98,10 +94,6 @@ export type FactRef = {
     source: "repository";
     selector: RepositoryFactSelector;
     type: "string_set" | "repository_path_set" | "scalar";
-} | {
-    source: "change_intent";
-    selector: ChangeIntentFactSelector;
-    type: DocumentFactType;
 };
 interface AnchorFactInputInstance {
     value?: unknown;
@@ -148,7 +140,6 @@ export interface FactReadContext {
     anchors?: {
         byType?: Record<string, AnchorFactInputInstance[]>;
     };
-    changeIntent?: unknown;
 }
 export interface DocumentFactError {
     code: DocumentFactErrorCode;
