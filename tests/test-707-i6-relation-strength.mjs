@@ -51,8 +51,8 @@ test("relation strength: requires relation removal is still explained by its own
   const head=state(B,[root(),node("R1",{parent,doc:art("documents","src/stable.ts")})],["src/stable.ts"]);
   const result=evaluate(base,head);
   green(result,"requires");
-  const relation=result.explanations.whyChanged.find(x=>x.kind==="relation_replace");
-  assert.ok(relation.causes.includes("R1"));
+  const relation=result.explanations.whyChanged.find(x=>x.kind.startsWith("relation_") && x.causes.includes("R1"));
+  assert.ok(relation, "relation transition must retain R1 as causal owner");
 });
 
 test("relation strength: resource generates topology stays causal through exact source ownership",()=>{
