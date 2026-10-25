@@ -40,7 +40,7 @@ export interface RepoGuardSelfHostInput {
 export interface RepoGuardSelfHostConfig extends Omit<RepoGuardSelfHostInput, "observedTrackedPaths" | "observedDiffFiles"> {}
 
 const selfHostRootSource = "docs/product-requirements.md";
-const selfHostProtectedResources = Object.freeze([selfHostRootSource, ".github/workflows/trusted-enforcement.yml"]);
+const selfHostProtectedResources = Object.freeze([selfHostRootSource]);
 const legacyPredicates: Readonly<Record<string, string>> = Object.freeze({
   requires: "requires", implements: "implemented_by", verifies: "verified_by", documents: "documents",
 });

@@ -33,34 +33,6 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
-      path: "examples/scenarios/governance-cutover/base/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/governance-cutover/cases/fail-no-grant/head/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/governance-cutover/cases/fail-no-grant/issue.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/governance-cutover/cases/pass/head/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/governance-cutover/cases/pass/issue.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/governance-cutover/pr.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/governance-cutover/scenario.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
       path: "examples/scenarios/README.md"
   - predicates: [documents]
     target:

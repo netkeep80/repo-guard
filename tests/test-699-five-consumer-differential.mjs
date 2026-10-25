@@ -458,7 +458,7 @@ test("#699 D3.5 package/package-lock cochange remains an explicit Requirement tr
   assert.equal(allOrNoneChanged(members, members), true);
 });
 test("#699 D3.6 trusted workflow/status producer remains external TRUST/platform fact", () => {
-  assert.throws(() => normalizeResourceRef({ kind: "artifact", path: ".github/workflows/trusted-enforcement.yml", trusted: true }), /unknown field/);
+  assert.throws(() => normalizeResourceRef({ kind: "artifact", path: ".github/workflows/compiler-gate.yml", trusted: true }), /unknown field/);
   assert.equal(enforcementBoundary("blocking", "blocking").externalGate, "blocking");
 });
 test("#699 D3.7 package/lock/docs receive ordinary N:M justification", () => {

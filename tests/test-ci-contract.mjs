@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   writeFileSync,
@@ -33,17 +34,10 @@ assert.deepEqual(
   "CI must re-evaluate authority-bearing PR metadata edits",
 );
 
-const trustedWorkflowSource = readFileSync(
-  resolve(root, ".github/workflows/trusted-enforcement.yml"),
-  "utf8",
-);
-const trustedWorkflowDocument = parseDocument(trustedWorkflowSource);
-assert.equal(trustedWorkflowDocument.errors.length, 0);
-const trustedWorkflow = trustedWorkflowDocument.toJS();
-assert.deepEqual(
-  [...(trustedWorkflow.on?.pull_request_target?.types ?? [])].sort(),
-  authoritySensitivePrEvents,
-  "trusted enforcement must re-evaluate authority-bearing PR metadata edits",
+assert.equal(
+  existsSync(resolve(root, ".github/workflows/trusted-enforcement.yml")),
+  false,
+  "obsolete trusted-enforcement workflow must be absent",
 );
 
 assert.deepEqual(Object.keys(workflow.jobs ?? {}).sort(), ["smoke-pack", "validate"]);

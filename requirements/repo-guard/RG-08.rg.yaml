@@ -81,10 +81,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-707-i0-shadow.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-c3-2-compression-metrics.mjs"
   - predicates: [verified_by]
     target:

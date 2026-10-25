@@ -45,10 +45,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-644-b-requirement-transition-runtime.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-644-requirement-transition-falsifier.mjs"
   - predicates: [verified_by]
     target:
