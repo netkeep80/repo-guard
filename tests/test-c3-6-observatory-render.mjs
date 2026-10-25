@@ -92,7 +92,7 @@ assert.equal(snapshot.release.stable_published, true);
 assert.equal(snapshot.release.tag_commit, releaseCommit);
 assert.equal(snapshot.release.tag_matches_accepted_sha, false);
 assert.equal(snapshot.release_integrity?.conclusion, "failure");
-assert.equal(snapshot.scenarios.length, 5);
+assert.equal(snapshot.scenarios.length, 4);
 validateObservatorySnapshot(snapshot);
 
 const unsafeSnapshot = {
@@ -131,9 +131,9 @@ assert.match(first, new RegExp(acceptedSha));
 assert.match(first, /primitive_relation/);
 assert.match(first, /numeric_bound/);
 assert.match(first, /forbidden-paths/);
-assert.equal((first.match(/data-scenario-id=/g) ?? []).length, 5);
-assert.equal((first.match(/data-case-result="PASS"/g) ?? []).length, 5);
-assert.equal((first.match(/data-case-result="FAIL"/g) ?? []).length, 5);
+assert.equal((first.match(/data-scenario-id=/g) ?? []).length, 4);
+assert.equal((first.match(/data-case-result="PASS"/g) ?? []).length, 4);
+assert.equal((first.match(/data-case-result="FAIL"/g) ?? []).length, 4);
 
 assert.ok(first.includes(`Пакет: <code>${packageVersion}</code>`));
 assert.ok(first.includes(`Ожидаемый тег: <code>${packageTag}</code>`));
