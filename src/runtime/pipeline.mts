@@ -1,8 +1,8 @@
 import type { RepositoryFactsInput } from "../facts/input.mjs";
 import type { ParsedDiffFile } from "../diff/parser.mjs";
-import { normalizeDocumentFact, resolveJsonPointer } from "../document-facts.mjs";
+import { normalizeDocumentFact } from "../document-facts.mjs";
 import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef, runGit } from "../git.mjs";
-import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, lowerNativeRequirements, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type NativeRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
+import { canonicalSemanticDigest, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, lowerNativeRequirements, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type NativeRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";

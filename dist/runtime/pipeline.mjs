@@ -1,6 +1,6 @@
-import { normalizeDocumentFact, resolveJsonPointer } from "../document-facts.mjs";
+import { normalizeDocumentFact } from "../document-facts.mjs";
 import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef, runGit } from "../git.mjs";
-import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, lowerNativeRequirements } from "./canonical-requirements.mjs";
+import { canonicalSemanticDigest, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, lowerNativeRequirements } from "./canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";
@@ -125,6 +125,73 @@ export function selectRepoGuardAuthoritativeEvaluator(input) {
         base === "native" && head === "legacy" ? "A1:rollback_authority_missing" :
             "A1:representation_mixed_or_unknown";
     return { ok: false, reason, baseRepresentation: base, headRepresentation: head };
+}
+function readRepoGuardNativeSnapshot(repository, revision, repositoryRoot) {
+    const entries = listTrackedEntriesAtRef(revision, repositoryRoot);
+    const nativePaths = entries.map((entry) => entry.path)
+        .filter((path) => path.startsWith("requirements/") && /\.rg\.(?:yaml|json)$/.test(path))
+        .sort((a, b) => a.localeCompare(b, "en"));
+    const native = loadNativeRequirements({
+        repository,
+        revision,
+        paths: nativePaths,
+        readFile: (sha, path) => sha === revision ? readFileAtRef(sha, path, repositoryRoot) : null,
+    });
+    const lowered = lowerNativeRequirements(native);
+    return { revision, entries, nativePaths, native, ...lowered };
+}
+function closeRepoGuardNativeSnapshot(repository, repositoryRoot, snapshot, trustedRoots) {
+    const j2 = evaluateRootedRequirements({ requirements: snapshot.requirements, trustedRoots });
+    let j1 = {
+        ok: false,
+        justified: [],
+        unjustified: snapshot.entries.map((entry) => entry.path),
+        errors: [{ code: "j2_not_rooted", path: "" }],
+        explanations: {},
+        owners: {},
+    };
+    if (snapshot.requirements.ok && j2.ok) {
+        const resolver = createResourceResolver({
+            repository,
+            revision: snapshot.revision,
+            requirements: snapshot.requirements,
+            readers: {
+                [repository]: (sha, path) => sha === snapshot.revision ? readFileAtRef(sha, path, repositoryRoot) : null,
+            },
+        });
+        j1 = evaluateTrackedResourceClosure({
+            repository,
+            revision: snapshot.revision,
+            requirements: snapshot.requirements,
+            j2,
+            trackedPaths: snapshot.entries.map((entry) => entry.path),
+            resourceRelations: snapshot.resourceRelations,
+            resolver,
+        });
+    }
+    return { ...snapshot, j2, j1 };
+}
+function exactReceiptAllows(input, permission) {
+    return (input.trustedReceipts || []).some((receipt) => receipt.authorityBaseRevision === input.trustedAuthorityBaseRevision &&
+        receipt.baseRevision === input.baseRevision &&
+        receipt.headRevision === input.headRevision &&
+        Array.isArray(receipt.permissions) &&
+        receipt.permissions.every((item) => typeof item === "string" && item.length > 0 && item !== "*" && !item.includes("*")) &&
+        receipt.permissions.includes(permission));
+}
+function nativeRootsForHead(input, authority, head) {
+    const accepted = new Map(authority.native.requirements.map((item) => [item.id, item.semantic]));
+    const roots = [];
+    for (const item of head.native.requirements) {
+        const prior = accepted.get(item.id);
+        if (prior && semanticSubjectKey(prior) === semanticSubjectKey(item.semantic)) {
+            roots.push(prior);
+            continue;
+        }
+        if (exactReceiptAllows(input, "requirement:" + item.id))
+            roots.push(item.semantic);
+    }
+    return roots.sort((a, b) => a.requirementId.localeCompare(b.requirementId, "en"));
 }
 export function evaluateRepoGuardNativeBlockingSnapshot(input) {
     const reasons = [];
