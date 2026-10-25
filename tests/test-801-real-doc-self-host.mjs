@@ -134,7 +134,7 @@ test("#801 S4: real README orphan is detected then only exact region is removed"
     assert.equal(result.status, 0, result.error);
     const after = readFileSync(join(dir, "README.md"), "utf8");
     assert.equal(after, removeBlock(before));
-    assert.ok(after.includes("Новая блокирующая возможность"));
+    assert.ok(after.includes("Новая generic возможность"));
     assert.equal(readFileSync(join(dir, generated.model.target.path), "utf8"), read(generated.model.target.path));
     assert.equal(run("build", base, head, { [generated.model.id]: outputs[generated.model.id] }).result.idempotent, true);
   });
