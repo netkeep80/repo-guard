@@ -24,10 +24,6 @@ assert.match(observatorySource, /normalizePolicy/, "Observatory must consume can
 const checkDiffSource = source("src/check-diff.mts");
 assert.match(checkDiffSource, /loadPolicyRuntime/, "check-diff must consume canonical runtime normalization");
 assert.doesNotMatch(checkDiffSource, /resolvePolicyPacks|compileAnchorPolicy|compileConstraintProgram/, "check-diff must not own policy lowering");
-const githubPrSource = source("src/github-pr.mts");
-assert.match(githubPrSource, /loadPolicyRuntimeFromObject/, "check-pr must consume canonical runtime normalization for HEAD and BASE");
-assert.doesNotMatch(githubPrSource, /resolvePolicyPacks|compileAnchorPolicy|compileConstraintProgram/, "check-pr must not own policy lowering");
-
 function foundationPolicy() {
   return {
     policy_format_version: "0.3.0",

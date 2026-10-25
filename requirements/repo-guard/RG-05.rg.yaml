@@ -117,14 +117,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-c3.8c-linked-issue-observation.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-current-base-ref.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-doctor-boundary.mjs"
   - predicates: [verified_by]
     target:
@@ -145,23 +137,11 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-p0-2-cross-repo-linked-issue-process.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-p0-6-exact-repository-observation.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-p1-2-observation-report.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-p2-1-immutable-snapshot-cache.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p3-linked-issue-authority-freshness.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

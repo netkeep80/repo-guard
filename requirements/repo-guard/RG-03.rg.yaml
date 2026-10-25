@@ -181,10 +181,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-p0-4-scoped-state-obligation-replacement.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-p0-4-state-obligation-negative-matrix.mjs"
   - predicates: [verified_by]
     target:

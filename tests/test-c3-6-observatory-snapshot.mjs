@@ -225,12 +225,11 @@ assert.deepEqual(first.architecture.provenance, {
   source: "scripts/compression-metrics.mjs",
   sha: acceptedSha,
 });
-assert.equal(first.scenarios.length, 5);
+assert.equal(first.scenarios.length, 4);
 assert.deepEqual(
   first.scenarios.map((item) => item.id).sort(),
   [
     "contract-evidence",
-    "governance-cutover",
     "minimal-diff-policy",
     "surgical-change",
     "version-transition",

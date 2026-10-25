@@ -7,7 +7,6 @@ import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { compileAnchorPolicy, compileChangeProfiles, compileForbidRegex } from "../dist/policy-compiler.mjs";
 import { evaluateConstraintIR } from "../dist/checks/rules/constraints.mjs";
-import { checkIssueFallbackPrerequisites, checkPrerequisites } from "../dist/github-pr.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoGuard = resolve(projectRoot, "dist/repo-guard.mjs");
@@ -74,16 +73,6 @@ describe("runtime hardening", () => {
     assert.equal(failed.ok, false);
     assert.equal(failed.actual, 0);
     assert.equal(failed.min, 1);
-  });
-  it("separates mandatory git prerequisites from optional linked-issue gh lookup", () => {
-    const originalEvent = process.env.GITHUB_EVENT_PATH; delete process.env.GITHUB_EVENT_PATH;
-    try { assert.ok(checkPrerequisites().some((item) => item.includes("GITHUB_EVENT_PATH"))); }
-    finally { if (originalEvent !== undefined) process.env.GITHUB_EVENT_PATH = originalEvent; }
-    const root = mkdtempSync(join(tmpdir(), "rg-no-gh-")), fakeGit = join(root, "git");
-    writeFileSync(fakeGit, "#!/bin/sh\nprintf 'git version 2.0.0\\n'\n"); chmodSync(fakeGit, 0o755);
-    const originalPath = process.env.PATH; process.env.PATH = root; process.env.GITHUB_EVENT_PATH = join(root, "event.json");
-    try { assert.equal(checkPrerequisites().some((item) => item.includes("gh CLI")), false); assert.equal(checkIssueFallbackPrerequisites().some((item) => item.includes("gh CLI")), true); }
-    finally { process.env.PATH = originalPath; if (originalEvent !== undefined) process.env.GITHUB_EVENT_PATH = originalEvent; else delete process.env.GITHUB_EVENT_PATH; rmSync(root, { recursive: true, force: true }); }
   });
   it("passes shell-looking refs to git without shell execution", () => {
     const root = initTinyRepo("rg-ref-injection-");

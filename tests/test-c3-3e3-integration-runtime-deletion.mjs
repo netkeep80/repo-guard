@@ -38,14 +38,11 @@ assert.equal(read("src/policy-compiler.mts").includes("compileIntegrationPolicy"
 assert.equal(read("src/doctor.mts").includes("checkWorkflowConfig"), false);
 assert.equal(read("src/doctor.mts").includes("compileIntegrationPolicy"), false);
 
-const githubPrSource = read("src/github-pr.mts");
-for (const residue of [
-  "resolveAtomicIntegrationTransition",
-  "atomicCutoverRequested",
-  "integration-workflows",
-  "integration-artifacts",
-  "/integration/workflows/",
-]) assert.equal(githubPrSource.includes(residue), false, `src/github-pr.mts must not contain ${residue}`);
+assert.equal(
+  existsSync(resolve(root, "src/github-pr.mts")),
+  false,
+  "retired GitHub PR authority adapter must stay deleted",
+);
 
 const kindsFromProgram = [...new Set(runtimeConstraints(compileConstraintProgram(policy, null)).map((item) => item.kind))].sort();
 assert.deepEqual(kindsFromProgram, ["primitive_relation"]);

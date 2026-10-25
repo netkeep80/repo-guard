@@ -13,19 +13,11 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: ".github/workflows/trusted-enforcement.yml"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/checks/rules/governance-paths.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
       path: "dist/enforcement.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/trusted-authorizer.mjs"
   - predicates: [documents]
     target:
       kind: artifact
@@ -46,18 +38,10 @@ relations:
     target:
       kind: artifact
       path: "src/enforcement.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/trusted-authorizer.mts"
   - predicates: [verified_by]
     target:
       kind: artifact
       path: "tests/test-644-a-requirement-relation-core.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-644-b-requirement-transition-runtime.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -85,18 +69,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-p0-2-positive-permission-authority.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p0-3-trusted-enforcement-workflow.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p2-2-lazy-trust-lookup.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-p2-3-self-enforcement-topology.mjs"
   - predicates: [verified_by]
     target:
@@ -106,7 +78,3 @@ relations:
     target:
       kind: artifact
       path: "tests/test-security-fast-uri.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-trusted-authorizer-boundary.mjs"

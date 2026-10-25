@@ -53,10 +53,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/github-pr.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/policy-compiler.mjs"
   - predicates: [implemented_by]
     target:
@@ -233,10 +229,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "src/github-pr.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/policy-compiler.mts"
   - predicates: [implemented_by]
     target:
@@ -345,14 +337,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-645-self-host-relation-inventory.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-707-i0-shadow.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-707-i1-canonical-loader.mjs"
   - predicates: [verified_by]
     target:
@@ -417,10 +401,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-c3-10a-external-base-cutover.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-c3-10b-contract-surface-cutover.mjs"
   - predicates: [verified_by]
     target:
@@ -477,23 +457,11 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-github-pr-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-github-pr.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-p0-5-trusted-diff-budget-ceilings.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
       path: "tests/test-p1-1-policy-normalization.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p2-2-lazy-trust-lookup.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
