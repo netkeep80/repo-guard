@@ -7,7 +7,6 @@ import {
 } from "../dist/projection-model.mjs";
 import { lowerProjectionVerification } from "../dist/projection-lowering.mjs";
 import { evaluatePrimitiveRelation } from "../dist/checks/relation-kernel.mjs";
-import { checkGovernanceChangeAuthorization } from "../dist/checks/rules/governance-paths.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -158,29 +157,4 @@ assert.throws(
   "HYBRID output must fail closed rather than incorrectly lower to whole-file identity",
 );
 
-const projectionManifestPath = "repo-projections.json";
-const changedProjectionModel = {
-  path: projectionManifestPath,
-  status: "modified",
-  addedLines: ["+candidate narrows dependencies"],
-  deletedLines: ["-accepted dependency"],
-};
-const denied = checkGovernanceChangeAuthorization({
-  files: [changedProjectionModel],
-  governancePaths: [projectionManifestPath],
-});
-assert.equal(denied.ok, false, "existing governance boundary blocks candidate ProjectionModel self-weakening");
-
-const allowed = checkGovernanceChangeAuthorization({
-  files: [changedProjectionModel],
-  governancePaths: [projectionManifestPath],
-  governanceGrant: { authorized_governance_paths: [projectionManifestPath] },
-  trustedAuthorizer: {
-    trusted: true,
-    source: "repository_permission",
-    reason: "trusted_permission",
-  },
-});
-assert.equal(allowed.ok, true, "existing GovernanceGrant machinery is sufficient when independently authorized");
-
-console.log("Projection lowering/authority boundary passed.");
+console.log("Projection lowering boundary passed.");

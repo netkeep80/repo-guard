@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { strictCanonicalJson, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
-import { runPolicyPipelineShadow } from "../dist/runtime/pipeline.mjs";
 import { parseJson } from "../dist/document-facts.mjs";
 import { test } from "node:test";
 const sha = "a".repeat(40), repo = "netkeep80/repo-guard";
@@ -73,46 +72,6 @@ test("I1 F21 stable keyed fragment identity survives unrelated sibling insertion
   assert.equal(first.identity.pointer, second.identity.pointer);
 });
 
-test("I1 uses I0 shadow on existing normalized facts without altering v3 blocking report", async () => {
-  const input = {
-    mode: "check-diff", repositoryRoot: "/tmp/rg-i1-snapshot", repositoryIdentity: repo,
-    policy: {
-      policy_format_version: "0.3.0", repository_kind: "tooling",
-      paths: { forbidden: [], governance_paths: [], canonical_docs: [], operational_paths: [] },
-      diff_rules: { max_new_files: 8, max_new_docs: 8, max_net_added_lines: 100 },
-      content_rules: [], cochange_rules: [],
-    },
-    changeIntent: null, changeIntentSource: "none",
-    enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
-    diffText: "", trackedFiles: ["requirements/R1.json"],
-    readFile: () => '{"id":"R1"}',
-    readFileAtRef: (revision, path) => revision === sha && path === "requirements/R1.json" ? '{"id":"R1"}' : null,
-  };
-  const { runPolicyPipeline } = await import("../dist/runtime/pipeline.mjs");
-  const baseline = runPolicyPipeline(input, { quiet: true });
-  const shadow = runPolicyPipelineShadow(input, { quiet: true }, (facts) => {
-    const result = loadCanonicalRequirements({
-      repository: facts.repositoryIdentity,
-      revision: sha,
-      paths: facts.trackedFiles,
-      readFile: (revision, path) => facts.readFileAtRef(revision, path),
-    });
-    return { ok: result.ok, reasons: result.errors.map(e => e.code) };
-  });
-  assert.deepEqual(shadow.legacy, baseline);
-  assert.equal(shadow.comparison.candidate.ok, true);
-  assert.equal(shadow.comparison.classification, baseline.ok ? "EQUIVALENT" : "UNEXPECTED_DIFFERENCE");
-  const malformed = runPolicyPipelineShadow(input, { quiet: true }, (facts) => {
-    const result = loadCanonicalRequirements({
-      repository: facts.repositoryIdentity, revision: sha, paths: facts.trackedFiles,
-      readFile: () => '{"id":"R1","id":"R2"}',
-    });
-    return { ok: result.ok, reasons: result.errors.map(e => e.code) };
-  });
-  assert.deepEqual(malformed.legacy, baseline);
-  assert.equal(malformed.comparison.candidate.ok, false);
-  assert.ok(malformed.comparison.candidate.reasons.includes("duplicate_json_key"));
-});
 
 test("I1 semantic canonicalizer rejects non-finite or host-only values before SHA256", () => {
   assert.equal(load([item("requirements/R1.json",'{"id":"R1","overflow":1e999}')]).ok, false);

@@ -53,14 +53,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-contract-conformance-current-promotion.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-execution-phases.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-post-release-hygiene.mjs"
   - predicates: [verified_by]
     target:
@@ -78,7 +70,3 @@ relations:
     target:
       kind: artifact
       path: "tests/test-release-transaction.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-transition-rules.mjs"

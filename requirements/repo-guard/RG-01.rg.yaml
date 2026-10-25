@@ -22,22 +22,6 @@ relations:
     target:
       kind: artifact
       path: "docs/product-requirements.md"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "repo-policy.json"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "schemas/governance-grant.schema.json"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rules/governance-paths.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/enforcement.mts"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -45,31 +29,7 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-644-requirement-transition-falsifier.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-atomic-governance-cutover.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-c3-9h-enforcement-surface-purge.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-enforcement-mode.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-governance-paths.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-hardening.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p2-3-self-enforcement-topology.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

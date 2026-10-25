@@ -55,27 +55,3 @@ test("J2-35..40 exact root and provenance permutations, shortest canonical root 
  const permutedEdges=[req("A"),req("B"),req("C",["A","B"]),req("D",["C"])];
  assert.deepEqual(base,evaluate(permutedEdges,["A","B"]));
 });
-test("J2-40 I0 shadow failure does not change legacy blocking verdict",async()=>{
- const {runPolicyPipeline,runPolicyPipelineShadow}=await import("../dist/runtime/pipeline.mjs");
- const input={
-  mode:"check-diff",repositoryRoot:"/tmp/i3-exact",repositoryIdentity:repo,
-  policy:{policy_format_version:"0.3.0",repository_kind:"tooling",
-   paths:{forbidden:[],governance_paths:[],canonical_docs:[],operational_paths:[]},
-   diff_rules:{max_new_files:10,max_new_docs:10,max_net_added_lines:100},
-   content_rules:[],cochange_rules:[]},
-  changeIntent:null,changeIntentSource:"none",diffText:"",
-  enforcement:{ok:true,mode:"blocking",source:"test",requested:"blocking"},
-  trackedFiles:["requirements/A.json"],readFile:()=>null,
-  readFileAtRef:(_,path)=>path==="requirements/A.json"?JSON.stringify(req("A",["A"])):null,
- };
- const legacy=runPolicyPipeline(input,{quiet:true});
- const shadow=runPolicyPipelineShadow(input,{quiet:true},facts=>{
-  const universe=loadCanonicalRequirements({repository:facts.repositoryIdentity,revision:sha,
-   paths:["requirements/A.json"],readFile:(revision,path)=>facts.readFileAtRef(revision,path)});
-  const closure=evaluateRootedRequirements({requirements:universe,trustedRoots:[]});
-  return {ok:closure.ok,reasons:closure.ok?[]:["UNROOTED_REQUIREMENT"]};
- });
- assert.deepEqual(shadow.legacy,legacy);
- assert.equal(shadow.comparison.candidate.ok,false);
- assert.ok(shadow.comparison.candidate.reasons.includes("UNROOTED_REQUIREMENT"));
-});

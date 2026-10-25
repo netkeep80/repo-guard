@@ -29,10 +29,6 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
-      path: "docs/requirements-strict-pack.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
       path: "examples/scenarios/README.md"
   - predicates: [documents]
     target:
@@ -57,19 +53,7 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "src/init.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/policy-packs.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/repo-guard.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/reporting/renderers.mts"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -97,36 +81,8 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-documentation-language.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-init-boundary.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
       path: "tests/test-init.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p1-1-built-in-pack-equivalence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-pack-vocabulary-convergence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-policy-packs.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-repo-root.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-report-renderers-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-structured-output.mjs"

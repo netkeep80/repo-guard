@@ -37,19 +37,7 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
-      path: "docs/architecture-compression-3-baseline.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
       path: "docs/cli-reference.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "docs/self-hosting-coverage.json"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "scripts/compression-metrics.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -74,10 +62,6 @@ relations:
     target:
       kind: artifact
       path: "tests/support/vnext-699-model.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-699-five-consumer-differential.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -137,31 +121,11 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-compression-3-baseline.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-compression-metrics-git-io.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-compression-rules.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-isolation-manifest.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-p1-1-policy-normalization.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-p2-4-test-isolation.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-self-hosting.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact

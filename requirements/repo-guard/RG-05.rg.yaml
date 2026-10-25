@@ -5,10 +5,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: ".github/workflows/pages.yml"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/doctor.mjs"
   - predicates: [implemented_by]
     target:
@@ -41,26 +37,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "scripts/observatory/collect.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "scripts/observatory/render.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/doctor.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/facts/control-plane.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/facts/input.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/git.mts"
   - predicates: [implemented_by]
     target:
@@ -70,22 +46,6 @@ relations:
     target:
       kind: artifact
       path: "tests/support/immutable-observation.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-647-control-plane-doctor.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-647-control-plane-graph.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-647-git-lease-delete.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-647-merged-residue-planner.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -117,27 +77,7 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-doctor-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-doctor.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-git-output-buffer.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p0-1-machine-safe-git-transaction-coverage.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p0-1-machine-safe-git-transaction.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p0-6-exact-repository-observation.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -150,7 +90,3 @@ relations:
     target:
       kind: artifact
       path: "tests/test-rg05-runtime-action-authority.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-typescript-source-cutover.mjs"

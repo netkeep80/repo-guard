@@ -1,90 +1,99 @@
 {
   "required_paths": [
-    "docs/architecture-compression-3-baseline.md",
+    ".github/workflows/compiler-gate.yml",
+    "src/local-compiler.mts",
+    "src/runtime/canonical-requirements.mts",
+    "src/runtime/requirement-closure.mts",
+    "src/runtime/resource-closure.mts",
+    "src/runtime/transition-closure.mts",
+    "src/projection-api.mts",
     "tests/test-ci-contract.mjs"
   ],
   "forbidden_paths": [
+    ".github/workflows/pages.yml",
     ".github/workflows/trusted-enforcement.yml",
-    "dist/branch-hygiene.mjs",
-    "dist/checks/trace-rules.mjs",
-    "dist/github-pr.mjs",
-    "dist/trusted-authorizer.mjs",
-    "docs/architecture-compression-3-c3.3b.md",
-    "docs/branch-hygiene.md",
-    "docs/superpowers",
-    "docs/trusted-deployment.md",
-    "examples/size-rules-policy.json",
-    "src/branch-hygiene.mts",
-    "src/checks/trace-rules.mts",
-    "src/github-pr.mts",
-    "src/trusted-authorizer.mts",
-    "tests/test-branch-hygiene-analysis.mjs",
-    "tests/test-c3-8a-ci-runtime.mjs",
-    "tests/test-c3-8d-smoke-pack-install-dedup.mjs",
-    "tests/test-c3-8f-minimal-git-evidence.mjs",
-    "tests/test-c3-9i-branch-hygiene-purge.mjs"
+    ".github/ISSUE_TEMPLATE/change-intent.yml",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "repo-policy.json",
+    "schemas/repo-policy.schema.json",
+    "schemas/change-intent.schema.json",
+    "schemas/governance-grant.schema.json",
+    "src/change-intent.mts",
+    "src/check-diff.mts",
+    "src/doctor.mts",
+    "src/enforcement.mts",
+    "src/init.mts",
+    "src/policy-compiler.mts",
+    "src/policy-packs.mts",
+    "src/policy-vocabulary.mts",
+    "src/validate.mts",
+    "src/runtime/pipeline.mts",
+    "src/runtime/validation.mts",
+    "src/facts/control-plane.mts",
+    "src/facts/input.mts",
+    "scripts/observatory/collect.mjs",
+    "scripts/observatory/render.mjs",
+    "scripts/compression-metrics.mjs",
+    "docs/self-hosting-coverage.json",
+    "docs/requirements-strict-pack.md"
   ],
-  "required_text": [],
+  "required_text": [
+    {
+      "path": "src/repo-guard.mts",
+      "tokens": [
+        "check:",
+        "build:"
+      ]
+    },
+    {
+      "path": "README.md",
+      "tokens": [
+        "Snapshot",
+        "+ SubjectRef",
+        "+ Requirement",
+        "+ Relation",
+        "+ Constraint",
+        "+ Projection"
+      ]
+    }
+  ],
   "forbidden_text": [
     {
-      "path": "tests/validate-schemas.mjs",
+      "path": "src/repo-guard.mts",
       "tokens": [
-        "examples/size-rules-policy.json"
+        "check-diff",
+        "doctor",
+        "init",
+        "validate",
+        "--enforcement",
+        "repo-policy"
       ]
     },
     {
-      "path": "src/checks/constraint-program.mts",
+      "path": "action.yml",
       "tokens": [
-        "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult"
+        "check-diff",
+        "change-intent",
+        "enforcement",
+        "repo-policy.json"
       ]
     },
     {
-      "path": "src/checks/rules/constraints.mts",
+      "path": ".github/workflows/ci.yml",
       "tokens": [
-        "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult",
-        "interface ConstraintIR { files:",
-        "files: facts.diff.files.checked"
+        "repo-policy.json",
+        "check-diff",
+        "doctor",
+        "advisory policy"
       ]
     },
     {
-      "path": "src/reporting/anchor-diagnostics.mts",
+      "path": "README.md",
       "tokens": [
-        "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult"
-      ]
-    },
-    {
-      "path": "tests/test-c3-7-version-truth.mjs",
-      "tokens": [
-        "3.1.0"
-      ]
-    },
-    {
-      "path": "tests/test-c3-6-observatory-render.mjs",
-      "tokens": [
-        "3.1.0"
-      ]
-    },
-    {
-      "path": "tests/test-c3-6-observatory-snapshot.mjs",
-      "tokens": [
-        "3.1.0"
-      ]
-    },
-    {
-      "path": "src/git.mts",
-      "tokens": [
-        "BasePolicyProjection",
-        "BaseGovernancePathsResult",
-        "readBaseGovernancePaths"
-      ]
-    },
-    {
-      "path": "src/checks/relation-kernel.mts",
-      "tokens": [
-        "maxBound"
+        "repo-policy.json",
+        "check-diff",
+        "GovernanceGrant",
+        "ChangeIntent"
       ]
     }
   ]

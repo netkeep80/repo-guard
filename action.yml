@@ -1,5 +1,5 @@
 name: "repo-guard"
-description: "Run deterministic RepoGuard compiler on exact repository snapshots"
+description: "Run deterministic RepoGuard causal compiler on exact repository snapshots"
 author: "netkeep80"
 
 branding:
@@ -7,47 +7,18 @@ branding:
   color: "red"
 
 inputs:
-  mode:
-    description: >
-      Use `check` for exact BASE/HEAD compiler semantics (default).
-      `check-diff` is an optional legacy local-diff command.
-    required: false
-    default: "check"
-
-  enforcement:
-    description: >
-      Policy enforcement behavior. `blocking` fails the job when policy
-      violations are found. `advisory` reports violations but exits
-      successfully so teams can observe noise before enforcing.
-    required: false
-    default: "blocking"
-
   repo-root:
-    description: >
-      Path to the repository root that contains `repo-policy.json`.
-      Defaults to the root of the checked-out repository (`$GITHUB_WORKSPACE`).
+    description: "Repository root to evaluate. Defaults to GITHUB_WORKSPACE."
     required: false
     default: ""
-
   base:
-    description: >
-      Exact 40-character BASE commit SHA; defaults to the PR event BASE SHA.
+    description: "Exact 40-character BASE commit SHA; defaults to the PR event BASE SHA."
     required: false
     default: ""
-
   head:
-    description: >
-      Exact 40-character HEAD commit SHA; defaults to the PR event HEAD SHA.
+    description: "Exact 40-character HEAD commit SHA; defaults to the PR event HEAD SHA."
     required: false
     default: ""
-
-  change-intent:
-    description: >
-      Path to a ChangeIntent JSON file (used with `mode: check-diff`).
-      Path is relative to `repo-root`.
-    required: false
-    default: ""
-
   node-version:
     description: "Node.js version to use when running repo-guard."
     required: false
@@ -55,13 +26,10 @@ inputs:
 
 outputs:
   result:
-    description: >
-      Enforcement result derived from the structured report: `passed`, `failed`,
-      or `error` when repo-guard could not produce a valid machine report.
+    description: "Compiler result: passed, failed, or error."
     value: ${{ steps.run-repo-guard.outputs.result }}
-
   summary:
-    description: "Human-readable one-line summary derived from the structured report."
+    description: "Human-readable one-line compiler summary."
     value: ${{ steps.run-repo-guard.outputs.summary }}
 
 runs:
@@ -82,79 +50,43 @@ runs:
       id: run-repo-guard
       shell: bash
       env:
-        RG_MODE: ${{ inputs.mode }}
-        RG_ENFORCEMENT: ${{ inputs.enforcement }}
         RG_REPO_ROOT: ${{ inputs.repo-root }}
         RG_BASE: ${{ inputs.base }}
         RG_HEAD: ${{ inputs.head }}
         RG_EVENT_BASE: ${{ github.event.pull_request.base.sha }}
         RG_EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
-        RG_CHANGE_INTENT: ${{ inputs.change-intent }}
       run: |
         set +e
         REPO_ROOT="${RG_REPO_ROOT:-${GITHUB_WORKSPACE:-$PWD}}"
+        BASE_SHA="${RG_BASE:-$RG_EVENT_BASE}"
+        HEAD_SHA="${RG_HEAD:-$RG_EVENT_HEAD}"
         REPORT_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/repo-guard-report.XXXXXX.json")"
-        ARGS=(node "${GITHUB_ACTION_PATH}/dist/repo-guard.mjs" --repo-root "$REPO_ROOT")
-        if [ "$RG_MODE" = "check-diff" ] && [ -n "$RG_ENFORCEMENT" ]; then ARGS+=(--enforcement "$RG_ENFORCEMENT"); fi
 
-        case "$RG_MODE" in
-          check)
-            BASE_SHA="${RG_BASE:-$RG_EVENT_BASE}"
-            HEAD_SHA="${RG_HEAD:-$RG_EVENT_HEAD}"
-            if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-              ARGS+=(check --base "$BASE_SHA" --head "$HEAD_SHA" --format json)
-            else
-              : > "$REPORT_FILE"
-              CLI_EXIT=1
-            fi
-            ;;
-          check-diff)
-            ARGS+=(check-diff --format json)
-            if [ -n "$RG_BASE" ]; then ARGS+=(--base "$RG_BASE"); fi
-            if [ -n "$RG_HEAD" ]; then ARGS+=(--head "$RG_HEAD"); fi
-            if [ -n "$RG_CHANGE_INTENT" ]; then ARGS+=(--change-intent "$RG_CHANGE_INTENT"); fi
-            ;;
-          *)
-            : > "$REPORT_FILE"
-            CLI_EXIT=1
-            ;;
-        esac
-
-        if [ "$RG_MODE" = "check" ] || [ "$RG_MODE" = "check-diff" ]; then
-          "${ARGS[@]}" > "$REPORT_FILE"
+        if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          node "${GITHUB_ACTION_PATH}/dist/repo-guard.mjs" --repo-root "$REPO_ROOT"             check --base "$BASE_SHA" --head "$HEAD_SHA" --format json > "$REPORT_FILE"
           CLI_EXIT=$?
+        else
+          : > "$REPORT_FILE"
+          CLI_EXIT=1
         fi
 
-        node --input-type=module - "$REPORT_FILE" "$GITHUB_OUTPUT" "$CLI_EXIT" "$RG_ENFORCEMENT" <<'NODE'
+        node --input-type=module - "$REPORT_FILE" "$GITHUB_OUTPUT" "$CLI_EXIT" <<'NODE'
         import { readFileSync, appendFileSync } from "node:fs";
-        const [reportPath, outputPath, cliExitRaw, requestedEnforcement] = process.argv.slice(2);
+        const [reportPath, outputPath, cliExitRaw] = process.argv.slice(2);
         const cliExit = Number(cliExitRaw);
         let report = null;
         try { report = JSON.parse(readFileSync(reportPath, "utf8")); } catch {}
-        const compiler = report?.format === "repo-guard/local-compiler-v1";
-        const machineResult = report?.result;
-        const legacy = ["passed", "failed", "error", "passed_with_warnings"].includes(report?.result);
-        const validCompiler = compiler && typeof report.ok === "boolean"
-          && report.base && report.head && cliExit === (report.ok ? 0 : 1);
-        const validLegacy = legacy && Number.isInteger(report.exitCode)
-          && report.exitCode === cliExit;
-        const invalid = !validCompiler && !validLegacy;
-        const result = invalid ? "error" : compiler
-          ? (report.ok ? "passed" : "failed")
-          : report.result === "passed_with_warnings" ? "passed" : report.result;
-        const oneLine = (value, fallback) => typeof value === "string" && value.trim()
-          ? value.replace(/\s+/g, " ").trim() : fallback;
-        const summary = invalid
-          ? "repo-guard: error; structured report unavailable or inconsistent"
-          : compiler
-            ? `repo-guard: ${result}; J1 ${report.j1?.justified}/${report.j1?.tracked}; J2 ${report.j2?.rooted}; diagnostics ${report.diagnostics?.length}`
-            : machineResult === "error"
-              ? `repo-guard: error; ${oneLine(report?.reasonCode, "unknown_reason")}; ${oneLine(report?.message, "no diagnostic message")}`
-              : `repo-guard: ${result}; legacy check-diff; ${report.violationCount ?? 0} violation(s)`;
+        const valid = report?.format === "repo-guard/local-compiler-v1"
+          && typeof report.ok === "boolean"
+          && typeof report.base === "string"
+          && typeof report.head === "string"
+          && cliExit === (report.ok ? 0 : 1);
+        const result = valid ? (report.ok ? "passed" : "failed") : "error";
+        const summary = valid
+          ? `repo-guard: ${result}; J1 ${report.j1?.justified}/${report.j1?.tracked}; J2 ${report.j2?.rooted}; diagnostics ${report.diagnostics?.length}`
+          : "repo-guard: error; structured compiler report unavailable or inconsistent";
         appendFileSync(outputPath, `result=${result}\nsummary=${summary}\n`);
-        if (invalid) process.exitCode = 1;
-        else if (requestedEnforcement === "advisory" && result === "failed") process.exitCode = 0;
-        else process.exitCode = cliExit;
+        process.exitCode = valid ? cliExit : 1;
         NODE
         ADAPTER_EXIT=$?
         rm -f "$REPORT_FILE"

@@ -408,17 +408,3 @@ test("I5 malformed authored relation is fail-closed at transition boundary", () 
   red(result, "invalid_relation:ROOT:bad", "malformed relation");
 });
 
-test("I5 remains non-authoritative behind I0 shadow seam; legacy v3 blocking report is unchanged", async () => {
-  const { runPolicyPipeline, runPolicyPipelineShadow } = await import("../dist/runtime/pipeline.mjs");
-  const input = {
-    mode: "check-diff", repositoryRoot: "/tmp/i5-shadow", repositoryIdentity: repository,
-    policy: { policy_format_version: "0.3.0", repository_kind: "tooling", paths: { forbidden: [], governance_paths: [], canonical_docs: [], operational_paths: [] }, diff_rules: { max_new_files: 10, max_new_docs: 10, max_net_added_lines: 100 }, content_rules: [], cochange_rules: [] },
-    changeIntent: null, changeIntentSource: "none", enforcement: { ok: true, mode: "blocking", source: "test", requested: "blocking" },
-    diffText: "", trackedFiles: [], readFile: () => null,
-  };
-  const legacy = runPolicyPipeline(input, { quiet: true });
-  const shadow = runPolicyPipelineShadow(input, { quiet: true }, () => ({ ok: false, reasons: ["J3:no_cause:synthetic"] }));
-  assert.deepEqual(shadow.legacy, legacy);
-  assert.equal(shadow.comparison.candidate.ok, false);
-  assert.equal(shadow.comparison.identical, false);
-});
