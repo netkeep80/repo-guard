@@ -42,11 +42,3 @@ relations:
     target:
       kind: artifact
       path: "tests/test-cli-runtime.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-init-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-init.mjs"

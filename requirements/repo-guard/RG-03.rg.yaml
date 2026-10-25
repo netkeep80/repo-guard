@@ -66,7 +66,3 @@ relations:
     target:
       kind: artifact
       path: "tests/fixtures/valid-change-intent.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-diff-rules.mjs"
