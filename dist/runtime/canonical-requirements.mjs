@@ -496,7 +496,6 @@ export function loadNativeRequirements(input) {
         a.source.path.localeCompare(b.source.path, "en"));
     return { ok: errors.length === 0, requirements, index, errors };
 }
-
 export function lowerNativeRequirements(native) {
     const errors = native.errors.map(error => ({
         code: "invalid_canonical_source",
@@ -592,4 +591,3 @@ export function lowerNativeRequirements(native) {
     };
     return { requirements: result, lifecycle, resourceRelations };
 }
-

@@ -132,4 +132,13 @@ export interface NativeRequirementsResult {
     errors: readonly NativeContractError[];
 }
 export declare function loadNativeRequirements(input: CanonicalSnapshotInput): NativeRequirementsResult;
+export declare function lowerNativeRequirements(native: NativeRequirementsResult): {
+    requirements: CanonicalRequirementsResult;
+    lifecycle: Record<string, Record<string, boolean>>;
+    resourceRelations: {
+        from: string;
+        kind: "generates";
+        to: string;
+    }[];
+};
 export {};
