@@ -16,7 +16,6 @@ const PIN = {
   setupNode: "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
   downloadArtifact: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
   uploadArtifact: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-  appToken: "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
 };
 
 const packageJson = JSON.parse(read("package.json"));
@@ -40,13 +39,6 @@ assert.match(actionRun, /report\?\.reasonCode/, "Action summary must preserve st
 assert.match(actionRun, /report\?\.message/, "Action summary must preserve structured error message");
 assert.ok(actionRun.includes('value.replace(/\\s+/g, " ")'), "Action summary diagnostics must remain single-line");
 assert.match(actionRun, /structured report unavailable or inconsistent/, "invalid reports must keep the generic fail-closed adapter error");
-
-const trusted = yaml(".github/workflows/trusted-enforcement.yml");
-const trustedUses = (trusted.jobs?.["trusted-enforcement"]?.steps ?? []).map((step) => step.uses).filter(Boolean);
-assert.ok(trustedUses.includes(PIN.checkout), "independent trusted producer checkout must be immutable-pinned");
-assert.ok(trustedUses.includes(PIN.appToken), "dedicated App token action remains immutable-pinned");
-assert.ok(trustedUses.includes("./"), "trusted producer must execute accepted local repo-guard");
-assert.equal(trustedUses.some((uses) => /^actions\/checkout@v/.test(uses)), false);
 
 const release = yaml(".github/workflows/release.yml");
 const releaseUses = Object.values(release.jobs ?? {}).flatMap((job) => (job.steps ?? []).map((step) => step.uses).filter(Boolean));

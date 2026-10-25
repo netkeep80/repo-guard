@@ -33,10 +33,6 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
-      path: "docs/trusted-deployment.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
       path: "examples/scenarios/governance-cutover/base/repo-policy.json"
   - predicates: [documents]
     target:
