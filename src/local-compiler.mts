@@ -1,7 +1,6 @@
 import { listTrackedEntriesAtRef, readFileAtRef, runGit } from "./git.mjs";
 import { parseNameStatusZ } from "./diff/parser.mjs";
-import { loadNativeRequirements } from "./runtime/canonical-requirements.mjs";
-import { lowerNativeRequirements } from "./runtime/pipeline.mjs";
+import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "./runtime/resource-closure.mjs";
 import { createResourceResolver } from "./runtime/resource-resolver.mjs";

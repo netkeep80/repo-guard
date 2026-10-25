@@ -2,7 +2,7 @@ import type { RepositoryFactsInput } from "../facts/input.mjs";
 import type { ParsedDiffFile } from "../diff/parser.mjs";
 import { normalizeDocumentFact, resolveJsonPointer } from "../document-facts.mjs";
 import { getExactDiffIdentity, listTrackedEntriesAtRef, readFileAtRef, runGit } from "../git.mjs";
-import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type NativeRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
+import { canonicalSemanticDigest, durablePointer, exactRepresentationSubject, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, lowerNativeRequirements, type CanonicalError, type CanonicalRequirement, type CanonicalRequirementsResult, type NativeRequirementsResult, type SemanticRequirementSubject } from "./canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./requirement-closure.mjs";
 import { createResourceResolver } from "./resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "./resource-closure.mjs";
@@ -168,101 +168,6 @@ export function selectRepoGuardAuthoritativeEvaluator(input: {
     base === "native" && head === "legacy" ? "A1:rollback_authority_missing" :
     "A1:representation_mixed_or_unknown";
   return { ok: false as const, reason, baseRepresentation: base, headRepresentation: head };
-}
-
-export function lowerNativeRequirements(native: NativeRequirementsResult) {
-  const errors: CanonicalError[] = native.errors.map(error => ({
-    code: "invalid_canonical_source",
-    path: error.path,
-    message: "native:" + error.code + ":" + error.message,
-    ...(error.otherPath ? { otherPath: error.otherPath } : {}),
-  }));
-  const requirements: CanonicalRequirement[] = [];
-  const lifecycle: Record<string, Record<string, boolean>> = {};
-  const resourceRelations: Array<{ from: string; kind: "generates"; to: string }> = [];
-  const generatedSeen = new Set<string>();
-
-  for (const item of native.requirements) {
-    const relations: Record<string, unknown> = {};
-    let relationIndex = 0;
-    for (const relation of item.relations) {
-      if (relation.predicate === "generates") {
-        if (relation.source.kind !== "artifact" || relation.target.kind !== "artifact") {
-          errors.push({ code: "invalid_canonical_source", path: item.source.path, message: "native:invalid generates lowering" });
-          continue;
-        }
-        const key = relation.source.path + "\0" + relation.target.path;
-        if (generatedSeen.has(key)) {
-          errors.push({ code: "invalid_canonical_source", path: item.source.path, message: "native:duplicate global generates relation" });
-          continue;
-        }
-        generatedSeen.add(key);
-        resourceRelations.push({ from: relation.source.path, kind: "generates", to: relation.target.path });
-        continue;
-      }
-      if (relation.source.kind !== "requirement" || relation.source.id !== item.id) {
-        errors.push({ code: "invalid_canonical_source", path: item.source.path, message: "native:non-generates relation must originate from enclosing Requirement" });
-        continue;
-      }
-      const label = "native_" + String(relationIndex++).padStart(6, "0");
-      relations[label] = {
-        predicate: relation.predicate,
-        target: relation.target,
-        ...(relation.collection === true ? { collection: true } : {}),
-      };
-    }
-    const constraints = item.constraints.map(constraint => ({
-      id: constraint.id,
-      activation: constraint.activation,
-      relations: [...constraint.scope.relations],
-      includeGenerated: constraint.scope.include_generated,
-      ...(constraint.metric ? {
-        metric: constraint.metric.key === "git.changed_lines" ? "changed_lines" :
-          constraint.metric.key === "git.changed_resources" ? "changed_resources" : constraint.metric.key,
-        max: constraint.metric.max,
-      } : {}),
-      ...(constraint.evidence ? {
-        evidence: {
-          kind: constraint.evidence.class,
-          key: constraint.evidence.key,
-          ...(constraint.evidence.verifier?.kind === "artifact" ? { verifierPath: constraint.evidence.verifier.path } : {}),
-        },
-      } : {}),
-    }));
-    const value = { id: item.id, normative: item.normative, relations, constraints } as CanonicalRequirement["value"];
-    requirements.push({ ...item, value, semantic: item.semantic });
-    lifecycle[item.id] = { ...item.lifecycle };
-  }
-
-  requirements.sort((a, b) => a.id.localeCompare(b.id, "en"));
-  resourceRelations.sort((a, b) => a.from.localeCompare(b.from, "en") || a.to.localeCompare(b.to, "en"));
-  errors.sort((a, b) => a.path.localeCompare(b.path, "en") || a.code.localeCompare(b.code, "en") || a.message.localeCompare(b.message, "en"));
-  const index: Record<string, CanonicalRequirement> = Object.create(null);
-  for (const item of requirements) index[item.id] = item;
-  const result: CanonicalRequirementsResult = {
-    ok: errors.length === 0,
-    requirements,
-    index,
-    errors,
-    resolveFragment(id, pointer, options = {}) {
-      const source = index[id];
-      if (errors.length || !source) return { ok: false, error: { code: "missing_fragment", path: id, message: "native Requirement unavailable in invalid or incomplete lowering" } };
-      if (options.durable && !durablePointer(pointer))
-        return { ok: false, error: { code: "malformed_pointer", path: source.source.path, message: "positional pointer is not durable" } };
-      try {
-        const value = resolveJsonPointer(source.value, pointer) as CanonicalRequirement["value"];
-        return {
-          ok: true,
-          value,
-          identity: exactRepresentationSubject(source.semantic.repository, source.representation.revision, source.source.path, pointer),
-        };
-      } catch (error) {
-        const message = (error as Error).message;
-        return { ok: false, error: { code: /invalid json_pointer/i.test(message) ? "malformed_pointer" : "missing_fragment", path: source.source.path, message } };
-      }
-    },
-  };
-  return { requirements: result, lifecycle, resourceRelations };
 }
 
 export interface RepoGuardNativeBlockingSnapshotInput {
