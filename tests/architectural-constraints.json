@@ -10,32 +10,42 @@
     "tests/test-ci-contract.mjs"
   ],
   "forbidden_paths": [
-    ".github/workflows/pages.yml",
-    ".github/workflows/trusted-enforcement.yml",
     ".github/ISSUE_TEMPLATE/change-intent.yml",
     ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/pages.yml",
+    ".github/workflows/trusted-enforcement.yml",
+    "docs/contract-development.md",
+    "docs/requirements-strict-pack.md",
+    "docs/self-hosting-coverage.json",
     "repo-policy.json",
-    "schemas/repo-policy.schema.json",
     "schemas/change-intent.schema.json",
     "schemas/governance-grant.schema.json",
+    "schemas/repo-policy.schema.json",
+    "scripts/compression-metrics.mjs",
+    "scripts/observatory/collect.mjs",
+    "scripts/observatory/render.mjs",
     "src/change-intent.mts",
     "src/check-diff.mts",
     "src/doctor.mts",
     "src/enforcement.mts",
+    "src/facts/control-plane.mts",
+    "src/facts/input.mts",
     "src/init.mts",
     "src/policy-compiler.mts",
     "src/policy-packs.mts",
     "src/policy-vocabulary.mts",
-    "src/validate.mts",
     "src/runtime/pipeline.mts",
     "src/runtime/validation.mts",
-    "src/facts/control-plane.mts",
-    "src/facts/input.mts",
-    "scripts/observatory/collect.mjs",
-    "scripts/observatory/render.mjs",
-    "scripts/compression-metrics.mjs",
-    "docs/self-hosting-coverage.json",
-    "docs/requirements-strict-pack.md"
+    "src/validate.mts",
+    "tests/fixtures/broken-policy.json",
+    "tests/fixtures/diff-change-intent.json",
+    "tests/fixtures/invalid-change-intent.json",
+    "tests/fixtures/invalid-content-rule-old-form.json",
+    "tests/fixtures/invalid-operational-paths.json",
+    "tests/fixtures/invalid-policy.json",
+    "tests/fixtures/policy-bad-regex.json",
+    "tests/fixtures/valid-change-intent.json",
+    "tests/fixtures/valid-policy.json"
   ],
   "required_text": [
     {
@@ -94,6 +104,58 @@
         "check-diff",
         "GovernanceGrant",
         "ChangeIntent"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-01.rg.yaml",
+      "tokens": [
+        "GovernanceGrant",
+        "trusted-enforcement"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-02.rg.yaml",
+      "tokens": [
+        "contract-conformance"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-03.rg.yaml",
+      "tokens": [
+        "must_not_touch",
+        "pr_immutable",
+        "потолки политики"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-04.rg.yaml",
+      "tokens": [
+        "cochange"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-06.rg.yaml",
+      "tokens": [
+        "advisory",
+        "doctor",
+        "`init`",
+        "blocking",
+        "app_id"
+      ]
+    },
+    {
+      "path": "docs/product-requirements.md",
+      "tokens": [
+        "repo-policy.json",
+        "ChangeIntent",
+        "GovernanceGrant",
+        "check-diff",
+        "doctor",
+        "`init`",
+        "contract-conformance",
+        "must_not_touch",
+        "pr_immutable",
+        "cochange"
       ]
     }
   ]

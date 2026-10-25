@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-03
-normative: "### RG-03 — Ограниченные и раздельные полномочия изменения\n\n**`MUST`:** явно выбранная граница изменения должна охватывать затронутую authority, включая прежний путь при переименовании. Разрешение менять одну область не распространяется автоматически на соседнюю. Ограничения из непривилегированного намерения не расширяют доверенные потолки.\n\nРиск — переименование или совместное изменение позволяет пересечь запрет. Нарушение — тот же защищаемый объект можно изменить через другое имя либо повышение бюджета в PR. Машинная проверяемость высокая для путей и числовых потолков; путь сам по себе не доказывает семантическую независимость модулей.\n\nСредства: `scope`, `must_not_touch`, потолки политики, governance, `pr_immutable`; для постоянной границы нужна доверенная политика, поскольку сам автор может переписать своё намерение. В `anum_parser` независимость семантического и визуального пакетов дополнительно проверялась точными зависимостями и предметным CI. Доказанный дефект `rename-away` обычного намерения закрыт в #568: `scope` и `must_not_touch` учитывают прежний путь, тогда как положительная семантика `must_touch` намеренно не менялась.\n"
+normative: "### RG-03 — Ограниченная причинная область изменения\n\n**`MUST`:** изменённый tracked Resource обосновывается явной причинной цепочкой от rooted Requirement; связь или Constraint одного Requirement не распространяется на несвязанный Resource. Requirement-scoped Constraint измеряет только область, выбранную его объявленными отношениями.\n\nРиск — соседний или переименованный Resource проходит проверку без собственного причинного основания либо локальное ограничение превращается в скрытый глобальный барьер. Нарушение — orphan Resource считается допустимым только из-за близости пути, общего каталога или несвязанного изменения.\n\nСредства: точная Git identity, J1 resource closure, J3 transition cause и relation-scoped Constraints."
 relations:
   - predicates: [implemented_by]
     target:
@@ -54,15 +54,3 @@ relations:
     target:
       kind: artifact
       path: "src/utils/path-patterns.mts"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/diff-change-intent.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-change-intent.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/valid-change-intent.json"

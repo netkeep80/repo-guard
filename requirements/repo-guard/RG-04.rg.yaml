@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-04
-normative: "### RG-04 — Свидетельство соответствует утверждению\n\n**`MUST`:** результат сообщает проверенное ограничение, идентичность входов, наблюдение и предел вывода. Отсутствующее свидетельство нельзя называть успехом. **`SHOULD`:** для существенной гарантии иметь положительный пример и контрпример с ожидаемой причиной отказа.\n\nРиск — зелёный цвет, наличие тестового файла или изменение соседнего файла подменяет доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката. Машинно проверяются объявленные значения и связи; содержательность теста требует предметной проверки.\n\nСредства: машинный отчёт, диагностика отношений, исполняемые сценарии, предметные тесты, точные ссылки на запуски. Отрицательный свидетель может успешно доказать существование пробела: в `anum_docs` тест проходит, утверждая, что текущая реализация ещё не удовлетворяет кандидату. `cochange` не доказывает запуск или релевантность теста.\n"
+normative: "### RG-04 — Свидетельство соответствует утверждению\n\n**`MUST`:** результат сообщает точную identity входов, проверенное ограничение, наблюдение и предел вывода. Отсутствующее обязательное свидетельство нельзя называть успехом. `verified_by` задаёт traceability к проверочной поверхности, но не подменяет фактическое исполнение предметного теста или доказательства обычным CI. **`SHOULD`:** существенная гарантия имеет положительный и отрицательный свидетель.\n\nРиск — зелёный цвет, наличие тестового файла или соседнее изменение выдаются за доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката."
 relations:
   - predicates: [implemented_by]
     target:
@@ -122,30 +122,6 @@ relations:
     target:
       kind: artifact
       path: "tests/architectural-constraints.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/broken-policy.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-content-rule-old-form.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-operational-paths.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-policy.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/policy-bad-regex.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/valid-policy.json"
   - predicates: [verified_by]
     target:
       kind: artifact
