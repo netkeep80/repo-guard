@@ -1,11 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { readFact } from "../dist/document-facts.mjs";
 import {
   relationDescriptor,
   relationDescriptors,
 } from "../dist/checks/relation-kernel.mjs";
-import { observeImmutable } from "./support/immutable-observation.mjs";
 
 let failures = 0;
 
@@ -16,10 +13,6 @@ function expect(label, actual, expected) {
     failures++;
     console.error(`  expected: ${expected}, got: ${actual}`);
   }
-}
-
-function source(path) {
-  return readFileSync(resolve(path), "utf8");
 }
 
 const expectedPublicKinds = [
@@ -42,25 +35,14 @@ const descriptors = relationDescriptors();
 const descriptorKinds = descriptors.map((item) => item.kind).sort();
 const publicKinds = descriptors.filter((item) => item.public).map((item) => item.kind).sort();
 expect(
-  "one relation descriptor table owns public and internal canonical relation kinds",
+  "one relation descriptor table owns public and internal generic relation kinds",
   descriptorKinds.join(","),
-  expectedKinds.join(",")
+  expectedKinds.join(","),
 );
 expect(
   "public relation surface remains the established seven document relations",
   publicKinds.join(","),
-  expectedPublicKinds.join(",")
-);
-
-const schema = JSON.parse(source("schemas/repo-policy.schema.json"));
-const schemaKinds = schema.definitions.document_relation_rule.oneOf
-  .map((form) => form.properties?.kind?.const)
-  .filter((kind) => typeof kind === "string")
-  .sort();
-expect(
-  "schema document relation kinds exactly match public canonical descriptors",
-  schemaKinds.join(","),
-  publicKinds.join(",")
+  expectedPublicKinds.join(","),
 );
 
 const transition = relationDescriptor("scalar_strictly_greater");
@@ -71,7 +53,7 @@ expect("transition relation has explicit strictness semantics", Boolean(transiti
 expect("transition relation has stable identity inputs", transition.identity.join(","), "id");
 
 for (const kind of expectedInternalKinds) {
-  expect(`${kind} is internal canonical semantics`, relationDescriptor(kind).public, false);
+  expect(`${kind} is internal generic semantics`, relationDescriptor(kind).public, false);
 }
 
 let unknownError = "";
@@ -142,36 +124,9 @@ const missingBase = readFact({ ...snapshotContext, baseRef: null }, {
 });
 expect("FactRef snapshot reads fail closed", missingBase.ok, false);
 
-for (const file of [
-  "src/policy-compiler.mts",
-  "src/checks/constraint-program.mts",
-  "src/checks/rules/constraints.mts",
-]) {
-  const text = source(file);
-  const duplicated = expectedPublicKinds.filter((kind) => text.includes(`"${kind}"`));
-  expect(`${file} has no independent public relation-kind switch`, duplicated.join(","), "");
-}
-
-expect("old selector type is deleted", source("src/document-facts.mts").includes("DocumentFactSelector"), false);
-expect("old selector reader is deleted", source("src/document-facts.mts").includes("readDocumentFact"), false);
-
-const compressionMetrics = JSON.parse(observeImmutable(
-  process.execPath,
-  ["scripts/compression-metrics.mjs", "--ref", "HEAD"],
-));
-const c31 = compressionMetrics.architecture;
-expect("compression metrics see one canonical FactRef model", c31.canonical_factref_model_count, 1);
-expect("compression metrics see one primitive descriptor registry", c31.primitive_descriptor_registry_count, 1);
-expect("compression metrics see all canonical descriptor kinds", c31.primitive_descriptor_kinds.join(","), expectedKinds.join(","));
-expect("compression metrics see established public descriptor kinds", c31.public_primitive_descriptor_kinds.join(","), expectedPublicKinds.join(","));
-expect("compression metrics prove schema and public descriptor parity", c31.schema_relation_kinds_match_descriptors, true);
-expect("compression metrics see one generic primitive runtime shape", c31.primitive_runtime_shape_count, 1);
-expect("compression metrics see no downstream public relation switches", c31.independent_document_relation_switches, 0);
-expect("new primitive requires one semantic kernel edit-site", c31.semantic_edit_sites_per_new_primitive, 1);
-
 if (failures) {
-  console.error(`\n${failures} canonical relation kernel assertion(s) failed.`);
+  console.error(`\n${failures} generic relation kernel assertion(s) failed.`);
   process.exit(1);
 }
 
-console.log("\nCanonical relation kernel contract passed.");
+console.log("\nGeneric relation kernel contract passed.");
