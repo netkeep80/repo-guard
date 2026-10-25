@@ -45,7 +45,8 @@
     "tests/fixtures/invalid-policy.json",
     "tests/fixtures/policy-bad-regex.json",
     "tests/fixtures/valid-change-intent.json",
-    "tests/fixtures/valid-policy.json"
+    "tests/fixtures/valid-policy.json",
+    "tests/support/vnext-699-model.mjs"
   ],
   "required_text": [
     {
@@ -69,14 +70,12 @@
   ],
   "forbidden_text": [
     {
-      "path": "src/repo-guard.mts",
+      "path": ".github/workflows/ci.yml",
       "tokens": [
+        "repo-policy.json",
         "check-diff",
         "doctor",
-        "init",
-        "validate",
-        "--enforcement",
-        "repo-policy"
+        "advisory policy"
       ]
     },
     {
@@ -89,12 +88,24 @@
       ]
     },
     {
-      "path": ".github/workflows/ci.yml",
+      "path": "docs/product-requirements.md",
       "tokens": [
         "repo-policy.json",
+        "ChangeIntent",
+        "GovernanceGrant",
         "check-diff",
         "doctor",
-        "advisory policy"
+        "`init`",
+        "contract-conformance",
+        "must_not_touch",
+        "pr_immutable",
+        "cochange"
+      ]
+    },
+    {
+      "path": "PORTFOLIO.md",
+      "tokens": [
+        "docs/contract-development.md"
       ]
     },
     {
@@ -104,6 +115,14 @@
         "check-diff",
         "GovernanceGrant",
         "ChangeIntent"
+      ]
+    },
+    {
+      "path": "RELEASING.md",
+      "tokens": [
+        ".github/workflows/pages.yml",
+        "Policy Observatory",
+        "repo-guard init"
       ]
     },
     {
@@ -144,18 +163,50 @@
       ]
     },
     {
-      "path": "docs/product-requirements.md",
+      "path": "scripts/verify-release-ref.mjs",
       "tokens": [
-        "repo-policy.json",
-        "ChangeIntent",
-        "GovernanceGrant",
+        "used by repo-guard init"
+      ]
+    },
+    {
+      "path": "src/document-facts.mts",
+      "tokens": [
+        "\"change_intent\"",
+        "ChangeIntentFactSelector",
+        "changeIntent?:",
+        "changeIntentFactSource"
+      ]
+    },
+    {
+      "path": "src/local-compiler.mts",
+      "tokens": [
+        "mode: \"compiler\"",
+        "trustedEvidenceProviders"
+      ]
+    },
+    {
+      "path": "src/repo-guard.mts",
+      "tokens": [
         "check-diff",
         "doctor",
-        "`init`",
-        "contract-conformance",
-        "must_not_touch",
-        "pr_immutable",
-        "cochange"
+        "init",
+        "validate",
+        "--enforcement",
+        "repo-policy"
+      ]
+    },
+    {
+      "path": "src/runtime/transition-closure.mts",
+      "tokens": [
+        "AuthenticatedProviderGrant",
+        "ProviderCapability",
+        "TransitionReceipt",
+        "WorkIntentFact",
+        "authenticatedProviderGrants",
+        "mode?: \"trusted\"",
+        "protectedResources",
+        "trustedEvidenceProviders",
+        "trustedReceipts"
       ]
     }
   ]

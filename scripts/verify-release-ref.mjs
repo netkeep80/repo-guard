@@ -378,7 +378,7 @@ export async function verifyReleaseRef({
 function usage() {
   return `Usage: node scripts/verify-release-ref.mjs [--repo <owner/repo>] [--tag <vX.Y.Z>] [--expected-sha <40-hex-S>] [--package-root <path>]
 
-Checks the release invariant used by repo-guard init:
+Checks the release invariant used by the release workflows and optional prepublish verification:
   package.json.version -> exact Git tag commit -> current checkout -> published GitHub release v<version>
 `;
 }

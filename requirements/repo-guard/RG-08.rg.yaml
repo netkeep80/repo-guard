@@ -54,10 +54,6 @@ relations:
     target:
       kind: artifact
       path: "tests/support/run-cli.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/support/vnext-699-model.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
