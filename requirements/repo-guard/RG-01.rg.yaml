@@ -10,14 +10,6 @@ relations:
     target:
       kind: artifact
       path: "tests/test-788-compiler-gate.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/governance-paths.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/enforcement.mjs"
   - predicates: [documents]
     target:
       kind: artifact
@@ -26,10 +18,6 @@ relations:
     target:
       kind: artifact
       path: "tests/test-644-a-requirement-relation-core.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9h-enforcement-surface-purge.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

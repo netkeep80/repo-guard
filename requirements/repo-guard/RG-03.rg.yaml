@@ -5,22 +5,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/change-intent.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/check-diff.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/policy-delta-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/state-obligation-plan.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/diff/classification.d.mts"
   - predicates: [implemented_by]
     target:
@@ -50,54 +34,6 @@ relations:
     target:
       kind: artifact
       path: "dist/utils/path-patterns.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/minimal-diff-policy/base/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/minimal-diff-policy/base/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/minimal-diff-policy/cases/fail-forbidden/head/forbidden.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/minimal-diff-policy/cases/pass/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/minimal-diff-policy/scenario.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/base/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/base/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/cases/fail-must-not-touch/head/docs/oops.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/cases/fail-must-not-touch/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/cases/pass/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/change-intent.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/surgical-change/scenario.json"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -130,10 +66,6 @@ relations:
     target:
       kind: artifact
       path: "tests/fixtures/valid-change-intent.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-10b-profile-surface-cutover.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

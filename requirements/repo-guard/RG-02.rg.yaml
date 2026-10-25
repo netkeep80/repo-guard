@@ -13,26 +13,6 @@ relations:
   - predicates: [documents]
     target:
       kind: artifact
-      path: "examples/scenarios/version-transition/base/meta/REVISION"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/version-transition/base/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/version-transition/cases/fail-downgrade/head/meta/REVISION"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/version-transition/cases/pass/head/meta/REVISION"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/version-transition/scenario.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
       path: "RELEASING.md"
   - predicates: [implemented_by]
     target:
@@ -42,14 +22,6 @@ relations:
     target:
       kind: artifact
       path: "scripts/verify-release-ref.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3b-phase-override.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-7-version-truth.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

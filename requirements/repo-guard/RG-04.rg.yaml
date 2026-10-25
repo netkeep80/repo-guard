@@ -9,55 +9,11 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/checks/constraint-program.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/default-rule-families.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/orchestrator.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/checks/relation-kernel.d.mts"
   - predicates: [implemented_by]
     target:
       kind: artifact
       path: "dist/checks/relation-kernel.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rule-registry.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/advisory-text-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/anchor-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/constraints.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/content-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/extractors/anchors.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/policy-compiler.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/policy-vocabulary.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -89,23 +45,11 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/reporting/anchor-diagnostics.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/requirement-relations.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/runtime/analysis-report.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/runtime/canonical-requirements.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/runtime/pipeline.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -126,66 +70,6 @@ relations:
     target:
       kind: artifact
       path: "dist/runtime/transition-closure.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/runtime/validation.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/validate.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/contracts/checks.yaml"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/contracts/spec.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/docs/spec.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/tests/gate.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/fail-required-path/head/contracts/checks.yaml"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/fail-required-path/head/contracts/spec.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/fail-required-path/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/pass/head/contracts/checks.yaml"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/pass/head/contracts/spec.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/pass/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/scenario.json"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -325,32 +209,8 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-c3-10b-contract-surface-cutover.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3-diagnostic-evidence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3b-trace-anchor-lowering.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3d2-change-profile-lowering.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9g-doctor-git-evidence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-canonical-relation-kernel.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
       path: "tests/test-ci-contract.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/validate-schemas.mjs"

@@ -9,27 +9,11 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/init.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/policy-packs.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/repo-guard.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/reporting/renderers.mjs"
   - predicates: [documents]
     target:
       kind: artifact
       path: "docs/contract-development.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/README.md"
   - predicates: [documents]
     target:
       kind: artifact
@@ -54,26 +38,6 @@ relations:
     target:
       kind: artifact
       path: "src/repo-guard.mts"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-10b-policy-packs.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-10b-repo-guard-workflow-pack.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-5-scenario-library.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9c-readme-convergence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9f-single-consumer-scaffold-authority.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
