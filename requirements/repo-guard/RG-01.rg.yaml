@@ -10,14 +10,6 @@ relations:
     target:
       kind: artifact
       path: "tests/test-788-compiler-gate.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-security-brace-expansion.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-security-fast-uri.mjs"
   - predicates: [documents]
     target:
       kind: artifact

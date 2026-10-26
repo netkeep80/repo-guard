@@ -1,0 +1,20 @@
+format: repo-guard/requirement-v1
+id: RG-09
+normative: "### RG-09 — Явная и согласованная лицензия дистрибутива\n\n**`MUST`:** распространяемый пакет RepoGuard явно декларирует принятую лицензию и включает соответствующий текст лицензии; package metadata и `LICENSE` не должны расходиться.\n\nРиск — consumer получает неоднозначные или противоречивые условия использования. Нарушение — опубликованный пакет объявляет другую лицензию, не включает принятый license text или metadata и license artifact расходятся.\n\nСредства: versioned package metadata, tracked `LICENSE` и executable consistency witness."
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "package.json"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "LICENSE"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-rg09-distribution-license.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"
