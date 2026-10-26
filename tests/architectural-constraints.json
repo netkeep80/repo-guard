@@ -16,6 +16,7 @@
     ".github/workflows/trusted-enforcement.yml",
     "dist/requirement-relations.mjs",
     "docs/contract-development.md",
+    "docs/product-requirements.md",
     "docs/requirements-strict-pack.md",
     "docs/self-hosting-coverage.json",
     "repo-policy.json",
@@ -88,21 +89,6 @@
         "change-intent",
         "enforcement",
         "repo-policy.json"
-      ]
-    },
-    {
-      "path": "docs/product-requirements.md",
-      "tokens": [
-        "repo-policy.json",
-        "ChangeIntent",
-        "GovernanceGrant",
-        "check-diff",
-        "doctor",
-        "`init`",
-        "contract-conformance",
-        "must_not_touch",
-        "pr_immutable",
-        "cochange"
       ]
     },
     {

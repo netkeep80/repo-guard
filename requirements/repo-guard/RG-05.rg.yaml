@@ -54,3 +54,7 @@ relations:
     target:
       kind: artifact
       path: "tests/test-rg05-runtime-action-authority.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"

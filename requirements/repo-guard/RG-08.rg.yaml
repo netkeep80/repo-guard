@@ -34,10 +34,6 @@ relations:
     target:
       kind: artifact
       path: "dist/utils/repository-files.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "docs/cli-reference.md"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -57,8 +53,8 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "scripts/self-host-docs.mjs"
-  - predicates: [implemented_by]
+      path: "tsconfig.json"
+  - predicates: [documents]
     target:
       kind: artifact
-      path: "tsconfig.json"
+      path: "README.md"

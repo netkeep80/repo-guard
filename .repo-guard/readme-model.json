@@ -1,0 +1,56 @@
+{
+  "schema": "repo-guard/readme-model/v1",
+  "requirement_ids": [
+    "RG-01",
+    "RG-02",
+    "RG-03",
+    "RG-04",
+    "RG-05",
+    "RG-06",
+    "RG-07",
+    "RG-08"
+  ],
+  "readme": {
+    "title": "repo-guard — локальный causal compiler для репозитория",
+    "intro": "README является производным пользовательским представлением. Нормативная authority находится только в канонических Requirements; порядок, примеры и поясняющий текст принадлежат project-owned document model.",
+    "architecture": [
+      "Snapshot",
+      "SubjectRef",
+      "Requirement",
+      "Relation",
+      "Constraint",
+      "Projection"
+    ],
+    "requirements_heading": "Канонические требования",
+    "requirements_intro": "Текст ниже берётся из поля `normative` канонических Requirement-файлов. README не является вторым нормативным источником.",
+    "commands_heading": "Команды",
+    "action_heading": "Action",
+    "action_intro": "Для GitHub Actions закрепляйте принятую версию RepoGuard immutable SHA:",
+    "action_example": [
+      "- uses: netkeep80/repo-guard@<40-char-SHA>",
+      "  with:",
+      "    base: ${{ github.event.pull_request.base.sha }}",
+      "    head: ${{ github.event.pull_request.head.sha }}"
+    ],
+    "projection_heading": "Материализация Projection",
+    "projection_intro": "`build` применяет только bytes для явно объявленных Projection writers.",
+    "development_heading": "Разработка",
+    "development_commands": [
+      "npm ci",
+      "npm run check:dist",
+      "npm test"
+    ],
+    "roadmap_text": "Архитектурные решения и дальнейшие изменения координируются через roadmap.",
+    "roadmap_issue": 518
+  },
+  "cli": {
+    "descriptions": {
+      "build": "Без сетевых вызовов материализует только явно принадлежащие Projection файлы и области; Requirement relation сама по себе не даёт write authority.",
+      "check": "Локально проверяет exact `BASE/HEAD`, Requirements, Relations, Constraints и Projection freshness/ownership без записи."
+    },
+    "examples": {
+      "build": "repo-guard build --base <sha> --head <sha> --outputs outputs.json",
+      "check": "repo-guard check --base <40-char-sha> --head <40-char-sha>"
+    }
+  }
+}

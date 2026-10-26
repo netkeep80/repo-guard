@@ -134,3 +134,19 @@ relations:
     target:
       kind: artifact
       path: "tests/test-projection-self-host.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".repo-guard/readme-model.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "scripts/self-host-docs.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-820-requirement-readme.mjs"
