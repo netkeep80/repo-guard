@@ -3,7 +3,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getDiffObservation, runGit } from "../dist/git.mjs";
+import { runGit } from "../dist/git.mjs";
+import { parseNameStatusZ } from "../dist/diff/parser.mjs";
+// from "../dist/git.mjs";
 
 const scratch = mkdtempSync(join(tmpdir(), "repo-guard-large-diff-"));
 const git = (...args) => execFileSync("git", args, { cwd: scratch, encoding: "utf8" }).trim();
@@ -26,12 +28,14 @@ try {
   git("commit", "--quiet", "-m", "large diff");
   const head = git("rev-parse", "HEAD");
 
-  const observation = getDiffObservation(base, head, scratch);
-  assert.ok(Buffer.byteLength(observation.diffText, "utf8") > 1024 * 1024,
+  const diffText = runGit(["-c", "core.quotepath=false", "diff", base, head], { cwd: scratch });
+  assert.ok(Buffer.byteLength(diffText, "utf8") > 1024 * 1024,
     "regression fixture must exceed Node execFileSync default maxBuffer");
-  assert.equal(observation.files.length, 1);
-  assert.equal(observation.files[0].path, "large.txt");
-  assert.equal(observation.files[0].status, "modified");
+  const rawIdentity = runGit(["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", base, head], { cwd: scratch });
+  const files = parseNameStatusZ(rawIdentity);
+  assert.equal(files.length, 1);
+  assert.equal(files[0].path, "large.txt");
+  assert.equal(files[0].status, "modified");
 
   assert.throws(
     () => runGit(["show", "HEAD:large.txt"], { cwd: scratch, maxBuffer: 1024 }),
