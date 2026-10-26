@@ -31,13 +31,16 @@ console.log("\n--- package and Action execute checked dist without runtime TypeS
   assert.equal(existsSync(resolve(projectRoot, "dist/repo-guard.mjs")), true);
 
   const action = read("action.yml");
-  assert.match(action, /ARGS=\(node "\$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs"/);
+  assert.match(action, /node "\$\{GITHUB_ACTION_PATH\}\/dist\/repo-guard\.mjs"/);
+  assert.match(action, /check --base "\$BASE_SHA" --head "\$HEAD_SHA" --format json/);
   assert.doesNotMatch(action, /GITHUB_ACTION_PATH\}\/src\/repo-guard\.(?:mjs|mts)/);
+  assert.doesNotMatch(action, /check-diff|change-intent|--enforcement|repo-policy\.json/);
   assert.match(action, /npm install --omit=dev --silent/);
 
   const workflow = read(".github/workflows/ci.yml");
   assert.match(workflow, /name: Verify generated dist freshness\n\s+run: npm run check:dist/);
-  assert.match(workflow, /node dist\/repo-guard\.mjs --enforcement advisory check-diff/);
+  assert.match(workflow, /node dist\/repo-guard\.mjs check/);
+  assert.doesNotMatch(workflow, /check-diff|--enforcement|repo-policy\.json|doctor/);
 }
 
 console.log("\n--- stale generated dist is rejected ---");

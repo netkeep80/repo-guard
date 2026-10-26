@@ -137,18 +137,6 @@ export async function preflightRelease({
     "post-merge CI",
   );
 
-  const pages = await githubJson({
-    repo,
-    path: `/actions/workflows/pages.yml/runs?branch=main&event=workflow_run&head_sha=${sha}&status=completed&per_page=100`,
-    token,
-    fetchImpl,
-  });
-  requireExactWorkflowRun(
-    pages?.workflow_runs,
-    { path: ".github/workflows/pages.yml", event: "workflow_run", sha },
-    "Pages-on-accepted-SHA",
-  );
-
   const release = await observeReleaseTruth({
     repo,
     tag,

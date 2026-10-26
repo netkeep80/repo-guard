@@ -107,33 +107,3 @@ test("J1 independent exact reader rejects a revision substitution",()=>{
   trackedPaths:["requirements/ROOT.json","src/a.ts"],resolver:wrong});
  assert.equal(res.ok,false);assert.ok(res.errors.some(e=>e.code==="missing_resource_target"));
 });
-test("J1-44 shadow negative candidate preserves legacy report",async()=>{
- const {runPolicyPipeline,runPolicyPipelineShadow}=await import("../dist/runtime/pipeline.mjs");
- const input={
-  mode:"check-diff",repositoryRoot:"/tmp/i4-j1",repositoryIdentity:repository,
-  policy:{policy_format_version:"0.3.0",repository_kind:"tooling",
-   paths:{forbidden:[],governance_paths:[],canonical_docs:[],operational_paths:[]},
-   diff_rules:{max_new_files:10,max_new_docs:10,max_net_added_lines:100},
-   content_rules:[],cochange_rules:[]},
-  changeIntent:null,changeIntentSource:"none",diffText:"",
-  enforcement:{ok:true,mode:"blocking",source:"test",requested:"blocking"},
-  trackedFiles:["requirements/ROOT.json","src/a.ts","src/orphan.ts"],
-  readFile:()=>null,
-  readFileAtRef:(_,path)=>path==="requirements/ROOT.json"?JSON.stringify(doc):"exact:"+path
- };
- const legacy=runPolicyPipeline(input,{quiet:true});
- const result=runPolicyPipelineShadow(input,{quiet:true},facts=>{
-  const tracked=["requirements/ROOT.json","src/a.ts","src/orphan.ts"];
-  const requirements=loadCanonicalRequirements({repository,revision,paths:["requirements/ROOT.json"],
-   readFile:(sha,path)=>facts.readFileAtRef(sha,path)});
-  const j2=evaluateRootedRequirements({requirements,trustedRoots:[requirements.index.ROOT.semantic]});
-  const resolver=createResourceResolver({repository,revision,requirements,readers:{
-   [repository]:(sha,path)=>tracked.includes(path)?facts.readFileAtRef(sha,path):null
-  }});
-  const j1=evaluateTrackedResourceClosure({repository,revision,requirements,j2,trackedPaths:tracked,resolver});
-  return {ok:j1.ok,reasons:j1.unjustified.map(path=>"UNJUSTIFIED:"+path)};
- });
- assert.deepEqual(result.legacy,legacy);
- assert.equal(result.comparison.candidate.ok,false);
- assert.ok(result.comparison.candidate.reasons.includes("UNJUSTIFIED:src/orphan.ts"));
-});

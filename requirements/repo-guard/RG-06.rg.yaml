@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-06
-normative: "### RG-06 — Постепенное подключение и честный охват\n\n**`MUST`:** сложная контрактная методика включается явно; обнаружение существующих контрактов может предложить настройку, но не включать новые блокировки молча. Начальная конфигурация и диагностика не должны обещать неустановленную защиту. **`SHOULD`:** цена первого полезного ограничения мала.\n\nРиск — процессный барьер без пользы либо ложное ощущение защищённости. Нарушение — маленький проект обязан создать искусственный контракт или получает заявление о защите слияния без проверки платформы. Машинно проверяемы создаваемые файлы, режим и доступные настройки; выбор нужной зрелости принадлежит владельцу.\n\nСредства: явный `advisory`, начальные настройки, `doctor`, короткие примеры. `init` по-прежнему по умолчанию создаёт `blocking`, поэтому безопасное постепенное подключение требует явно выбрать `advisory`. `doctor` теперь только для чтения наблюдает защиту ветки и обязательные статусы, включая доступные `app_id`, но не настраивает платформу и не решает за владельца, какой производитель статуса является доверенным.\n"
+normative: "### RG-06 — Явное подключение и честный охват\n\n**`MUST`:** consumer явно выбирает неизменяемую версию RepoGuard и точные `BASE/HEAD`; отсутствие необходимых Requirements, Relations, предметного CI или платформенного required check нельзя выдавать за установленную защиту. **`SHOULD`:** первое полезное подключение моделирует только реально нужную причинную границу и не требует искусственной конфигурации.\n\nРиск — процессный барьер без пользы или ложное ощущение защищённости. Нарушение — инструмент обещает merge protection или предметную корректность, которых фактически не наблюдает.\n\nСредства: тонкий CLI/Action поверх `check`, обычный CI и настройки защиты ветки платформы."
 relations:
   - predicates: [implemented_by]
     target:
@@ -9,31 +9,7 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/init.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/policy-packs.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/repo-guard.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/reporting/renderers.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "docs/contract-development.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "docs/requirements-strict-pack.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/README.md"
   - predicates: [documents]
     target:
       kind: artifact
@@ -57,76 +33,8 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "src/init.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/policy-packs.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/repo-guard.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/reporting/renderers.mts"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-10b-policy-packs.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-10b-repo-guard-workflow-pack.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-5-scenario-library.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9c-readme-convergence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9f-single-consumer-scaffold-authority.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
       path: "tests/test-cli-runtime.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-documentation-language.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-init-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-init.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p1-1-built-in-pack-equivalence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-pack-vocabulary-convergence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-policy-packs.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-repo-root.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-report-renderers-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-structured-output.mjs"

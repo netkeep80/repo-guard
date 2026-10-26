@@ -1,29 +1,29 @@
 import assert from "node:assert/strict";
-import * as publicRuntime from "../dist/repo-guard.mjs";
 import { COMMANDS, runCli } from "../dist/repo-guard.mjs";
 
-assert.deepEqual([...COMMANDS].sort(), ["validate", "check-diff", "check", "build", "init", "doctor"].sort());
-for (const name of ["runTrustedService","reconcileAuthorityTarget","sameAuthorityEvaluationKey","verifyAuthorityWebhook","serviceEvaluatorEnvironment","runBoundedChild"]) {
-  assert.equal(Object.hasOwn(publicRuntime, name), false, `obsolete external authority export must be absent: ${name}`);
-}
-const originalError = console.error, errors = [];
+assert.deepEqual([...COMMANDS].sort(), ["build", "check"]);
+
+const originalError = console.error;
+const errors = [];
 console.error = (...args) => errors.push(args.join(" "));
-const cases = [
-  [["--definitely-unknown"], /Unknown option/],
-  [["--repo-root"], /--repo-root requires a path argument/],
-  [["check-diff", "--base"], /--base requires a value/],
-  [["check-diff", "--change-intent"], /--change-intent requires a value/],
-  [["check-diff", "--contract", "legacy.json"], /Unknown option for check-diff/],
-  [["check-pr", "extra"], /Unexpected argument for validate/],
-  [["trusted-service", "--bogus"], /Unknown option for validate/],
-  [["validate", "one.json", "two.json"], /Unexpected argument for validate/],
-  [["init", "--bogus"], /Unknown option for init/],
-];
 try {
-  for (const [args, pattern] of cases) {
-    errors.length = 0;
-    assert.equal(await runCli(args), 1);
-    assert.match(errors.join("\n"), pattern);
+  for (const args of [
+    [],
+    ["validate"],
+    ["check-diff"],
+    ["doctor"],
+    ["init"],
+    ["--definitely-unknown"],
+    ["--repo-root"],
+    ["check", "--base"],
+    ["check", "--bogus"],
+    ["build", "--bogus"],
+  ]) {
+    const code = await runCli(args);
+    assert.equal(code, 1, `expected failure for ${JSON.stringify(args)}`);
   }
-} finally { console.error = originalError; }
-console.log("CLI runtime boundary passed");
+} finally {
+  console.error = originalError;
+}
+assert.ok(errors.every((line) => line.startsWith("ERROR:")));
+console.log("CLI exposes only check/build and rejects retired policy commands");

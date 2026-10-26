@@ -37,7 +37,7 @@ export type DocumentScalar = string | number | boolean | null;
 export type NormalizedDocumentFact = DocumentScalar | string[];
 export type FactSnapshot = "state" | "base" | "head";
 export type FactFormat = "json" | "yaml" | "plain_text";
-export type FactSource = "document" | "diff" | "repository" | "change_intent";
+export type FactSource = "document" | "diff" | "repository";
 export interface MarkdownOwnedBlockIdentityRegion {
   kind: "markdown_owned_block";
   anchor_id: string;
@@ -91,10 +91,6 @@ export type RepositoryFactSelector =
   | {
       kind: "tracked_paths";
     };
-export type ChangeIntentFactSelector = {
-  pointer: string;
-  projection?: DocumentProjection;
-};
 export type DocumentFactErrorCode =
   | "malformed_pointer"
   | "missing_pointer_segment"
@@ -111,8 +107,7 @@ export type FactRef =
       type: DocumentFactType;
     }
   | { source: "diff"; selector: DiffFactSelector; type: DocumentFactType }
-  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "repository_path_set" | "scalar" }
-  | { source: "change_intent"; selector: ChangeIntentFactSelector; type: DocumentFactType };
+  | { source: "repository"; selector: RepositoryFactSelector; type: "string_set" | "repository_path_set" | "scalar" };
 
 type DocumentRef = Extract<FactRef, { source: "document" }>;
 type DocumentSelector = DocumentRef["selector"];
@@ -158,7 +153,6 @@ export interface FactReadContext {
   trackedFiles?: string[];
   diff?: { files?: { checked?: ParsedDiffFile[] } };
   anchors?: { byType?: Record<string, AnchorFactInputInstance[]> };
-  changeIntent?: unknown;
 }
 
 export interface DocumentFactError {
@@ -359,7 +353,7 @@ export function normalizeDocumentFact(value: unknown, type: DocumentFactType, po
 }
 
 function factPointer(ref: FactRef): string {
-  return ref.source === "document" || ref.source === "change_intent" ? ref.selector.pointer : "";
+  return ref.source === "document" ? ref.selector.pointer : "";
 }
 
 function documentSelector(ref: FactRef): DocumentSelector {
@@ -647,16 +641,6 @@ function repositoryFact(context: FactReadContext, ref: Extract<FactRef, { source
   };
 }
 
-function changeIntentFactSource(context: FactReadContext, ref: Extract<FactRef, { source: "change_intent" }>): unknown {
-  const projection = ref.selector.projection ?? "value";
-  try {
-    return projectDocumentValue(context.changeIntent ?? {}, ref.selector.pointer, projection);
-  } catch (error) {
-    if (error instanceof DocumentFactFailure && error.code === "missing_pointer_segment" && projection !== "value") return [];
-    throw error;
-  }
-}
-
 export function readFact(context: FactReadContext, ref: FactRef): DocumentFactResult {
   const pointer = factPointer(ref);
   try {
@@ -664,9 +648,6 @@ export function readFact(context: FactReadContext, ref: FactRef): DocumentFactRe
       return { ok: true, value: normalizeDocumentFact(diffFactSource(context, ref.selector), ref.type, pointer) };
     }
     if (ref.source === "repository") return repositoryFact(context, ref);
-    if (ref.source === "change_intent") {
-      return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
-    }
     const selector = documentSelector(ref);
     const source = selector.snapshot === "state"
       ? context.documents ? structuredFactSource(context.documents, selector) : failDocumentFact("document_read_error", "document reader is unavailable", selector.pointer)

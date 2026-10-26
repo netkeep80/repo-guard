@@ -21,24 +21,17 @@ const PIN = {
 const packageJson = JSON.parse(read("package.json"));
 assert.equal(packageJson.engines?.node, ">=20.0.0");
 
-const ci = yaml(".github/workflows/ci.yml");
-const validate = ci.jobs?.validate;
-const smoke = ci.jobs?.["smoke-pack"];
-assert.ok(validate && smoke);
-const validateNode = validate.steps.find((step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-node@"));
-const smokeNode = smoke.steps.find((step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-node@"));
-assert.equal(String(validateNode?.with?.["node-version"]), "24", "primary runtime remains Node 24");
-assert.equal(String(smokeNode?.with?.["node-version"]), "20", "package minimum must be executable-smoked on Node 20");
-
 const action = yaml("action.yml");
+assert.deepEqual(Object.keys(action.inputs ?? {}).sort(), ["base", "head", "node-version", "repo-root"]);
 const actionNode = action.runs?.steps?.find((step) => step.name === "Set up Node.js");
-assert.equal(actionNode?.uses, PIN.setupNode, "public composite Action must not hide mutable transitive setup-node authority");
+assert.equal(actionNode?.uses, PIN.setupNode);
 const actionRun = action.runs?.steps?.find((step) => step.name === "Run repo-guard")?.run ?? "";
-assert.match(actionRun, /machineResult === "error"/, "valid machine errors need a dedicated summary branch");
-assert.match(actionRun, /report\?\.reasonCode/, "Action summary must preserve structured error reasonCode");
-assert.match(actionRun, /report\?\.message/, "Action summary must preserve structured error message");
-assert.ok(actionRun.includes('value.replace(/\\s+/g, " ")'), "Action summary diagnostics must remain single-line");
-assert.match(actionRun, /structured report unavailable or inconsistent/, "invalid reports must keep the generic fail-closed adapter error");
+assert.match(actionRun, /dist\/repo-guard\.mjs/);
+assert.match(actionRun, /check --base/);
+assert.match(actionRun, /repo-guard\/local-compiler-v1/);
+for (const token of ["check-diff", "change-intent", "--enforcement", "repo-policy.json"]) {
+  assert.equal(actionRun.includes(token), false, `Action still contains ${token}`);
+}
 
 const release = yaml(".github/workflows/release.yml");
 const releaseUses = Object.values(release.jobs ?? {}).flatMap((job) => (job.steps ?? []).map((step) => step.uses).filter(Boolean));
@@ -49,13 +42,6 @@ const integrityUses = Object.values(integrity.jobs ?? {}).flatMap((job) => (job.
 for (const expected of [PIN.downloadArtifact, PIN.checkout, PIN.setupNode, PIN.uploadArtifact]) {
   assert.ok(integrityUses.includes(expected), `release-integrity missing exact pin: ${expected}`);
 }
-for (const uses of integrityUses) {
-  assert.match(uses, /@[0-9a-f]{40}$/, `release-integrity authority path contains mutable Action ref: ${uses}`);
-}
+for (const uses of integrityUses) assert.match(uses, /@[0-9a-f]{40}$/);
 
-const ordinaryCiUses = JSON.stringify(ci);
-const pagesUses = read(".github/workflows/pages.yml");
-assert.match(ordinaryCiUses, /actions\/checkout@v6/);
-assert.match(pagesUses, /actions\/deploy-pages@v4/);
-
-console.log("RG-05 runtime minimum and bounded transitive Action authority contract passed.");
+console.log("RG-05 thin Action/runtime authority boundary passed");

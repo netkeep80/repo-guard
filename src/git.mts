@@ -21,11 +21,6 @@ export interface ExactRemoteBranchDeletionInput {
   remote?: string;
 }
 
-export interface BasePolicyReadResult {
-  policy: unknown | null;
-  error: string | null;
-}
-
 export interface GitDiffObservation {
   diffText: string;
   files: ParsedDiffFile[];
@@ -299,22 +294,3 @@ export function readFileAtRef(ref: string | null | undefined, path: string | nul
   if (!ref || !path) return null;
   return runGit(["show", `${ref}:${path}`], { cwd });
 }
-
-export function readBasePolicy(base: string | null | undefined, cwd: string, policyPath = "repo-policy.json"): BasePolicyReadResult {
-  if (!base) return { policy: null, error: "no_base_ref" };
-  let raw: string | null;
-  try {
-    raw = readFileAtRef(base, policyPath, cwd);
-  } catch (e) {
-    return { policy: null, error: `git_show_failed: ${(e as Error).message}` };
-  }
-  if (raw == null) return { policy: null, error: "empty_base_policy" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    return { policy: null, error: `base_policy_parse_error: ${(e as Error).message}` };
-  }
-  return { policy: parsed, error: null };
-}
-

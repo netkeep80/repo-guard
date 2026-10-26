@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-01
-normative: "### RG-01 — Независимая проверка принятого состояния\n\n**`MUST`:** намерение изменения не выдаёт разрешение менять правила управления. Компилятор проверяет точные `BASE/HEAD` относительно принятого `BASE` и версионированных требований, отношений и ограничений. Решение должно быть воспроизводимо локально, без обращения к изменяемым описаниям запросов на слияние или связанных задач для установления полномочий.\n\nРиск — кандидат подменяет критерии собственной проверки либо результат зависит от состояния внешнего сервиса. Нарушение — семантический вердикт по тем же `BASE/HEAD` меняется из-за тела PR, связанной задачи, внешнего авторизатора или секрета. Машинно проверяются точные Git-редакции, нормативные входы и диагностируемые ограничения; человеческая приёмка и разрешение слияния остаются вне компилятора.\n\nСредства: детерминированный локальный компилятор, обычный CI/CD, ревью и настройки прав/защиты ветки платформы. Отдельные приложения, сервисы, секреты, разрешения `GovernanceGrant` или производитель статуса `trusted-enforcement` не требуются для семантической проверки.\n"
+normative: "### RG-01 — Независимая проверка принятого состояния\n\n**`MUST`:** семантический verdict для изменения вычисляется детерминированно по точным `BASE/HEAD` и версионированным требованиям, отношениям, ограничениям и проекциям принятого снимка. Изменяемое описание PR, связанная задача, внешний сервис или секрет не должны менять результат для тех же входных снимков.\n\nРиск — кандидат подменяет критерии собственной проверки или результат зависит от невоспроизводимого внешнего состояния. Нарушение — одинаковые `BASE/HEAD` дают разный семантический результат без изменения версионированных входов.\n\nСредства: локальный compiler-only runtime, независимый BASE-owned compiler gate, обычный CI/CD и платформенные права review/merge."
 relations:
   - predicates: [implemented_by]
     target:
@@ -10,66 +10,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-788-compiler-gate.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/governance-paths.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/enforcement.mjs"
   - predicates: [documents]
     target:
       kind: artifact
       path: "docs/product-requirements.md"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "repo-policy.json"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "schemas/governance-grant.schema.json"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rules/governance-paths.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/enforcement.mts"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-644-a-requirement-relation-core.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-644-requirement-transition-falsifier.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-atomic-governance-cutover.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9h-enforcement-surface-purge.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-enforcement-mode.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-governance-paths.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-hardening.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p2-3-self-enforcement-topology.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

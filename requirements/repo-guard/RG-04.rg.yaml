@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-04
-normative: "### RG-04 — Свидетельство соответствует утверждению\n\n**`MUST`:** результат сообщает проверенное ограничение, идентичность входов, наблюдение и предел вывода. Отсутствующее свидетельство нельзя называть успехом. **`SHOULD`:** для существенной гарантии иметь положительный пример и контрпример с ожидаемой причиной отказа.\n\nРиск — зелёный цвет, наличие тестового файла или изменение соседнего файла подменяет доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката. Машинно проверяются объявленные значения и связи; содержательность теста требует предметной проверки.\n\nСредства: машинный отчёт, диагностика отношений, исполняемые сценарии, предметные тесты, точные ссылки на запуски. Отрицательный свидетель может успешно доказать существование пробела: в `anum_docs` тест проходит, утверждая, что текущая реализация ещё не удовлетворяет кандидату. `cochange` не доказывает запуск или релевантность теста.\n"
+normative: "### RG-04 — Свидетельство соответствует утверждению\n\n**`MUST`:** результат сообщает точную identity входов, проверенное ограничение, наблюдение и предел вывода. Отсутствующее обязательное свидетельство нельзя называть успехом. `verified_by` задаёт traceability к проверочной поверхности, но не подменяет фактическое исполнение предметного теста или доказательства обычным CI. **`SHOULD`:** существенная гарантия имеет положительный и отрицательный свидетель.\n\nРиск — зелёный цвет, наличие тестового файла или соседнее изменение выдаются за доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката."
 relations:
   - predicates: [implemented_by]
     target:
@@ -9,55 +9,11 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/checks/constraint-program.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/default-rule-families.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/orchestrator.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/checks/relation-kernel.d.mts"
   - predicates: [implemented_by]
     target:
       kind: artifact
       path: "dist/checks/relation-kernel.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rule-registry.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/advisory-text-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/anchor-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/constraints.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/checks/rules/content-rules.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/extractors/anchors.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/policy-compiler.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/policy-vocabulary.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -89,23 +45,7 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/reporting/anchor-diagnostics.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/requirement-relations.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/runtime/analysis-report.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/runtime/canonical-requirements.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/runtime/pipeline.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -129,111 +69,7 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/runtime/validation.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/validate.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/contracts/checks.yaml"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/contracts/spec.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/docs/spec.md"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/repo-policy.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/base/tests/gate.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/fail-required-path/head/contracts/checks.yaml"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/fail-required-path/head/contracts/spec.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/fail-required-path/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/pass/head/contracts/checks.yaml"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/pass/head/contracts/spec.json"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/cases/pass/head/src/app.txt"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "examples/scenarios/contract-evidence/scenario.json"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/constraint-program.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/default-rule-families.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/orchestrator.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/checks/relation-kernel.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rule-registry.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rules/advisory-text-rules.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rules/anchor-rules.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rules/constraints.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/checks/rules/content-rules.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/extractors/anchors.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/policy-compiler.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/policy-vocabulary.mts"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -253,23 +89,7 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "src/reporting/anchor-diagnostics.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/requirement-relations.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/runtime/analysis-report.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/runtime/canonical-requirements.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/runtime/pipeline.mts"
   - predicates: [implemented_by]
     target:
       kind: artifact
@@ -290,14 +110,6 @@ relations:
     target:
       kind: artifact
       path: "src/runtime/transition-closure.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/runtime/validation.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/validate.mts"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -305,35 +117,7 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/fixtures/broken-policy.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-content-rule-old-form.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-operational-paths.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/invalid-policy.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/policy-bad-regex.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/fixtures/valid-policy.json"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-641-closure-falsifier.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-644-a-requirement-relation-core.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -385,39 +169,7 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-analysis-report-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-anchor-diagnostics-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-anchor-extractors.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-architectural-constraints.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-10b-contract-surface-cutover.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3-diagnostic-evidence.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3b-trace-anchor-lowering.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-3d2-change-profile-lowering.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-c3-9g-doctor-git-evidence.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -425,68 +177,4 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-check-diff-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-ci-contract.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-cochange-group-schema.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-cochange-group.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-cross-document-traceability.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-current-policy-vocabulary-projection.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-documentation-language.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-generated-cochange-identity.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p0-5-trusted-diff-budget-ceilings.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-p1-1-policy-normalization.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-pipeline.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-policy-compiler-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-rule-registry.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-runtime-validation-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-trace-evidence-rules.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-validate-boundary.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/validate-schemas.mjs"

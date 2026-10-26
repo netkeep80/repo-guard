@@ -178,7 +178,7 @@ export function normalizeDocumentFact(value, type, pointer = "") {
     return failDocumentFact("fact_type_mismatch", `unsupported document fact type "${String(exhaustive)}"`, pointer);
 }
 function factPointer(ref) {
-    return ref.source === "document" || ref.source === "change_intent" ? ref.selector.pointer : "";
+    return ref.source === "document" ? ref.selector.pointer : "";
 }
 function documentSelector(ref) {
     if (ref.source !== "document")
@@ -462,17 +462,6 @@ function repositoryFact(context, ref) {
         provenance: { kind: "anchor_instances", anchor_type: ref.selector.anchor_type, instances },
     };
 }
-function changeIntentFactSource(context, ref) {
-    const projection = ref.selector.projection ?? "value";
-    try {
-        return projectDocumentValue(context.changeIntent ?? {}, ref.selector.pointer, projection);
-    }
-    catch (error) {
-        if (error instanceof DocumentFactFailure && error.code === "missing_pointer_segment" && projection !== "value")
-            return [];
-        throw error;
-    }
-}
 export function readFact(context, ref) {
     const pointer = factPointer(ref);
     try {
@@ -481,9 +470,6 @@ export function readFact(context, ref) {
         }
         if (ref.source === "repository")
             return repositoryFact(context, ref);
-        if (ref.source === "change_intent") {
-            return { ok: true, value: normalizeDocumentFact(changeIntentFactSource(context, ref), ref.type, pointer) };
-        }
         const selector = documentSelector(ref);
         const source = selector.snapshot === "state"
             ? context.documents ? structuredFactSource(context.documents, selector) : failDocumentFact("document_read_error", "document reader is unavailable", selector.pointer)

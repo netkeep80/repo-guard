@@ -1,7 +1,6 @@
 import { listTrackedEntriesAtRef, readFileAtRef, runGit } from "./git.mjs";
 import { parseNameStatusZ } from "./diff/parser.mjs";
-import { loadNativeRequirements } from "./runtime/canonical-requirements.mjs";
-import { lowerNativeRequirements } from "./runtime/pipeline.mjs";
+import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "./runtime/resource-closure.mjs";
 import { createResourceResolver } from "./runtime/resource-resolver.mjs";
@@ -70,7 +69,6 @@ function localObservations(root: string, repository: string, base: string, head:
     path,
     metric: "changed_lines" as const,
     value,
-    providerId: "local-git",
   }));
 }
 
@@ -193,7 +191,6 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
   }
 
   const transition = evaluateTransitionCauseClosure({
-    mode: "compiler",
     repository: input.repository,
     base: {
       revision: base,
@@ -220,7 +217,6 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     baseLifecycle: before.lifecycle,
     headLifecycle: after.lifecycle,
     observationFacts: localObservations(input.root, input.repository, base, head),
-    trustedEvidenceProviders: ["local-git"],
   });
   for (const reason of transition.reasons)
     diagnostics.push({ code: "j3", subject: reason });

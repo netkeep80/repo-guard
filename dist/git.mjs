@@ -229,24 +229,3 @@ export function readFileAtRef(ref, path, cwd) {
         return null;
     return runGit(["show", `${ref}:${path}`], { cwd });
 }
-export function readBasePolicy(base, cwd, policyPath = "repo-policy.json") {
-    if (!base)
-        return { policy: null, error: "no_base_ref" };
-    let raw;
-    try {
-        raw = readFileAtRef(base, policyPath, cwd);
-    }
-    catch (e) {
-        return { policy: null, error: `git_show_failed: ${e.message}` };
-    }
-    if (raw == null)
-        return { policy: null, error: "empty_base_policy" };
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    }
-    catch (e) {
-        return { policy: null, error: `base_policy_parse_error: ${e.message}` };
-    }
-    return { policy: parsed, error: null };
-}

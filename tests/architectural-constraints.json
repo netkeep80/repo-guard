@@ -1,90 +1,215 @@
 {
   "required_paths": [
-    "docs/architecture-compression-3-baseline.md",
+    ".github/workflows/compiler-gate.yml",
+    "src/local-compiler.mts",
+    "src/runtime/canonical-requirements.mts",
+    "src/runtime/requirement-closure.mts",
+    "src/runtime/resource-closure.mts",
+    "src/runtime/transition-closure.mts",
+    "src/projection-api.mts",
     "tests/test-ci-contract.mjs"
   ],
   "forbidden_paths": [
+    ".github/ISSUE_TEMPLATE/change-intent.yml",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/pages.yml",
     ".github/workflows/trusted-enforcement.yml",
-    "dist/branch-hygiene.mjs",
-    "dist/checks/trace-rules.mjs",
-    "dist/github-pr.mjs",
-    "dist/trusted-authorizer.mjs",
-    "docs/architecture-compression-3-c3.3b.md",
-    "docs/branch-hygiene.md",
-    "docs/superpowers",
-    "docs/trusted-deployment.md",
-    "examples/size-rules-policy.json",
-    "src/branch-hygiene.mts",
-    "src/checks/trace-rules.mts",
-    "src/github-pr.mts",
-    "src/trusted-authorizer.mts",
-    "tests/test-branch-hygiene-analysis.mjs",
-    "tests/test-c3-8a-ci-runtime.mjs",
-    "tests/test-c3-8d-smoke-pack-install-dedup.mjs",
-    "tests/test-c3-8f-minimal-git-evidence.mjs",
-    "tests/test-c3-9i-branch-hygiene-purge.mjs"
+    "dist/requirement-relations.mjs",
+    "docs/contract-development.md",
+    "docs/requirements-strict-pack.md",
+    "docs/self-hosting-coverage.json",
+    "repo-policy.json",
+    "schemas/change-intent.schema.json",
+    "schemas/governance-grant.schema.json",
+    "schemas/repo-policy.schema.json",
+    "scripts/compression-metrics.mjs",
+    "scripts/observatory/collect.mjs",
+    "scripts/observatory/render.mjs",
+    "src/change-intent.mts",
+    "src/check-diff.mts",
+    "src/doctor.mts",
+    "src/enforcement.mts",
+    "src/facts/control-plane.mts",
+    "src/facts/input.mts",
+    "src/init.mts",
+    "src/policy-compiler.mts",
+    "src/policy-packs.mts",
+    "src/policy-vocabulary.mts",
+    "src/requirement-relations.mts",
+    "src/runtime/pipeline.mts",
+    "src/runtime/validation.mts",
+    "src/validate.mts",
+    "tests/fixtures/broken-policy.json",
+    "tests/fixtures/diff-change-intent.json",
+    "tests/fixtures/invalid-change-intent.json",
+    "tests/fixtures/invalid-content-rule-old-form.json",
+    "tests/fixtures/invalid-operational-paths.json",
+    "tests/fixtures/invalid-policy.json",
+    "tests/fixtures/policy-bad-regex.json",
+    "tests/fixtures/valid-change-intent.json",
+    "tests/fixtures/valid-policy.json",
+    "tests/support/vnext-699-model.mjs",
+    "tests/test-644-a-requirement-relation-core.mjs"
   ],
-  "required_text": [],
+  "required_text": [
+    {
+      "path": "src/repo-guard.mts",
+      "tokens": [
+        "check:",
+        "build:"
+      ]
+    },
+    {
+      "path": "README.md",
+      "tokens": [
+        "Snapshot",
+        "+ SubjectRef",
+        "+ Requirement",
+        "+ Relation",
+        "+ Constraint",
+        "+ Projection"
+      ]
+    }
+  ],
   "forbidden_text": [
     {
-      "path": "tests/validate-schemas.mjs",
+      "path": ".github/workflows/ci.yml",
       "tokens": [
-        "examples/size-rules-policy.json"
+        "repo-policy.json",
+        "check-diff",
+        "doctor",
+        "advisory policy"
       ]
     },
     {
-      "path": "src/checks/constraint-program.mts",
+      "path": "action.yml",
       "tokens": [
-        "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult"
+        "check-diff",
+        "change-intent",
+        "enforcement",
+        "repo-policy.json"
       ]
     },
     {
-      "path": "src/checks/rules/constraints.mts",
+      "path": "docs/product-requirements.md",
       "tokens": [
-        "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult",
-        "interface ConstraintIR { files:",
-        "files: facts.diff.files.checked"
+        "repo-policy.json",
+        "ChangeIntent",
+        "GovernanceGrant",
+        "check-diff",
+        "doctor",
+        "`init`",
+        "contract-conformance",
+        "must_not_touch",
+        "pr_immutable",
+        "cochange"
       ]
     },
     {
-      "path": "src/reporting/anchor-diagnostics.mts",
+      "path": "PORTFOLIO.md",
       "tokens": [
-        "buildTraceRuleDiagnostics",
-        "checkTraceRuleResult"
+        "docs/contract-development.md"
       ]
     },
     {
-      "path": "tests/test-c3-7-version-truth.mjs",
+      "path": "README.md",
       "tokens": [
-        "3.1.0"
+        "repo-policy.json",
+        "check-diff",
+        "GovernanceGrant",
+        "ChangeIntent"
       ]
     },
     {
-      "path": "tests/test-c3-6-observatory-render.mjs",
+      "path": "RELEASING.md",
       "tokens": [
-        "3.1.0"
+        ".github/workflows/pages.yml",
+        "Policy Observatory",
+        "repo-guard init"
       ]
     },
     {
-      "path": "tests/test-c3-6-observatory-snapshot.mjs",
+      "path": "requirements/repo-guard/RG-01.rg.yaml",
       "tokens": [
-        "3.1.0"
+        "GovernanceGrant",
+        "trusted-enforcement"
       ]
     },
     {
-      "path": "src/git.mts",
+      "path": "requirements/repo-guard/RG-02.rg.yaml",
       "tokens": [
-        "BasePolicyProjection",
-        "BaseGovernancePathsResult",
-        "readBaseGovernancePaths"
+        "contract-conformance"
       ]
     },
     {
-      "path": "src/checks/relation-kernel.mts",
+      "path": "requirements/repo-guard/RG-03.rg.yaml",
       "tokens": [
-        "maxBound"
+        "must_not_touch",
+        "pr_immutable",
+        "потолки политики"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-04.rg.yaml",
+      "tokens": [
+        "cochange"
+      ]
+    },
+    {
+      "path": "requirements/repo-guard/RG-06.rg.yaml",
+      "tokens": [
+        "advisory",
+        "doctor",
+        "`init`",
+        "blocking",
+        "app_id"
+      ]
+    },
+    {
+      "path": "scripts/verify-release-ref.mjs",
+      "tokens": [
+        "used by repo-guard init"
+      ]
+    },
+    {
+      "path": "src/document-facts.mts",
+      "tokens": [
+        "\"change_intent\"",
+        "ChangeIntentFactSelector",
+        "changeIntent?:",
+        "changeIntentFactSource"
+      ]
+    },
+    {
+      "path": "src/local-compiler.mts",
+      "tokens": [
+        "mode: \"compiler\"",
+        "trustedEvidenceProviders"
+      ]
+    },
+    {
+      "path": "src/repo-guard.mts",
+      "tokens": [
+        "check-diff",
+        "doctor",
+        "init",
+        "validate",
+        "--enforcement",
+        "repo-policy"
+      ]
+    },
+    {
+      "path": "src/runtime/transition-closure.mts",
+      "tokens": [
+        "AuthenticatedProviderGrant",
+        "ProviderCapability",
+        "TransitionReceipt",
+        "WorkIntentFact",
+        "authenticatedProviderGrants",
+        "mode?: \"trusted\"",
+        "protectedResources",
+        "trustedEvidenceProviders",
+        "trustedReceipts"
       ]
     }
   ]
