@@ -8,7 +8,8 @@
     "RG-05",
     "RG-06",
     "RG-07",
-    "RG-08"
+    "RG-08",
+    "RG-09"
   ],
   "readme": {
     "title": "repo-guard — локальный causal compiler для репозитория",

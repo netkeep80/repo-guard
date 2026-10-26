@@ -48,7 +48,7 @@
           {
             "source_id": "document-model",
             "algorithm": "sha256",
-            "digest": "151623126df4551b1c59bff36ab1c9246213f74e31eb6f54ea3243156a360b2e"
+            "digest": "8ef314849c31ba2abd41775836f370ad5d2f21e4e4e6f3d88b4fe034941be5bd"
           },
           {
             "source_id": "renderer",
@@ -167,6 +167,15 @@
               "id": "RG-08"
             },
             "algorithm": "sha256"
+          },
+          {
+            "id": "rg-09",
+            "kind": "repository_subject",
+            "subject": {
+              "kind": "requirement",
+              "id": "RG-09"
+            },
+            "algorithm": "sha256"
           }
         ],
         "target": {
@@ -181,7 +190,7 @@
       "build": {
         "schema": "repo-guard/projection-build-record/v0",
         "projection_id": "repo-guard.docs.readme",
-        "model_identity": "218e00d708a78df655fb8e0e0b2bde348ab947fb1f604207a3c52cf7ed9ead56",
+        "model_identity": "2c73b23a209c77900eb09610112bb944ac3e0e773e71f5d65397fc3c633cd36d",
         "source_identities": [
           {
             "source_id": "cli-runtime",
@@ -191,7 +200,7 @@
           {
             "source_id": "document-model",
             "algorithm": "sha256",
-            "digest": "151623126df4551b1c59bff36ab1c9246213f74e31eb6f54ea3243156a360b2e"
+            "digest": "8ef314849c31ba2abd41775836f370ad5d2f21e4e4e6f3d88b4fe034941be5bd"
           },
           {
             "source_id": "renderer",
@@ -237,6 +246,11 @@
             "source_id": "rg-08",
             "algorithm": "sha256",
             "digest": "c6e6303e54e3ba9e7765970f9add839728641ef2ad876349d1821e3f52e2daa8"
+          },
+          {
+            "source_id": "rg-09",
+            "algorithm": "sha256",
+            "digest": "98e1548cb750037bfffbf0c5aa759b79507fa51d4dc78494e7b3b343bdf7ee8d"
           }
         ],
         "generator": {
@@ -246,7 +260,7 @@
         "configuration_digest": "4154f12d05c5a4233242972730be541ec2e280c493bf41bd7a9d56725c5586e1",
         "output_identity": {
           "algorithm": "sha256",
-          "digest": "64ae9b6e1fa8ce306edc57faaa6718580a2531d6c6f6ce8e6431119bcea9755e"
+          "digest": "946d2c851e988ff4a6fce5381e9e195bb24554d967ccfab1e8049ec40b7ea4a6"
         },
         "evidence": []
       },

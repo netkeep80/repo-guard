@@ -182,3 +182,15 @@ relations:
     target:
       kind: artifact
       path: "README.md"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: ".gitignore"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "tests/run.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-824-semantic-adequacy.mjs"

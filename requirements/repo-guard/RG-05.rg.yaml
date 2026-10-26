@@ -58,3 +58,19 @@ relations:
     target:
       kind: artifact
       path: "README.md"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "package-lock.json"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "tsconfig.json"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-security-brace-expansion.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-security-fast-uri.mjs"

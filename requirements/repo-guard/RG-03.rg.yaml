@@ -13,14 +13,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/diff/filters.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "dist/diff/growth.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/diff/parser.d.mts"
   - predicates: [implemented_by]
     target:
@@ -38,14 +30,6 @@ relations:
     target:
       kind: artifact
       path: "src/diff/classification.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/diff/filters.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
-      path: "src/diff/growth.mts"
   - predicates: [implemented_by]
     target:
       kind: artifact

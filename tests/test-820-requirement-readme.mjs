@@ -13,8 +13,9 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const runner=resolve(root,"dist/repo-guard.mjs");
 const STATE=".repo-guard/projections.json", MODEL=".repo-guard/readme-model.json";
 const README="README.md", CLI="docs/cli-reference.md", RUNTIME="dist/repo-guard.mjs", RENDERER="scripts/self-host-docs.mjs";
-const requirementPaths=Array.from({length:8},(_,i)=>"requirements/repo-guard/RG-0"+(i+1)+".rg.yaml");
 const read=(path)=>readFileSync(resolve(root,path),"utf8");
+const requirementIds=JSON.parse(read(MODEL)).requirement_ids;
+const requirementPaths=requirementIds.map((id)=>"requirements/repo-guard/"+id+".rg.yaml");
 const stateRaw=read(STATE), state=JSON.parse(stateRaw);
 const readmeEntry=state.entries.find((entry)=>entry.model.id==="repo-guard.docs.readme");
 assert.ok(readmeEntry);
@@ -158,6 +159,6 @@ test("#820 declaration uses canonical Requirement SubjectRefs and whole-file GEN
   assert.equal(readmeEntry.model.target.ownership,"generated");
   assert.equal(readmeEntry.model.target.path,README);
   const subjects=readmeEntry.model.sources.filter((x)=>x.kind==="repository_subject").map((x)=>x.subject);
-  assert.deepEqual(subjects,Array.from({length:8},(_,i)=>({kind:"requirement",id:"RG-0"+(i+1)})));
+  assert.deepEqual(subjects,requirementIds.map((id)=>({kind:"requirement",id})));
   for(const source of readmeEntry.model.sources.filter((x)=>x.kind==="repository_subject")) assert.equal("representation" in source,false);
 });
