@@ -67,7 +67,6 @@ try {
   const base = commit("base");
   assert.equal(evaluate(base, base).ok, true, "valid structural root must be GREEN");
 
-
   // #689: actual Git type/mode transitions must reach the causal compiler without
   // the historical textual-patch identity/content record-count mismatch.
   const identity = (from, to) => {
@@ -167,7 +166,7 @@ try {
   assert.equal(evaluate(normative, duplicate).ok, false, "duplicate Requirement IDs RED");
   git("rm", "-q", "requirements/duplicate.rg.yaml");
 
-  put("requirements/invalid.rg.yaml", "format: repo-guard/requirement-v1\nid: INVALID\n");
+  put("requirements/invalid.rg.yaml", "format: repo-guard/requirement-v1\\nid: INVALID\\n");
   const malformed = commit("malformed Requirement");
   assert.equal(evaluate(normative, malformed).ok, false, "malformed Requirement RED");
   git("rm", "-q", "requirements/invalid.rg.yaml");
