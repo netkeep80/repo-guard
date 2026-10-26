@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
+import { parseNameStatusZ } from "../dist/diff/parser.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "repo-guard-c1-"));
 const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -65,6 +66,67 @@ try {
   put("src/a.txt", "first\n");
   const base = commit("base");
   assert.equal(evaluate(base, base).ok, true, "valid structural root must be GREEN");
+
+
+  // #689: actual Git type/mode transitions must reach the causal compiler without
+  // the historical textual-patch identity/content record-count mismatch.
+  const identity = (from, to) => {
+    const raw = execFileSync("git", ["-c", "core.quotepath=false", "diff",
+      "--name-status", "-z", "--find-renames", from, to], { cwd: root, encoding: "utf8" });
+    const parsed = parseNameStatusZ(raw);
+    assert.equal(parsed.length, 1, "exactly one Git identity record");
+    assert.equal(parsed[0].path, "src/a.txt");
+    return { raw, file: parsed[0] };
+  };
+  unlinkSync(join(root, "src/a.txt"));
+  symlinkSync("target.txt", join(root, "src/a.txt"));
+  const symlinkHead = commit("regular to symlink");
+  const forward = identity(base, symlinkHead);
+  assert.equal(forward.raw, "T\\0src/a.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(forward.file.gitStatus, "T");
+  assert.equal(forward.file.status, "modified");
+  const forwardResult = evaluate(base, symlinkHead);
+  assert.equal(forwardResult.ok, true, JSON.stringify(forwardResult.diagnostics));
+  assert.equal(forwardResult.j1.base && forwardResult.j1.head && forwardResult.j2.base &&
+    forwardResult.j2.head && forwardResult.j3.ok, true);
+  assert.equal(forwardResult.diagnostics.length, 0);
+
+  unlinkSync(join(root, "src/a.txt"));
+  put("src/a.txt", "restored\\n");
+  const restoredRegular = commit("symlink to regular");
+  const backward = identity(symlinkHead, restoredRegular);
+  assert.equal(backward.raw, "T\\0src/a.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(backward.file.gitStatus, "T");
+  const backwardResult = evaluate(symlinkHead, restoredRegular);
+  assert.equal(backwardResult.ok, true, JSON.stringify(backwardResult.diagnostics));
+
+  chmodSync(join(root, "src/a.txt"), 0o755);
+  const executableHead = commit("executable bit");
+  const mode = identity(restoredRegular, executableHead);
+  assert.equal(mode.raw, "M\\0src/a.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(mode.file.gitStatus, undefined);
+  const modeResult = evaluate(restoredRegular, executableHead);
+  assert.equal(modeResult.ok, true, JSON.stringify(modeResult.diagnostics));
+  chmodSync(join(root, "src/a.txt"), 0o644);
+  const modeReset = commit("restore file mode");
+  assert.equal(evaluate(executableHead, modeReset).ok, true);
+
+  put("src/unowned.txt", "unowned\\n");
+  const unownedBase = commit("unjustified fixture base");
+  unlinkSync(join(root, "src/unowned.txt"));
+  symlinkSync("target.txt", join(root, "src/unowned.txt"));
+  const unownedHead = commit("unjustified type change");
+  const unownedRaw = execFileSync("git", ["diff", "--name-status", "-z",
+    unownedBase, unownedHead], { cwd: root, encoding: "utf8" });
+  assert.equal(unownedRaw, "T\\0src/unowned.txt\\0".replaceAll("\\\\0", "\\0"));
+  const unownedResult = evaluate(unownedBase, unownedHead);
+  assert.equal(unownedResult.ok, false);
+  assert.ok(unownedResult.diagnostics.some(item => item.code === "unjustified_resource" &&
+    item.subject.endsWith(":src/unowned.txt")), JSON.stringify(unownedResult.diagnostics));
+  assert.ok(!unownedResult.diagnostics.some(item => /identity.content mismatch/.test(JSON.stringify(item))));
+  git("rm", "-q", "src/unowned.txt");
+  const cleanedUnowned = commit("remove unjustified fixture");
+  assert.equal(evaluate(modeReset, cleanedUnowned).ok, true);
 
   put("src/a.txt", "changed\n");
   const changed = commit("implementation change");
