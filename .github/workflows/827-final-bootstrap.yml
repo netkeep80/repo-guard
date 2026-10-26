@@ -1,0 +1,280 @@
+name: "#827 final transitive lock refresh"
+
+on:
+  push:
+    branches:
+      - security/827-transitive-lock-refresh
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Verify registry and exact BASE security state
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=715ae88c9ccac79a92ffaacbb5734596ac22705b
+          test "$(git rev-parse HEAD^)" = "$BASE"
+          cmp -s package.json <(git show "$BASE:package.json")
+          cmp -s package-lock.json <(git show "$BASE:package-lock.json")
+
+          test "$(npm view brace-expansion@5.0.12 version)" = "5.0.12"
+          test -n "$(npm view brace-expansion@5.0.12 dist.integrity)"
+          test "$(npm view fast-uri@3.1.9 version)" = "3.1.9"
+          test -n "$(npm view fast-uri@3.1.9 dist.integrity)"
+
+          npm ci
+          npm ls brace-expansion minimatch ajv fast-uri yaml
+
+          npm audit --json > "$RUNNER_TEMP/audit-before.json" || true
+          npm audit --omit=dev --json > "$RUNNER_TEMP/audit-before-prod.json" || true
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          for (const name of ["audit-before.json", "audit-before-prod.json"]) {
+            const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/" + name, "utf8"));
+            assert.deepEqual(Object.keys(report.vulnerabilities || {}).sort(), ["brace-expansion", "fast-uri"]);
+            assert.equal(report.metadata?.vulnerabilities?.total, 2);
+          }
+          NODE
+          echo "=== audit before ==="
+          cat "$RUNNER_TEMP/audit-before.json"
+          echo "=== production audit before ==="
+          cat "$RUNNER_TEMP/audit-before-prod.json"
+
+      - name: Generate minimal patched lock with npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp package.json "$RUNNER_TEMP/package.before.json"
+          cp package-lock.json "$RUNNER_TEMP/package-lock.before.json"
+
+          npm update brace-expansion fast-uri --package-lock-only
+
+          cmp -s package.json "$RUNNER_TEMP/package.before.json"
+
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          const before = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/package-lock.before.json", "utf8"));
+          const after = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+          const brace = "node_modules/brace-expansion";
+          const fast = "node_modules/fast-uri";
+          assert.equal(before.packages[brace].version, "5.0.9");
+          assert.equal(before.packages[fast].version, "3.1.7");
+          assert.equal(after.packages[brace].version, "5.0.12");
+          assert.equal(after.packages[fast].version, "3.1.9");
+          assert.equal(after.packages["node_modules/minimatch"].version, "10.2.5");
+          assert.equal(after.packages["node_modules/minimatch"].dependencies["brace-expansion"], "^5.0.5");
+          assert.equal(after.packages["node_modules/ajv"].version, "8.18.0");
+          assert.equal(after.packages["node_modules/ajv"].dependencies["fast-uri"], "^3.0.1");
+          const strippedBefore = structuredClone(before);
+          const strippedAfter = structuredClone(after);
+          delete strippedBefore.packages[brace];
+          delete strippedBefore.packages[fast];
+          delete strippedAfter.packages[brace];
+          delete strippedAfter.packages[fast];
+          assert.deepEqual(strippedAfter, strippedBefore, "unrelated semantic lockfile change");
+          for (const key of [brace, fast]) {
+            assert.match(after.packages[key].resolved, /^https:\/\/registry\.npmjs\.org\//);
+            assert.match(after.packages[key].integrity, /^sha512-/);
+          }
+          console.log("UNRELATED_SEMANTIC_LOCK_CHANGES=0");
+          NODE
+
+      - name: Replace stale security pins with floor invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > tests/test-security-brace-expansion.mjs <<'TEST'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          import { resolve } from "node:path";
+
+          const lock = JSON.parse(readFileSync(resolve("package-lock.json"), "utf8"));
+          const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
+          const root = lock.packages?.[""];
+          const minimatch = lock.packages?.["node_modules/minimatch"];
+          const braceExpansion = lock.packages?.["node_modules/brace-expansion"];
+
+          const atLeast = (version, floor) => {
+            const parse = (value) => value.split(".").map((part) => Number(part));
+            const a = parse(version), b = parse(floor);
+            assert.equal(a.length, 3);
+            assert.equal(b.length, 3);
+            for (let i = 0; i < 3; i++) {
+              if (a[i] !== b[i]) return a[i] > b[i];
+            }
+            return true;
+          };
+
+          assert.ok(root, "package-lock root package must exist");
+          assert.ok(minimatch, "minimatch must remain a locked runtime dependency");
+          assert.ok(braceExpansion, "brace-expansion must remain represented in the lockfile");
+          assert.equal(root.dependencies?.["brace-expansion"], undefined,
+            "brace-expansion must stay transitive rather than becoming a direct dependency");
+          assert.equal(packageJson.dependencies?.["brace-expansion"], undefined,
+            "package.json must not gain a direct brace-expansion dependency");
+          assert.equal(packageJson.overrides?.["brace-expansion"], undefined,
+            "package.json must not gain a brace-expansion override");
+          assert.equal(minimatch.version, "10.2.5");
+          assert.equal(minimatch.dependencies?.["brace-expansion"], "^5.0.5",
+            "existing minimatch dependency range must remain the source of brace-expansion");
+          assert.equal(braceExpansion.version.split(".")[0], "5",
+            "brace-expansion must stay within the compatible 5.x line");
+          assert.ok(atLeast(braceExpansion.version, "5.0.12"),
+            "brace-expansion must not regress below the security floor 5.0.12");
+          assert.equal(braceExpansion.resolved,
+            `https://registry.npmjs.org/brace-expansion/-/brace-expansion-${braceExpansion.version}.tgz`);
+          assert.match(braceExpansion.integrity, /^sha512-/);
+          console.log("Security brace-expansion lock contract passed");
+          TEST
+
+          cat > tests/test-security-fast-uri.mjs <<'TEST'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+          import { resolve } from "node:path";
+
+          const lock = JSON.parse(readFileSync(resolve("package-lock.json"), "utf8"));
+          const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
+          const root = lock.packages?.[""];
+          const ajv = lock.packages?.["node_modules/ajv"];
+          const fastUri = lock.packages?.["node_modules/fast-uri"];
+
+          const atLeast = (version, floor) => {
+            const parse = (value) => value.split(".").map((part) => Number(part));
+            const a = parse(version), b = parse(floor);
+            assert.equal(a.length, 3);
+            assert.equal(b.length, 3);
+            for (let i = 0; i < 3; i++) {
+              if (a[i] !== b[i]) return a[i] > b[i];
+            }
+            return true;
+          };
+
+          assert.ok(root, "package-lock root package must exist");
+          assert.ok(ajv, "ajv must remain a locked runtime dependency");
+          assert.ok(fastUri, "fast-uri must remain represented in the lockfile");
+          assert.equal(root.dependencies?.["fast-uri"], undefined,
+            "fast-uri must stay transitive rather than becoming a direct dependency");
+          assert.equal(packageJson.dependencies?.["fast-uri"], undefined,
+            "package.json must not gain a direct fast-uri dependency");
+          assert.equal(packageJson.overrides?.["fast-uri"], undefined,
+            "package.json must not gain a fast-uri override");
+          assert.equal(ajv.version, "8.18.0");
+          assert.equal(ajv.dependencies?.["fast-uri"], "^3.0.1",
+            "existing ajv dependency range must remain the source of fast-uri");
+          assert.equal(fastUri.version.split(".")[0], "3",
+            "fast-uri must stay within the compatible 3.x line");
+          assert.ok(atLeast(fastUri.version, "3.1.9"),
+            "fast-uri must not regress below the security floor 3.1.9");
+          assert.equal(fastUri.resolved,
+            `https://registry.npmjs.org/fast-uri/-/fast-uri-${fastUri.version}.tgz`);
+          assert.match(fastUri.integrity, /^sha512-/);
+          console.log("Security fast-uri lock contract passed");
+          TEST
+
+      - name: Create exact final candidate commit without bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=715ae88c9ccac79a92ffaacbb5734596ac22705b
+          git config user.name "repo-guard #827 bootstrap"
+          git config user.email "repo-guard@example.invalid"
+          git rm .github/workflows/827-final-bootstrap.yml
+          git add package-lock.json tests/test-security-brace-expansion.mjs tests/test-security-fast-uri.mjs
+          git commit -m "chore(#827): refresh vulnerable transitive locks"
+          test ! -e .github/workflows/827-final-bootstrap.yml
+          test "$(git diff --name-only "$BASE"..HEAD | sort)" = "$(printf '%s\n' package-lock.json tests/test-security-brace-expansion.mjs tests/test-security-fast-uri.mjs | sort)"
+          cmp -s package.json <(git show "$BASE:package.json")
+
+      - name: Verify final candidate security and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=715ae88c9ccac79a92ffaacbb5734596ac22705b
+          HEAD="$(git rev-parse HEAD)"
+
+          rm -rf node_modules
+          npm ci
+          npm ls brace-expansion minimatch ajv fast-uri yaml
+
+          npm audit --json > "$RUNNER_TEMP/audit-after.json"
+          npm audit --omit=dev --json > "$RUNNER_TEMP/audit-after-prod.json"
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          for (const name of ["audit-after.json", "audit-after-prod.json"]) {
+            const report = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/" + name, "utf8"));
+            assert.deepEqual(report.vulnerabilities || {}, {});
+            assert.equal(report.metadata?.vulnerabilities?.total, 0);
+          }
+          NODE
+
+          node tests/test-security-brace-expansion.mjs
+          node tests/test-security-fast-uri.mjs
+          npm run check:dist
+          npm test
+
+          npm pack --ignore-scripts >/dev/null
+          TARBALL="$(ls repo-guard-*.tgz)"
+          TMPDIR="$(mktemp -d)"
+          npm install --prefix "$TMPDIR" "$PWD/$TARBALL"
+          "$TMPDIR/node_modules/.bin/repo-guard" --repo-root "$PWD" check --base "$HEAD" --head "$HEAD" --format summary
+
+          node dist/repo-guard.mjs check --base "$BASE" --head "$HEAD" --format summary
+          node dist/repo-guard.mjs check --base "$BASE" --head "$HEAD" --format json > "$RUNNER_TEMP/self-check.json"
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          const r = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/self-check.json", "utf8"));
+          assert.equal(r.ok, true);
+          assert.equal(r.j1.base, true);
+          assert.equal(r.j1.head, true);
+          assert.equal(r.j2.base, true);
+          assert.equal(r.j2.head, true);
+          assert.equal(r.j3.ok, true);
+          assert.equal(r.diagnostics.length, 0);
+          if (r.projections) {
+            assert.equal(r.projections.ok, true);
+            assert.equal(r.projections.ownership.ok, true);
+            assert.equal(r.projections.analyses.filter(x => x.freshness === "STALE").length, 0);
+            assert.equal(r.projections.analyses.filter(x => x.freshness === "BROKEN").length, 0);
+          }
+          console.log(JSON.stringify({
+            head: r.head,
+            j1: r.j1,
+            j2: r.j2,
+            j3: r.j3,
+            diagnostics: r.diagnostics.length,
+            projections: r.projections && {
+              current: r.projections.analyses.filter(x => x.freshness === "CURRENT").length,
+              stale: r.projections.analyses.filter(x => x.freshness === "STALE").length,
+              broken: r.projections.analyses.filter(x => x.freshness === "BROKEN").length,
+              ownership: r.projections.ownership.ok,
+              coverage: r.projections.ownership.coverage.status,
+            },
+          }, null, 2));
+          NODE
+
+          echo "=== audit after ==="
+          cat "$RUNNER_TEMP/audit-after.json"
+          echo "=== production audit after ==="
+          cat "$RUNNER_TEMP/audit-after-prod.json"
+
+      - name: Push verified final candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${GITHUB_REF_NAME}"
