@@ -112,6 +112,10 @@ function observeOwnedBlock(source, spec, conflicts) {
         });
         return { observed: false };
     }
+    // A BASE declaration is historical ownership provenance. If its exact
+    // managed block is gone, a retired anchor is not a current HEAD obligation.
+    if (!block && spec.state === "base")
+        return { observed: false };
     let node;
     try {
         node = readMarkdownNode(source, locator.anchor_id, {

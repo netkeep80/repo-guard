@@ -1434,3 +1434,156 @@ test("#799 duplicate native RequirementId makes dependent Projection BROKEN in r
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("#822 G1 clean BASE HYBRID retirement does not enforce a retired HEAD anchor", () => {
+  const begin = "<!-- rg:retired:begin -->";
+  const end = "<!-- rg:retired:end -->";
+  const previous = owned("previous", "README.md", "old-anchor", "retired", begin, end);
+  const head = "# Replacement document\n\nNo retired anchor or owned markers remain.\n";
+  const report = analyzeProjectionOwnership({
+    live: [],
+    base: [previous],
+    readHead: filesReader(new Map([["README.md", head]])),
+  });
+
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.observed, []);
+  assert.deepEqual(report.orphan, []);
+  assert.equal(report.conflicts.some((item) => item.code === "malformed_target"), false);
+});
+
+test("#822 G2 BASE HYBRID may retire into one HEAD GENERATED whole-file writer", () => {
+  const begin = "<!-- rg:retired:begin -->";
+  const end = "<!-- rg:retired:end -->";
+  const previous = owned("previous", "README.md", "old-anchor", "retired", begin, end);
+  const current = generated("current", "README.md");
+  const head = "# Fully generated replacement\n";
+  const report = analyzeProjectionOwnership({
+    live: [current],
+    base: [previous],
+    readHead: filesReader(new Map([["README.md", head]])),
+  });
+
+  assert.equal(report.ok, true, JSON.stringify(report.conflicts));
+  assert.deepEqual(report.orphan, []);
+  assert.deepEqual(report.missing, []);
+  assert.deepEqual(report.invalid_projections, []);
+  for (const code of ["multiple_writers", "managed_overlap", "malformed_target"]) {
+    assert.equal(report.conflicts.some((item) => item.code === code), false, code);
+  }
+});
+
+test("#822 G3 surviving retired BASE region remains orphan RED", () => {
+  const begin = "<!-- rg:retired:begin -->";
+  const end = "<!-- rg:retired:end -->";
+  const previous = owned("previous", "docs/residue.md", "old-anchor", "retired", begin, end);
+  const head = [
+    '<a id="old-anchor"></a>',
+    "# Old",
+    begin,
+    "surviving managed residue",
+    end,
+    "",
+  ].join("\n");
+  const report = analyzeProjectionOwnership({
+    live: [],
+    base: [previous],
+    readHead: filesReader(new Map([["docs/residue.md", head]])),
+  });
+
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.orphan, report.observed);
+  assert.equal(report.orphan.length, 1);
+});
+
+test("#822 G4 malformed surviving retired BASE residue remains RED", () => {
+  const begin = "<!-- rg:retired:begin -->";
+  const end = "<!-- rg:retired:end -->";
+  const previous = owned("previous", "docs/malformed-residue.md", "old-anchor", "retired", begin, end);
+  const head = [
+    '<a id="old-anchor"></a>',
+    "# Old",
+    begin,
+    "first",
+    begin,
+    "duplicate begin marker",
+    end,
+    "",
+  ].join("\n");
+  const report = analyzeProjectionOwnership({
+    live: [],
+    base: [previous],
+    readHead: filesReader(new Map([["docs/malformed-residue.md", head]])),
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(report.conflicts.some((item) =>
+    item.code === "malformed_target" && /malformed owned block/.test(item.detail || "")));
+});
+
+test("#822 G5 active writer, locator, containment and SOURCE safety remain fail-closed", () => {
+  const begin = "<!-- rg:active:begin -->";
+  const end = "<!-- rg:active:end -->";
+  const activeDoc = ['<a id="active"></a>', "# Active", begin, "owned", end, ""].join("\n");
+
+  const twoWriters = analyzeProjectionOwnership({
+    live: [generated("one", "docs/generated.md"), generated("two", "docs/generated.md")],
+    readHead: filesReader(new Map([["docs/generated.md", "generated\n"]])),
+  });
+  assert.ok(twoWriters.conflicts.some((item) => item.code === "multiple_writers"));
+
+  const wholeAndRegion = analyzeProjectionOwnership({
+    live: [
+      generated("whole", "docs/active.md"),
+      owned("region", "docs/active.md", "active", "active", begin, end),
+    ],
+    readHead: filesReader(new Map([["docs/active.md", activeDoc]])),
+  });
+  assert.ok(wholeAndRegion.conflicts.some((item) => item.code === "managed_overlap"));
+
+  const liveRetained = analyzeProjectionOwnership({
+    live: [generated("live", "docs/retained.md")],
+    retained: [generated("retained", "docs/retained.md")],
+    readHead: filesReader(new Map([["docs/retained.md", "retained\n"]])),
+  });
+  assert.ok(liveRetained.conflicts.some((item) => item.code === "live_retained_overlap"));
+
+  const malformedLive = analyzeProjectionOwnership({
+    live: [owned("live", "docs/missing-anchor.md", "missing", "active", begin, end)],
+    readHead: filesReader(new Map([["docs/missing-anchor.md", "# No anchor or block\n"]])),
+  });
+  assert.ok(malformedLive.conflicts.some((item) => item.code === "malformed_target"));
+
+  const outside = [
+    '<a id="a"></a>',
+    "# A",
+    "",
+    '<a id="b"></a>',
+    "# B",
+    begin,
+    "owned under B",
+    end,
+    "",
+  ].join("\n");
+  const containment = analyzeProjectionOwnership({
+    live: [owned("live", "docs/containment.md", "a", "active", begin, end)],
+    readHead: filesReader(new Map([["docs/containment.md", outside]])),
+  });
+  assert.ok(containment.conflicts.some((item) => item.code === "containment"));
+
+  const sourceModel = generated("former", "docs/source.md");
+  const sourceState = JSON.stringify({
+    schema: "repo-guard/projection-check/v0",
+    entries: [{ state: "source", model: sourceModel }],
+  });
+  const sourceReport = evaluateProjectionCheck({
+    baseRaw: JSON.stringify({ schema: "repo-guard/projection-check/v0", entries: [] }),
+    headRaw: sourceState,
+    readHead: () => "source\n",
+    facts: { readFile: () => "source\n", diff: { files: { checked: [] } } },
+  });
+  assert.equal(sourceReport.ok, false);
+  assert.ok(sourceReport.diagnostics.some((item) =>
+    item.code === "projection_source_reclassification_invalid"));
+});
+
