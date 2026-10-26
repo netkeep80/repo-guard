@@ -45,10 +45,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "dist/requirement-relations.mjs"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "dist/runtime/canonical-requirements.mjs"
   - predicates: [implemented_by]
     target:
@@ -93,10 +89,6 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "src/requirement-relations.mts"
-  - predicates: [implemented_by]
-    target:
-      kind: artifact
       path: "src/runtime/canonical-requirements.mts"
   - predicates: [implemented_by]
     target:
@@ -126,10 +118,6 @@ relations:
     target:
       kind: artifact
       path: "tests/test-641-closure-falsifier.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
-      path: "tests/test-644-a-requirement-relation-core.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact

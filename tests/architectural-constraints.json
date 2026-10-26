@@ -14,6 +14,7 @@
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/workflows/pages.yml",
     ".github/workflows/trusted-enforcement.yml",
+    "dist/requirement-relations.mjs",
     "docs/contract-development.md",
     "docs/requirements-strict-pack.md",
     "docs/self-hosting-coverage.json",
@@ -34,6 +35,7 @@
     "src/policy-compiler.mts",
     "src/policy-packs.mts",
     "src/policy-vocabulary.mts",
+    "src/requirement-relations.mts",
     "src/runtime/pipeline.mts",
     "src/runtime/validation.mts",
     "src/validate.mts",
@@ -46,7 +48,8 @@
     "tests/fixtures/policy-bad-regex.json",
     "tests/fixtures/valid-change-intent.json",
     "tests/fixtures/valid-policy.json",
-    "tests/support/vnext-699-model.mjs"
+    "tests/support/vnext-699-model.mjs",
+    "tests/test-644-a-requirement-relation-core.mjs"
   ],
   "required_text": [
     {

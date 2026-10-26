@@ -17,10 +17,6 @@ relations:
   - predicates: [verified_by]
     target:
       kind: artifact
-      path: "tests/test-644-a-requirement-relation-core.mjs"
-  - predicates: [verified_by]
-    target:
-      kind: artifact
       path: "tests/test-security-brace-expansion.mjs"
   - predicates: [verified_by]
     target:
