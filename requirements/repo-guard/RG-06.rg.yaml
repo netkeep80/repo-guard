@@ -38,3 +38,7 @@ relations:
     target:
       kind: artifact
       path: "tests/test-cli-runtime.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "docs/cli-reference.md"

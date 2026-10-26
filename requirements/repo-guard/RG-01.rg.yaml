@@ -10,10 +10,6 @@ relations:
     target:
       kind: artifact
       path: "tests/test-788-compiler-gate.mjs"
-  - predicates: [documents]
-    target:
-      kind: artifact
-      path: "docs/product-requirements.md"
   - predicates: [verified_by]
     target:
       kind: artifact
@@ -22,3 +18,7 @@ relations:
     target:
       kind: artifact
       path: "tests/test-security-fast-uri.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"

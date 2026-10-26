@@ -178,3 +178,7 @@ relations:
     target:
       kind: artifact
       path: "tests/test-ci-contract.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"

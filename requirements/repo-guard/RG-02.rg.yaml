@@ -42,3 +42,7 @@ relations:
     target:
       kind: artifact
       path: "tests/test-release-transaction.mjs"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"

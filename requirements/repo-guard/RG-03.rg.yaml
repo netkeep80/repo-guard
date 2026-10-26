@@ -54,3 +54,7 @@ relations:
     target:
       kind: artifact
       path: "src/utils/path-patterns.mts"
+  - predicates: [documents]
+    target:
+      kind: artifact
+      path: "README.md"

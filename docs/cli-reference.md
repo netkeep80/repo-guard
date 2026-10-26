@@ -1,12 +1,19 @@
 # Команды RepoGuard
 
-Список команд выводится из действующего интерфейса командной строки. Пояснения принадлежат проектному генератору. Этот файл не создаёт прав записи или нового источника требований.
+Этот файл является GENERATED Projection из текущего CLI inventory и project-owned presentation model.
 
-## `build`
+### `build`
 
-Без сетевых вызовов записывает только явно принадлежащие генератору файлы и области. Подготовленное содержимое передаётся извне; удаление опирается на ранее принятое владение.
+Без сетевых вызовов материализует только явно принадлежащие Projection файлы и области; Requirement relation сама по себе не даёт write authority.
 
-## `check`
+```bash
+repo-guard build --base <sha> --head <sha> --outputs outputs.json
+```
 
-Локально проверяет точные редакции репозитория, требования, отношения, актуальность производных файлов и границы владения без записи.
+### `check`
 
+Локально проверяет exact `BASE/HEAD`, Requirements, Relations, Constraints и Projection freshness/ownership без записи.
+
+```bash
+repo-guard check --base <40-char-sha> --head <40-char-sha>
+```
