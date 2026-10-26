@@ -82,7 +82,7 @@ try {
   symlinkSync("target.txt", join(root, "src/a.txt"));
   const symlinkHead = commit("regular to symlink");
   const forward = identity(base, symlinkHead);
-  assert.equal(forward.raw, "T\0src/a.txt\0".replaceAll("\\\0", "\0"));
+  assert.equal(forward.raw, "T\0src/a.txt\0");
   assert.equal(forward.file.gitStatus, "T");
   assert.equal(forward.file.status, "modified");
   const forwardResult = evaluate(base, symlinkHead);
@@ -95,7 +95,7 @@ try {
   put("src/a.txt", "restored\n");
   const restoredRegular = commit("symlink to regular");
   const backward = identity(symlinkHead, restoredRegular);
-  assert.equal(backward.raw, "T\0src/a.txt\0".replaceAll("\\\0", "\0"));
+  assert.equal(backward.raw, "T\0src/a.txt\0");
   assert.equal(backward.file.gitStatus, "T");
   const backwardResult = evaluate(symlinkHead, restoredRegular);
   assert.equal(backwardResult.ok, true, JSON.stringify(backwardResult.diagnostics));
@@ -103,7 +103,7 @@ try {
   chmodSync(join(root, "src/a.txt"), 0o755);
   const executableHead = commit("executable bit");
   const mode = identity(restoredRegular, executableHead);
-  assert.equal(mode.raw, "M\0src/a.txt\0".replaceAll("\\\0", "\0"));
+  assert.equal(mode.raw, "M\0src/a.txt\0");
   assert.equal(mode.file.gitStatus, undefined);
   const modeResult = evaluate(restoredRegular, executableHead);
   assert.equal(modeResult.ok, true, JSON.stringify(modeResult.diagnostics));
@@ -118,7 +118,7 @@ try {
   const unownedHead = commit("unjustified type change");
   const unownedRaw = execFileSync("git", ["diff", "--name-status", "-z",
     unownedBase, unownedHead], { cwd: root, encoding: "utf8" });
-  assert.equal(unownedRaw, "T\0src/unowned.txt\0".replaceAll("\\\0", "\0"));
+  assert.equal(unownedRaw, "T\0src/unowned.txt\0");
   const unownedResult = evaluate(unownedBase, unownedHead);
   assert.equal(unownedResult.ok, false);
   assert.ok(unownedResult.diagnostics.some(item => item.code === "unjustified_resource" &&
