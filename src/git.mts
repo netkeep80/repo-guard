@@ -1,5 +1,5 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
-import { parseMachineDiff, parseNameStatusZ, type ParsedDiffFile } from "./diff/parser.mjs";
+import { parseNameStatusZ, type ParsedDiffFile } from "./diff/parser.mjs";
 
 interface ChildProcessFailure {
   stderr?: { toString?: () => string } | null;
@@ -19,11 +19,6 @@ export interface ExactRemoteBranchDeletionInput {
   branch: string;
   expectedSha: string;
   remote?: string;
-}
-
-export interface GitDiffObservation {
-  diffText: string;
-  files: ParsedDiffFile[];
 }
 
 export interface GitTreeEntry {
@@ -254,32 +249,6 @@ export function acquirePullRequestObservation(input: PullRequestObservationInput
     },
     cache_key: `${input.repository}:${headTree}`,
   };
-}
-
-function diffArgs(...args: string[]): string[] {
-  return ["-c", "core.quotepath=false", "diff", ...args];
-}
-
-function selectedDiffOperands(base: string | null | undefined, head: string | null | undefined, cwd: string): string[] {
-  if (base && head) return [`${base}...${head}`];
-  const staged = runGit(diffArgs("--cached"), { cwd });
-  return staged.trim() ? ["--cached"] : ["HEAD"];
-}
-
-export function getDiff(base: string | null | undefined, head: string | null | undefined, cwd: string): string {
-  if (base && head) {
-    return runGit(diffArgs(`${base}...${head}`), { cwd });
-  }
-  const staged = runGit(diffArgs("--cached"), { cwd });
-  if (staged.trim()) return staged;
-  return runGit(diffArgs("HEAD"), { cwd });
-}
-
-export function getDiffObservation(base: string | null | undefined, head: string | null | undefined, cwd: string): GitDiffObservation {
-  const operands = selectedDiffOperands(base, head, cwd);
-  const diffText = runGit(diffArgs(...operands), { cwd });
-  const nameStatusZ = runGit(["diff", "--name-status", "-z", ...operands], { cwd });
-  return { diffText, files: parseMachineDiff(diffText, nameStatusZ) };
 }
 
 export function getExactDiffIdentity(base: string, head: string, cwd: string): ParsedDiffFile[] {
