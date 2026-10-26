@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { parseMachineDiff, parseNameStatusZ } from "./diff/parser.mjs";
+import { parseNameStatusZ } from "./diff/parser.mjs";
 const DEFAULT_GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const MAX_GIT_DIAGNOSTIC_CHARS = 4096;
 function boundedDiagnostic(value) {
@@ -190,30 +190,6 @@ export function acquirePullRequestObservation(input) {
         },
         cache_key: `${input.repository}:${headTree}`,
     };
-}
-function diffArgs(...args) {
-    return ["-c", "core.quotepath=false", "diff", ...args];
-}
-function selectedDiffOperands(base, head, cwd) {
-    if (base && head)
-        return [`${base}...${head}`];
-    const staged = runGit(diffArgs("--cached"), { cwd });
-    return staged.trim() ? ["--cached"] : ["HEAD"];
-}
-export function getDiff(base, head, cwd) {
-    if (base && head) {
-        return runGit(diffArgs(`${base}...${head}`), { cwd });
-    }
-    const staged = runGit(diffArgs("--cached"), { cwd });
-    if (staged.trim())
-        return staged;
-    return runGit(diffArgs("HEAD"), { cwd });
-}
-export function getDiffObservation(base, head, cwd) {
-    const operands = selectedDiffOperands(base, head, cwd);
-    const diffText = runGit(diffArgs(...operands), { cwd });
-    const nameStatusZ = runGit(["diff", "--name-status", "-z", ...operands], { cwd });
-    return { diffText, files: parseMachineDiff(diffText, nameStatusZ) };
 }
 export function getExactDiffIdentity(base, head, cwd) {
     if (!base || !head)
