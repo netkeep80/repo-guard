@@ -82,7 +82,7 @@ try {
   symlinkSync("target.txt", join(root, "src/a.txt"));
   const symlinkHead = commit("regular to symlink");
   const forward = identity(base, symlinkHead);
-  assert.equal(forward.raw, "T\\0src/a.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(forward.raw, "T\0src/a.txt\0".replaceAll("\\\0", "\0"));
   assert.equal(forward.file.gitStatus, "T");
   assert.equal(forward.file.status, "modified");
   const forwardResult = evaluate(base, symlinkHead);
@@ -92,10 +92,10 @@ try {
   assert.equal(forwardResult.diagnostics.length, 0);
 
   unlinkSync(join(root, "src/a.txt"));
-  put("src/a.txt", "restored\\n");
+  put("src/a.txt", "restored\n");
   const restoredRegular = commit("symlink to regular");
   const backward = identity(symlinkHead, restoredRegular);
-  assert.equal(backward.raw, "T\\0src/a.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(backward.raw, "T\0src/a.txt\0".replaceAll("\\\0", "\0"));
   assert.equal(backward.file.gitStatus, "T");
   const backwardResult = evaluate(symlinkHead, restoredRegular);
   assert.equal(backwardResult.ok, true, JSON.stringify(backwardResult.diagnostics));
@@ -103,7 +103,7 @@ try {
   chmodSync(join(root, "src/a.txt"), 0o755);
   const executableHead = commit("executable bit");
   const mode = identity(restoredRegular, executableHead);
-  assert.equal(mode.raw, "M\\0src/a.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(mode.raw, "M\0src/a.txt\0".replaceAll("\\\0", "\0"));
   assert.equal(mode.file.gitStatus, undefined);
   const modeResult = evaluate(restoredRegular, executableHead);
   assert.equal(modeResult.ok, true, JSON.stringify(modeResult.diagnostics));
@@ -111,14 +111,14 @@ try {
   const modeReset = commit("restore file mode");
   assert.equal(evaluate(executableHead, modeReset).ok, true);
 
-  put("src/unowned.txt", "unowned\\n");
+  put("src/unowned.txt", "unowned\n");
   const unownedBase = commit("unjustified fixture base");
   unlinkSync(join(root, "src/unowned.txt"));
   symlinkSync("target.txt", join(root, "src/unowned.txt"));
   const unownedHead = commit("unjustified type change");
   const unownedRaw = execFileSync("git", ["diff", "--name-status", "-z",
     unownedBase, unownedHead], { cwd: root, encoding: "utf8" });
-  assert.equal(unownedRaw, "T\\0src/unowned.txt\\0".replaceAll("\\\\0", "\\0"));
+  assert.equal(unownedRaw, "T\0src/unowned.txt\0".replaceAll("\\\0", "\0"));
   const unownedResult = evaluate(unownedBase, unownedHead);
   assert.equal(unownedResult.ok, false);
   assert.ok(unownedResult.diagnostics.some(item => item.code === "unjustified_resource" &&
@@ -167,7 +167,7 @@ try {
   assert.equal(evaluate(normative, duplicate).ok, false, "duplicate Requirement IDs RED");
   git("rm", "-q", "requirements/duplicate.rg.yaml");
 
-  put("requirements/invalid.rg.yaml", "format: repo-guard/requirement-v1\\nid: INVALID\\n");
+  put("requirements/invalid.rg.yaml", "format: repo-guard/requirement-v1\nid: INVALID\n");
   const malformed = commit("malformed Requirement");
   assert.equal(evaluate(normative, malformed).ok, false, "malformed Requirement RED");
   git("rm", "-q", "requirements/invalid.rg.yaml");
