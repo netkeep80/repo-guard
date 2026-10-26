@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGit } from "../dist/git.mjs";
 import { parseNameStatusZ } from "../dist/diff/parser.mjs";
-// from "../dist/git.mjs";
 
 const scratch = mkdtempSync(join(tmpdir(), "repo-guard-large-diff-"));
 const git = (...args) => execFileSync("git", args, { cwd: scratch, encoding: "utf8" }).trim();
