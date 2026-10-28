@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { normalizeProjectionModel, projectionModelIdentity } from "../dist/projection-model.mjs";
@@ -447,21 +447,26 @@ test("#800 F04: valid + valid + invalid prospective outputs cause zero writes", 
 
 
 
-test("#832 F1 generated projection manifest must be validated as the future manifest before writes", () => {
+test("#832 F1 generated projection manifest must be rejected before any multi-output writes", () => {
   environment(({ root, git, put, commit, build }) => {
     const futureInvalid = "{ definitely-not-valid-json";
+    const normal = generated("a.normal", "docs/normal.txt");
     const authority = generated("g.future-manifest", ".repo-guard/projections.json");
-    const acceptedManifest = state([entry(authority, futureInvalid)]);
+    const acceptedManifest = state([entry(normal, "NEW"), entry(authority, futureInvalid)]);
+    put("docs/normal.txt", "ORIGINAL");
     put(".repo-guard/projections.json", acceptedManifest);
     const head = commit("projection manifest is itself a generated target");
-    const beforeBytes = readFileSync(join(root, ".repo-guard/projections.json"));
+    const beforeManifest = readFileSync(join(root, ".repo-guard/projections.json"));
+    const beforeNormal = readFileSync(join(root, "docs/normal.txt"));
     const beforeStatus = git("status", "--porcelain=v1");
 
-    const red = build(head, head, { [authority.id]: futureInvalid });
+    const red = build(head, head, { [normal.id]: "NEW", [authority.id]: futureInvalid });
 
     assert.notEqual(red.status, 0,
-      "future-invalid projection manifest must be rejected before materialization");
-    assert.deepEqual(readFileSync(join(root, ".repo-guard/projections.json")), beforeBytes);
+      "projection authority is not an accepted materialization output capability");
+    assert.match(red.stderr, /authority\/state path is not a supported materialization target/);
+    assert.deepEqual(readFileSync(join(root, ".repo-guard/projections.json")), beforeManifest);
+    assert.deepEqual(readFileSync(join(root, "docs/normal.txt")), beforeNormal);
     assert.equal(git("status", "--porcelain=v1"), beforeStatus);
   });
 });
@@ -523,9 +528,115 @@ test("#832 F2 generated native Requirement must not validate against the old nat
     const red = build(head, head, { [authority.id]: futureRequirement });
 
     assert.notEqual(red.status, 0,
-      "future Requirement semantic identity must not be checked through the old HEAD native index");
+      "native Requirement authority is not an accepted materialization output capability");
+    assert.match(red.stderr, /authority\/state path is not a supported materialization target/);
     assert.deepEqual(readFileSync(join(root, "requirements/Q.rg.yaml")), beforeBytes);
     assert.equal(git("status", "--porcelain=v1"), beforeStatus);
+  });
+});
+
+
+test("#832 F3 prospective additions are visible to source identity and agree with post-build read-only evaluation", () => {
+  environment(({ root, put, commit, build }) => {
+    const futureSource = "FUTURE SOURCE\n";
+    const resultBytes = "RESULT\n";
+    const producer = generated("g.producer", "generated/source.txt");
+    const consumer = normalizeProjectionModel({
+      schema: "repo-guard/projection-model/v0",
+      id: "g.consumer",
+      sources: [{ id: "input", kind: "repository_content",
+        path: "generated/source.txt", algorithm: "sha256" }],
+      target: { path: "docs/result.txt", ownership: "generated" },
+      generator: { contract_id: "renderer/v1" },
+      required_evidence: [],
+    });
+    const consumerEntry = {
+      state: "live", model: consumer, build: built(consumer, resultBytes, futureSource),
+      current_generator: { tool_identity: "renderer@1", configuration_digest: sha("config") },
+    };
+    const manifest = state([entry(producer, futureSource), consumerEntry]);
+    put(".repo-guard/projections.json", manifest);
+    const head = commit("two future-added generated outputs");
+
+    const builtResult = build(head, head, {
+      [producer.id]: futureSource,
+      [consumer.id]: resultBytes,
+    });
+    assert.equal(builtResult.status, 0, builtResult.stderr);
+    assert.equal(readFileSync(join(root, "generated/source.txt"), "utf8"), futureSource);
+    assert.equal(readFileSync(join(root, "docs/result.txt"), "utf8"), resultBytes);
+
+    const actualRead = (path) => {
+      const absolute = join(root, path);
+      return existsSync(absolute) ? readFileSync(absolute) : null;
+    };
+    const actual = evaluateProjectionCheck({
+      baseRaw: manifest,
+      headRaw: manifest,
+      readHead: actualRead,
+      facts: { readFile: actualRead, diff: { files: { checked: [] } } },
+    });
+    assert.equal(actual.ok, true, JSON.stringify(actual.diagnostics));
+    assert.deepEqual(actual.diagnostics.map((item) => item.code), []);
+    assert.deepEqual(actual.analyses.map((item) => item.freshness), ["CURRENT", "CURRENT"]);
+    assert.equal(actual.ownership.ok, true);
+  });
+});
+
+test("#832 F4 prospective deletion is visible to a surviving projection before any write", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const sourceBytes = "SOURCE\n";
+    const resultBytes = "RESULT\n";
+    const producer = generated("g.producer-delete", "generated/source.txt");
+    const consumer = normalizeProjectionModel({
+      schema: "repo-guard/projection-model/v0",
+      id: "g.consumer-delete",
+      sources: [{ id: "input", kind: "repository_content",
+        path: "generated/source.txt", algorithm: "sha256" }],
+      target: { path: "docs/result.txt", ownership: "generated" },
+      generator: { contract_id: "renderer/v1" },
+      required_evidence: [],
+    });
+    const consumerEntry = {
+      state: "live", model: consumer, build: built(consumer, resultBytes, sourceBytes),
+      current_generator: { tool_identity: "renderer@1", configuration_digest: sha("config") },
+    };
+    put("generated/source.txt", sourceBytes);
+    put("docs/result.txt", resultBytes);
+    put(".repo-guard/projections.json", state([entry(producer, sourceBytes), consumerEntry]));
+    const base = commit("producer and consumer accepted");
+    put(".repo-guard/projections.json", state([consumerEntry]));
+    const head = commit("remove producer but keep consumer");
+    const beforeStatus = git("status", "--porcelain=v1");
+
+    const red = build(base, head, { [consumer.id]: resultBytes });
+
+    assert.notEqual(red.status, 0);
+    assert.match(red.stderr, /prospective output would not pass read-only ProjectionCheck/);
+    assert.equal(readFileSync(join(root, "generated/source.txt"), "utf8"), sourceBytes);
+    assert.equal(readFileSync(join(root, "docs/result.txt"), "utf8"), resultBytes);
+    assert.equal(git("status", "--porcelain=v1"), beforeStatus);
+  });
+});
+
+test("#832 F5 apply-time partial failure rolls back a prior future addition", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const first = generated("g.apply-first", "a/new.txt");
+    const second = generated("g.apply-second", "z/blocked/second.txt");
+    put("z/blocked/second.txt", "ORIGINAL");
+    put(".repo-guard/projections.json", state([entry(first, "NEW1"), entry(second, "NEW2")]));
+    const head = commit("two valid outputs before apply-time failure");
+    const blocked = join(root, "z/blocked");
+    chmodSync(blocked, 0o555);
+    try {
+      const red = build(head, head, { [first.id]: "NEW1", [second.id]: "NEW2" });
+      assert.notEqual(red.status, 0);
+    } finally {
+      chmodSync(blocked, 0o755);
+    }
+    assert.equal(existsSync(join(root, "a/new.txt")), false);
+    assert.equal(readFileSync(join(root, "z/blocked/second.txt"), "utf8"), "ORIGINAL");
+    assert.equal(git("status", "--porcelain=v1"), "");
   });
 });
 

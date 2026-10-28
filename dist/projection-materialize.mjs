@@ -10,6 +10,11 @@ import { loadNativeRequirements, strictCanonicalJson } from "./runtime/canonical
 const hex40 = /^[a-f0-9]{40}$/;
 const hex64 = /^[a-f0-9]{64}$/;
 const sha = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+const projectionStatePath = ".repo-guard/projections.json";
+const nativeRequirementPath = /^requirements\/.*\.rg\.(?:yaml|json)$/;
+function materializationAuthorityPath(path) {
+    return path === projectionStatePath || nativeRequirementPath.test(path);
+}
 function deny(reason) { throw new Error("projection_build_red: " + reason); }
 function exact(root, revision) {
     if (!hex40.test(revision || ""))
@@ -175,9 +180,8 @@ function stagesFor(input) {
     }
     const baseTree = new Map(listTrackedEntriesAtRef(base, root).map((e) => [e.path, e]));
     const headTree = new Map(listTrackedEntriesAtRef(head, root).map((e) => [e.path, e]));
-    const statePath = ".repo-guard/projections.json";
-    const rawBase = baseTree.has(statePath) ? readFileBytesAtRef(base, statePath, root) : null;
-    const rawHead = headTree.has(statePath) ? readFileBytesAtRef(head, statePath, root) : null;
+    const rawBase = baseTree.has(projectionStatePath) ? readFileBytesAtRef(base, projectionStatePath, root) : null;
+    const rawHead = headTree.has(projectionStatePath) ? readFileBytesAtRef(head, projectionStatePath, root) : null;
     const prior = parseProjectionCheckState(rawBase);
     const current = parseProjectionCheckState(rawHead);
     const view = (path) => headTree.has(path) ? readFileAtRef(head, path, root) : null;
@@ -207,6 +211,9 @@ function stagesFor(input) {
     const updated = new Map();
     function stage(path) {
         safeRelative(path);
+        if (materializationAuthorityPath(path)) {
+            deny("authority/state path is not a supported materialization target: " + path);
+        }
         if (!updated.has(path))
             updated.set(path, {
                 before: view(path),
@@ -227,6 +234,8 @@ function stagesFor(input) {
     }
     const oldLive = prior.entries.filter((e) => e.state === "live");
     const orphanKeys = new Set(report.ownership.orphan);
+    // Native Requirement authority cannot be materialized by Projection build, so
+    // the exact HEAD index is also the native index of the prospective state.
     const native = nativeIndex(root, head, headTree);
     for (const item of oldLive) {
         const model = item.model;
@@ -241,10 +250,21 @@ function stagesFor(input) {
         oldLive.filter((item) => orphanKeys.has(key(item.model.target))).length !== orphanKeys.size) {
         deny("orphan lacks one exact BASE live writer");
     }
-    // Validate the entire prospective output snapshot before touching the filesystem.
-    const prospective = (path) => updated.has(path) ? updated.get(path).after : exactView(path);
+    // Validate one coherent prospective path/content snapshot before touching the filesystem.
+    const prospectivePaths = new Set(headTree.keys());
+    for (const [path, change] of updated) {
+        if (change.after === null)
+            prospectivePaths.delete(path);
+        else
+            prospectivePaths.add(path);
+    }
+    const prospective = (path) => {
+        if (!prospectivePaths.has(path))
+            return null;
+        return updated.has(path) ? updated.get(path).after : exactView(path);
+    };
     const afterReport = evaluateProjectionCheck({
-        baseRaw: rawBase, headRaw: rawHead, readHead: prospective,
+        baseRaw: rawBase, headRaw: prospective(projectionStatePath), readHead: prospective,
         facts: { readFile: prospective, diff: { files: { checked: [] } } },
         resolveRequirement: (id) => native.index[id] ? {
             digest: native.index[id].semantic.digest,
