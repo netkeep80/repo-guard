@@ -17,7 +17,12 @@ export interface ResourceClosureInput {
   j2: RootedRequirementResult;
   trackedPaths: readonly string[];
   resourceRelations?: readonly ResourceLink[];
-  resolver: { resolve(ref: unknown): { ok: boolean; value?: unknown } };
+  resolver: {
+    resolve(
+      ref: unknown,
+      options?: { durable?: boolean; expectedRevision?: string },
+    ): { ok: boolean; value?: unknown; error?: { code: string } };
+  };
 }
 export interface ResourceClosureError { code: string; path: string; target?: string; }
 const direct = new Set(["requires","implemented_by","verified_by","documents","generates"]);
@@ -150,11 +155,26 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
       const relations=obj(obj(requirement.value)?.relations);
       for(const key of Object.keys(relations||{}).sort()) {
         const relation=obj(relations![key]);
-        if(!relation || !direct.has(String(relation.predicate)))continue;
+        if(!relation)continue;
+        const predicate=String(relation.predicate);
+        const target=obj(relation.target);
+        if(target?.kind==="document") {
+          if(relation.collection===true) {
+            errors.push({code:"invalid_resource_collection",path:id,target:key}); continue;
+          }
+          const resolved=input.resolver.resolve(target,{durable:true});
+          if(!resolved.ok) {
+            const code=typeof resolved.error?.code==="string" ? resolved.error.code : "invalid_ref";
+            const path=typeof target.path==="string" ? target.path : key;
+            const pointer=typeof target.pointer==="string" ? target.pointer : "";
+            errors.push({code:"document_ref_"+code,path:id,target:path+pointer});
+          }
+          continue;
+        }
+        if(!direct.has(predicate))continue;
         if(relation.collection!==undefined && typeof relation.collection!=="boolean") {
           errors.push({code:"invalid_resource_collection",path:id,target:key}); continue;
         }
-        const target=obj(relation.target);
         if(!target || target.kind!=="artifact") {
           if(relation.collection===true)errors.push({code:"invalid_resource_collection",path:id,target:key});
           continue;
@@ -164,7 +184,6 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
         if(!tracked.has(path) || !exactArtifact(input,path)) {
           errors.push({code:"missing_resource_target",path:id,target:path});continue;
         }
-        const predicate=String(relation.predicate);
         const directProof=[...proof,predicate+":"+path];
         add(path,directProof,id);
         if(relation.collection===true) {

@@ -840,5 +840,306 @@ try {
     }
   });
 
-  console.log("#833 DocumentRef falsification witnesses loaded");
+  const r833NativeRequirement = ({
+    id = "R1",
+    ownerPaths = [],
+    predicate = "documents",
+    target = null,
+    metric = "git.changed_resources",
+    max = 0,
+    includeConstraint = true,
+  } = {}) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id,
+    normative: "bounded #833 target-kind matrix",
+    relations: [
+      ...ownerPaths.map(path => ({
+        predicates: ["implemented_by"],
+        target: { kind: "artifact", path },
+      })),
+      ...(target ? [{ predicates: [predicate], target }] : []),
+    ],
+    ...(includeConstraint ? {
+      constraints: [{
+        id: "doc-scope",
+        scope: { relations: [predicate] },
+        metric: { key: metric, max },
+      }],
+    } : {}),
+  }, null, 2) + "\n";
+
+  test("#833 F4 valid unchanged DocumentRef is NOT_APPLICABLE", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      const head = r833Commit(root, "head", true);
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(scoped.verdict, "NOT_APPLICABLE");
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+      assert.deepEqual(scoped.touched, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F5 changed DocumentRef under changed_resources limit passes", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 1,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 } }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(scoped.verdict, "PASS");
+      assert.equal(scoped.observed, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F6 changed DocumentRef over changed_resources limit fails", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 } }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F7 DocumentRef changed_lines uses deterministic file-level numstat", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json",
+        pointer: "/guarded",
+        ownerPath: "docs/a.json",
+        metric: "git.changed_lines",
+        max: 2,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 }, outside: 1 }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(scoped.verdict, "PASS");
+      assert.equal(scoped.observed, 2);
+      assert.deepEqual(scoped.observationSources, [{ path: "docs/a.json", metric: "changed_lines", value: 2 }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F8 file change outside referenced fragment still counts at path level", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 2 }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F9 BASE DocumentRef obligation cannot be erased by HEAD relation or Constraint removal", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+        ownerPaths: ["docs/a.json"],
+        target: { kind: "document", path: "docs/a.json", pointer: "/guarded" },
+        max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+        ownerPaths: ["docs/a.json"],
+        includeConstraint: false,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 } }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F10 document delete and rename retain transition obligation", () => {
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["docs/a.json", "src/owned.txt"],
+          target: { kind: "document", path: "docs/a.json", pointer: "/guarded" },
+          max: 0,
+        }));
+        r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+        r833Put(root, "src/owned.txt", "owned\n");
+        const base = r833Commit(root, "base");
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["src/owned.txt"],
+          includeConstraint: false,
+        }));
+        unlinkSync(join(root, "docs/a.json"));
+        const head = r833Commit(root, "head");
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        const scoped = r833Constraint(report);
+        assert.equal(report.ok, false);
+        assert.equal(scoped.verdict, "RED");
+        assert.equal(scoped.observed, 1);
+        assert.deepEqual(scoped.scope, ["docs/a.json"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["docs/a.json"],
+          target: { kind: "document", path: "docs/a.json", pointer: "/guarded" },
+          max: 0,
+        }));
+        r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+        const base = r833Commit(root, "base");
+        r833Git(root, "mv", "docs/a.json", "docs/b.json");
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["docs/b.json"],
+          target: { kind: "document", path: "docs/b.json", pointer: "/guarded" },
+          max: 0,
+        }));
+        const head = r833Commit(root, "head");
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        const scoped = r833Constraint(report);
+        assert.equal(report.ok, false);
+        assert.equal(scoped.verdict, "RED");
+        assert.equal(scoped.observed, 1);
+        assert.deepEqual(scoped.scope, ["docs/a.json", "docs/b.json"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("#833 F11 accepted unsupported Constraint targets fail closed instead of disappearing", () => {
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["src/owned.txt"],
+          target: {
+            kind: "external_document",
+            repository: "other/repository",
+            revision: "a".repeat(40),
+            path: "docs/ext.json",
+            pointer: "/guarded",
+          },
+          max: 0,
+        }));
+        r833Put(root, "src/owned.txt", "owned\n");
+        const base = r833Commit(root, "base");
+        const head = r833Commit(root, "head", true);
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        assert.equal(report.ok, false);
+        assert.ok(report.diagnostics.some(item =>
+          item.code === "j3" &&
+          item.subject.includes("I7:unsupported_scope_target:R1:") &&
+          item.subject.endsWith(":external_document")
+        ), JSON.stringify(report.diagnostics, null, 2));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["src/owned.txt"],
+          predicate: "constrains",
+          target: { kind: "requirement", id: "R2" },
+          max: 0,
+        }));
+        r833Put(root, "requirements/r2.rg.json", r833NativeRequirement({
+          id: "R2",
+          includeConstraint: false,
+        }));
+        r833Put(root, "src/owned.txt", "owned\n");
+        const base = r833Commit(root, "base");
+        const head = r833Commit(root, "head", true);
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        assert.equal(report.ok, false);
+        assert.ok(report.diagnostics.some(item =>
+          item.code === "j3" &&
+          item.subject.includes("I7:unsupported_scope_target:R1:") &&
+          item.subject.endsWith(":requirement")
+        ), JSON.stringify(report.diagnostics, null, 2));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("#833 F12 existing ArtifactRef scoped-change behavior is unchanged", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+        ownerPaths: ["src/a.txt"],
+        predicate: "implemented_by",
+        max: 0,
+      }));
+      r833Put(root, "src/a.txt", "before\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "src/a.txt", "after\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["src/a.txt"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#833 DocumentRef regression matrix: PASS");
 }

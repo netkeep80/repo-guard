@@ -157,13 +157,30 @@ export function evaluateTrackedResourceClosure(input) {
             const relations = obj(obj(requirement.value)?.relations);
             for (const key of Object.keys(relations || {}).sort()) {
                 const relation = obj(relations[key]);
-                if (!relation || !direct.has(String(relation.predicate)))
+                if (!relation)
+                    continue;
+                const predicate = String(relation.predicate);
+                const target = obj(relation.target);
+                if (target?.kind === "document") {
+                    if (relation.collection === true) {
+                        errors.push({ code: "invalid_resource_collection", path: id, target: key });
+                        continue;
+                    }
+                    const resolved = input.resolver.resolve(target, { durable: true });
+                    if (!resolved.ok) {
+                        const code = typeof resolved.error?.code === "string" ? resolved.error.code : "invalid_ref";
+                        const path = typeof target.path === "string" ? target.path : key;
+                        const pointer = typeof target.pointer === "string" ? target.pointer : "";
+                        errors.push({ code: "document_ref_" + code, path: id, target: path + pointer });
+                    }
+                    continue;
+                }
+                if (!direct.has(predicate))
                     continue;
                 if (relation.collection !== undefined && typeof relation.collection !== "boolean") {
                     errors.push({ code: "invalid_resource_collection", path: id, target: key });
                     continue;
                 }
-                const target = obj(relation.target);
                 if (!target || target.kind !== "artifact") {
                     if (relation.collection === true)
                         errors.push({ code: "invalid_resource_collection", path: id, target: key });
@@ -181,7 +198,6 @@ export function evaluateTrackedResourceClosure(input) {
                     errors.push({ code: "missing_resource_target", path: id, target: path });
                     continue;
                 }
-                const predicate = String(relation.predicate);
                 const directProof = [...proof, predicate + ":" + path];
                 add(path, directProof, id);
                 if (relation.collection === true) {
