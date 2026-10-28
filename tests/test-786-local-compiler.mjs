@@ -706,3 +706,139 @@ try {
 
   console.log("#834 deterministic Git transition metric matrix: PASS");
 }
+
+
+{
+  const r833Repository = "local/repository";
+
+  const r833Git = (root, ...args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+
+  const r833Put = (root, path, value) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), value);
+  };
+
+  const r833Commit = (root, message, allowEmpty = false) => {
+    r833Git(root, "add", "-A");
+    r833Git(
+      root,
+      "-c", "user.name=#833 Fixture",
+      "-c", "user.email=833@example.invalid",
+      "commit",
+      "-qm", message,
+      ...(allowEmpty ? ["--allow-empty"] : []),
+    );
+    return r833Git(root, "rev-parse", "HEAD");
+  };
+
+  const r833Requirement = ({ documentPath, pointer, ownerPath, metric = "git.changed_resources", max = 0 }) =>
+    JSON.stringify({
+      format: "repo-guard/requirement-v1",
+      id: "R1",
+      normative: "DocumentRef Constraint scope must be exact and fail closed",
+      relations: [
+        {
+          predicates: ["implemented_by"],
+          target: { kind: "artifact", path: ownerPath },
+        },
+        {
+          predicates: ["documents"],
+          target: { kind: "document", path: documentPath, pointer },
+        },
+      ],
+      constraints: [
+        {
+          id: "doc-scope",
+          scope: { relations: ["documents"] },
+          metric: { key: metric, max },
+        },
+      ],
+    }, null, 2) + "\n";
+
+  const r833Constraint = (report) => {
+    const item = report.j3.constraints.find(entry => entry.constraintId === "doc-scope");
+    assert.ok(item, JSON.stringify(report, null, 2));
+    return item;
+  };
+
+  const r833Init = () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-"));
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    return root;
+  };
+
+  test("#833 F1 DocumentRef path must seed changed_resources Constraint scope", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json",
+        pointer: "/guarded",
+        ownerPath: "docs/a.json",
+        max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 }, outside: 1 }) + "\n");
+      const head = r833Commit(root, "head");
+
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false, "changed referenced document must exceed max=0");
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+      assert.deepEqual(scoped.touched, ["docs/a.json"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F2 missing local DocumentRef path must be blocking", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/missing.json",
+        pointer: "/guarded",
+        ownerPath: "src/owned.txt",
+      }));
+      r833Put(root, "src/owned.txt", "owned\n");
+      const base = r833Commit(root, "base");
+      const head = r833Commit(root, "head", true);
+
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      assert.equal(report.ok, false, "dangling local document path must fail closed");
+      assert.ok(
+        report.diagnostics.some(item => item.code === "document_ref_missing_path"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F3 missing local DocumentRef pointer must be blocking", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json",
+        pointer: "/missing",
+        ownerPath: "docs/a.json",
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      const head = r833Commit(root, "head", true);
+
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      assert.equal(report.ok, false, "missing document fragment must fail closed");
+      assert.ok(
+        report.diagnostics.some(item => item.code === "document_ref_missing_fragment"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#833 DocumentRef falsification witnesses loaded");
+}
