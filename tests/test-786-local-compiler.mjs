@@ -360,7 +360,7 @@ try {
   }
   function constraint(report) {
     const item = report.j3.constraints.find((entry) => entry.constraintId === "metric");
-    assert.ok(item, JSON.stringify(report.j3.constraints));
+    assert.ok(item, JSON.stringify({ diagnostics: report.diagnostics, j3: report.j3 }, null, 2));
     return item;
   }
   function semantic(check) {
@@ -555,7 +555,7 @@ try {
         setConfig(root, key, null);
       }
       const clean = runCheck(root, base, head);
-      assert.equal(clean.status, 0);
+      assert.equal(clean.status, 0, JSON.stringify(clean.report, null, 2));
   
       const attrs = join(root, "hostile-attributes");
       writeFileSync(attrs, "*.txt -diff\n");
