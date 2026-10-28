@@ -12,6 +12,7 @@ export interface RunGitOptions {
   cwd?: string;
   stdio?: ExecFileSyncOptionsWithStringEncoding["stdio"];
   maxBuffer?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface ExactRemoteBranchDeletionInput {
@@ -101,6 +102,7 @@ export function runGit(args: string[], options: RunGitOptions = {}): string {
       cwd: options.cwd,
       stdio: options.stdio || "pipe",
       maxBuffer,
+      env: options.env,
     });
   } catch (error) {
     const command = gitSubcommand(args);

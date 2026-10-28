@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { devNull, tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import { listTrackedEntriesAtRef, readFileBytesAtRef, runGit } from "./git.mjs";
 import { parseNameStatusZ } from "./diff/parser.mjs";
 import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
@@ -60,8 +63,80 @@ function parseChangedLinesZ(raw: string): Map<string, number> {
   return result;
 }
 
-function localObservations(root: string, repository: string, base: string, head: string): TransitionObservationFact[] {
-  const raw = runGit(["-c", "core.quotepath=false", "diff", "--numstat", "-z", "--find-renames", base, head], { cwd: root });
+const isolatedGitEnvironmentKeys = new Set([
+  "GIT_DIR",
+  "GIT_COMMON_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_ATTR_SOURCE",
+  "GIT_EXTERNAL_DIFF",
+  "GIT_DIFF_OPTS",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_NAMESPACE",
+  "GIT_TEMPLATE_DIR",
+  "GIT_DEFAULT_HASH",
+]);
+
+function isolatedGitEnvironment(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (isolatedGitEnvironmentKeys.has(key) || /^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(key)) delete env[key];
+  }
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_GLOBAL = devNull;
+  env.GIT_CONFIG_SYSTEM = devNull;
+  env.GIT_ATTR_NOSYSTEM = "1";
+  return env;
+}
+
+function deterministicTransitionDiff(root: string, base: string, head: string): { nameStatus: string; numstat: string } {
+  const env = isolatedGitEnvironment();
+  const objectPath = runGit(["rev-parse", "--git-path", "objects"], { cwd: root, env }).trim();
+  if (!objectPath) throw new Error("cannot resolve Git object directory");
+  const objectDirectory = isAbsolute(objectPath) ? objectPath : resolve(root, objectPath);
+  const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-diff-"));
+  const gitDir = join(tempRoot, "repo.git");
+  const templateDir = join(tempRoot, "empty-template");
+  try {
+    mkdirSync(templateDir);
+    runGit([
+      "init",
+      "--bare",
+      "--object-format=sha1",
+      `--template=${templateDir}`,
+      "-q",
+      gitDir,
+    ], { cwd: root, env });
+    const diffEnv = { ...env, GIT_ALTERNATE_OBJECT_DIRECTORIES: objectDirectory };
+    const args = [
+      `--git-dir=${gitDir}`,
+      `--attr-source=${head}`,
+      "-c", "core.quotepath=false",
+      "-c", `core.attributesFile=${devNull}`,
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--ignore-submodules=none",
+      "--diff-algorithm=myers",
+      "--indent-heuristic",
+      "--find-renames=50%",
+      "-l1000",
+    ];
+    return {
+      nameStatus: runGit([...args, "--name-status", "-z", base, head], { cwd: root, env: diffEnv }),
+      numstat: runGit([...args, "--numstat", "-z", base, head], { cwd: root, env: diffEnv }),
+    };
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+function localObservations(repository: string, base: string, head: string, raw: string): TransitionObservationFact[] {
   return [...parseChangedLinesZ(raw)].sort(([a], [b]) => a.localeCompare(b, "en")).map(([path, value]) => ({
     authorityBaseRevision: base,
     baseRevision: base,
@@ -148,10 +223,8 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
   const head = resolveCommit(input.root, input.head);
   const before = open(base);
   const after = open(head);
-  const diff = parseNameStatusZ(runGit(
-    ["-c", "core.quotepath=false", "diff", "--name-status", "-z", "--find-renames", base, head],
-    { cwd: input.root },
-  ));
+  const transitionDiff = deterministicTransitionDiff(input.root, base, head);
+  const diff = parseNameStatusZ(transitionDiff.nameStatus);
   const projectionPath = ".repo-guard/projections.json";
   const baseProjectionPaths = new Set(before.entries.map((entry) => entry.path));
   const headProjectionPaths = new Set(after.entries.map((entry) => entry.path));
@@ -216,7 +289,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     resourceDeltas: resourceDeltasFromParsedDiff(diff),
     baseLifecycle: before.lifecycle,
     headLifecycle: after.lifecycle,
-    observationFacts: localObservations(input.root, input.repository, base, head),
+    observationFacts: localObservations(input.repository, base, head, transitionDiff.numstat),
   });
   for (const reason of transition.reasons)
     diagnostics.push({ code: "j3", subject: reason });
