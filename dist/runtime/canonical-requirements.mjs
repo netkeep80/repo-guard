@@ -205,7 +205,7 @@ export function validateCompiledConstraint(value) {
         ok: true,
         value: {
             id: input.id,
-            activation: input.activation ?? "scoped_change",
+            activation: (input.activation ?? "scoped_change"),
             relations: [...input.relations].sort(),
             includeGenerated: input.includeGenerated === true,
             ...(input.metric !== undefined ? {
