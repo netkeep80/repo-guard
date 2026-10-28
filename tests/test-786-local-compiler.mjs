@@ -322,7 +322,7 @@ try {
       metric:
         key: ${metric}
         max: ${max}
-  `;
+  `.replace(/^  /gm, "");
   
   function init(root) {
     execFileSync("git", ["init", "-q"], { cwd: root });
@@ -595,10 +595,13 @@ try {
   
       init(root);
       put(root, "requirements/core.rg.yaml", metricRequirement(["deps/lib"], "git.changed_resources", 0));
+      git(root, "add", "requirements/core.rg.yaml");
       git(root, "update-index", "--add", "--cacheinfo", `160000,${first},deps/lib`);
-      const base = commit(root, "gitlink base");
+      git(root, "-c", "user.name=#834 Fixture", "-c", "user.email=834@example.invalid", "commit", "-qm", "gitlink base");
+      const base = git(root, "rev-parse", "HEAD");
       git(root, "update-index", "--cacheinfo", `160000,${second},deps/lib`);
-      const head = commit(root, "gitlink head");
+      git(root, "-c", "user.name=#834 Fixture", "-c", "user.email=834@example.invalid", "commit", "-qm", "gitlink head");
+      const head = git(root, "rev-parse", "HEAD");
   
       setConfig(root, "diff.ignoreSubmodules", "none");
       const visible = semantic(runCheck(root, base, head));
