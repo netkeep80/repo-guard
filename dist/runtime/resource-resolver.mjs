@@ -1,4 +1,5 @@
 import { normalizeDocumentFact, parseJson, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
+import { decodeUtf8Strict } from "../utils/repository-files.mjs";
 import { durablePointer } from "./canonical-requirements.mjs";
 const sha = /^[0-9a-f]{40}$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -99,7 +100,7 @@ export function createResourceResolver(context) {
                 const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
                 if (ref.kind === "artifact")
                     return { ok: true, value: { kind: "resolved_artifact", representation: identity, bytes } };
-                const document = parsedDocument(bytes.toString("utf8"), path);
+                const document = parsedDocument(decodeUtf8Strict(bytes, `document "${path}"`), path);
                 const value = resolveJsonPointer(document, pointer);
                 return { ok: true, value: { kind: "resolved_document", representation: identity, value } };
             }
