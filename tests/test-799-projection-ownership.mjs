@@ -13,7 +13,11 @@ import {
 } from "../dist/projection-api.mjs";
 import { analyzeProjectionCurrent } from "../dist/projection-analysis.mjs";
 import { analyzeProjectionOwnership } from "../dist/projection-ownership.mjs";
-import { loadNativeRequirements } from "../dist/runtime/canonical-requirements.mjs";
+import { readFileAtRef } from "../dist/git.mjs";
+import {
+  loadCanonicalRequirements,
+  loadNativeRequirements,
+} from "../dist/runtime/canonical-requirements.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -1587,3 +1591,132 @@ test("#822 G5 active writer, locator, containment and SOURCE safety remain fail-
     item.code === "projection_source_reclassification_invalid"));
 });
 
+
+
+test("#831 Git adapter preserves byte identity before projection hashing", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-831-byte-"));
+  const git831 = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const commit831 = (message) => {
+    git831("add", "-A");
+    git831("-c", "user.name=RepoGuard Test", "-c", "user.email=test@example.invalid", "commit", "-qm", message);
+    return git831("rev-parse", "HEAD");
+  };
+  try {
+    git831("init", "-q");
+    const oldBytes = Buffer.from([0xef, 0xbf, 0xbd]);
+    const newBytes = Buffer.from([0xff]);
+    const output = Buffer.from("derived", "utf8");
+
+    writeFileSync(join(root, "input.txt"), oldBytes);
+    writeFileSync(join(root, "output.txt"), output);
+
+    const model = normalizeProjectionModel({
+      schema: "repo-guard/projection-model/v0",
+      id: "binary-source",
+      sources: [{
+        id: "input",
+        kind: "repository_content",
+        path: "input.txt",
+        algorithm: "sha256",
+      }],
+      target: { path: "output.txt", ownership: "generated" },
+      generator: { contract_id: "renderer/v1" },
+      required_evidence: [],
+    });
+    const build = {
+      schema: "repo-guard/projection-build-record/v0",
+      projection_id: model.id,
+      model_identity: projectionModelIdentity(model),
+      source_identities: [{
+        source_id: "input",
+        algorithm: "sha256",
+        digest: sha256(oldBytes),
+      }],
+      generator: {
+        contract_id: "renderer/v1",
+        tool_identity: "renderer@1",
+      },
+      configuration_digest: sha256("config"),
+      output_identity: {
+        algorithm: "sha256",
+        digest: sha256(output),
+      },
+      evidence: [],
+    };
+    const raw = JSON.stringify({
+      schema: "repo-guard/projection-check/v0",
+      entries: [{
+        state: "live",
+        model,
+        build,
+        current_generator: {
+          tool_identity: "renderer@1",
+          configuration_digest: sha256("config"),
+        },
+      }],
+    });
+
+    mkdirSync(join(root, ".repo-guard"));
+    writeFileSync(join(root, ".repo-guard", "projections.json"), raw);
+    const base = commit831("base");
+
+    const evaluate = (revision, changed) => {
+      const read = (path) => readFileAtRef(revision, path, root);
+      return evaluateProjectionCheck({
+        baseRaw: raw,
+        headRaw: raw,
+        readHead: read,
+        facts: {
+          readFile: read,
+          diff: { files: { checked: changed ? [{ path: "input.txt", status: "modified" }] : [] } },
+        },
+      });
+    };
+
+    const baseReport = evaluate(base, false);
+    assert.equal(baseReport.ok, true);
+    assert.equal(baseReport.analyses[0].freshness, "CURRENT");
+
+    writeFileSync(join(root, "input.txt"), newBytes);
+    const head = commit831("head");
+    assert.notEqual(sha256(oldBytes), sha256(newBytes));
+
+    const headReport = evaluate(head, true);
+    assert.equal(headReport.ok, false);
+    assert.equal(headReport.analyses[0].freshness, "STALE");
+    assert.ok(headReport.analyses[0].reasons.includes("source_changed:input"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("#831 canonical textual Requirement rejects invalid UTF-8 from exact Git blob", () => {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-831-utf8-"));
+  const git831 = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git831("init", "-q");
+    mkdirSync(join(root, "requirements"));
+    const raw = Buffer.concat([
+      Buffer.from("format: repo-guard/requirement-v1\nid: Q\nnormative: \"", "utf8"),
+      Buffer.from([0xff]),
+      Buffer.from("\"\n", "utf8"),
+    ]);
+    writeFileSync(join(root, "requirements", "Q.rg.yaml"), raw);
+    git831("add", "-A");
+    git831("-c", "user.name=RepoGuard Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "invalid utf8");
+    const revision = git831("rev-parse", "HEAD");
+
+    const result = loadCanonicalRequirements({
+      repository: "audit/fixture",
+      revision,
+      paths: ["requirements/Q.rg.yaml"],
+      readFile: (sha, path) => readFileAtRef(sha, path, root),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errors[0]?.code, "invalid_canonical_source");
+    assert.match(result.errors[0]?.message || "", /valid UTF-8/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
