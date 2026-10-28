@@ -1,5 +1,6 @@
 import { normalizeProjectionModel, } from "./projection-model.mjs";
 import { readMarkdownNode, readOwnedMarkdownBlock, } from "./markdown-structure.mjs";
+import { decodeUtf8Strict } from "./utils/repository-files.mjs";
 function targetKey(target) {
     if (target.ownership === "generated") {
         return JSON.stringify({ kind: "whole_file", path: target.path });
@@ -71,7 +72,7 @@ function specs(entries) {
         projection_id: model.id,
     }));
 }
-function readHeadText(input, path, conflicts, subject) {
+function readHeadText(input, path, conflicts, subject, strictUtf8 = false) {
     let raw;
     try {
         raw = input.readHead(path);
@@ -87,7 +88,23 @@ function readHeadText(input, path, conflicts, subject) {
     }
     if (raw === null || raw === undefined)
         return null;
-    return Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+    if (raw instanceof Uint8Array) {
+        if (!strictUtf8)
+            return Buffer.from(raw).toString("utf8");
+        try {
+            return decodeUtf8Strict(raw, `projection Markdown target "${path}"`);
+        }
+        catch (error) {
+            conflicts.push({
+                code: "malformed_target",
+                subject,
+                path,
+                detail: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
+    }
+    return String(raw);
 }
 function observeOwnedBlock(source, spec, conflicts) {
     if (spec.target.ownership !== "hybrid" || spec.target.locator?.kind !== "markdown_owned_block") {
@@ -166,7 +183,7 @@ function observeOwnedBlock(source, spec, conflicts) {
     };
 }
 function observeSpec(input, spec, conflicts) {
-    const source = readHeadText(input, spec.path, conflicts, spec.key);
+    const source = readHeadText(input, spec.path, conflicts, spec.key, spec.target.ownership === "hybrid");
     if (source === null)
         return { observed: false };
     if (spec.target.ownership === "generated") {
