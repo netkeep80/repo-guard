@@ -331,9 +331,9 @@ export function validateCompiledConstraint(value: unknown): CompiledConstraintVa
     ok: true,
     value: {
       id: input.id,
-      ...(input.activation !== undefined ? { activation: input.activation as "scoped_change" | "requirement_cause" } : {}),
-      relations: [...input.relations] as NativeRelationPredicate[],
-      ...(input.includeGenerated !== undefined ? { includeGenerated: input.includeGenerated as boolean } : {}),
+      activation: (input.activation ?? "scoped_change") as "scoped_change" | "requirement_cause",
+      relations: [...input.relations].sort() as NativeRelationPredicate[],
+      includeGenerated: input.includeGenerated === true,
       ...(input.metric !== undefined ? {
         metric: input.metric as CompiledConstraintMetric,
         max: input.max as number,
