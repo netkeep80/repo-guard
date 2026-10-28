@@ -280,7 +280,12 @@ export function getExactDiffIdentity(base: string, head: string, cwd: string): P
   return parseNameStatusZ(output);
 }
 
-export function readFileAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): Buffer | null {
+export function readFileAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): string | null {
+  if (!ref || !path) return null;
+  return runGit(["show", `${ref}:${path}`], { cwd });
+}
+
+export function readFileBytesAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): Buffer | null {
   if (!ref || !path) return null;
   return runGitBytes(["show", `${ref}:${path}`], { cwd });
 }
