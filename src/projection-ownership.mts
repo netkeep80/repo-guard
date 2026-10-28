@@ -8,6 +8,7 @@ import {
   readOwnedMarkdownBlock,
   type MarkdownOwnedBlock,
 } from "./markdown-structure.mjs";
+import { decodeUtf8Strict } from "./utils/repository-files.mjs";
 
 export type ProjectionInventoryState = "live" | "retained" | "base";
 
@@ -180,6 +181,7 @@ function readHeadText(
   path: string,
   conflicts: ProjectionOwnershipConflict[],
   subject: string,
+  strictUtf8 = false,
 ): string | null {
   let raw: unknown;
   try {
@@ -194,7 +196,21 @@ function readHeadText(
     return null;
   }
   if (raw === null || raw === undefined) return null;
-  return Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+  if (raw instanceof Uint8Array) {
+    if (!strictUtf8) return Buffer.from(raw).toString("utf8");
+    try {
+      return decodeUtf8Strict(raw, `projection Markdown target "${path}"`);
+    } catch (error) {
+      conflicts.push({
+        code: "malformed_target",
+        subject,
+        path,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+  return String(raw);
 }
 
 function observeOwnedBlock(
@@ -282,7 +298,13 @@ function observeSpec(
   spec: TargetSpec,
   conflicts: ProjectionOwnershipConflict[],
 ): { observed: boolean; region?: ObservedRegion } {
-  const source = readHeadText(input, spec.path, conflicts, spec.key);
+  const source = readHeadText(
+    input,
+    spec.path,
+    conflicts,
+    spec.key,
+    spec.target.ownership === "hybrid",
+  );
   if (source === null) return { observed: false };
 
   if (spec.target.ownership === "generated") {
