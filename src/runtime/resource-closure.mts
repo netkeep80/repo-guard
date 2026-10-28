@@ -1,4 +1,5 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
+import { decodeUtf8Strict } from "../utils/repository-files.mjs";
 import { strictCanonicalJson, type CanonicalRequirementsResult } from "./canonical-requirements.mjs";
 import type { RootedRequirementResult } from "./requirement-closure.mjs";
 
@@ -41,10 +42,10 @@ const resolvedArtifact = (input: ResourceClosureInput, path: string): Record<str
 };
 const exactArtifact = (input: ResourceClosureInput, path: string): boolean =>
   resolvedArtifact(input,path)!==null;
-const artifactText = (input: ResourceClosureInput, path: string): string | null => {
+const artifactText = (input: ResourceClosureInput, path: string, label: string): string | null => {
   const bytes=resolvedArtifact(input,path)?.bytes;
   if(typeof bytes==="string")return bytes;
-  if(Buffer.isBuffer(bytes))return bytes.toString("utf8");
+  if(bytes instanceof Uint8Array)return decodeUtf8Strict(bytes,label);
   return null;
 };
 const typedCollectionBytes = (raw: string): boolean => {
@@ -72,13 +73,13 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
   const parseCollection=(manifest:string) => {
     const cached=collectionCache.get(manifest);
     if(cached)return cached;
-    const raw=artifactText(input,manifest);
-    if(raw===null) {
-      const failure={ok:false as const,code:"invalid_resource_collection" as const,target:manifest};
-      collectionCache.set(manifest,failure); return failure;
-    }
+    let raw:string|null=null;
     let root:Record<string,unknown>|null=null;
-    try {root=obj(strictCanonicalJson(raw));} catch {
+    try {
+      raw=artifactText(input,manifest,`resource collection "${manifest}"`);
+      if(raw===null) throw new Error("resource collection bytes unavailable");
+      root=obj(strictCanonicalJson(raw));
+    } catch {
       const failure={ok:false as const,code:"invalid_resource_collection" as const,target:manifest};
       collectionCache.set(manifest,failure); return failure;
     }
@@ -111,7 +112,12 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
         const failure={ok:false as const,code:"missing_resource_target" as const,target:member};
         collectionCache.set(manifest,failure); return failure;
       }
-      const memberText=artifactText(input,member);
+      let memberText:string|null=null;
+      try {
+        memberText=artifactText(input,member,`resource collection probe "${member}"`);
+      } catch {
+        memberText=null;
+      }
       if(memberText!==null && typedCollectionBytes(memberText)) {
         const failure={ok:false as const,code:"nested_resource_collection" as const,target:member};
         collectionCache.set(manifest,failure); return failure;
