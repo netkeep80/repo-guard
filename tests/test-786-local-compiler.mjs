@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
@@ -616,5 +616,93 @@ try {
     }
   });
   
+  test("#834 F7 hostile GIT_TEMPLATE_DIR cannot inject temp-repo attributes", () => {
+    binaryFixture(false, ({ root, base, head }) => {
+      const template = join(root, "hostile-template");
+      mkdirSync(join(template, "info"), { recursive: true });
+      writeFileSync(join(template, "info", "attributes"), "*.bin diff\n");
+
+      const controlRoot = mkdtempSync(join(tmpdir(), "repo-guard-834-template-control-"));
+      const controlGitDir = join(controlRoot, "repo.git");
+      try {
+        execFileSync("git", ["init", "--bare", "-q", controlGitDir], {
+          cwd: root,
+          env: { ...process.env, GIT_TEMPLATE_DIR: template, GIT_DEFAULT_HASH: "sha1" },
+        });
+        assert.equal(existsSync(join(controlGitDir, "info", "attributes")), true,
+          "ordinary unprotected git init must copy hostile info/attributes");
+
+        const objectDirectory = join(git(root, "rev-parse", "--absolute-git-dir"), "objects");
+        const raw = execFileSync("git", [
+          `--git-dir=${controlGitDir}`,
+          `--attr-source=${head}`,
+          "-c", "core.quotepath=false",
+          "-c", `core.attributesFile=${devNull}`,
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--ignore-submodules=none",
+          "--diff-algorithm=myers",
+          "--indent-heuristic",
+          "--find-renames=50%",
+          "-l1000",
+          "--numstat",
+          "-z",
+          base,
+          head,
+        ], {
+          cwd: root,
+          encoding: "utf8",
+          env: { ...process.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: objectDirectory },
+        });
+        assert.equal(raw, "1\t1\tsrc/a.bin\0",
+          "unprotected temp-repo info/attributes must change binary numstat to numeric");
+      } finally {
+        rmSync(controlRoot, { recursive: true, force: true });
+      }
+
+      const clean = semantic(runCheck(root, base, head));
+      const hostile = semantic(runCheck(root, base, head, { GIT_TEMPLATE_DIR: template }));
+      assert.deepEqual(hostile, clean);
+      assert.equal(clean.constraint.observed, null);
+      assert.equal(clean.constraint.verdict, "RED");
+    });
+  });
+
+  test("#834 F8 GIT_DEFAULT_HASH cannot alter temp observation repository format", () => {
+    lineFixture(({ root, base, head }) => {
+      const controlRoot = mkdtempSync(join(tmpdir(), "repo-guard-834-hash-control-"));
+      const controlGitDir = join(controlRoot, "repo.git");
+      const emptyTemplate = join(controlRoot, "empty-template");
+      try {
+        mkdirSync(emptyTemplate);
+        execFileSync("git", ["init", "--bare", "-q", controlGitDir], {
+          cwd: root,
+          env: {
+            ...process.env,
+            GIT_TEMPLATE_DIR: emptyTemplate,
+            GIT_DEFAULT_HASH: "sha256",
+          },
+        });
+        const objectFormat = execFileSync("git", [
+          `--git-dir=${controlGitDir}`,
+          "rev-parse",
+          "--show-object-format",
+        ], { cwd: root, encoding: "utf8" }).trim();
+        assert.equal(objectFormat, "sha256",
+          "ordinary unprotected git init must honor GIT_DEFAULT_HASH=sha256");
+      } finally {
+        rmSync(controlRoot, { recursive: true, force: true });
+      }
+
+      const clean = semantic(runCheck(root, base, head));
+      const hostile = semantic(runCheck(root, base, head, { GIT_DEFAULT_HASH: "sha256" }));
+      assert.deepEqual(hostile, clean);
+      assert.equal(clean.status, 0);
+      assert.equal(clean.constraint.observed, 22);
+      assert.equal(clean.constraint.verdict, "PASS");
+    });
+  });
+
   console.log("#834 deterministic Git transition metric matrix: PASS");
 }

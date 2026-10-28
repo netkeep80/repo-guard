@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { listTrackedEntriesAtRef, readFileBytesAtRef, runGit } from "./git.mjs";
@@ -68,6 +68,8 @@ const isolatedGitEnvironmentKeys = new Set([
     "GIT_CEILING_DIRECTORIES",
     "GIT_DISCOVERY_ACROSS_FILESYSTEM",
     "GIT_NAMESPACE",
+    "GIT_TEMPLATE_DIR",
+    "GIT_DEFAULT_HASH",
 ]);
 function isolatedGitEnvironment() {
     const env = { ...process.env };
@@ -87,9 +89,19 @@ function deterministicTransitionDiff(root, base, head) {
     if (!objectPath)
         throw new Error("cannot resolve Git object directory");
     const objectDirectory = isAbsolute(objectPath) ? objectPath : resolve(root, objectPath);
-    const gitDir = mkdtempSync(join(tmpdir(), "repo-guard-diff-"));
+    const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-diff-"));
+    const gitDir = join(tempRoot, "repo.git");
+    const templateDir = join(tempRoot, "empty-template");
     try {
-        runGit(["init", "--bare", "-q", gitDir], { cwd: root, env });
+        mkdirSync(templateDir);
+        runGit([
+            "init",
+            "--bare",
+            "--object-format=sha1",
+            `--template=${templateDir}`,
+            "-q",
+            gitDir,
+        ], { cwd: root, env });
         const diffEnv = { ...env, GIT_ALTERNATE_OBJECT_DIRECTORIES: objectDirectory };
         const args = [
             `--git-dir=${gitDir}`,
@@ -111,7 +123,7 @@ function deterministicTransitionDiff(root, base, head) {
         };
     }
     finally {
-        rmSync(gitDir, { recursive: true, force: true });
+        rmSync(tempRoot, { recursive: true, force: true });
     }
 }
 function localObservations(repository, base, head, raw) {
