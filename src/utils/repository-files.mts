@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { TextDecoder } from "node:util";
 
 export interface RepositoryFileOptions {
   repoRoot?: string;
@@ -16,15 +17,26 @@ function readFromCallback(filePath: string, options: RepositoryFileOptions = {})
   return content;
 }
 
+export function decodeUtf8Strict(content: Uint8Array, label = "text content"): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch {
+    throw new Error(`${label} is not valid UTF-8`);
+  }
+}
+
 export function readRepositoryTextFile(filePath: string, options: RepositoryFileOptions = {}): string {
   const callbackContent = readFromCallback(filePath, options);
   if (callbackContent !== undefined) {
-    return Buffer.isBuffer(callbackContent)
-      ? callbackContent.toString("utf-8")
+    return callbackContent instanceof Uint8Array
+      ? decodeUtf8Strict(callbackContent, `repository text "${filePath}"`)
       : String(callbackContent);
   }
 
-  return readFileSync(resolve(options.repoRoot || process.cwd(), filePath), "utf-8");
+  return decodeUtf8Strict(
+    readFileSync(resolve(options.repoRoot || process.cwd(), filePath)),
+    `repository text "${filePath}"`,
+  );
 }
 
 export function readRepositoryBufferFile(filePath: string, options: RepositoryFileOptions = {}): Buffer | null {
