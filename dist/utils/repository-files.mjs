@@ -12,7 +12,7 @@ function readFromCallback(filePath, options = {}) {
 }
 export function decodeUtf8Strict(content, label = "text content") {
     try {
-        return new TextDecoder("utf-8", { fatal: true }).decode(content);
+        return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);
     }
     catch {
         throw new Error(`${label} is not valid UTF-8`);
