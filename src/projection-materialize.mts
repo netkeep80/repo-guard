@@ -1,4 +1,3 @@
-// @ts-nocheck
 // #800: deterministic, fail-closed local materialization over accepted Projection ownership.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, rmdirSync, unlinkSync, chmodSync } from "node:fs";
