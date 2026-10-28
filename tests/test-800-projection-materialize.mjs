@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { normalizeProjectionModel, projectionModelIdentity } from "../dist/projection-model.mjs";
 import { replaceOwnedMarkdownBlock, readOwnedMarkdownBlock } from "../dist/markdown-structure.mjs";
 import { evaluateProjectionCheck } from "../dist/projection-check.mjs";
+import { canonicalSemanticDigest } from "../dist/runtime/canonical-requirements.mjs";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 const cli = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
@@ -441,6 +442,90 @@ test("#800 F04: valid + valid + invalid prospective outputs cause zero writes", 
       assert.equal(readFileSync(join(root, path), "utf8"), "ORIGINAL");
     }
     assert.equal(git("status", "--porcelain=v1"), was);
+  });
+});
+
+
+
+test("#832 F1 generated projection manifest must be validated as the future manifest before writes", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const futureInvalid = "{ definitely-not-valid-json";
+    const authority = generated("g.future-manifest", ".repo-guard/projections.json");
+    const acceptedManifest = state([entry(authority, futureInvalid)]);
+    put(".repo-guard/projections.json", acceptedManifest);
+    const head = commit("projection manifest is itself a generated target");
+    const beforeBytes = readFileSync(join(root, ".repo-guard/projections.json"));
+    const beforeStatus = git("status", "--porcelain=v1");
+
+    const red = build(head, head, { [authority.id]: futureInvalid });
+
+    assert.notEqual(red.status, 0,
+      "future-invalid projection manifest must be rejected before materialization");
+    assert.deepEqual(readFileSync(join(root, ".repo-guard/projections.json")), beforeBytes);
+    assert.equal(git("status", "--porcelain=v1"), beforeStatus);
+  });
+});
+
+test("#832 F2 generated native Requirement must not validate against the old native semantic identity", () => {
+  environment(({ root, git, put, commit, build }) => {
+    const requirementText = (normative) => [
+      "format: repo-guard/requirement-v1",
+      "id: Q",
+      "normative: " + JSON.stringify(normative),
+      "",
+    ].join("\n");
+    const oldNormative = "old normative identity";
+    const futureNormative = "future normative identity";
+    const oldRequirement = requirementText(oldNormative);
+    const futureRequirement = requirementText(futureNormative);
+    const authority = normalizeProjectionModel({
+      schema: "repo-guard/projection-model/v0",
+      id: "g.future-requirement",
+      sources: [{
+        id: "requirement",
+        kind: "repository_subject",
+        subject: { kind: "requirement", id: "Q" },
+        algorithm: "sha256",
+      }],
+      target: { path: "requirements/Q.rg.yaml", ownership: "generated" },
+      generator: { contract_id: "renderer/v1" },
+      required_evidence: [],
+    });
+    const authorityEntry = {
+      state: "live",
+      model: authority,
+      build: {
+        schema: "repo-guard/projection-build-record/v0",
+        projection_id: authority.id,
+        model_identity: projectionModelIdentity(authority),
+        source_identities: [{
+          source_id: "requirement",
+          algorithm: "sha256",
+          digest: canonicalSemanticDigest(oldNormative),
+        }],
+        generator: { contract_id: "renderer/v1", tool_identity: "renderer@1" },
+        configuration_digest: sha("config"),
+        output_identity: { algorithm: "sha256", digest: sha(futureRequirement) },
+        evidence: [],
+      },
+      current_generator: {
+        tool_identity: "renderer@1",
+        configuration_digest: sha("config"),
+      },
+    };
+
+    put("requirements/Q.rg.yaml", oldRequirement);
+    put(".repo-guard/projections.json", state([authorityEntry]));
+    const head = commit("native Requirement is itself a generated target");
+    const beforeBytes = readFileSync(join(root, "requirements/Q.rg.yaml"));
+    const beforeStatus = git("status", "--porcelain=v1");
+
+    const red = build(head, head, { [authority.id]: futureRequirement });
+
+    assert.notEqual(red.status, 0,
+      "future Requirement semantic identity must not be checked through the old HEAD native index");
+    assert.deepEqual(readFileSync(join(root, "requirements/Q.rg.yaml")), beforeBytes);
+    assert.equal(git("status", "--porcelain=v1"), beforeStatus);
   });
 });
 
