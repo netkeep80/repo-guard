@@ -112,6 +112,27 @@ export function runGit(args: string[], options: RunGitOptions = {}): string {
   }
 }
 
+function runGitBytes(args: string[], options: Pick<RunGitOptions, "cwd" | "maxBuffer"> = {}): Buffer {
+  const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES;
+  if (!Number.isSafeInteger(maxBuffer) || maxBuffer <= 0) {
+    throw new Error("git maxBuffer must be a positive safe integer");
+  }
+  try {
+    return execFileSync("git", args, {
+      cwd: options.cwd,
+      stdio: "pipe",
+      maxBuffer,
+    });
+  } catch (error) {
+    const command = gitSubcommand(args);
+    const subcommand = command ? ` ${command}` : "";
+    if ((error as ChildProcessFailure | null | undefined)?.code === "ENOBUFS") {
+      throw new Error(`git${subcommand} failed: output exceeded configured maxBuffer=${maxBuffer} bytes`);
+    }
+    throw new Error(`git${subcommand} failed: ${childProcessMessage(error)}`);
+  }
+}
+
 function exactCommit(ref: string, cwd: string, label: string): string {
   try {
     const sha = runGit(["rev-parse", "--verify", `${ref}^{commit}`], { cwd }).trim();
@@ -259,7 +280,7 @@ export function getExactDiffIdentity(base: string, head: string, cwd: string): P
   return parseNameStatusZ(output);
 }
 
-export function readFileAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): string | null {
+export function readFileAtRef(ref: string | null | undefined, path: string | null | undefined, cwd: string): Buffer | null {
   if (!ref || !path) return null;
-  return runGit(["show", `${ref}:${path}`], { cwd });
+  return runGitBytes(["show", `${ref}:${path}`], { cwd });
 }
