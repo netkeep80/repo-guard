@@ -165,8 +165,9 @@ function removeOwned(content, model) {
 function replaceOwned(content, model, generated) {
     if (typeof content !== "string")
         deny("HYBRID file must already exist: " + model.target.path);
+    const locator = model.target.locator;
     return replaceOwnedMarkdownBlock({
-        source: content, mode: "hybrid", anchorId: model.target.locator.anchor_id,
+        source: content, mode: "hybrid", anchorId: locator.anchor_id,
         block: blockSpec(model), generatedContent: generated,
     });
 }
