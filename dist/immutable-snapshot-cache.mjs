@@ -1,4 +1,5 @@
 import { normalizePathEntry } from "./utils/path-patterns.mjs";
+import { decodeUtf8Strict } from "./utils/repository-files.mjs";
 const EXACT_COMMIT_SHA = /^[0-9a-f]{40}$/i;
 function normalizeIdentity(identity) {
     const repository = String(identity.repository || "").trim().toLowerCase();
@@ -67,7 +68,11 @@ export function createImmutableSnapshotDocumentCache(options) {
             }
             metrics.parses++;
             try {
-                const value = options.parsers[format](String(read(coordinate.identity, coordinate.path)));
+                const rawValue = read(coordinate.identity, coordinate.path);
+                const text = rawValue instanceof Uint8Array
+                    ? decodeUtf8Strict(rawValue, `snapshot document "${coordinate.path}"`)
+                    : String(rawValue);
+                const value = options.parsers[format](text);
                 parsed.set(key, { ok: true, value });
                 return value;
             }

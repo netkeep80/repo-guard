@@ -1,4 +1,4 @@
-import { listTrackedEntriesAtRef, readFileAtRef, runGit } from "./git.mjs";
+import { listTrackedEntriesAtRef, readFileBytesAtRef, runGit } from "./git.mjs";
 import { parseNameStatusZ } from "./diff/parser.mjs";
 import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
@@ -74,7 +74,7 @@ export function evaluateLocalCompiler(input) {
             repository: input.repository,
             revision,
             paths,
-            readFile: (sha, path) => sha === revision ? readFileAtRef(sha, path, input.root) : null,
+            readFile: (sha, path) => sha === revision ? readFileBytesAtRef(sha, path, input.root) : null,
         });
         const lowered = lowerNativeRequirements(native);
         const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: structuralRoots(lowered) });
@@ -92,7 +92,7 @@ export function evaluateLocalCompiler(input) {
                 repository: input.repository,
                 revision,
                 requirements: lowered.requirements,
-                readers: { [input.repository]: (sha, path) => sha === revision ? readFileAtRef(sha, path, input.root) : null },
+                readers: { [input.repository]: (sha, path) => sha === revision ? readFileBytesAtRef(sha, path, input.root) : null },
             });
             j1 = evaluateTrackedResourceClosure({
                 repository: input.repository,
@@ -141,14 +141,14 @@ export function evaluateLocalCompiler(input) {
     const headProjectionPaths = new Set(after.entries.map((entry) => entry.path));
     const projectionReport = evaluateProjectionCheck({
         baseRaw: baseProjectionPaths.has(projectionPath)
-            ? readFileAtRef(base, projectionPath, input.root)
+            ? readFileBytesAtRef(base, projectionPath, input.root)
             : null,
         headRaw: headProjectionPaths.has(projectionPath)
-            ? readFileAtRef(head, projectionPath, input.root)
+            ? readFileBytesAtRef(head, projectionPath, input.root)
             : null,
-        readHead: (path) => headProjectionPaths.has(path) ? readFileAtRef(head, path, input.root) : null,
+        readHead: (path) => headProjectionPaths.has(path) ? readFileBytesAtRef(head, path, input.root) : null,
         facts: {
-            readFile: (path) => readFileAtRef(head, path, input.root),
+            readFile: (path) => readFileBytesAtRef(head, path, input.root),
             diff: { files: { checked: diff } },
         },
         resolveRequirement: (id) => {

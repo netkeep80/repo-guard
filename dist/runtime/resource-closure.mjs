@@ -1,4 +1,5 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
+import { decodeUtf8Strict } from "../utils/repository-files.mjs";
 import { strictCanonicalJson } from "./canonical-requirements.mjs";
 const direct = new Set(["requires", "implemented_by", "verified_by", "documents", "generates"]);
 const collectionDirect = new Set(["requires", "implemented_by", "verified_by", "documents"]);
@@ -23,12 +24,12 @@ const resolvedArtifact = (input, path) => {
     return result;
 };
 const exactArtifact = (input, path) => resolvedArtifact(input, path) !== null;
-const artifactText = (input, path) => {
+const artifactText = (input, path, label) => {
     const bytes = resolvedArtifact(input, path)?.bytes;
     if (typeof bytes === "string")
         return bytes;
-    if (Buffer.isBuffer(bytes))
-        return bytes.toString("utf8");
+    if (bytes instanceof Uint8Array)
+        return decodeUtf8Strict(bytes, label);
     return null;
 };
 const typedCollectionBytes = (raw) => {
@@ -61,14 +62,12 @@ export function evaluateTrackedResourceClosure(input) {
         const cached = collectionCache.get(manifest);
         if (cached)
             return cached;
-        const raw = artifactText(input, manifest);
-        if (raw === null) {
-            const failure = { ok: false, code: "invalid_resource_collection", target: manifest };
-            collectionCache.set(manifest, failure);
-            return failure;
-        }
+        let raw = null;
         let root = null;
         try {
+            raw = artifactText(input, manifest, `resource collection "${manifest}"`);
+            if (raw === null)
+                throw new Error("resource collection bytes unavailable");
             root = obj(strictCanonicalJson(raw));
         }
         catch {
@@ -113,7 +112,13 @@ export function evaluateTrackedResourceClosure(input) {
                 collectionCache.set(manifest, failure);
                 return failure;
             }
-            const memberText = artifactText(input, member);
+            let memberText = null;
+            try {
+                memberText = artifactText(input, member, `resource collection probe "${member}"`);
+            }
+            catch {
+                memberText = null;
+            }
             if (memberText !== null && typedCollectionBytes(memberText)) {
                 const failure = { ok: false, code: "nested_resource_collection", target: member };
                 collectionCache.set(manifest, failure);

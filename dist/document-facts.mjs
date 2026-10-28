@@ -3,7 +3,7 @@ import { parseMarkdown } from "./markdown-parser.mjs";
 import { readMarkdownNode, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
 import { isAlias, isNode, isPair, isScalar, parseDocument, visit } from "yaml";
 import { selectPaths } from "./diff/classification.mjs";
-import { readRepositoryTextFile } from "./utils/repository-files.mjs";
+import { decodeUtf8Strict, readRepositoryTextFile } from "./utils/repository-files.mjs";
 import { uniqueSorted } from "./utils/collections.mjs";
 import { matchesAny, normalizePathEntry } from "./utils/path-patterns.mjs";
 export { parseMarkdown } from "./markdown-parser.mjs";
@@ -220,16 +220,19 @@ function snapshotFactSource(context, selector) {
     }
     if (raw === null || raw === undefined)
         return failDocumentFact("document_read_error", `missing ${label} file`, selector.pointer);
+    const text = raw instanceof Uint8Array
+        ? decodeUtf8Strict(raw, `${label} text "${path}"`)
+        : String(raw);
     if (selector.format === "plain_text") {
         if (selector.pointer !== "" || (selector.projection !== undefined && selector.projection !== "value")) {
             return failDocumentFact("projection_type_mismatch", "plain_text fact requires the root value selector", selector.pointer);
         }
-        return String(raw).trim();
+        return text.trim();
     }
     if (selector.format === "json")
-        return identity ? context.snapshotDocuments.parsed(identity, path, "json") : parseJson(String(raw));
+        return identity ? context.snapshotDocuments.parsed(identity, path, "json") : parseJson(text);
     if (selector.format === "yaml")
-        return identity ? context.snapshotDocuments.parsed(identity, path, "yaml") : parseYaml(String(raw));
+        return identity ? context.snapshotDocuments.parsed(identity, path, "yaml") : parseYaml(text);
     const exhaustive = selector.format;
     return failDocumentFact("unsupported_document_type", `unsupported document type for "${String(exhaustive)}"`, selector.pointer);
 }
@@ -253,7 +256,7 @@ function canonicalIdentityJson(value) {
 export function readDurableDocumentIdentity(content, format, pointer = "") {
     const text = typeof content === "string"
         ? content
-        : Buffer.from(content).toString("utf8");
+        : decodeUtf8Strict(content, "durable document identity source");
     const document = format === "json" ? parseDurableJson(text) : parseYaml(text);
     const value = resolveJsonPointer(document, pointer);
     const canonicalValue = canonicalIdentityJson(value);
@@ -307,9 +310,9 @@ function contentIdentityFactSource(context, selector) {
     if (raw === null || raw === undefined) {
         return failDocumentFact("document_read_error", `content identity source "${path}" is unavailable`);
     }
-    let bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf8");
+    let bytes = raw instanceof Uint8Array ? Buffer.from(raw) : Buffer.from(String(raw), "utf8");
     if (selector.region?.kind === "markdown_owned_block") {
-        const text = bytes.toString("utf8");
+        const text = decodeUtf8Strict(bytes, `Markdown identity source "${path}"`);
         const node = readMarkdownNode(text, selector.region.anchor_id, {
             transparentOwnedBlocks: [{
                     blockId: selector.region.block_id,
@@ -331,7 +334,7 @@ function contentIdentityFactSource(context, selector) {
         bytes = Buffer.from(block.content, "utf8");
     }
     else if (selector.region?.kind === "document_pointer") {
-        const text = bytes.toString("utf8");
+        const text = decodeUtf8Strict(bytes, `document identity source "${path}"`);
         const document = selector.region.format === "json" ? parseDurableJson(text) : parseYaml(text);
         const selected = resolveJsonPointer(document, selector.region.pointer);
         bytes = Buffer.from(canonicalIdentityJson(selected), "utf8");

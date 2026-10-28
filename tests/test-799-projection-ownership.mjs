@@ -13,7 +13,12 @@ import {
 } from "../dist/projection-api.mjs";
 import { analyzeProjectionCurrent } from "../dist/projection-analysis.mjs";
 import { analyzeProjectionOwnership } from "../dist/projection-ownership.mjs";
-import { loadNativeRequirements } from "../dist/runtime/canonical-requirements.mjs";
+import { readFileBytesAtRef } from "../dist/git.mjs";
+import { decodeUtf8Strict } from "../dist/utils/repository-files.mjs";
+import {
+  loadCanonicalRequirements,
+  loadNativeRequirements,
+} from "../dist/runtime/canonical-requirements.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -866,10 +871,12 @@ relations:
 
   try {
     git("init", "-q");
+    const oldBytes = Buffer.from([0xef, 0xbf, 0xbd]);
+    const newBytes = Buffer.from([0xff]);
     put("requirements/core.rg.yaml", requirement);
-    put("model/source.txt", "alpha\n");
+    put("model/source.txt", oldBytes);
     put("derived/output.txt", "ALPHA\n");
-    put(".repo-guard/projections.json", state("alpha\n", "ALPHA\n"));
+    put(".repo-guard/projections.json", state(oldBytes, "ALPHA\n"));
     const base = commit("base");
 
     const current = check(base, base);
@@ -887,15 +894,16 @@ relations:
     const before = execFileSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" });
     assert.equal(before, "", "fixture must be clean before read-only check");
 
-    put("model/source.txt", "beta\n");
-    const staleHead = commit("source changed without rebuild");
+    put("model/source.txt", newBytes);
+    const staleHead = commit("source bytes changed without rebuild");
     const stale = check(base, staleHead);
     assert.notEqual(stale.status, 0);
     assert.equal(stale.report.projections.analyses[0].freshness, "STALE");
+    assert.ok(stale.report.projections.analyses[0].reasons.includes("source_changed:source"));
     assert.ok(stale.report.diagnostics.some((item) => item.code === "projection_stale"));
 
     put("derived/output.txt", "BETA\n");
-    put(".repo-guard/projections.json", state("beta\n", "BETA\n"));
+    put(".repo-guard/projections.json", state(newBytes, "BETA\n"));
     const rebuiltHead = commit("record deterministic rebuild");
     const rebuilt = check(base, rebuiltHead);
     assert.equal(rebuilt.status, 0);
@@ -1587,3 +1595,91 @@ test("#822 G5 active writer, locator, containment and SOURCE safety remain fail-
     item.code === "projection_source_reclassification_invalid"));
 });
 
+
+
+test("#831 canonical textual Requirement rejects invalid UTF-8 from exact Git blob", () => {
+  assert.equal(decodeUtf8Strict(Buffer.from([0xef, 0xbb, 0xbf, 0x61])), "\uFEFFa", "valid UTF-8 BOM semantics must remain unchanged");
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-831-utf8-"));
+  const git831 = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git831("init", "-q");
+    mkdirSync(join(root, "requirements"));
+    const raw = Buffer.concat([
+      Buffer.from("format: repo-guard/requirement-v1\nid: Q\nnormative: \"", "utf8"),
+      Buffer.from([0xff]),
+      Buffer.from("\"\n", "utf8"),
+    ]);
+    writeFileSync(join(root, "requirements", "Q.rg.yaml"), raw);
+    git831("add", "-A");
+    git831("-c", "user.name=RepoGuard Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "invalid utf8");
+    const revision = git831("rev-parse", "HEAD");
+
+    const result = loadCanonicalRequirements({
+      repository: "audit/fixture",
+      revision,
+      paths: ["requirements/Q.rg.yaml"],
+      readFile: (sha, path) => readFileBytesAtRef(sha, path, root),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errors[0]?.code, "invalid_canonical_source");
+    assert.match(result.errors[0]?.message || "", /valid UTF-8/i);
+
+    const cliPath = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+    let stdout = "";
+    let status = 0;
+    try {
+      stdout = execFileSync(process.execPath, [
+        cliPath,
+        "--repo-root", root,
+        "check",
+        "--base", revision,
+        "--head", revision,
+        "--format", "json",
+      ], {
+        cwd: root,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH },
+      });
+    } catch (error) {
+      status = error.status ?? 1;
+      stdout = String(error.stdout || "");
+    }
+    assert.notEqual(status, 0, "production CLI must fail closed on invalid UTF-8 Requirement bytes");
+    const report = JSON.parse(stdout);
+    assert.ok(report.diagnostics.some((item) =>
+      item.code === "invalid_requirement" && /valid UTF-8/i.test(item.detail || "")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("#831 retained HYBRID ownership rejects invalid UTF-8 before Markdown interpretation", () => {
+  const begin = "<!-- rg:utf8:begin -->";
+  const end = "<!-- rg:utf8:end -->";
+  const model = owned("retained.utf8", "docs/retained.md", "utf8-root", "utf8", begin, end);
+  const prefix = [
+    '<a id="utf8-root"></a>',
+    "# UTF-8",
+    begin,
+    "managed",
+    end,
+    "",
+  ].join("\n");
+  const bytes = Buffer.concat([
+    Buffer.from(prefix, "utf8"),
+    Buffer.from([0xff]),
+    Buffer.from("\n", "utf8"),
+  ]);
+
+  const report = analyzeProjectionOwnership({
+    live: [],
+    retained: [model],
+    readHead: () => bytes,
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(report.conflicts.some((item) =>
+    item.code === "malformed_target" && /valid UTF-8/i.test(item.detail || "")));
+});

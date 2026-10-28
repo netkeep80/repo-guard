@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import { normalizeDocumentFact, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
+import { decodeUtf8Strict } from "../utils/repository-files.mjs";
 const fail = (code, path, message, otherPath) => ({ code, path, message, ...(otherPath ? { otherPath } : {}) });
 function canonical(value) {
     if (value === null || typeof value === "string" || typeof value === "boolean")
@@ -99,7 +100,9 @@ export function loadCanonicalRequirements(input) {
             const content = input.readFile(input.revision, safePath);
             if (content === null || content === undefined)
                 throw new Error("canonical source missing at exact snapshot");
-            const value = parseRequirement(Buffer.isBuffer(content) ? content.toString("utf8") : content, safePath);
+            const value = parseRequirement(content instanceof Uint8Array
+                ? decodeUtf8Strict(content, `canonical Requirement "${safePath}"`)
+                : content, safePath);
             const id = value.id;
             if (typeof id !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(id)) {
                 errors.push(fail("malformed_requirement_id", safePath, "missing or malformed RequirementId"));
@@ -449,7 +452,9 @@ export function loadNativeRequirements(input) {
             if (content === null || content === undefined)
                 nativeFailure("invalid_native_document", "native source missing at exact snapshot");
             const exactContent = content;
-            const raw = Buffer.isBuffer(exactContent) ? exactContent.toString("utf8") : exactContent;
+            const raw = exactContent instanceof Uint8Array
+                ? decodeUtf8Strict(exactContent, `native Requirement "${path}"`)
+                : exactContent;
             const value = parseNativeRequirement(raw, path);
             nativeExactFields(value, ["format", "id", "normative", "lifecycle", "relations", "constraints"], "native Requirement");
             if (value.format !== "repo-guard/requirement-v1")

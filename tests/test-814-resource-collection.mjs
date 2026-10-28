@@ -426,4 +426,39 @@ test("#814 N11/N14 exact snapshot ignores working tree and verdict is determinis
   }
 });
 
+test("#831 invalid UTF-8 collection manifest cannot alias a valid U+FFFD member path", () => {
+  const aliasedMember = "tests/\uFFFD.test.ts";
+  const malformedManifest = Buffer.concat([
+    Buffer.from(`{"schema":"${SCHEMA}","members":["tests/`, "utf8"),
+    Buffer.from([0xff]),
+    Buffer.from('.test.ts"]}\n', "utf8"),
+  ]);
+  const result = closure({
+    docs: [canonicalRequirement("R", "inventory/tests.resources.json")],
+    files: new Map([
+      ["inventory/tests.resources.json", malformedManifest],
+      [aliasedMember, "valid member\n"],
+    ]),
+    roots: ["R"],
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) =>
+    error.code === "invalid_resource_collection" &&
+    error.target === "inventory/tests.resources.json"));
+  assert.equal(result.owners[aliasedMember], undefined);
+});
+
+test("#831 binary collection member remains opaque when probed for nested collection schema", () => {
+  const result = closure({
+    docs: [canonicalRequirement("R", "inventory/tests.resources.json")],
+    files: new Map([
+      ["inventory/tests.resources.json", manifest(["bin/payload.bin"])],
+      ["bin/payload.bin", Buffer.from([0xff, 0x00, 0x01])],
+    ]),
+    roots: ["R"],
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.owners["bin/payload.bin"], ["R"]);
+});
+
 console.log("#814 bounded exact Resource Collection fixtures loaded");

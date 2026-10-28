@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, rmdirSync, unlinkSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { runGit, listTrackedEntriesAtRef, readFileAtRef } from "./git.mjs";
+import { runGit, listTrackedEntriesAtRef, readFileAtRef, readFileBytesAtRef } from "./git.mjs";
 import { parseProjectionCheckState, evaluateProjectionCheck } from "./projection-check.mjs";
 import { replaceOwnedMarkdownBlock, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
 import { loadNativeRequirements, strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
@@ -108,7 +108,7 @@ function nativeIndex(root, revision, entries) {
   const paths = [...entries.keys()].filter((p) => /^requirements\/.*\.rg\.(yaml|json)$/.test(p));
   const native = loadNativeRequirements({
     repository: localRepository(root), revision, paths,
-    readFile: (_sha, path) => readFileAtRef(revision, path, root),
+    readFile: (_sha, path) => readFileBytesAtRef(revision, path, root),
   });
   if (!native.ok) deny("invalid canonical Requirement index: " + native.errors.map((e) => e.code).join(","));
   return native;
@@ -147,14 +147,15 @@ function stagesFor(input) {
   const baseTree = new Map(listTrackedEntriesAtRef(base, root).map((e) => [e.path, e]));
   const headTree = new Map(listTrackedEntriesAtRef(head, root).map((e) => [e.path, e]));
   const statePath = ".repo-guard/projections.json";
-  const rawBase = baseTree.has(statePath) ? readFileAtRef(base, statePath, root) : null;
-  const rawHead = headTree.has(statePath) ? readFileAtRef(head, statePath, root) : null;
+  const rawBase = baseTree.has(statePath) ? readFileBytesAtRef(base, statePath, root) : null;
+  const rawHead = headTree.has(statePath) ? readFileBytesAtRef(head, statePath, root) : null;
   const prior = parseProjectionCheckState(rawBase);
   const current = parseProjectionCheckState(rawHead);
   const view = (path) => headTree.has(path) ? readFileAtRef(head, path, root) : null;
+  const exactView = (path) => headTree.has(path) ? readFileBytesAtRef(head, path, root) : null;
   const report = evaluateProjectionCheck({
-    baseRaw: rawBase, headRaw: rawHead, readHead: view,
-    facts: { readFile: view, diff: { files: { checked: [] } } },
+    baseRaw: rawBase, headRaw: rawHead, readHead: exactView,
+    facts: { readFile: exactView, diff: { files: { checked: [] } } },
   });
   if (report.ownership.conflicts.length ||
       report.diagnostics.some((d) => d.code.startsWith("projection_source_reclassification"))) {
@@ -208,7 +209,7 @@ function stagesFor(input) {
   }
 
   // Validate the entire prospective output snapshot before touching the filesystem.
-  const prospective = (path) => updated.has(path) ? updated.get(path).after : view(path);
+  const prospective = (path) => updated.has(path) ? updated.get(path).after : exactView(path);
   const afterReport = evaluateProjectionCheck({
     baseRaw: rawBase, headRaw: rawHead, readHead: prospective,
     facts: { readFile: prospective, diff: { files: { checked: [] } } },

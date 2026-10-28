@@ -1,4 +1,5 @@
 import { normalizePathEntry } from "./utils/path-patterns.mjs";
+import { decodeUtf8Strict } from "./utils/repository-files.mjs";
 
 export type ImmutableSnapshotFormat = "json" | "yaml";
 
@@ -112,7 +113,11 @@ export function createImmutableSnapshotDocumentCache(options: ImmutableSnapshotD
       }
       metrics.parses++;
       try {
-        const value = options.parsers[format](String(read(coordinate.identity, coordinate.path)));
+        const rawValue = read(coordinate.identity, coordinate.path);
+        const text = rawValue instanceof Uint8Array
+          ? decodeUtf8Strict(rawValue, `snapshot document "${coordinate.path}"`)
+          : String(rawValue);
+        const value = options.parsers[format](text);
         parsed.set(key, { ok: true, value });
         return value;
       } catch (error: unknown) {
