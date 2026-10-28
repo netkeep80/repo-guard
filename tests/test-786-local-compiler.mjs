@@ -1218,3 +1218,190 @@ try {
     }
   });
 }
+
+
+{
+  const causalRef = (predicate, target) => ({ predicates: [predicate], target });
+  const causalRequirement = ({ id, relations, guard = false }) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id,
+    normative: "#833 B1 targetPath causal isolation matrix",
+    relations,
+    ...(guard ? {
+      constraints: [{
+        id: "guard",
+        activation: "requirement_cause",
+        scope: { relations: ["constrains"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      }],
+    } : {}),
+  }, null, 2) + "\n";
+
+  function runDocumentRelationMutation(mode) {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-matrix-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = causalRequirement({
+      id: "A",
+      guard: true,
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "docs/a.json" }),
+        causalRef("constrains", { kind: "artifact", path: "src/b.txt" }),
+      ],
+    });
+    const b = (pointer) => causalRequirement({
+      id: "B",
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        ...(pointer === null ? [] : [
+          causalRef("documents", { kind: "document", path: "docs/a.json", pointer }),
+        ]),
+      ],
+    });
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b(mode === "add" ? null : "/one"));
+      putFile("docs/a.json", JSON.stringify({ one: { value: 1 }, two: { value: 2 } }) + "\n");
+      putFile("src/b.txt", "before\n");
+      const base = save("base");
+
+      putFile("requirements/b.rg.json", b(mode === "remove" ? null : mode === "replace" ? "/two" : "/one"));
+      putFile("src/b.txt", "after\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "A" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+      return { report, guard };
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  for (const [mode, deltaKind] of [
+    ["add", "relation_add"],
+    ["remove", "relation_remove"],
+    ["replace", "relation_replace"],
+  ]) {
+    test(`#833 B1 DocumentRef relation ${mode} is causally isolated from path owner`, () => {
+      const { report, guard } = runDocumentRelationMutation(mode);
+      assert.ok(
+        report.j3.deltas.some(delta => delta.kind === deltaKind && delta.subject === "B"),
+        JSON.stringify(report.j3.deltas, null, 2),
+      );
+      assert.deepEqual(report.j3.affectedRequirements, ["B"]);
+      assert.equal(guard.directApplicable, false);
+      assert.equal(guard.verdict, "NOT_APPLICABLE");
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+    });
+  }
+
+  test("#833 B1 ArtifactRef targetPath causal semantics remain unchanged", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-artifact-control-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = causalRequirement({
+      id: "A",
+      guard: true,
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "docs/a.json" }),
+        causalRef("constrains", { kind: "artifact", path: "src/b.txt" }),
+      ],
+    });
+    const b = (withArtifact) => causalRequirement({
+      id: "B",
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        ...(withArtifact ? [
+          causalRef("documents", { kind: "artifact", path: "docs/a.json" }),
+        ] : []),
+      ],
+    });
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b(false));
+      putFile("docs/a.json", JSON.stringify({ one: 1 }) + "\n");
+      putFile("src/b.txt", "before\n");
+      const base = save("base");
+      putFile("requirements/b.rg.json", b(true));
+      putFile("src/b.txt", "after\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "A" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+      assert.ok(report.j3.deltas.some(delta => delta.kind === "relation_add" && delta.subject === "B"));
+      assert.deepEqual(report.j3.affectedRequirements, ["A", "B"]);
+      assert.equal(guard.directApplicable, true);
+      assert.equal(guard.verdict, "RED");
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.diagnostics.some(item => item.code === "j3" && item.subject === "I7:constraint_exceeded:A:guard:1>0"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 B1 DocumentRef validation does not create J1 ownership", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-j1-control-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = causalRequirement({
+      id: "A",
+      relations: [causalRef("implemented_by", { kind: "artifact", path: "docs/a.json" })],
+    });
+    const b = causalRequirement({
+      id: "B",
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        causalRef("documents", { kind: "document", path: "docs/a.json", pointer: "/one" }),
+      ],
+    });
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b);
+      putFile("docs/a.json", JSON.stringify({ one: { value: 1 } }) + "\n");
+      putFile("src/b.txt", "stable\n");
+      const base = save("base");
+      putFile("docs/a.json", JSON.stringify({ one: { value: 2 } }) + "\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      assert.deepEqual(report.j3.affectedRequirements, ["A"]);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#833 B1 causal applicability regression matrix: PASS");
+}

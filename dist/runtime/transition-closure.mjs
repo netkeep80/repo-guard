@@ -48,10 +48,6 @@ function targetIdentity(value) {
         const path = normPath(target.path);
         return { key: stable({ kind: "artifact", path }), path };
     }
-    if (target.kind === "document") {
-        const path = normPath(target.path);
-        return { key: stable(target), path };
-    }
     return { key: stable(target) };
 }
 function relationFactKey(fact) {
