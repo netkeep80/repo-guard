@@ -224,5 +224,10 @@ export function getExactDiffIdentity(base, head, cwd) {
 export function readFileAtRef(ref, path, cwd) {
     if (!ref || !path)
         return null;
+    return runGit(["show", `${ref}:${path}`], { cwd });
+}
+export function readFileBytesAtRef(ref, path, cwd) {
+    if (!ref || !path)
+        return null;
     return runGitBytes(["show", `${ref}:${path}`], { cwd });
 }
