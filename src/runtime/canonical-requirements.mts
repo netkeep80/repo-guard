@@ -193,7 +193,7 @@ export interface NativeConstraintScope {
 }
 
 export interface NativeConstraintMetric {
-  key: string;
+  key: "git.changed_lines" | "git.changed_resources";
   max: number;
 }
 
@@ -258,6 +258,90 @@ const nativePredicates = new Set<NativeRelationPredicate>([
 const nativeScopePredicates = new Set<NativeRelationPredicate>([
   "requires", "implemented_by", "verified_by", "documents", "constrains",
 ]);
+
+export const compiledConstraintIdPattern = /^[A-Za-z][A-Za-z0-9._-]*$/;
+export type CompiledConstraintMetric = "changed_lines" | "changed_resources";
+export interface CompiledConstraintEvidence {
+  kind: "execution" | "domain";
+  key: string;
+  providerId?: string;
+  verifierPath?: string;
+}
+export interface CompiledConstraint {
+  id: string;
+  activation?: "scoped_change" | "requirement_cause";
+  relations: readonly NativeRelationPredicate[];
+  includeGenerated?: boolean;
+  metric?: CompiledConstraintMetric;
+  max?: number;
+  evidence?: CompiledConstraintEvidence;
+}
+export type CompiledConstraintValidation =
+  | { ok: true; value: CompiledConstraint }
+  | { ok: false; error: string };
+
+export function validateCompiledConstraint(value: unknown): CompiledConstraintValidation {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return { ok: false, error: "compiled Constraint must be an object" };
+  const input = value as Record<string, unknown>;
+  const allowed = new Set(["id", "activation", "relations", "includeGenerated", "metric", "max", "evidence"]);
+  if (Object.keys(input).some(key => !allowed.has(key)))
+    return { ok: false, error: "compiled Constraint has unknown field" };
+  if (typeof input.id !== "string" || !compiledConstraintIdPattern.test(input.id))
+    return { ok: false, error: "compiled Constraint id is invalid" };
+  if (input.activation !== undefined && input.activation !== "scoped_change" && input.activation !== "requirement_cause")
+    return { ok: false, error: "compiled Constraint activation is invalid" };
+  if (!Array.isArray(input.relations) || input.relations.length === 0 ||
+      input.relations.some(item => typeof item !== "string" || !nativeScopePredicates.has(item as NativeRelationPredicate)) ||
+      new Set(input.relations).size !== input.relations.length)
+    return { ok: false, error: "compiled Constraint relations are invalid" };
+  if (input.includeGenerated !== undefined && typeof input.includeGenerated !== "boolean")
+    return { ok: false, error: "compiled Constraint includeGenerated is invalid" };
+  if (input.metric !== undefined && input.metric !== "changed_lines" && input.metric !== "changed_resources")
+    return { ok: false, error: "compiled Constraint metric is invalid" };
+  if (input.metric === undefined && input.max !== undefined)
+    return { ok: false, error: "compiled Constraint max requires metric" };
+  if (input.metric !== undefined && (!Number.isSafeInteger(input.max) || (input.max as number) < 0))
+    return { ok: false, error: "compiled Constraint max is invalid" };
+
+  let evidence: CompiledConstraintEvidence | undefined;
+  if (input.evidence !== undefined) {
+    if (!input.evidence || typeof input.evidence !== "object" || Array.isArray(input.evidence))
+      return { ok: false, error: "compiled Constraint evidence is invalid" };
+    const raw = input.evidence as Record<string, unknown>;
+    const evidenceAllowed = new Set(["kind", "key", "providerId", "verifierPath"]);
+    if (Object.keys(raw).some(key => !evidenceAllowed.has(key)) ||
+        (raw.kind !== "execution" && raw.kind !== "domain") ||
+        typeof raw.key !== "string" || raw.key.length === 0 ||
+        (raw.providerId !== undefined && (typeof raw.providerId !== "string" || raw.providerId.length === 0)) ||
+        (raw.verifierPath !== undefined && (typeof raw.verifierPath !== "string" || raw.verifierPath.length === 0)) ||
+        (raw.kind === "execution" && typeof raw.verifierPath !== "string"))
+      return { ok: false, error: "compiled Constraint evidence is invalid" };
+    evidence = {
+      kind: raw.kind,
+      key: raw.key,
+      ...(typeof raw.providerId === "string" ? { providerId: raw.providerId } : {}),
+      ...(typeof raw.verifierPath === "string" ? { verifierPath: raw.verifierPath } : {}),
+    };
+  }
+  if (input.metric === undefined && evidence === undefined)
+    return { ok: false, error: "compiled Constraint requires metric or evidence" };
+
+  return {
+    ok: true,
+    value: {
+      id: input.id,
+      ...(input.activation !== undefined ? { activation: input.activation as "scoped_change" | "requirement_cause" } : {}),
+      relations: [...input.relations] as NativeRelationPredicate[],
+      ...(input.includeGenerated !== undefined ? { includeGenerated: input.includeGenerated as boolean } : {}),
+      ...(input.metric !== undefined ? {
+        metric: input.metric as CompiledConstraintMetric,
+        max: input.max as number,
+      } : {}),
+      ...(evidence ? { evidence } : {}),
+    },
+  };
+}
 
 class NativeContractFailure extends Error {
   readonly code: NativeErrorCode;
@@ -462,11 +546,11 @@ function nativeConstraintScope(value: unknown, label: string): NativeConstraintS
 function nativeConstraintMetric(value: unknown, label: string): NativeConstraintMetric {
   const input = nativeObject(value, label);
   nativeExactFields(input, ["key", "max"], label);
-  if (typeof input.key !== "string" || input.key.length === 0)
-    nativeFailure("invalid_constraint", label + ".key must be a non-empty string");
-  if (typeof input.max !== "number" || !Number.isFinite(input.max) || input.max < 0)
-    nativeFailure("invalid_constraint", label + ".max must be a finite non-negative number");
-  return { key: input.key as string, max: input.max as number };
+  if (input.key !== "git.changed_lines" && input.key !== "git.changed_resources")
+    nativeFailure("invalid_constraint", label + ".key must be git.changed_lines or git.changed_resources");
+  if (!Number.isSafeInteger(input.max) || (input.max as number) < 0)
+    nativeFailure("invalid_constraint", label + ".max must be a non-negative safe integer");
+  return { key: input.key, max: input.max as number };
 }
 
 function nativeConstraintEvidence(value: unknown, label: string): NativeConstraintEvidence {
@@ -496,7 +580,7 @@ function nativeConstraints(value: unknown): NativeConstraint[] {
     const label = "constraints[" + index + "]";
     const input = nativeObject(values[index], label);
     nativeExactFields(input, ["id", "activation", "scope", "metric", "evidence"], label);
-    if (typeof input.id !== "string" || !/^[A-Za-z][A-Za-z0-9._:-]*$/.test(input.id))
+    if (typeof input.id !== "string" || !compiledConstraintIdPattern.test(input.id))
       nativeFailure("invalid_constraint", label + ".id is invalid");
     const id = input.id as string;
     if (ids.has(id)) return nativeFailure("duplicate_constraint_id", "duplicate Constraint id " + id);
@@ -643,24 +727,32 @@ export function lowerNativeRequirements(native: NativeRequirementsResult) {
         ...(relation.collection === true ? { collection: true } : {}),
       };
     }
-    const constraints = item.constraints.map(constraint => ({
-      id: constraint.id,
-      activation: constraint.activation,
-      relations: [...constraint.scope.relations],
-      includeGenerated: constraint.scope.include_generated,
-      ...(constraint.metric ? {
-        metric: constraint.metric.key === "git.changed_lines" ? "changed_lines" :
-          constraint.metric.key === "git.changed_resources" ? "changed_resources" : constraint.metric.key,
-        max: constraint.metric.max,
-      } : {}),
-      ...(constraint.evidence ? {
-        evidence: {
-          kind: constraint.evidence.class,
-          key: constraint.evidence.key,
-          ...(constraint.evidence.verifier?.kind === "artifact" ? { verifierPath: constraint.evidence.verifier.path } : {}),
-        },
-      } : {}),
-    }));
+    const constraints: CompiledConstraint[] = [];
+    for (const constraint of item.constraints) {
+      const candidate: CompiledConstraint = {
+        id: constraint.id,
+        activation: constraint.activation,
+        relations: [...constraint.scope.relations],
+        includeGenerated: constraint.scope.include_generated,
+        ...(constraint.metric ? {
+          metric: constraint.metric.key === "git.changed_lines" ? "changed_lines" : "changed_resources",
+          max: constraint.metric.max,
+        } : {}),
+        ...(constraint.evidence ? {
+          evidence: {
+            kind: constraint.evidence.class,
+            key: constraint.evidence.key,
+            ...(constraint.evidence.verifier?.kind === "artifact" ? { verifierPath: constraint.evidence.verifier.path } : {}),
+          },
+        } : {}),
+      };
+      const validated = validateCompiledConstraint(candidate);
+      if (!validated.ok) {
+        errors.push({ code: "invalid_canonical_source", path: item.source.path, message: "native:compiled_constraint:" + validated.error });
+        continue;
+      }
+      constraints.push(validated.value);
+    }
     const value = { id: item.id, normative: item.normative, relations, constraints } as CanonicalRequirement["value"];
     requirements.push({ ...item, value, semantic: item.semantic });
     lifecycle[item.id] = { ...item.lifecycle };

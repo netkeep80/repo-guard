@@ -99,4 +99,87 @@ test("requirement_cause Constraint activates from repository causal ownership",(
   assert.equal(greenResult.ok,true,greenResult.reasons.join(" | "));
 });
 
+
+const metricEvidence = ({ metric = "changed_resources", max = 10, kind = "domain", verifierPath = null } = {}) => ({
+  id: "combo",
+  relations: ["implemented_by"],
+  metric,
+  max,
+  evidence: {
+    kind,
+    key: kind === "execution" ? "execution:tests/t.mjs" : "domain:test",
+    ...(verifierPath ? { verifierPath } : {}),
+  },
+});
+const constraintExplanation = (x, id = "combo") => scopes(x).find(item => item.constraintId === id);
+
+test("#836 F1 metric PASS + no evidence", () => {
+  const x = run({ baseConstraints: [lines(10)], observed: 5 });
+  yes(x, "metric pass");
+  assert.equal(constraintExplanation(x, "lines")?.verdict, "PASS");
+  assert.equal(constraintExplanation(x, "lines")?.evidenceStatus, null);
+});
+test("#836 F2 metric RED + no evidence", () => {
+  const x = run({ baseConstraints: [lines(0)], observed: 1 });
+  no(x, "constraint_exceeded:R1:lines:1>0", "metric red");
+  assert.equal(constraintExplanation(x, "lines")?.verdict, "RED");
+  assert.equal(constraintExplanation(x, "lines")?.evidenceStatus, null);
+});
+test("#836 F3 evidence-only valid domain delegation", () => {
+  const x = run({ baseConstraints: [check("domain", "domain:test", null)] });
+  yes(x, "domain evidence");
+  assert.equal(constraintExplanation(x, "verify")?.verdict, "DELEGATED");
+  assert.equal(constraintExplanation(x, "verify")?.evidenceStatus, "DELEGATED");
+});
+test("#836 F4 metric PASS + valid domain evidence", () => {
+  const x = run({ baseConstraints: [metricEvidence({ max: 2 })] });
+  yes(x, "metric pass domain");
+  assert.equal(constraintExplanation(x)?.verdict, "DELEGATED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F5 metric RED + valid domain evidence", () => {
+  const x = run({ baseConstraints: [metricEvidence({ max: 0 })] });
+  no(x, "constraint_exceeded:R1:combo:1>0", "metric red domain");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F6 metric PASS + valid execution evidence", () => {
+  const x = run({
+    baseConstraints: [metricEvidence({ max: 2, kind: "execution", verifierPath: "tests/t.mjs" })],
+    baseRelations: verifierRelations(),
+    baseFiles: ["src/a.ts", "tests/t.mjs"],
+  });
+  yes(x, "metric pass execution");
+  assert.equal(constraintExplanation(x)?.verdict, "DELEGATED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F7 metric RED + valid execution evidence", () => {
+  const x = run({
+    baseConstraints: [metricEvidence({ max: 0, kind: "execution", verifierPath: "tests/t.mjs" })],
+    baseRelations: verifierRelations(),
+    baseFiles: ["src/a.ts", "tests/t.mjs"],
+  });
+  no(x, "constraint_exceeded:R1:combo:1>0", "metric red execution");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F8 invalid execution verifier stays RED", () => {
+  const x = run({ baseConstraints: [metricEvidence({ max: 2, kind: "execution", verifierPath: "tests/t.mjs" })] });
+  no(x, "invalid_external_verifier:R1:combo", "invalid verifier");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "INVALID");
+});
+test("#836 F9 inactive Constraint does not activate evidence", () => {
+  const x = run({ baseConstraints: [check("domain", "domain:test", null)], resourceDeltas: [] });
+  yes(x, "inactive evidence");
+  assert.equal(constraintExplanation(x, "verify")?.verdict, "NOT_APPLICABLE");
+  assert.equal(constraintExplanation(x, "verify")?.evidenceStatus, null);
+});
+test("#836 F10 missing changed_lines observation stays RED with evidence", () => {
+  const x = run({ baseConstraints: [metricEvidence({ metric: "changed_lines", max: 10 })] });
+  no(x, "missing_observation:R1:combo:src/a.ts", "missing observation with evidence");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+
 console.log("compiler-only scoped Constraint witnesses loaded");

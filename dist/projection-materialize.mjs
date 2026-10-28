@@ -1,4 +1,3 @@
-// @ts-nocheck
 // #800: deterministic, fail-closed local materialization over accepted Projection ownership.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, rmdirSync, unlinkSync, chmodSync } from "node:fs";
@@ -157,6 +156,8 @@ function priorOrphanIntegrity(model, current, accepted) {
 function removeOwned(content, model) {
     if (model.target.ownership === "generated")
         return null;
+    if (content === null)
+        deny("missing orphan content: " + model.id);
     const block = readOwnedMarkdownBlock(content, blockSpec(model));
     if (!block)
         deny("missing orphan block: " + model.id);
@@ -225,6 +226,8 @@ function stagesFor(input) {
         const p = item.model.target.path;
         const target = stage(p);
         const generated = supplied[item.model.id];
+        if (typeof generated !== "string")
+            deny("missing rendered bytes: " + item.model.id);
         target.after = item.model.target.ownership === "generated"
             ? generated : replaceOwned(target.after, item.model, generated);
         const published = currentOutput(target.after, item.model);
@@ -283,7 +286,7 @@ function stagesFor(input) {
     return { root, base, head, candidates };
 }
 export function runProjectionBuild(roots, args) {
-    function opt(name) { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; }
+    function opt(name) { const i = args.indexOf(name); return i < 0 ? null : args[i + 1] || null; }
     const base = opt("--base"), head = opt("--head"), outputsPath = opt("--outputs");
     if (!base || !head || !outputsPath)
         deny("build requires --base, --head and --outputs");

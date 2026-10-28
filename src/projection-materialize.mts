@@ -2,62 +2,71 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, rmdirSync, unlinkSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { runGit, listTrackedEntriesAtRef, readFileAtRef, readFileBytesAtRef } from "./git.mjs";
-import { parseProjectionCheckState, evaluateProjectionCheck } from "./projection-check.mjs";
+import { runGit, listTrackedEntriesAtRef, readFileAtRef, readFileBytesAtRef, type GitTreeEntry } from "./git.mjs";
+import { parseProjectionCheckState, evaluateProjectionCheck, type ProjectionCheckLiveEntry } from "./projection-check.mjs";
+import type { ProjectionModel } from "./projection-model.mjs";
 import { replaceOwnedMarkdownBlock, readOwnedMarkdownBlock } from "./markdown-structure.mjs";
 import { loadNativeRequirements, strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
 
 const hex40 = /^[a-f0-9]{40}$/;
 const hex64 = /^[a-f0-9]{64}$/;
-const sha = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+const sha = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 const projectionStatePath = ".repo-guard/projections.json";
 const nativeRequirementPath = /^requirements\/.*\.rg\.(?:yaml|json)$/;
-function materializationAuthorityPath(path) {
+function materializationAuthorityPath(path: string): boolean {
   return path === projectionStatePath || nativeRequirementPath.test(path);
 }
-function deny(reason) { throw new Error("projection_build_red: " + reason); }
-function exact(root, revision) {
+function deny(reason: string): never { throw new Error("projection_build_red: " + reason); }
+function exact(root: string, revision: string): string {
   if (!hex40.test(revision || "")) deny("base/head must be exact commit SHAs");
   const found = runGit(["rev-parse", "--verify", revision + "^{commit}"], { cwd: root }).trim();
   if (found !== revision) deny("exact commit not available: " + revision);
   return revision;
 }
-function key(target) {
+function key(target: ProjectionModel["target"]): string {
   if (target.ownership === "generated") return JSON.stringify({ kind: "whole_file", path: target.path });
   const locator = target.locator;
   if (!locator || locator.kind !== "markdown_owned_block") deny("writable region requires a durable owned-block locator");
   return JSON.stringify({ kind: "markdown_owned_block", path: target.path,
     anchor_id: locator.anchor_id, block_id: locator.block_id });
 }
-function safeRelative(path) {
+function safeRelative(path: string): string {
   if (typeof path !== "string" || path === "" || path.split("/")[0]?.toLowerCase() === ".git" || path.includes("\\") ||
       isAbsolute(path) || path.startsWith("/") || path.split("/").some((p) => p === "." || p === ".." || !p)) {
     deny("unsafe materialization path: " + String(path));
   }
   return path;
 }
-function byteText(bytes, label) {
+function byteText(bytes: Uint8Array, label: string): string {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
   catch { deny("non-UTF8 content cannot be mutated safely: " + label); }
 }
-function blockSpec(model) {
+function blockSpec(model: ProjectionModel) {
   const locator = model.target.locator;
   if (!locator || locator.kind !== "markdown_owned_block") deny("invalid HYBRID locator");
   return { blockId: locator.block_id, beginMarker: locator.begin_marker, endMarker: locator.end_marker };
 }
-function currentOutput(content, model) {
+function currentOutput(content: string | null, model: ProjectionModel): string | null {
   if (content === null) return null;
   if (model.target.ownership === "generated") return content;
+  if (content === null) deny("missing orphan content: " + model.id);
   const block = readOwnedMarkdownBlock(content, blockSpec(model));
   return block ? block.content : null;
 }
-function localRepository(root) {
+function localRepository(root: string): string {
   let remote = "";
   try { remote = runGit(["config", "--get", "remote.origin.url"], { cwd: root }).trim(); } catch {}
   const match = remote.match(/(?:github\.com[:/])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
   return match?.[1] || "local/repository";
 }
-function validateLocalPath(root, path, before, after, expected) {
+interface StagedChange { before: string | null; after: string | null; }
+function validateLocalPath(
+  root: string,
+  path: string,
+  before: ReadonlyMap<string, GitTreeEntry>,
+  after: ReadonlyMap<string, GitTreeEntry>,
+  expected: StagedChange,
+) {
   safeRelative(path);
   const absolute = resolve(root, path);
   if (absolute === root || !absolute.startsWith(root + sep)) deny("path escapes repository: " + path);
@@ -87,7 +96,7 @@ function validateLocalPath(root, path, before, after, expected) {
   if (atHead && atBase && atHead.mode !== atBase.mode) deny("changed file mode: " + path);
   const present = existsSync(absolute) || (() => {
     try { lstatSync(absolute); return true; } catch (error) {
-      if (error.code === "ENOENT") return false;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
   })();
@@ -108,7 +117,7 @@ function validateLocalPath(root, path, before, after, expected) {
   if (!atHead && observed !== null && observed !== expected.after) deny("unexpected untracked target: " + path);
   return { absolute, observed, mode: atHead?.mode || atBase?.mode || "100644" };
 }
-function nativeIndex(root, revision, entries) {
+function nativeIndex(root: string, revision: string, entries: ReadonlyMap<string, GitTreeEntry>) {
   const paths = [...entries.keys()].filter((p) => /^requirements\/.*\.rg\.(yaml|json)$/.test(p));
   const native = loadNativeRequirements({
     repository: localRepository(root), revision, paths,
@@ -117,7 +126,7 @@ function nativeIndex(root, revision, entries) {
   if (!native.ok) deny("invalid canonical Requirement index: " + native.errors.map((e) => e.code).join(","));
   return native;
 }
-function priorOrphanIntegrity(model, current, accepted) {
+function priorOrphanIntegrity(model: ProjectionModel, current: string | null, accepted: ProjectionCheckLiveEntry): string {
   const observed = currentOutput(current, model);
   if (observed === null || !accepted || !hex64.test(accepted.build.output_identity.digest)) {
     deny("orphan does not have exact accepted BASE build evidence: " + model.id);
@@ -127,21 +136,21 @@ function priorOrphanIntegrity(model, current, accepted) {
   }
   return observed;
 }
-function removeOwned(content, model) {
+function removeOwned(content: string | null, model: ProjectionModel): string | null {
   if (model.target.ownership === "generated") return null;
   const block = readOwnedMarkdownBlock(content, blockSpec(model));
   if (!block) deny("missing orphan block: " + model.id);
   // Do not remove authored newline characters outside the exact marker interval.
   return content.slice(0, block.start) + content.slice(block.end);
 }
-function replaceOwned(content, model, generated) {
+function replaceOwned(content: string | null, model: ProjectionModel, generated: string): string {
   if (typeof content !== "string") deny("HYBRID file must already exist: " + model.target.path);
   return replaceOwnedMarkdownBlock({
     source: content, mode: "hybrid", anchorId: model.target.locator.anchor_id,
     block: blockSpec(model), generatedContent: generated,
   });
 }
-function stagesFor(input) {
+function stagesFor(input: { repoRoot: string; base: string; head: string; outputs: unknown }) {
   const root = resolve(input.repoRoot);
   const base = exact(root, input.base);
   const head = exact(root, input.head);
@@ -154,8 +163,8 @@ function stagesFor(input) {
   const rawHead = headTree.has(projectionStatePath) ? readFileBytesAtRef(head, projectionStatePath, root) : null;
   const prior = parseProjectionCheckState(rawBase);
   const current = parseProjectionCheckState(rawHead);
-  const view = (path) => headTree.has(path) ? readFileAtRef(head, path, root) : null;
-  const exactView = (path) => headTree.has(path) ? readFileBytesAtRef(head, path, root) : null;
+  const view = (path: string): string | null => headTree.has(path) ? readFileAtRef(head, path, root) : null;
+  const exactView = (path: string): Buffer | null => headTree.has(path) ? readFileBytesAtRef(head, path, root) : null;
   const report = evaluateProjectionCheck({
     baseRaw: rawBase, headRaw: rawHead, readHead: exactView,
     facts: { readFile: exactView, diff: { files: { checked: [] } } },
@@ -168,14 +177,15 @@ function stagesFor(input) {
   }
   const live = current.entries.filter((e) => e.state === "live");
   const retained = current.entries.filter((e) => e.state === "retained");
-  const supplied = input.outputs;
-  if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) deny("outputs must be an object");
+  const rawSupplied = input.outputs;
+  if (!rawSupplied || typeof rawSupplied !== "object" || Array.isArray(rawSupplied)) deny("outputs must be an object");
+  const supplied = rawSupplied as Record<string, unknown>;
   const ids = new Set(live.map((e) => e.model.id));
   for (const id of Object.keys(supplied)) if (!ids.has(id)) deny("unowned generated output: " + id);
   for (const id of ids) if (typeof supplied[id] !== "string") deny("missing rendered bytes: " + id);
 
-  const updated = new Map();
-  function stage(path) {
+  const updated = new Map<string, StagedChange>();
+  function stage(path: string): StagedChange {
     safeRelative(path);
     if (materializationAuthorityPath(path)) {
       deny("authority/state path is not a supported materialization target: " + path);
@@ -184,12 +194,13 @@ function stagesFor(input) {
       before: view(path),
       after: view(path),
     });
-    return updated.get(path);
+    return updated.get(path)!;
   }
   for (const item of [...live].sort((a, b) => a.model.id.localeCompare(b.model.id, "en"))) {
     const p = item.model.target.path;
     const target = stage(p);
     const generated = supplied[item.model.id];
+    if (typeof generated !== "string") deny("missing rendered bytes: " + item.model.id);
     target.after = item.model.target.ownership === "generated"
       ? generated : replaceOwned(target.after, item.model, generated);
     const published = currentOutput(target.after, item.model);
@@ -222,7 +233,7 @@ function stagesFor(input) {
     if (change.after === null) prospectivePaths.delete(path);
     else prospectivePaths.add(path);
   }
-  const prospective = (path) => {
+  const prospective = (path: string): string | Buffer | null => {
     if (!prospectivePaths.has(path)) return null;
     return updated.has(path) ? updated.get(path).after : exactView(path);
   };
@@ -245,14 +256,14 @@ function stagesFor(input) {
   }));
   return { root, base, head, candidates };
 }
-export function runProjectionBuild(roots, args) {
-  function opt(name) { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; }
+export function runProjectionBuild(roots: { repoRoot: string }, args: string[]): number {
+  function opt(name: string): string | null { const i = args.indexOf(name); return i < 0 ? null : args[i + 1] || null; }
   const base = opt("--base"), head = opt("--head"), outputsPath = opt("--outputs");
   if (!base || !head || !outputsPath) deny("build requires --base, --head and --outputs");
   const outputs = strictCanonicalJson(readFileSync(resolve(roots.repoRoot, outputsPath), "utf8"));
   const plan = stagesFor({ repoRoot: roots.repoRoot, base, head, outputs });
-  const applied = [];
-  const createdDirs = [];
+  const applied: Array<(typeof plan.candidates)[number]> = [];
+  const createdDirs: string[] = [];
   try {
     for (const item of plan.candidates) {
       if (item.observed === item.after) continue;

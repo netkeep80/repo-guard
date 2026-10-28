@@ -1,4 +1,5 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
+import { validateCompiledConstraint } from "./canonical-requirements.mjs";
 const sha = /^[0-9a-f]{40}$/;
 const allDeltaKinds = new Set([
     "requirement_add", "requirement_modify", "requirement_remove", "requirement_relocate",
@@ -431,26 +432,13 @@ function evaluateScopedObligations(input, deltas, applicability) {
         }
         const seen = new Set(), rules = [];
         for (const item of raw) {
-            const rule = obj(item), evidence = obj(rule?.evidence);
-            if (!rule || typeof rule.id !== "string" || !/^[A-Za-z][A-Za-z0-9._-]*$/.test(rule.id) ||
-                seen.has(rule.id) || !Array.isArray(rule.relations) || !rule.relations.length ||
-                rule.relations.some((p) => !["requires", "implemented_by", "verified_by", "documents", "generates", "constrains"].includes(String(p))) ||
-                (rule.activation !== undefined && !["scoped_change", "requirement_cause"].includes(String(rule.activation))) ||
-                (rule.includeGenerated !== undefined && typeof rule.includeGenerated !== "boolean") ||
-                (rule.metric !== undefined && !["changed_lines", "changed_resources"].includes(String(rule.metric))) ||
-                (rule.metric === undefined && rule.max !== undefined) ||
-                (rule.metric !== undefined && (typeof rule.max !== "number" || !Number.isSafeInteger(rule.max) || rule.max < 0)) ||
-                (rule.metric === undefined && rule.evidence === undefined) ||
-                (rule.evidence !== undefined && (!evidence || !["execution", "domain"].includes(String(evidence.kind)) ||
-                    typeof evidence.key !== "string" || !evidence.key ||
-                    (evidence.providerId !== undefined && (typeof evidence.providerId !== "string" || !evidence.providerId)) ||
-                    (evidence.kind === "execution" && typeof evidence.verifierPath !== "string"))) ||
-                Object.keys(rule).some(k => !["id", "activation", "relations", "includeGenerated", "metric", "max", "evidence"].includes(k))) {
+            const parsed = validateCompiledConstraint(item);
+            if (!parsed.ok || seen.has(parsed.value.id)) {
                 problems.push("I7:invalid_constraint:" + label + ":" + id);
                 continue;
             }
-            seen.add(rule.id);
-            rules.push(rule);
+            seen.add(parsed.value.id);
+            rules.push(parsed.value);
         }
         return rules;
     };
@@ -586,7 +574,9 @@ function evaluateScopedObligations(input, deltas, applicability) {
                 const touched = sorted(new Set(selected.map(d => d.afterPath || d.beforePath || d.subject)));
                 const activation = rule.activation === "requirement_cause" ? "requirement_cause" : "scoped_change";
                 const active = activation === "requirement_cause" ? applicability.direct.has(id) : selected.length > 0;
-                let observed = null, verdict = active ? "PASS" : "NOT_APPLICABLE";
+                let observed = null;
+                let localNegative = false;
+                let evidenceStatus = null;
                 if (active && rule.metric === "changed_resources") {
                     observed = selected.length;
                 }
@@ -597,23 +587,24 @@ function evaluateScopedObligations(input, deltas, applicability) {
                         if (number === undefined) {
                             problems.push("I7:missing_observation:" + id + ":" + rule.id + ":" + path);
                             complete = false;
+                            localNegative = true;
                         }
                         else
                             sum += number;
                     }
                     if (complete && Number.isSafeInteger(sum))
                         observed = sum;
-                    else if (complete)
+                    else if (complete) {
                         problems.push("I7:observation_overflow:" + id + ":" + rule.id);
-                    if (observed === null)
-                        verdict = "RED";
+                        localNegative = true;
+                    }
                 }
                 else if (active && rule.metric !== undefined) {
-                    verdict = "RED";
+                    localNegative = true;
                     problems.push("I7:missing_observation:" + id + ":" + rule.id + ":" + String(rule.metric));
                 }
-                if (observed !== null && observed > rule.max) {
-                    verdict = "RED";
+                if (observed !== null && rule.max !== undefined && observed > rule.max) {
+                    localNegative = true;
                     problems.push("I7:constraint_exceeded:" + id + ":" + rule.id + ":" + observed + ">" + rule.max);
                 }
                 if (active && rule.evidence !== undefined) {
@@ -627,13 +618,17 @@ function evaluateScopedObligations(input, deltas, applicability) {
                         });
                     })();
                     if (!verifierValid) {
-                        verdict = "RED";
+                        evidenceStatus = "INVALID";
+                        localNegative = true;
                         problems.push("I7:invalid_external_verifier:" + id + ":" + rule.id + ":" + spec.key);
                     }
                     else {
-                        verdict = "DELEGATED";
+                        evidenceStatus = "DELEGATED";
                     }
                 }
+                const verdict = !active ? "NOT_APPLICABLE" :
+                    localNegative ? "RED" :
+                        evidenceStatus === "DELEGATED" ? "DELEGATED" : "PASS";
                 explanations.push({ requirementId: id, constraintId: rule.id, basis: v.label,
                     activation, directApplicable: applicability.direct.has(id), selectedCause: applicability.selected.has(id),
                     reverseImpacted: applicability.reverseOnly.has(id),
@@ -643,7 +638,7 @@ function evaluateScopedObligations(input, deltas, applicability) {
                     touched, observed, observationSources: touched.filter(path => observationMap.has("changed_lines\0" + path)).map(path => ({
                         path, metric: "changed_lines", value: observationMap.get("changed_lines\0" + path)
                     })),
-                    requiredEvidence: rule.evidence || null, verdict });
+                    requiredEvidence: rule.evidence || null, evidenceStatus, verdict });
             }
         }
     }
