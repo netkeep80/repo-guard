@@ -93,7 +93,7 @@ export interface NativeConstraintScope {
     include_generated: boolean;
 }
 export interface NativeConstraintMetric {
-    key: string;
+    key: "git.changed_lines" | "git.changed_resources";
     max: number;
 }
 export interface NativeConstraintEvidence {
@@ -131,6 +131,31 @@ export interface NativeRequirementsResult {
     index: Readonly<Record<string, NativeRequirement>>;
     errors: readonly NativeContractError[];
 }
+export declare const compiledConstraintIdPattern: RegExp;
+export type CompiledConstraintMetric = "changed_lines" | "changed_resources";
+export interface CompiledConstraintEvidence {
+    kind: "execution" | "domain";
+    key: string;
+    providerId?: string;
+    verifierPath?: string;
+}
+export interface CompiledConstraint {
+    id: string;
+    activation?: "scoped_change" | "requirement_cause";
+    relations: readonly NativeRelationPredicate[];
+    includeGenerated?: boolean;
+    metric?: CompiledConstraintMetric;
+    max?: number;
+    evidence?: CompiledConstraintEvidence;
+}
+export type CompiledConstraintValidation = {
+    ok: true;
+    value: CompiledConstraint;
+} | {
+    ok: false;
+    error: string;
+};
+export declare function validateCompiledConstraint(value: unknown): CompiledConstraintValidation;
 export declare function loadNativeRequirements(input: CanonicalSnapshotInput): NativeRequirementsResult;
 export declare function lowerNativeRequirements(native: NativeRequirementsResult): {
     requirements: CanonicalRequirementsResult;

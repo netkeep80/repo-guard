@@ -156,8 +156,6 @@ function priorOrphanIntegrity(model, current, accepted) {
 function removeOwned(content, model) {
     if (model.target.ownership === "generated")
         return null;
-    if (content === null)
-        deny("missing orphan content: " + model.id);
     const block = readOwnedMarkdownBlock(content, blockSpec(model));
     if (!block)
         deny("missing orphan block: " + model.id);
@@ -167,11 +165,8 @@ function removeOwned(content, model) {
 function replaceOwned(content, model, generated) {
     if (typeof content !== "string")
         deny("HYBRID file must already exist: " + model.target.path);
-    const locator = model.target.locator;
-    if (!locator || locator.kind !== "markdown_owned_block")
-        deny("invalid HYBRID locator");
     return replaceOwnedMarkdownBlock({
-        source: content, mode: "hybrid", anchorId: locator.anchor_id,
+        source: content, mode: "hybrid", anchorId: model.target.locator.anchor_id,
         block: blockSpec(model), generatedContent: generated,
     });
 }
@@ -229,8 +224,6 @@ function stagesFor(input) {
         const p = item.model.target.path;
         const target = stage(p);
         const generated = supplied[item.model.id];
-        if (typeof generated !== "string")
-            deny("missing rendered bytes: " + item.model.id);
         target.after = item.model.target.ownership === "generated"
             ? generated : replaceOwned(target.after, item.model, generated);
         const published = currentOutput(target.after, item.model);
@@ -289,7 +282,7 @@ function stagesFor(input) {
     return { root, base, head, candidates };
 }
 export function runProjectionBuild(roots, args) {
-    function opt(name) { const i = args.indexOf(name); return i < 0 ? null : args[i + 1] || null; }
+    function opt(name) { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]; }
     const base = opt("--base"), head = opt("--head"), outputsPath = opt("--outputs");
     if (!base || !head || !outputsPath)
         deny("build requires --base, --head and --outputs");

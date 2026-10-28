@@ -49,7 +49,6 @@ function blockSpec(model: ProjectionModel) {
 function currentOutput(content: string | null, model: ProjectionModel): string | null {
   if (content === null) return null;
   if (model.target.ownership === "generated") return content;
-  if (content === null) deny("missing orphan content: " + model.id);
   const block = readOwnedMarkdownBlock(content, blockSpec(model));
   return block ? block.content : null;
 }
@@ -138,16 +137,14 @@ function priorOrphanIntegrity(model: ProjectionModel, current: string | null, ac
 }
 function removeOwned(content: string | null, model: ProjectionModel): string | null {
   if (model.target.ownership === "generated") return null;
-  if (content === null) deny("missing orphan content: " + model.id);
-  const block = readOwnedMarkdownBlock(content, blockSpec(model));
+  const block = readOwnedMarkdownBlock(content!, blockSpec(model));
   if (!block) deny("missing orphan block: " + model.id);
   // Do not remove authored newline characters outside the exact marker interval.
-  return content.slice(0, block.start) + content.slice(block.end);
+  return content!.slice(0, block.start) + content!.slice(block.end);
 }
 function replaceOwned(content: string | null, model: ProjectionModel, generated: string): string {
   if (typeof content !== "string") deny("HYBRID file must already exist: " + model.target.path);
-  const locator = model.target.locator;
-  if (!locator || locator.kind !== "markdown_owned_block") deny("invalid HYBRID locator");
+  const locator = model.target.locator as Extract<NonNullable<ProjectionModel["target"]["locator"]>, { kind: "markdown_owned_block" }>;
   return replaceOwnedMarkdownBlock({
     source: content, mode: "hybrid", anchorId: locator.anchor_id,
     block: blockSpec(model), generatedContent: generated,
@@ -180,9 +177,8 @@ function stagesFor(input: { repoRoot: string; base: string; head: string; output
   }
   const live = current.entries.filter((e) => e.state === "live");
   const retained = current.entries.filter((e) => e.state === "retained");
-  const rawSupplied = input.outputs;
-  if (!rawSupplied || typeof rawSupplied !== "object" || Array.isArray(rawSupplied)) deny("outputs must be an object");
-  const supplied = rawSupplied as Record<string, unknown>;
+  const supplied = input.outputs as Record<string, unknown>;
+  if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) deny("outputs must be an object");
   const ids = new Set(live.map((e) => e.model.id));
   for (const id of Object.keys(supplied)) if (!ids.has(id)) deny("unowned generated output: " + id);
   for (const id of ids) if (typeof supplied[id] !== "string") deny("missing rendered bytes: " + id);
@@ -202,8 +198,7 @@ function stagesFor(input: { repoRoot: string; base: string; head: string; output
   for (const item of [...live].sort((a, b) => a.model.id.localeCompare(b.model.id, "en"))) {
     const p = item.model.target.path;
     const target = stage(p);
-    const generated = supplied[item.model.id];
-    if (typeof generated !== "string") deny("missing rendered bytes: " + item.model.id);
+    const generated = supplied[item.model.id] as string;
     target.after = item.model.target.ownership === "generated"
       ? generated : replaceOwned(target.after, item.model, generated);
     const published = currentOutput(target.after, item.model);
@@ -260,7 +255,7 @@ function stagesFor(input: { repoRoot: string; base: string; head: string; output
   return { root, base, head, candidates };
 }
 export function runProjectionBuild(roots: { repoRoot: string }, args: string[]): number {
-  function opt(name: string): string | null { const i = args.indexOf(name); return i < 0 ? null : args[i + 1] || null; }
+  function opt(name: string): string | null { const i = args.indexOf(name); return i < 0 ? null : args[i + 1]!; }
   const base = opt("--base"), head = opt("--head"), outputsPath = opt("--outputs");
   if (!base || !head || !outputsPath) deny("build requires --base, --head and --outputs");
   const outputs = strictCanonicalJson(readFileSync(resolve(roots.repoRoot, outputsPath), "utf8"));
