@@ -550,7 +550,7 @@ function nativeConstraintMetric(value: unknown, label: string): NativeConstraint
     nativeFailure("invalid_constraint", label + ".key must be git.changed_lines or git.changed_resources");
   if (!Number.isSafeInteger(input.max) || (input.max as number) < 0)
     nativeFailure("invalid_constraint", label + ".max must be a non-negative safe integer");
-  return { key: input.key, max: input.max as number };
+  return { key: input.key as NativeConstraintMetric["key"], max: input.max as number };
 }
 
 function nativeConstraintEvidence(value: unknown, label: string): NativeConstraintEvidence {
@@ -753,7 +753,7 @@ export function lowerNativeRequirements(native: NativeRequirementsResult) {
       }
       constraints.push(validated.value);
     }
-    const value = { id: item.id, normative: item.normative, relations, constraints } as CanonicalRequirement["value"];
+    const value = { id: item.id, normative: item.normative, relations, constraints } as unknown as CanonicalRequirement["value"];
     requirements.push({ ...item, value, semantic: item.semantic });
     lifecycle[item.id] = { ...item.lifecycle };
   }

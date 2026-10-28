@@ -138,6 +138,7 @@ function priorOrphanIntegrity(model: ProjectionModel, current: string | null, ac
 }
 function removeOwned(content: string | null, model: ProjectionModel): string | null {
   if (model.target.ownership === "generated") return null;
+  if (content === null) deny("missing orphan content: " + model.id);
   const block = readOwnedMarkdownBlock(content, blockSpec(model));
   if (!block) deny("missing orphan block: " + model.id);
   // Do not remove authored newline characters outside the exact marker interval.
@@ -145,8 +146,10 @@ function removeOwned(content: string | null, model: ProjectionModel): string | n
 }
 function replaceOwned(content: string | null, model: ProjectionModel, generated: string): string {
   if (typeof content !== "string") deny("HYBRID file must already exist: " + model.target.path);
+  const locator = model.target.locator;
+  if (!locator || locator.kind !== "markdown_owned_block") deny("invalid HYBRID locator");
   return replaceOwnedMarkdownBlock({
-    source: content, mode: "hybrid", anchorId: model.target.locator.anchor_id,
+    source: content, mode: "hybrid", anchorId: locator.anchor_id,
     block: blockSpec(model), generatedContent: generated,
   });
 }
@@ -235,7 +238,7 @@ function stagesFor(input: { repoRoot: string; base: string; head: string; output
   }
   const prospective = (path: string): string | Buffer | null => {
     if (!prospectivePaths.has(path)) return null;
-    return updated.has(path) ? updated.get(path).after : exactView(path);
+    return updated.has(path) ? updated.get(path)!.after : exactView(path);
   };
   const afterReport = evaluateProjectionCheck({
     baseRaw: rawBase, headRaw: prospective(projectionStatePath), readHead: prospective,
