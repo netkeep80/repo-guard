@@ -19,7 +19,7 @@ function readFromCallback(filePath: string, options: RepositoryFileOptions = {})
 
 export function decodeUtf8Strict(content: Uint8Array, label = "text content"): string {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content);
   } catch {
     throw new Error(`${label} is not valid UTF-8`);
   }
