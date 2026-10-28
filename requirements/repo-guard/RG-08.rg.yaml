@@ -14,6 +14,10 @@ relations:
     target:
       kind: artifact
       path: "tests/test-786-local-compiler.mjs"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-834-deterministic-git-transition-metrics.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact
