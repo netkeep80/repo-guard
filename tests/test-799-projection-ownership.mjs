@@ -14,6 +14,7 @@ import {
 import { analyzeProjectionCurrent } from "../dist/projection-analysis.mjs";
 import { analyzeProjectionOwnership } from "../dist/projection-ownership.mjs";
 import { readFileBytesAtRef } from "../dist/git.mjs";
+import { decodeUtf8Strict } from "../dist/utils/repository-files.mjs";
 import {
   loadCanonicalRequirements,
   loadNativeRequirements,
@@ -1596,6 +1597,7 @@ test("#822 G5 active writer, locator, containment and SOURCE safety remain fail-
 
 
 test("#831 canonical textual Requirement rejects invalid UTF-8 from exact Git blob", () => {
+  assert.equal(decodeUtf8Strict(Buffer.from([0xef, 0xbb, 0xbf, 0x61])), "\uFEFFa", "valid UTF-8 BOM semantics must remain unchanged");
   const root = mkdtempSync(join(tmpdir(), "repo-guard-831-utf8-"));
   const git831 = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   try {
