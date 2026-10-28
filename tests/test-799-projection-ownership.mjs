@@ -13,7 +13,7 @@ import {
 } from "../dist/projection-api.mjs";
 import { analyzeProjectionCurrent } from "../dist/projection-analysis.mjs";
 import { analyzeProjectionOwnership } from "../dist/projection-ownership.mjs";
-import { readFileAtRef } from "../dist/git.mjs";
+import { readFileBytesAtRef } from "../dist/git.mjs";
 import {
   loadCanonicalRequirements,
   loadNativeRequirements,
@@ -1661,7 +1661,7 @@ test("#831 Git adapter preserves byte identity before projection hashing", () =>
     const base = commit831("base");
 
     const evaluate = (revision, changed) => {
-      const read = (path) => readFileAtRef(revision, path, root);
+      const read = (path) => readFileBytesAtRef(revision, path, root);
       return evaluateProjectionCheck({
         baseRaw: raw,
         headRaw: raw,
@@ -1710,7 +1710,7 @@ test("#831 canonical textual Requirement rejects invalid UTF-8 from exact Git bl
       repository: "audit/fixture",
       revision,
       paths: ["requirements/Q.rg.yaml"],
-      readFile: (sha, path) => readFileAtRef(sha, path, root),
+      readFile: (sha, path) => readFileBytesAtRef(sha, path, root),
     });
 
     assert.equal(result.ok, false);
