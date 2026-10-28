@@ -40,6 +40,7 @@ export function runGit(args, options = {}) {
             cwd: options.cwd,
             stdio: options.stdio || "pipe",
             maxBuffer,
+            env: options.env,
         });
     }
     catch (error) {
