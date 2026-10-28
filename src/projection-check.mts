@@ -3,6 +3,7 @@ import {
   type FactReadContext,
 } from "./document-facts.mjs";
 import { strictCanonicalJson } from "./runtime/canonical-requirements.mjs";
+import { decodeUtf8Strict } from "./utils/repository-files.mjs";
 import {
   analyzeProjectionCurrent,
   type ProjectionCurrentAnalysis,
@@ -154,7 +155,7 @@ export function parseProjectionCheckState(
   }
   const text = typeof raw === "string"
     ? raw
-    : Buffer.from(raw).toString("utf8");
+    : decodeUtf8Strict(raw, "projection check state");
   const input = object(strictCanonicalJson(text), "ProjectionCheck");
   fields(input, ["schema", "entries"], "ProjectionCheck");
   if (input.schema !== "repo-guard/projection-check/v0") {
