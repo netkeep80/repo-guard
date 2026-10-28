@@ -1143,3 +1143,78 @@ try {
 
   console.log("#833 DocumentRef regression matrix: PASS");
 }
+
+
+{
+  const b1Requirement = ({ id, relations, constraint }) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id,
+    normative: "#833 B1 causal applicability isolation",
+    relations,
+    ...(constraint ? { constraints: [constraint] } : {}),
+  }, null, 2) + "\n";
+
+  const b1Relation = (predicate, target) => ({ predicates: [predicate], target });
+
+  test("#833 B1 blocked-head reproduction: DocumentRef pointer replace must not activate another path owner", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = b1Requirement({
+      id: "A",
+      relations: [
+        b1Relation("implemented_by", { kind: "artifact", path: "docs/a.json" }),
+        b1Relation("constrains", { kind: "artifact", path: "src/b.txt" }),
+      ],
+      constraint: {
+        id: "guard",
+        activation: "requirement_cause",
+        scope: { relations: ["constrains"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      },
+    });
+    const b = (pointer) => b1Requirement({
+      id: "B",
+      relations: [
+        b1Relation("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        b1Relation("documents", { kind: "document", path: "docs/a.json", pointer }),
+      ],
+    });
+
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b("/one"));
+      putFile("docs/a.json", JSON.stringify({ one: { value: 1 }, two: { value: 2 } }) + "\n");
+      putFile("src/b.txt", "before\n");
+      const base = save("base");
+
+      putFile("requirements/b.rg.json", b("/two"));
+      putFile("src/b.txt", "after\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "A" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+
+      assert.ok(
+        report.j3.deltas.some(delta => delta.kind === "relation_replace" && delta.subject === "B"),
+        JSON.stringify(report.j3.deltas, null, 2),
+      );
+      assert.deepEqual(report.j3.affectedRequirements, ["B"]);
+      assert.equal(guard.directApplicable, false);
+      assert.equal(guard.verdict, "NOT_APPLICABLE");
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
