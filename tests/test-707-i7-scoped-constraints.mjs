@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadCanonicalRequirements } from "../dist/runtime/canonical-requirements.mjs";
+import { loadCanonicalRequirements, validateCompiledConstraint } from "../dist/runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
@@ -180,6 +180,77 @@ test("#836 F10 missing changed_lines observation stays RED with evidence", () =>
   no(x, "missing_observation:R1:combo:src/a.ts", "missing observation with evidence");
   assert.equal(constraintExplanation(x)?.verdict, "RED");
   assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+
+
+const b1Canonical = (rule) => {
+  const parsed = validateCompiledConstraint(rule);
+  assert.equal(parsed.ok, true, JSON.stringify(parsed));
+  return parsed.value;
+};
+const b1Original = {
+  id: "guard", relations: ["implemented_by", "documents"],
+  metric: "changed_resources", max: 1,
+};
+const b1Explicit = {
+  id: "guard", activation: "scoped_change",
+  relations: ["documents", "implemented_by"], includeGenerated: false,
+  metric: "changed_resources", max: 1,
+};
+function b1Replay(authorityRule, baseRule) {
+  const relations = {
+    parent, implementation: art("implemented_by", "src/a.ts"),
+    document: art("documents", "docs/a.md"),
+  };
+  const paths = ["src/a.ts", "docs/a.md"];
+  const authority = snapshot(C, defaultNodes(relations, [authorityRule]), paths);
+  const base = snapshot(A, defaultNodes(relations, [baseRule]), paths);
+  const head = snapshot(B, defaultNodes(relations, [baseRule]), paths);
+  const result = evaluateTransitionCauseClosure({
+    repository: repo, base, head,
+    trustedAuthorityBase: {
+      revision: authority.revision, requirements: authority.requirements,
+      j1: authority.j1, j2: authority.j2,
+      resourceRelations: authority.resourceRelations,
+    },
+    resourceDeltas: [{kind:"modify", path:"src/a.ts"}],
+  });
+  return result.explanations.constraints.filter(x => x.requirementId === "R1" && x.constraintId === "guard");
+}
+test("#836 B1 blocked-head direct compiled reproducer: semantic equivalents must apply once", () => {
+  assert.equal(b1Canonical(b1Original).id, "guard");
+  assert.equal(b1Canonical(b1Explicit).id, "guard");
+  assert.equal(b1Replay(b1Original, b1Explicit).length, 1, "AUTHORITY/BASE/HEAD duplicate obligation");
+});
+test("#836 B1 default and relation order canonical fingerprints", () => {
+  const variants = [
+    {...b1Original, activation: "scoped_change"},
+    {...b1Original, includeGenerated: false},
+    {...b1Original, relations: [...b1Original.relations].reverse()},
+    b1Explicit,
+  ];
+  for (const variant of variants) {
+    assert.deepEqual(b1Canonical(variant), b1Canonical(b1Original));
+    assert.equal(b1Replay(b1Original, variant).length, 1, JSON.stringify(variant));
+  }
+});
+test("#836 B1 preserve true semantic differences and reject duplicate relations", () => {
+  const variants = [
+    {...b1Original, activation:"requirement_cause"},
+    {...b1Original, includeGenerated:true},
+    {...b1Original, relations:["implemented_by"]},
+    {...b1Original, relations:["documents"]},
+    {...b1Original, metric:"changed_lines"},
+    {...b1Original, max:2},
+    {...b1Original, evidence:{kind:"domain",key:"domain:test"}},
+  ];
+  for (const variant of variants) {
+    assert.notDeepEqual(b1Canonical(variant),b1Canonical(b1Original));
+    assert.equal(b1Replay(b1Original,variant).length,2,JSON.stringify(variant));
+  }
+  assert.equal(validateCompiledConstraint({
+    ...b1Original,relations:["documents","documents"],
+  }).ok,false);
 });
 
 console.log("compiler-only scoped Constraint witnesses loaded");
