@@ -706,3 +706,702 @@ try {
 
   console.log("#834 deterministic Git transition metric matrix: PASS");
 }
+
+
+{
+  const r833Repository = "local/repository";
+
+  const r833Git = (root, ...args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+
+  const r833Put = (root, path, value) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), value);
+  };
+
+  const r833Commit = (root, message, allowEmpty = false) => {
+    r833Git(root, "add", "-A");
+    r833Git(
+      root,
+      "-c", "user.name=#833 Fixture",
+      "-c", "user.email=833@example.invalid",
+      "commit",
+      "-qm", message,
+      ...(allowEmpty ? ["--allow-empty"] : []),
+    );
+    return r833Git(root, "rev-parse", "HEAD");
+  };
+
+  const r833Requirement = ({ documentPath, pointer, ownerPath, metric = "git.changed_resources", max = 0 }) =>
+    JSON.stringify({
+      format: "repo-guard/requirement-v1",
+      id: "R1",
+      normative: "DocumentRef Constraint scope must be exact and fail closed",
+      relations: [
+        {
+          predicates: ["implemented_by"],
+          target: { kind: "artifact", path: ownerPath },
+        },
+        {
+          predicates: ["documents"],
+          target: { kind: "document", path: documentPath, pointer },
+        },
+      ],
+      constraints: [
+        {
+          id: "doc-scope",
+          scope: { relations: ["documents"] },
+          metric: { key: metric, max },
+        },
+      ],
+    }, null, 2) + "\n";
+
+  const r833Constraint = (report) => {
+    const item = report.j3.constraints.find(entry => entry.constraintId === "doc-scope");
+    assert.ok(item, JSON.stringify(report, null, 2));
+    return item;
+  };
+
+  const r833Init = () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-"));
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    return root;
+  };
+
+  test("#833 F1 DocumentRef path must seed changed_resources Constraint scope", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json",
+        pointer: "/guarded",
+        ownerPath: "docs/a.json",
+        max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 }, outside: 1 }) + "\n");
+      const head = r833Commit(root, "head");
+
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false, "changed referenced document must exceed max=0");
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+      assert.deepEqual(scoped.touched, ["docs/a.json"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F2 missing local DocumentRef path must be blocking", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/missing.json",
+        pointer: "/guarded",
+        ownerPath: "src/owned.txt",
+      }));
+      r833Put(root, "src/owned.txt", "owned\n");
+      const base = r833Commit(root, "base");
+      const head = r833Commit(root, "head", true);
+
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      assert.equal(report.ok, false, "dangling local document path must fail closed");
+      assert.ok(
+        report.diagnostics.some(item => item.code === "document_ref_missing_path"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F3 missing local DocumentRef pointer must be blocking", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json",
+        pointer: "/missing",
+        ownerPath: "docs/a.json",
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      const head = r833Commit(root, "head", true);
+
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      assert.equal(report.ok, false, "missing document fragment must fail closed");
+      assert.ok(
+        report.diagnostics.some(item => item.code === "document_ref_missing_fragment"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  const r833NativeRequirement = ({
+    id = "R1",
+    ownerPaths = [],
+    predicate = "documents",
+    target = null,
+    metric = "git.changed_resources",
+    max = 0,
+    includeConstraint = true,
+  } = {}) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id,
+    normative: "bounded #833 target-kind matrix",
+    relations: [
+      ...ownerPaths.map(path => ({
+        predicates: ["implemented_by"],
+        target: { kind: "artifact", path },
+      })),
+      ...(target ? [{ predicates: [predicate], target }] : []),
+    ],
+    ...(includeConstraint ? {
+      constraints: [{
+        id: "doc-scope",
+        scope: { relations: [predicate] },
+        metric: { key: metric, max },
+      }],
+    } : {}),
+  }, null, 2) + "\n";
+
+  test("#833 F4 valid unchanged DocumentRef is NOT_APPLICABLE", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      const head = r833Commit(root, "head", true);
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(scoped.verdict, "NOT_APPLICABLE");
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+      assert.deepEqual(scoped.touched, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F5 changed DocumentRef under changed_resources limit passes", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 1,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 } }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(scoped.verdict, "PASS");
+      assert.equal(scoped.observed, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F6 changed DocumentRef over changed_resources limit fails", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 } }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F7 DocumentRef changed_lines uses deterministic file-level numstat", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json",
+        pointer: "/guarded",
+        ownerPath: "docs/a.json",
+        metric: "git.changed_lines",
+        max: 2,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 }, outside: 1 }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(scoped.verdict, "PASS");
+      assert.equal(scoped.observed, 2);
+      assert.deepEqual(scoped.observationSources, [{ path: "docs/a.json", metric: "changed_lines", value: 2 }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F8 file change outside referenced fragment still counts at path level", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833Requirement({
+        documentPath: "docs/a.json", pointer: "/guarded", ownerPath: "docs/a.json", max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 1 }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 }, outside: 2 }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F9 BASE DocumentRef obligation cannot be erased by HEAD relation or Constraint removal", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+        ownerPaths: ["docs/a.json"],
+        target: { kind: "document", path: "docs/a.json", pointer: "/guarded" },
+        max: 0,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+        ownerPaths: ["docs/a.json"],
+        includeConstraint: false,
+      }));
+      r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 2 } }) + "\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["docs/a.json"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 F10 document delete and rename retain transition obligation", () => {
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["docs/a.json", "src/owned.txt"],
+          target: { kind: "document", path: "docs/a.json", pointer: "/guarded" },
+          max: 0,
+        }));
+        r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+        r833Put(root, "src/owned.txt", "owned\n");
+        const base = r833Commit(root, "base");
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["src/owned.txt"],
+          includeConstraint: false,
+        }));
+        unlinkSync(join(root, "docs/a.json"));
+        const head = r833Commit(root, "head");
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        const scoped = r833Constraint(report);
+        assert.equal(report.ok, false);
+        assert.equal(scoped.verdict, "RED");
+        assert.equal(scoped.observed, 1);
+        assert.deepEqual(scoped.scope, ["docs/a.json"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["docs/a.json"],
+          target: { kind: "document", path: "docs/a.json", pointer: "/guarded" },
+          max: 0,
+        }));
+        r833Put(root, "docs/a.json", JSON.stringify({ guarded: { value: 1 } }) + "\n");
+        const base = r833Commit(root, "base");
+        r833Git(root, "mv", "docs/a.json", "docs/b.json");
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["docs/b.json"],
+          target: { kind: "document", path: "docs/b.json", pointer: "/guarded" },
+          max: 0,
+        }));
+        const head = r833Commit(root, "head");
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        const scoped = r833Constraint(report);
+        assert.equal(report.ok, false);
+        assert.equal(scoped.verdict, "RED");
+        assert.equal(scoped.observed, 1);
+        assert.deepEqual(scoped.scope, ["docs/a.json", "docs/b.json"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("#833 F11 accepted unsupported Constraint targets fail closed instead of disappearing", () => {
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["src/owned.txt"],
+          target: {
+            kind: "external_document",
+            repository: "other/repository",
+            revision: "a".repeat(40),
+            path: "docs/ext.json",
+            pointer: "/guarded",
+          },
+          max: 0,
+        }));
+        r833Put(root, "src/owned.txt", "owned\n");
+        const base = r833Commit(root, "base");
+        const head = r833Commit(root, "head", true);
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        assert.equal(report.ok, false);
+        assert.ok(report.diagnostics.some(item =>
+          item.code === "j3" &&
+          item.subject.includes("I7:unsupported_scope_target:R1:") &&
+          item.subject.endsWith(":external_document")
+        ), JSON.stringify(report.diagnostics, null, 2));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    {
+      const root = r833Init();
+      try {
+        r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+          ownerPaths: ["src/owned.txt"],
+          predicate: "constrains",
+          target: { kind: "requirement", id: "R2" },
+          max: 0,
+        }));
+        r833Put(root, "requirements/r2.rg.json", r833NativeRequirement({
+          id: "R2",
+          includeConstraint: false,
+        }));
+        r833Put(root, "src/owned.txt", "owned\n");
+        const base = r833Commit(root, "base");
+        const head = r833Commit(root, "head", true);
+        const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+        assert.equal(report.ok, false);
+        assert.ok(report.diagnostics.some(item =>
+          item.code === "j3" &&
+          item.subject.includes("I7:unsupported_scope_target:R1:") &&
+          item.subject.endsWith(":requirement")
+        ), JSON.stringify(report.diagnostics, null, 2));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("#833 F12 existing ArtifactRef scoped-change behavior is unchanged", () => {
+    const root = r833Init();
+    try {
+      r833Put(root, "requirements/r1.rg.json", r833NativeRequirement({
+        ownerPaths: ["src/a.txt"],
+        predicate: "implemented_by",
+        max: 0,
+      }));
+      r833Put(root, "src/a.txt", "before\n");
+      const base = r833Commit(root, "base");
+      r833Put(root, "src/a.txt", "after\n");
+      const head = r833Commit(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: r833Repository, base, head });
+      const scoped = r833Constraint(report);
+      assert.equal(report.ok, false);
+      assert.equal(scoped.verdict, "RED");
+      assert.equal(scoped.observed, 1);
+      assert.deepEqual(scoped.scope, ["src/a.txt"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#833 DocumentRef regression matrix: PASS");
+}
+
+
+{
+  const b1Requirement = ({ id, relations, constraint }) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id,
+    normative: "#833 B1 causal applicability isolation",
+    relations,
+    ...(constraint ? { constraints: [constraint] } : {}),
+  }, null, 2) + "\n";
+
+  const b1Relation = (predicate, target) => ({ predicates: [predicate], target });
+
+  test("#833 B1 blocked-head reproduction: DocumentRef pointer replace must not activate another path owner", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = b1Requirement({
+      id: "A",
+      relations: [
+        b1Relation("implemented_by", { kind: "artifact", path: "docs/a.json" }),
+        b1Relation("constrains", { kind: "artifact", path: "src/b.txt" }),
+      ],
+      constraint: {
+        id: "guard",
+        activation: "requirement_cause",
+        scope: { relations: ["constrains"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      },
+    });
+    const b = (pointer) => b1Requirement({
+      id: "B",
+      relations: [
+        b1Relation("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        b1Relation("documents", { kind: "document", path: "docs/a.json", pointer }),
+      ],
+    });
+
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b("/one"));
+      putFile("docs/a.json", JSON.stringify({ one: { value: 1 }, two: { value: 2 } }) + "\n");
+      putFile("src/b.txt", "before\n");
+      const base = save("base");
+
+      putFile("requirements/b.rg.json", b("/two"));
+      putFile("src/b.txt", "after\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "A" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+
+      assert.ok(
+        report.j3.deltas.some(delta => delta.kind === "relation_replace" && delta.subject === "B"),
+        JSON.stringify(report.j3.deltas, null, 2),
+      );
+      assert.deepEqual(report.j3.affectedRequirements, ["B"]);
+      assert.equal(guard.directApplicable, false);
+      assert.equal(guard.verdict, "NOT_APPLICABLE");
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+
+{
+  const causalRef = (predicate, target) => ({ predicates: [predicate], target });
+  const causalRequirement = ({ id, relations, guard = false }) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id,
+    normative: "#833 B1 targetPath causal isolation matrix",
+    relations,
+    ...(guard ? {
+      constraints: [{
+        id: "guard",
+        activation: "requirement_cause",
+        scope: { relations: ["constrains"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      }],
+    } : {}),
+  }, null, 2) + "\n";
+
+  function runDocumentRelationMutation(mode) {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-matrix-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = causalRequirement({
+      id: "A",
+      guard: true,
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "docs/a.json" }),
+        causalRef("constrains", { kind: "artifact", path: "src/b.txt" }),
+      ],
+    });
+    const b = (pointer) => causalRequirement({
+      id: "B",
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        ...(pointer === null ? [] : [
+          causalRef("documents", { kind: "document", path: "docs/a.json", pointer }),
+        ]),
+      ],
+    });
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b(mode === "add" ? null : "/one"));
+      putFile("docs/a.json", JSON.stringify({ one: { value: 1 }, two: { value: 2 } }) + "\n");
+      putFile("src/b.txt", "before\n");
+      const base = save("base");
+
+      putFile("requirements/b.rg.json", b(mode === "remove" ? null : mode === "replace" ? "/two" : "/one"));
+      putFile("src/b.txt", "after\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "A" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+      return { report, guard };
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  for (const [mode, deltaKind] of [
+    ["add", "relation_add"],
+    ["remove", "relation_remove"],
+    ["replace", "relation_replace"],
+  ]) {
+    test(`#833 B1 DocumentRef relation ${mode} is causally isolated from path owner`, () => {
+      const { report, guard } = runDocumentRelationMutation(mode);
+      assert.ok(
+        report.j3.deltas.some(delta => delta.kind === deltaKind && delta.subject === "B"),
+        JSON.stringify(report.j3.deltas, null, 2),
+      );
+      assert.deepEqual(report.j3.affectedRequirements, ["B"]);
+      assert.equal(guard.directApplicable, false);
+      assert.equal(guard.verdict, "NOT_APPLICABLE");
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+    });
+  }
+
+  test("#833 B1 ArtifactRef targetPath causal semantics remain unchanged", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-artifact-control-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = causalRequirement({
+      id: "A",
+      guard: true,
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "docs/a.json" }),
+        causalRef("constrains", { kind: "artifact", path: "src/b.txt" }),
+      ],
+    });
+    const b = (withArtifact) => causalRequirement({
+      id: "B",
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        ...(withArtifact ? [
+          causalRef("documents", { kind: "artifact", path: "docs/a.json" }),
+        ] : []),
+      ],
+    });
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b(false));
+      putFile("docs/a.json", JSON.stringify({ one: 1 }) + "\n");
+      putFile("src/b.txt", "before\n");
+      const base = save("base");
+      putFile("requirements/b.rg.json", b(true));
+      putFile("src/b.txt", "after\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "A" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+      assert.ok(report.j3.deltas.some(delta => delta.kind === "relation_add" && delta.subject === "B"));
+      assert.deepEqual(report.j3.affectedRequirements, ["A", "B"]);
+      assert.equal(guard.directApplicable, true);
+      assert.equal(guard.verdict, "RED");
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.diagnostics.some(item => item.code === "j3" && item.subject === "I7:constraint_exceeded:A:guard:1>0"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#833 B1 DocumentRef validation does not create J1 ownership", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-833-b1-j1-control-"));
+    const g = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const putFile = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      g("add", "-A");
+      g("-c", "user.name=#833 B1", "-c", "user.email=833-b1@example.invalid", "commit", "-qm", message);
+      return g("rev-parse", "HEAD");
+    };
+    const a = causalRequirement({
+      id: "A",
+      relations: [causalRef("implemented_by", { kind: "artifact", path: "docs/a.json" })],
+    });
+    const b = causalRequirement({
+      id: "B",
+      relations: [
+        causalRef("implemented_by", { kind: "artifact", path: "src/b.txt" }),
+        causalRef("documents", { kind: "document", path: "docs/a.json", pointer: "/one" }),
+      ],
+    });
+    try {
+      g("init", "-q");
+      putFile("requirements/a.rg.json", a);
+      putFile("requirements/b.rg.json", b);
+      putFile("docs/a.json", JSON.stringify({ one: { value: 1 } }) + "\n");
+      putFile("src/b.txt", "stable\n");
+      const base = save("base");
+      putFile("docs/a.json", JSON.stringify({ one: { value: 2 } }) + "\n");
+      const head = save("head");
+
+      const report = evaluateLocalCompiler({ root, repository: "local/repository", base, head });
+      assert.deepEqual(report.j3.affectedRequirements, ["A"]);
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#833 B1 causal applicability regression matrix: PASS");
+}

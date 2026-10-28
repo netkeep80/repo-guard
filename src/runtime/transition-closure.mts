@@ -467,11 +467,15 @@ function evaluateScopedObligations(
         };
         for (const name of Object.keys(direct || {}).sort()) {
             const rel = obj(direct![name]), target = obj(rel?.target);
-            if (!rel || !target || target.kind !== "artifact" || !rule.relations.includes(rel.predicate)) continue;
+            if (!rel || !target || !rule.relations.includes(rel.predicate)) continue;
+            if (target.kind !== "artifact" && target.kind !== "document") {
+                problems.push("I7:unsupported_scope_target:" + id + ":" + name + ":" + String(target.kind));
+                continue;
+            }
             try {
                 const path = normPath(target.path);
                 put(path, [id, String(rel.predicate) + ":" + path]);
-                if (rel.collection === true)
+                if (target.kind === "artifact" && rel.collection === true)
                     expectedCollections.push({predicate:String(rel.predicate),manifest:path});
             } catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);

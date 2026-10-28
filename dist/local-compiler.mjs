@@ -144,12 +144,15 @@ export function evaluateLocalCompiler(input) {
         if (existing)
             return existing;
         const entries = listTrackedEntriesAtRef(revision, input.root);
-        const paths = entries.map(entry => entry.path).filter(path => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
+        const trackedPaths = entries.map(entry => entry.path);
+        const tracked = new Set(trackedPaths);
+        const readExact = (sha, path) => sha === revision && tracked.has(path) ? readFileBytesAtRef(sha, path, input.root) : null;
+        const paths = trackedPaths.filter(path => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
         const native = loadNativeRequirements({
             repository: input.repository,
             revision,
             paths,
-            readFile: (sha, path) => sha === revision ? readFileBytesAtRef(sha, path, input.root) : null,
+            readFile: readExact,
         });
         const lowered = lowerNativeRequirements(native);
         const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: structuralRoots(lowered) });
@@ -167,14 +170,14 @@ export function evaluateLocalCompiler(input) {
                 repository: input.repository,
                 revision,
                 requirements: lowered.requirements,
-                readers: { [input.repository]: (sha, path) => sha === revision ? readFileBytesAtRef(sha, path, input.root) : null },
+                readers: { [input.repository]: readExact },
             });
             j1 = evaluateTrackedResourceClosure({
                 repository: input.repository,
                 revision,
                 requirements: lowered.requirements,
                 j2,
-                trackedPaths: entries.map(entry => entry.path),
+                trackedPaths,
                 resourceRelations: lowered.resourceRelations,
                 resolver,
             });
