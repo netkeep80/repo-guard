@@ -452,7 +452,9 @@ export function loadNativeRequirements(input) {
             if (content === null || content === undefined)
                 nativeFailure("invalid_native_document", "native source missing at exact snapshot");
             const exactContent = content;
-            const raw = Buffer.isBuffer(exactContent) ? exactContent.toString("utf8") : exactContent;
+            const raw = exactContent instanceof Uint8Array
+                ? decodeUtf8Strict(exactContent, `native Requirement "${path}"`)
+                : exactContent;
             const value = parseNativeRequirement(raw, path);
             nativeExactFields(value, ["format", "id", "normative", "lifecycle", "relations", "constraints"], "native Requirement");
             if (value.format !== "repo-guard/requirement-v1")
