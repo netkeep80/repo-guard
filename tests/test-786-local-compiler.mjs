@@ -2251,6 +2251,137 @@ relations:
     }
   });
 
+  test("#840 Slice 2 typed J1 ownership is exact legacy parity without authority broadening", () => {
+    const fx = fixture840();
+    try {
+      fx.put("requirements/ROOT.rg.json", requirement840({
+        id: "ROOT",
+        relations: [
+          relation840("requires", artifactRef840("src/requires.txt")),
+          relation840("implemented_by", artifactRef840("src/impl.txt")),
+          relation840("verified_by", artifactRef840("tests/verifier.mjs")),
+          relation840("documents", artifactRef840("docs/owned.md")),
+          relation840("requires", artifactRef840("inventory/resources.json"), { collection: true }),
+          relation840("implemented_by", artifactRef840("src/source.txt")),
+          generates840("src/source.txt", "gen/out.txt"),
+          relation840("documents", documentRef840("docs/data.json", "/section")),
+          relation840("constrains", artifactRef840("src/constrained.txt")),
+          relation840("depends_on", requirementRef840("TARGET")),
+          relation840("supersedes", requirementRef840("TARGET")),
+        ],
+      }));
+      fx.put("requirements/TARGET.rg.json", requirement840({ id: "TARGET" }));
+      fx.put("requirements/CHILD.rg.json", requirement840({
+        id: "CHILD",
+        relations: [relation840("derives_from", requirementRef840("ROOT"))],
+      }));
+
+      for (const [path, value] of [
+        ["src/requires.txt", "requires\n"],
+        ["src/impl.txt", "implementation\n"],
+        ["tests/verifier.mjs", "export {};\n"],
+        ["docs/owned.md", "owned documentation\n"],
+        ["src/source.txt", "generator source\n"],
+        ["gen/out.txt", "generated output\n"],
+        ["src/constrained.txt", "valid but not J1-owned\n"],
+        ["docs/data.json", JSON.stringify({ section: { value: 1 } }) + "\n"],
+        ["inventory/resources.json", JSON.stringify({
+          schema: collectionSchema840,
+          members: ["tests/member.txt"],
+        }, null, 2) + "\n"],
+        ["tests/member.txt", "collection member\n"],
+      ]) fx.put(path, value);
+
+      const revision = fx.save("Slice 2 typed J1 parity");
+      const entries = listTrackedEntriesAtRef(revision, fx.root);
+      const trackedPaths = entries.map((entry) => entry.path);
+      const tracked = new Set(trackedPaths);
+      const readExact = (sha, path) =>
+        sha === revision && tracked.has(path) ? readFileBytesAtRef(sha, path, fx.root) : null;
+      const requirementPaths = trackedPaths.filter((path) => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
+      const native = loadNativeRequirements({
+        repository: repository840,
+        revision,
+        paths: requirementPaths,
+        readFile: readExact,
+      });
+      assert.equal(native.ok, true, JSON.stringify(native.errors, null, 2));
+
+      const lowered = lowerNativeRequirements(native);
+      assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors, null, 2));
+      const roots = native.requirements
+        .filter((item) => !item.relations.some((relation) => relation.predicate === "derives_from"))
+        .map((item) => item.semantic);
+      const j2 = evaluateRootedRequirements({
+        requirements: lowered.requirements,
+        trustedRoots: roots,
+        nativeRequirements: native.requirements,
+      });
+      assert.equal(j2.ok, true, JSON.stringify(j2, null, 2));
+
+      const resolver = createResourceResolver({
+        repository: repository840,
+        revision,
+        requirements: lowered.requirements,
+        readers: { [repository840]: readExact },
+      });
+      const common = {
+        repository: repository840,
+        revision,
+        requirements: lowered.requirements,
+        j2,
+        trackedPaths,
+        resourceRelations: lowered.resourceRelations,
+        resolver,
+      };
+      const legacy = evaluateTrackedResourceClosure(common);
+      const typed = evaluateTrackedResourceClosure({
+        ...common,
+        nativeRequirements: native.requirements,
+      });
+
+      assert.deepEqual(typed, legacy);
+      assert.equal(typed.ok, false);
+      assert.deepEqual(typed.errors, []);
+      assert.deepEqual(typed.unjustified, ["docs/data.json", "src/constrained.txt"]);
+
+      assert.deepEqual(typed.owners["src/requires.txt"], ["ROOT"]);
+      assert.deepEqual(typed.owners["src/impl.txt"], ["ROOT"]);
+      assert.deepEqual(typed.owners["tests/verifier.mjs"], ["ROOT"]);
+      assert.deepEqual(typed.owners["docs/owned.md"], ["ROOT"]);
+
+      assert.equal(Object.hasOwn(typed.owners, "docs/data.json"), false);
+      assert.equal(Object.hasOwn(typed.owners, "src/constrained.txt"), false);
+      assert.equal(Object.hasOwn(typed.owners, "TARGET"), false);
+
+      assert.deepEqual(typed.owners["inventory/resources.json"], ["ROOT"]);
+      assert.deepEqual(typed.owners["tests/member.txt"], ["ROOT"]);
+      assert.deepEqual(typed.collections, [{
+        owner: "ROOT",
+        predicate: "requires",
+        manifest: "inventory/resources.json",
+        schema: collectionSchema840,
+        members: ["tests/member.txt"],
+      }]);
+      assert.deepEqual(typed.explanations["tests/member.txt"], [
+        "ROOT",
+        "requires:inventory/resources.json",
+        "collection:" + collectionSchema840,
+        "member:tests/member.txt",
+      ]);
+
+      assert.deepEqual(typed.owners["src/source.txt"], ["ROOT"]);
+      assert.deepEqual(typed.owners["gen/out.txt"], ["ROOT"]);
+      assert.deepEqual(typed.explanations["gen/out.txt"], [
+        "ROOT",
+        "implemented_by:src/source.txt",
+        "generates:gen/out.txt",
+      ]);
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
   test("#840 C3 native J3 relation delta reconstruction and predicate impact are characterized", () => {
     const fx = fixture840();
     try {
