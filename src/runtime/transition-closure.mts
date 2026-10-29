@@ -201,21 +201,21 @@ function canonicalRelations(state: TransitionState | TrustedAuthorityState): Rel
         errors.push(`invalid_relation:${id}:${label}`);
         continue;
       }
-      const rawTarget = obj(item.target);
-      if (rawTarget) {
-        const interpretedBase = {
-          origin: "requirement" as const,
-          from: id,
-          predicate: item.predicate,
-          targetKey: stable(rawTarget),
-          targetKind: rawTarget.kind,
-          ...(Object.hasOwn(rawTarget, "path") ? { scopePath: rawTarget.path } : {}),
-          sourceLabel: label,
-          ...(item.collection === true ? { collection: true } : {}),
-        };
-        interpreted.push({ ...interpretedBase, key: relationFactKey(interpretedBase) });
-      }
       try {
+        const rawTarget = obj(item.target);
+        if (rawTarget) {
+          const interpretedBase = {
+            origin: "requirement" as const,
+            from: id,
+            predicate: item.predicate,
+            targetKey: stable(rawTarget),
+            targetKind: rawTarget.kind,
+            ...(Object.hasOwn(rawTarget, "path") ? { scopePath: rawTarget.path } : {}),
+            sourceLabel: label,
+            ...(item.collection === true ? { collection: true } : {}),
+          };
+          interpreted.push({ ...interpretedBase, key: relationFactKey(interpretedBase) });
+        }
         const target = targetIdentity(item.target);
         const factBase = {
           origin: "requirement" as const,
