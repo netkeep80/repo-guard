@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 
 import { verifyReleaseRef } from "../scripts/verify-release-ref.mjs";
@@ -233,6 +233,67 @@ describe("automatic release integrity workflow", () => {
     assert.match(text, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/);
     assert.match(text, /--tag/);
     assert.doesNotMatch(text, /--expected-sha/);
+  });
+});
+
+
+function legacyProofConsumer(payload, requestedSha = exactSha) {
+  const parsed = JSON.parse(payload);
+  const sha = parsed.sha;
+  const version = parsed.version;
+  const tag = parsed.tag;
+  if (sha !== requestedSha) throw new Error("sha mismatch");
+  if (tag !== `v${version}`) throw new Error("tag mismatch");
+  return { sha, version, tag };
+}
+
+describe("#835 falsification-first release trust boundary", () => {
+  it("F1 reproduces target-owned preflight trust", () => {
+    const releaseSource = readFileSync(resolve(".github/workflows/release.yml"), "utf8");
+    const releaseWorkflow = parseDocument(releaseSource).toJS();
+    const preflight = releaseWorkflow.jobs?.preflight;
+    assert.ok(preflight);
+    const checkout = preflight.steps.find((step) => String(step.name).includes("Checkout exact release target"));
+    const install = preflight.steps.find((step) => String(step.name).includes("Install read-only preflight dependencies"));
+    const proof = preflight.steps.find((step) => step.id === "proof");
+    assert.equal(checkout?.with?.ref, "${{ github.event.client_payload.sha }}");
+    assert.ok((install?.run ?? "").includes("npm ci"));
+    assert.ok((proof?.run ?? "").includes("node scripts/release-preflight.mjs"));
+
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-835-f1-"));
+    const script = join(root, "scripts", "release-preflight.mjs");
+    mkdirSync(dirname(script), { recursive: true });
+    writeFileSync(script, `process.stdout.write(JSON.stringify({sha:"${exactSha}",version:"5.0.0",tag:"v5.0.0"})+"\\n");\n`);
+    const executed = spawnSync(process.execPath, [script], { encoding: "utf8" });
+    assert.equal(executed.status, 0);
+    assert.deepEqual(legacyProofConsumer(executed.stdout.trim()), {
+      sha: exactSha,
+      version: "5.0.0",
+      tag: "v5.0.0",
+    });
+    assert.fail("F1_TARGET_OWNED_PREFLIGHT_TRUST_REPRODUCED");
+  });
+
+  it("F2 reproduces forged three-field preflight payload acceptance", () => {
+    const forged = JSON.stringify({ sha: exactSha, version: "5.0.0", tag: "v5.0.0" });
+    assert.deepEqual(legacyProofConsumer(forged), {
+      sha: exactSha,
+      version: "5.0.0",
+      tag: "v5.0.0",
+    });
+    assert.fail("F2_FORGED_PREFLIGHT_PAYLOAD_REPRODUCED");
+  });
+
+  it("F3 reproduces target-owned automatic integrity verifier provenance", () => {
+    const source = readFileSync(resolve(".github/workflows/release-integrity.yml"), "utf8");
+    const workflow = parseDocument(source).toJS();
+    const verify = workflow.jobs?.["verify-automatic"];
+    assert.ok(verify);
+    const checkout = verify.steps.find((step) => String(step.name).includes("Checkout exact release target"));
+    const runStep = verify.steps.find((step) => String(step.run ?? "").includes("verify-release-ref.mjs"));
+    assert.equal(checkout?.with?.ref, "${{ needs.resolve-automatic-target.outputs.target_sha }}");
+    assert.ok((runStep?.run ?? "").includes("node scripts/verify-release-ref.mjs"));
+    assert.fail("F3_TARGET_OWNED_INTEGRITY_VERIFIER_REPRODUCED");
   });
 });
 
