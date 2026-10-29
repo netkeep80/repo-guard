@@ -598,6 +598,7 @@ export function lowerNativeRequirements(native) {
     const requirements = [];
     const lifecycle = {};
     const resourceRelations = [];
+    const compiledConstraints = Object.create(null);
     const generatedSeen = new Set();
     for (const item of native.requirements) {
         const relations = {};
@@ -654,6 +655,7 @@ export function lowerNativeRequirements(native) {
             }
             constraints.push(validated.value);
         }
+        compiledConstraints[item.id] = constraints;
         const value = { id: item.id, normative: item.normative, relations, constraints };
         requirements.push({ ...item, value, semantic: item.semantic });
         lifecycle[item.id] = { ...item.lifecycle };
@@ -689,5 +691,5 @@ export function lowerNativeRequirements(native) {
             }
         },
     };
-    return { requirements: result, lifecycle, resourceRelations };
+    return { requirements: result, lifecycle, resourceRelations, compiledConstraints };
 }
