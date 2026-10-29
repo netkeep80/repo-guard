@@ -16,9 +16,13 @@ const RELEASE_WORKFLOW_PATH = ".github/workflows/release.yml";
 export const ELIGIBILITY_SCHEMA_VERSION = 2;
 
 function runProcess(command, args, options = {}) {
+  const exactGitEnv = command === "git"
+    ? { ...(options.env ?? process.env), GIT_NO_REPLACE_OBJECTS: "1" }
+    : options.env;
   return execFileSync(command, args, {
     encoding: "utf8",
     ...options,
+    ...(exactGitEnv ? { env: exactGitEnv } : {}),
   }).trim();
 }
 

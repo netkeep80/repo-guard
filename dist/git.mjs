@@ -29,6 +29,9 @@ function gitSubcommand(args) {
     }
     return "";
 }
+function exactObjectEnvironment(env) {
+    return { ...(env ?? process.env), GIT_NO_REPLACE_OBJECTS: "1" };
+}
 export function runGit(args, options = {}) {
     const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES;
     if (!Number.isSafeInteger(maxBuffer) || maxBuffer <= 0) {
@@ -40,7 +43,7 @@ export function runGit(args, options = {}) {
             cwd: options.cwd,
             stdio: options.stdio || "pipe",
             maxBuffer,
-            env: options.env,
+            env: exactObjectEnvironment(options.env),
         });
     }
     catch (error) {
@@ -62,6 +65,7 @@ function runGitBytes(args, options = {}) {
             cwd: options.cwd,
             stdio: "pipe",
             maxBuffer,
+            env: exactObjectEnvironment(options.env),
         });
     }
     catch (error) {

@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
 import { loadNativeRequirements, lowerNativeRequirements, validateCompiledConstraint } from "../dist/runtime/canonical-requirements.mjs";
 import { parseNameStatusZ } from "../dist/diff/parser.mjs";
+import { listTrackedEntriesAtRef, readFileBytesAtRef } from "../dist/git.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "repo-guard-c1-"));
 const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -1744,4 +1745,143 @@ relations:
   });
 
   console.log("#847 literal exact public check identity matrix loaded");
+}
+
+
+{
+  const cli850 = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+  const git850 = (root, ...args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const put850 = (root, path, value) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), value);
+  };
+  const commit850 = (root, message) => {
+    git850(root, "add", "-A");
+    git850(root, "-c", "user.name=#850 Fixture", "-c", "user.email=850@example.invalid",
+      "commit", "-qm", message);
+    return git850(root, "rev-parse", "HEAD");
+  };
+  const check850 = (root, base, head) => {
+    const callerEnv = { ...process.env, PATH: process.env.PATH };
+    delete callerEnv.GIT_NO_REPLACE_OBJECTS;
+    assert.equal(
+      Object.hasOwn(callerEnv, "GIT_NO_REPLACE_OBJECTS"),
+      false,
+      "caller environment must not disable replacement refs for the protected invocation",
+    );
+    const result = spawnSync(process.execPath, [
+      cli850,
+      "--repo-root", root,
+      "check",
+      "--base", base,
+      "--head", head,
+      "--format", "json",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: callerEnv,
+    });
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.stdout, "", result.stderr);
+    return { status: result.status, report: JSON.parse(result.stdout) };
+  };
+
+  test("#850 exact RepoGuard observation is invariant under Git replacement refs", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-850-"));
+    const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
+    delete process.env.GIT_NO_REPLACE_OBJECTS;
+    try {
+      assert.equal(
+        process.env.GIT_NO_REPLACE_OBJECTS,
+        undefined,
+        "fixture caller environment must leave Git replacement refs enabled",
+      );
+      git850(root, "init", "-q", "--object-format=sha1");
+      git850(root, "branch", "-M", "main");
+
+      const requirementA = `format: repo-guard/requirement-v1
+id: CORE
+normative: "replacement invariant A"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/a.txt"
+`;
+      const requirementB = `format: repo-guard/requirement-v1
+id: CORE
+normative: "replacement invariant B"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/a.txt"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/b.txt"
+`;
+
+      put850(root, "requirements/core.rg.yaml", requirementA);
+      put850(root, "src/a.txt", "base\n");
+      const base = commit850(root, "base");
+
+      put850(root, "src/a.txt", "head-a\n");
+      const headA = commit850(root, "head A");
+
+      git850(root, "checkout", "-q", "-b", "replacement", base);
+      put850(root, "requirements/core.rg.yaml", requirementB);
+      put850(root, "src/b.txt", "replacement-only\n");
+      const headB = commit850(root, "head B");
+
+      git850(root, "checkout", "-q", "--detach", headA);
+
+      const clean = check850(root, base, headA);
+      assert.equal(clean.status, 0, JSON.stringify(clean.report.diagnostics));
+      const cleanEntries = listTrackedEntriesAtRef(headA, root);
+      const cleanRequirement = readFileBytesAtRef(headA, "requirements/core.rg.yaml", root);
+      assert.ok(cleanRequirement);
+
+      git850(root, "replace", headA, headB);
+      assert.equal(git850(root, "rev-parse", "refs/replace/" + headA), headB);
+      assert.equal(
+        git850(root, "show", headA + ":requirements/core.rg.yaml"),
+        requirementB.trim(),
+        "fixture must prove ordinary Git is honoring the hostile replacement ref",
+      );
+
+      assert.equal(
+        process.env.GIT_NO_REPLACE_OBJECTS,
+        undefined,
+        "shared Git helper caller environment must not disable replacement refs",
+      );
+      const replaced = check850(root, base, headA);
+      const replacedEntries = listTrackedEntriesAtRef(headA, root);
+      const replacedRequirement = readFileBytesAtRef(headA, "requirements/core.rg.yaml", root);
+      assert.ok(replacedRequirement);
+
+      assert.deepEqual(
+        replaced,
+        clean,
+        "same literal exact BASE/HEAD must produce identical RepoGuard report under refs/replace",
+      );
+      assert.deepEqual(
+        replacedEntries,
+        cleanEntries,
+        "tracked tree enumeration for an exact commit must ignore refs/replace",
+      );
+      assert.deepEqual(
+        replacedRequirement,
+        cleanRequirement,
+        "byte-exact Git reads for an exact commit must ignore refs/replace",
+      );
+    } finally {
+      if (previousNoReplace === undefined) delete process.env.GIT_NO_REPLACE_OBJECTS;
+      else process.env.GIT_NO_REPLACE_OBJECTS = previousNoReplace;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#850 replacement-ref exact-object invariant matrix loaded");
 }
