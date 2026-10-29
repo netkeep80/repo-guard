@@ -8,14 +8,7 @@ const valid = (s) => {
         Object.keys(v).sort().join(",") === "digest,kind,repository,requirementId";
 };
 const obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
-export function evaluateRootedRequirements(input) {
-    const errors = [];
-    const universe = input.requirements;
-    if (!universe.ok)
-        errors.push(...universe.errors.map(e => ({ code: "invalid_canonical_universe", requirement: e.path })));
-    const ids = Object.keys(universe.index).sort();
-    const rooted = new Set();
-    const paths = new Map();
+function canonicalParents(universe, ids, errors) {
     const parents = new Map();
     for (const id of ids) {
         const node = universe.index[id], relations = obj(obj(node.value)?.relations);
@@ -36,6 +29,40 @@ export function evaluateRootedRequirements(input) {
         }
         parents.set(id, [...new Set(targets)].sort());
     }
+    return parents;
+}
+function nativeParents(universe, ids, requirements, errors) {
+    const parents = new Map();
+    const nativeIndex = new Map(requirements.map(requirement => [requirement.id, requirement]));
+    for (const id of ids) {
+        const targets = [];
+        for (const relation of nativeIndex.get(id)?.relations || []) {
+            if (relation.predicate !== "derives_from")
+                continue;
+            if (relation.target.kind !== "requirement") {
+                errors.push({ code: "invalid_provenance_target", requirement: id });
+                continue;
+            }
+            if (!Object.hasOwn(universe.index, relation.target.id))
+                errors.push({ code: "missing_requirement_target", requirement: id, target: relation.target.id });
+            else
+                targets.push(relation.target.id);
+        }
+        parents.set(id, [...new Set(targets)].sort());
+    }
+    return parents;
+}
+export function evaluateRootedRequirements(input) {
+    const errors = [];
+    const universe = input.requirements;
+    if (!universe.ok)
+        errors.push(...universe.errors.map(e => ({ code: "invalid_canonical_universe", requirement: e.path })));
+    const ids = Object.keys(universe.index).sort();
+    const rooted = new Set();
+    const paths = new Map();
+    const parents = input.nativeRequirements
+        ? nativeParents(universe, ids, input.nativeRequirements, errors)
+        : canonicalParents(universe, ids, errors);
     const roots = [...input.trustedRoots].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     for (const subject of roots) {
         if (!valid(subject)) {
