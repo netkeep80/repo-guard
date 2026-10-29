@@ -187,6 +187,27 @@ describe("#835 independently trusted release eligibility", () => {
     assert.equal(result.repository, repo);
   });
 
+  it("F4a production alias evaluator == target == current accepted main is eligible", async () => {
+    const result = await runPreflight({
+      sha: exactSha,
+      evaluatorSha: exactSha,
+      checkout: exactSha,
+      routes: preflightRoutes({
+        mainSha: exactSha,
+        ciRuns: [workflowRun({
+          head_sha: exactSha,
+          status: "completed",
+          conclusion: "success",
+        })],
+      }),
+    });
+
+    assert.equal(result.eligibility, "eligible");
+    assert.equal(result.target_sha, exactSha);
+    assert.equal(result.evaluator_sha, exactSha);
+    assert.equal(result.evaluator_sha, result.target_sha);
+  });
+
   it("F5 unauthorized dispatcher is rejected", async () => {
     await assert.rejects(runPreflight({ actor: "mallory" }), /unauthorized release dispatcher/i);
   });

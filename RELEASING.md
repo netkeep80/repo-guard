@@ -33,37 +33,70 @@ release commit        = exact accepted SHA S
 Выпуск выполняет `.github/workflows/release.yml` как одну транзакцию вокруг неизменяемого `S`:
 
 ```text
-S
- -> read-only preflight(S)
- -> ensure tag(version) == S
- -> ensure published Release(tag)
- -> повторно проверить tag == S
- -> release-integrity
+authorized repository_dispatch
+ -> trusted evaluator E = github.sha
+ -> fetch/read TARGET_SHA = S only as Git data
+ -> require current main == S
+ -> require exact successful post-merge CI for S
+ -> observe package/lock/version/tag/Release identity
+ -> emit strict eligibility evidence schema v2
+ -> isolated publish of exact tag/Release for S
+ -> trusted automatic integrity verifier V = github.sha
+ -> verify published target as data
 ```
 
-«Атомарная» здесь означает, что после начала операции цель выпуска не может переключиться с `S` на более новый `main`. Платформа не предоставляет общего механизма отката для уже выполненных операций с тегом и выпуском, поэтому рабочий процесс не утверждает механическую транзакционность внешнего программного интерфейса. Любое противоречие или гонка приводит к блокировке; существующий тег никогда не перемещается и не перезаписывается.
+«Атомарная» здесь означает, что после начала операции цель выпуска не может переключиться с `S` на более новый `main`. Платформа не предоставляет общего механизма отката уже выполненных операций с тегом и выпуском, поэтому рабочий процесс не утверждает механическую транзакционность внешнего API. Любое противоречие или гонка приводит к блокировке; существующий тег никогда не перемещается и не перезаписывается.
 
-Рабочий процесс запускается через `repository_dispatch` из доверенной ветки по умолчанию. Это не позволяет выбирать произвольную ветку с изменённым процессом выпуска. Передаваемый `client_payload.sha` остаётся недоверенным входом и полностью проверяется заданием `preflight`.
+Рабочий процесс запускается через `repository_dispatch` из доверенной ветки по умолчанию. `client_payload.sha` остаётся недоверенным входом и задаёт только проверяемую цель `S`. Исполняемый evaluator выбирается платформой как `github.sha` текущей ветки по умолчанию и не выбирается `TARGET_SHA`.
+
+Нормальный выпуск допускает:
+
+```text
+EVALUATOR_SHA == TARGET_SHA == CURRENT_ACCEPTED_MAIN
+```
+
+Это не self-authorization непринимаемого кандидата: authority evaluator возникает из уже принятого текущего `main`, а не из произвольного `client_payload.sha`.
 
 ## Предварительная приёмка
 
 До выпуска `S` уже должен быть принят в `main` обычным процессом разработки и содержать окончательный `package.json.version`.
 
-Для `S` должны быть успешны:
+Для `S` должен существовать успешный authoritative post-merge CI:
 
 ```text
-post-merge CI: workflow=.github/workflows/ci.yml, event=push, branch=main, head_sha=S
+workflow=.github/workflows/ci.yml
+event=push
+branch=main
+head_sha=S
+status=completed
+conclusion=success
 ```
 
-В задании `preflight`, имеющем только права чтения, дополнительно проверяются:
+Задание `eligibility` имеет только `actions: read` и `contents: read`. До допуска оно:
 
-- рабочая копия имеет `HEAD == S`;
-- текущий `main == S` на момент допуска;
-- `package.json.version` и оба корневых отражения версии в `package-lock.json`;
-- `npm run check:dist`;
-- существующий тег: отсутствует либо указывает точно на `S`;
-- существующий выпуск на платформе: отсутствует либо уже опубликован как обычный, не `draft` и не `prerelease`;
-- наблюдение тега и выпуска выполняется через существующий `observeReleaseTruth()`.
+- проверяет точный repository, `repository_dispatch/release`, разрешённого actor и владельца repository;
+- получает рабочую копию доверенного evaluator `E = github.sha` и проверяет `HEAD == E`;
+- получает `S` только как Git object и не переключает рабочую копию на `S`;
+- читает `package.json` и `package-lock.json` из `S` через Git как данные;
+- требует, чтобы текущий `refs/heads/main` точно указывал на `S`;
+- находит authoritative CI именно для `S` и требует его успешного завершения;
+- проверяет согласованность stable SemVer, lockfile, ожидаемого тега и наблюдаемого Release state.
+
+В `eligibility` не выполняются `npm ci`, `check:dist`, install hooks или JavaScript из `TARGET_SHA`. Freshness `dist` и полный проектный test contract уже входят в exact post-merge CI, связанный с `S`.
+
+Успешный допуск создаёт versioned evidence schema v2 с точными полями:
+
+```text
+repository
+target_sha
+version
+tag
+evaluator_sha
+ci_run_id
+ci_run_attempt
+source_release_run_id
+source_release_run_attempt
+```
 
 Если после принятия `S` требуется изменение кода или версии, нужен новый обычный цикл PR и новый принятый SHA. Выпуск не переносится на новый `main` автоматически.
 
@@ -82,27 +115,17 @@ gh api --method POST \
   -f "client_payload[sha]=$S"
 ```
 
-Другие параметры версии или тега передавать не нужно.
-
 Рабочий процесс состоит из двух заданий с разными полномочиями.
 
-### `preflight`
+### `eligibility`
 
-`preflight` имеет только права чтения. Он получает точную рабочую копию `S`, выполняет проверки принятия и выдаёт следующему заданию только:
-
-```text
-sha
-version
-tag
-```
-
-Здесь допустимо выполнение `npm ci`, `check:dist` и кода репозитория только для чтения, поскольку полномочий записи нет.
+`eligibility` выполняет описанную выше read-only проверку доверенным evaluator `github.sha`. `TARGET_SHA` используется как данные, а не как источник исполняемой authority. После успеха задание передаёт следующему заданию только проверенные outputs и сохраняет exact eligibility evidence как artifact, связанный с текущими `run_id` и `run_attempt`.
 
 ### `publish`
 
-`publish` запускается только после успешного `preflight` и имеет `contents: write`.
+`publish` запускается только после успешного `eligibility` и имеет `contents: write`.
 
-В этом задании запрещены получение рабочей копии репозитория, `npm`, `node`, обработчики установки, `uses: ./` и любое выполнение кода выпускаемого кандидата. Оно использует только программный интерфейс платформы и проверенные значения `sha`, `version`, `tag` из `preflight`.
+В этом задании нет checkout репозитория, `npm`, `node`, install hooks, `uses: ./` или выполнения repository code. Оно использует только проверенные outputs `eligibility` и API платформы.
 
 Поведение идемпотентно:
 
@@ -117,13 +140,23 @@ tag
 
 ## Финальная проверка
 
-Объект выпуска, созданный заданием `publish` с помощью `GITHUB_TOKEN`, не используется как транспорт события между рабочими процессами: автоматическая проверка не полагается на появление отдельного события `release: published`.
+`Release integrity` автоматически запускается через `workflow_run` после завершения `Atomic release`.
 
-`Release integrity` автоматически запускается через `workflow_run` после завершения `Atomic release`. В задании `preflight` с правами только на чтение заранее создаётся артефакт данных с точной идентичностью цели: `target_sha`, `tag`, исходные `run_id` и `run_attempt`. В артефакте находятся только данные уже доказанной цели выпуска; он не является новым журналом состояния и не содержит исполняемого кода.
+Сначала `resolve-automatic-target` без checkout проверяет repository/path/event исходного запуска, загружает artifact exact eligibility evidence и связывает его с исходными `run_id` и `run_attempt`.
 
-До получения рабочей копии выпуска `Release integrity` проверяет доверенное происхождение исходного запуска и соответствие артефакта конкретным `run_id` и `run_attempt`. Затем автоматическая проверка получает рабочую копию строго `target_sha = S` и вызывает `verify-release-ref.mjs` с `--tag` и `--expected-sha`. Поэтому успешный автоматический запуск относится именно к установленным `S` и тегу, а не к произвольной ссылке рабочего процесса.
+Затем `verify-automatic` с правами только `actions: read` и `contents: read`:
 
-После установления точной цели автоматический рабочий процесс записывает доказательство, связанное с `S`, тегом, исходным запуском `Atomic release` и собственным запуском. Если проверка выпуска завершается ошибкой, доказательство может сохранить этот результат только для уже установленной идентичности. Ошибка до установления идентичности цели не приписывается какому-либо принятому SHA.
+- получает рабочую копию доверенного integrity evaluator `V = github.sha`;
+- проверяет `HEAD == V`;
+- получает опубликованный `target_sha` только как Git object;
+- выполняет evaluator-owned `scripts/release-preflight.mjs integrity`;
+- повторно проверяет identity исходного release run и exact CI run;
+- сверяет package/version/tag identity из target data;
+- требует, чтобы опубликованный tag разрешался точно в `target_sha`, а GitHub Release был stable и published.
+
+Опубликованный target не становится исполняемой authority ни на этапе eligibility, ни на этапе automatic integrity.
+
+После установления точной identity отдельное задание записывает evidence результата automatic integrity, включая evaluator/verifier identity, source run identity и conclusion. Ошибка до установления identity цели не приписывается какому-либо принятому SHA.
 
 Ручной запуск `Release integrity` по одному тегу сохраняется как отдельная диагностическая проверка. Он получает рабочую копию выбранного тега и запускает `verify-release-ref.mjs` без `--expected-sha`; такой результат сам по себе не доказывает, что исторический принятый `S` был установлен заранее.
 
@@ -140,6 +173,7 @@ npm run verify:release-ref -- --tag vX.Y.Z
 ```
 
 Успешный выпуск означает, что версия, точный тег, принятый `SHA` и опубликованный выпуск согласованы. Это не является утверждением, что платформа технически запрещает владельцу репозитория изменить тег после выпуска; обнаружение такого расхождения остаётся задачей проверок целостности и наблюдения.
+
 
 ## Публикация в npm
 
