@@ -2739,7 +2739,7 @@ relations:
         ],
       }));
       fx.put("src/a.txt", "a\n");
-      fx.put("docs/data.json", "{}\n");
+      fx.put("docs/data.json", JSON.stringify({ before: 1, after: 2 }) + "\n");
       fx.put("src/source.txt", "source\n");
       fx.put("gen/old.js", "old\n");
       const base = fx.save("Slice 4 Relation identity base");
@@ -2820,6 +2820,10 @@ relations:
             verifier: artifactRef840("tests/v.mjs"),
           },
         }],
+      }));
+      fx.put("requirements/VERIFIEROWNER.rg.json", requirement840({
+        id: "VERIFIEROWNER",
+        relations: [relation840("implemented_by", artifactRef840("tests/v.mjs"))],
       }));
       fx.put("src/a.txt", "a\n");
       fx.put("tests/v.mjs", "export {};\n");
