@@ -405,7 +405,13 @@ describe("#835 independently trusted release eligibility", () => {
   it("#850 release eligibility exact target package read ignores refs/replace", async () => {
     const root = mkdtempSync(join(tmpdir(), "repo-guard-850-release-"));
     const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
+    delete process.env.GIT_NO_REPLACE_OBJECTS;
     try {
+      assert.equal(
+        process.env.GIT_NO_REPLACE_OBJECTS,
+        undefined,
+        "release caller environment must leave Git replacement refs enabled",
+      );
       localGit(root, "init", "-q", "--object-format=sha1");
       write(root, "TRUSTED-EVALUATOR", "trusted\n");
       const evaluator = localCommit(root, "evaluator");
@@ -430,9 +436,17 @@ describe("#835 independently trusted release eligibility", () => {
       const targetB = localCommit(root, "target B");
       localGit(root, "checkout", "-q", "--detach", evaluator);
       localGit(root, "replace", targetA, targetB);
-      assert.equal(localGit(root, "show", targetA + ":package.json").includes("9.9.9"), true);
+      assert.equal(
+        process.env.GIT_NO_REPLACE_OBJECTS,
+        undefined,
+        "raw Git control must run with replacement-ref suppression absent",
+      );
+      assert.equal(
+        localGit(root, "show", targetA + ":package.json").includes("9.9.9"),
+        true,
+        "raw Git control must prove refs/replace is effective in the same caller environment",
+      );
 
-      process.env.GIT_NO_REPLACE_OBJECTS = "0";
       const result = await preflightRelease({
         repoRoot: root,
         repo,

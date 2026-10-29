@@ -1763,6 +1763,13 @@ relations:
     return git850(root, "rev-parse", "HEAD");
   };
   const check850 = (root, base, head) => {
+    const callerEnv = { ...process.env, PATH: process.env.PATH };
+    delete callerEnv.GIT_NO_REPLACE_OBJECTS;
+    assert.equal(
+      Object.hasOwn(callerEnv, "GIT_NO_REPLACE_OBJECTS"),
+      false,
+      "caller environment must not disable replacement refs for the protected invocation",
+    );
     const result = spawnSync(process.execPath, [
       cli850,
       "--repo-root", root,
@@ -1773,7 +1780,7 @@ relations:
     ], {
       cwd: root,
       encoding: "utf8",
-      env: { ...process.env, PATH: process.env.PATH, GIT_NO_REPLACE_OBJECTS: "0" },
+      env: callerEnv,
     });
     assert.equal(result.error, undefined);
     assert.notEqual(result.stdout, "", result.stderr);
@@ -1782,7 +1789,14 @@ relations:
 
   test("#850 exact RepoGuard observation is invariant under Git replacement refs", () => {
     const root = mkdtempSync(join(tmpdir(), "repo-guard-850-"));
+    const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
+    delete process.env.GIT_NO_REPLACE_OBJECTS;
     try {
+      assert.equal(
+        process.env.GIT_NO_REPLACE_OBJECTS,
+        undefined,
+        "fixture caller environment must leave Git replacement refs enabled",
+      );
       git850(root, "init", "-q", "--object-format=sha1");
       git850(root, "branch", "-M", "main");
 
@@ -1837,19 +1851,14 @@ relations:
         "fixture must prove ordinary Git is honoring the hostile replacement ref",
       );
 
-      const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
-      process.env.GIT_NO_REPLACE_OBJECTS = "0";
-      let replaced;
-      let replacedEntries;
-      let replacedRequirement;
-      try {
-        replaced = check850(root, base, headA);
-        replacedEntries = listTrackedEntriesAtRef(headA, root);
-        replacedRequirement = readFileBytesAtRef(headA, "requirements/core.rg.yaml", root);
-      } finally {
-        if (previousNoReplace === undefined) delete process.env.GIT_NO_REPLACE_OBJECTS;
-        else process.env.GIT_NO_REPLACE_OBJECTS = previousNoReplace;
-      }
+      assert.equal(
+        process.env.GIT_NO_REPLACE_OBJECTS,
+        undefined,
+        "shared Git helper caller environment must not disable replacement refs",
+      );
+      const replaced = check850(root, base, headA);
+      const replacedEntries = listTrackedEntriesAtRef(headA, root);
+      const replacedRequirement = readFileBytesAtRef(headA, "requirements/core.rg.yaml", root);
       assert.ok(replacedRequirement);
 
       assert.deepEqual(
@@ -1868,6 +1877,8 @@ relations:
         "byte-exact Git reads for an exact commit must ignore refs/replace",
       );
     } finally {
+      if (previousNoReplace === undefined) delete process.env.GIT_NO_REPLACE_OBJECTS;
+      else process.env.GIT_NO_REPLACE_OBJECTS = previousNoReplace;
       rmSync(root, { recursive: true, force: true });
     }
   });
