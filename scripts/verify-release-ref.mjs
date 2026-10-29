@@ -66,8 +66,15 @@ function fail(name, message, hint = null) {
   return { name, status: FAIL, message, hint };
 }
 
-function runProcess(command, args, { cwd } = {}) {
-  return execFileSync(command, args, { cwd, encoding: "utf-8" }).trim();
+function runProcess(command, args, { cwd, env } = {}) {
+  const processEnv = command === "git"
+    ? { ...(env ?? process.env), GIT_NO_REPLACE_OBJECTS: "1" }
+    : env;
+  return execFileSync(command, args, {
+    cwd,
+    encoding: "utf-8",
+    ...(processEnv ? { env: processEnv } : {}),
+  }).trim();
 }
 
 function requireObject(value, label) {
@@ -160,6 +167,15 @@ function validateReleasePayload(body, tag) {
     throw new Error("Malformed release payload: html_url must be a non-empty string");
   }
   return release;
+}
+
+const STABLE_RELEASE_TAG = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+function requireStableReleaseTag(tag) {
+  if (typeof tag !== "string" || !STABLE_RELEASE_TAG.test(tag)) {
+    throw new Error("Release tag must be stable SemVer vX.Y.Z");
+  }
+  return { tag, version: tag.slice(1) };
 }
 
 export function expectedTagForVersion(version) {
@@ -375,11 +391,149 @@ export async function verifyReleaseRef({
   };
 }
 
-function usage() {
-  return `Usage: node scripts/verify-release-ref.mjs [--repo <owner/repo>] [--tag <vX.Y.Z>] [--expected-sha <40-hex-S>] [--package-root <path>]
+function parseHistoricalTargetPackage(packageRoot, targetSha, run) {
+  const packageJson = requireObject(
+    JSON.parse(run("git", ["show", `${targetSha}:package.json`], { cwd: packageRoot })),
+    "historical package.json",
+  );
+  const packageLock = requireObject(
+    JSON.parse(run("git", ["show", `${targetSha}:package-lock.json`], { cwd: packageRoot })),
+    "historical package-lock.json",
+  );
+  const rootLock = requireObject(packageLock.packages?.[""], "historical package-lock root package");
 
-Checks the release invariant used by the release workflows and optional prepublish verification:
-  package.json.version -> exact Git tag commit -> current checkout -> published GitHub release v<version>
+  if (packageJson.name !== "repo-guard" || typeof packageJson.version !== "string") {
+    throw new Error("Historical package.json identity is invalid");
+  }
+  if (packageLock.name !== packageJson.name || packageLock.version !== packageJson.version) {
+    throw new Error("Historical package-lock top-level identity does not match package.json");
+  }
+  if (rootLock.name !== packageJson.name || rootLock.version !== packageJson.version) {
+    throw new Error("Historical package-lock root identity does not match package.json");
+  }
+  return { name: packageJson.name, version: packageJson.version };
+}
+
+export async function verifyHistoricalRelease({
+  packageRoot = defaultPackageRoot,
+  repo = DEFAULT_REPO,
+  tag,
+  targetSha,
+  verifierSha,
+  token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "",
+  fetchImpl = globalThis.fetch,
+  run = runProcess,
+} = {}) {
+  const checks = [];
+  let selected;
+  let normalizedTargetSha;
+  let normalizedVerifierSha;
+  let packageVersion = null;
+
+  if (!fetchImpl) {
+    checks.push(fail("github-api-client", missingFetchMessage()));
+    return { ok: false, repo, tag: tag ?? null, targetSha: null, verifierSha: null, packageVersion, checks };
+  }
+
+  try {
+    selected = requireStableReleaseTag(tag);
+    normalizedTargetSha = requireSha(targetSha, "historical target SHA");
+    normalizedVerifierSha = requireSha(verifierSha, "trusted verifier SHA");
+    checks.push(pass("historical-input", `${selected.tag} targets ${normalizedTargetSha}`));
+  } catch (e) {
+    checks.push(fail("historical-input", e.message));
+    return { ok: false, repo, tag: tag ?? null, targetSha: null, verifierSha: null, packageVersion, checks };
+  }
+
+  try {
+    const checkoutSha = requireSha(
+      run("git", ["rev-parse", "HEAD"], { cwd: packageRoot }),
+      "trusted verifier checkout",
+    );
+    if (checkoutSha !== normalizedVerifierSha) {
+      checks.push(fail(
+        "trusted-verifier-checkout",
+        `Trusted verifier checkout ${checkoutSha} does not match ${normalizedVerifierSha}`,
+      ));
+      return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+    }
+    checks.push(pass("trusted-verifier-checkout", `Trusted verifier checkout is ${checkoutSha}`));
+  } catch (e) {
+    checks.push(fail("trusted-verifier-checkout", e.message));
+    return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+  }
+
+  let truth;
+  try {
+    truth = await observeReleaseTruth({ repo, tag: selected.tag, token, fetchImpl });
+  } catch (e) {
+    checks.push(fail("release-observation", e.message));
+    return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+  }
+
+  if (!truth.tag_exists) {
+    checks.push(fail("published-git-tag", `Git tag ${selected.tag} was not found in ${repo}`));
+    return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+  }
+  checks.push(pass("published-git-tag", `Git tag ${selected.tag} exists in ${repo}`));
+
+  if (truth.tag_commit !== normalizedTargetSha) {
+    checks.push(fail(
+      "historical-target-binding",
+      `${selected.tag} resolves to ${truth.tag_commit}, expected ${normalizedTargetSha}`,
+    ));
+    return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+  }
+  checks.push(pass("historical-target-binding", `${selected.tag} resolves to exact target ${normalizedTargetSha}`));
+
+  if (!truth.release_exists) {
+    checks.push(fail("published-github-release", `GitHub release ${selected.tag} was not found in ${repo}`));
+    return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+  }
+  if (!truth.published) {
+    const state = truth.draft ? "draft" : "prerelease";
+    checks.push(fail("published-github-release", `GitHub release ${selected.tag} exists but is ${state}`));
+    return { ok: false, repo, tag: selected.tag, targetSha: normalizedTargetSha, verifierSha: normalizedVerifierSha, packageVersion, checks };
+  }
+  checks.push(pass("published-github-release", `GitHub release ${selected.tag} is published in ${repo}`));
+
+  try {
+    run("git", ["cat-file", "-e", `${normalizedTargetSha}^{commit}`], { cwd: packageRoot });
+    const targetPackage = parseHistoricalTargetPackage(packageRoot, normalizedTargetSha, run);
+    packageVersion = targetPackage.version;
+    if (packageVersion !== selected.version) {
+      checks.push(fail(
+        "historical-package-tag-binding",
+        `Historical package version ${packageVersion} does not match ${selected.tag}`,
+      ));
+    } else {
+      checks.push(pass(
+        "historical-package-tag-binding",
+        `Historical package version ${packageVersion} matches ${selected.tag}`,
+      ));
+    }
+  } catch (e) {
+    checks.push(fail("historical-target-package", e.message));
+  }
+
+  return {
+    ok: checks.every((check) => check.status === PASS),
+    repo,
+    tag: selected.tag,
+    targetSha: normalizedTargetSha,
+    verifierSha: normalizedVerifierSha,
+    packageVersion,
+    checks,
+  };
+}
+
+function usage() {
+  return `Usage:
+  node scripts/verify-release-ref.mjs [--repo <owner/repo>] [--tag <vX.Y.Z>] [--expected-sha <40-hex-S>] [--package-root <path>]
+  node scripts/verify-release-ref.mjs --historical --tag <vX.Y.Z> --target-sha <40-hex-S> --verifier-sha <40-hex-S> [--repo <owner/repo>]
+
+Default mode checks current-checkout/prepublish release identity.
+Historical mode verifies target package/release data using the trusted current evaluator checkout without executing target code.
 `;
 }
 
@@ -397,6 +551,12 @@ function parseArgs(args) {
       opts.expectedSha = args[++i];
     } else if (arg === "--package-root" && args[i + 1]) {
       opts.packageRoot = resolve(args[++i]);
+    } else if (arg === "--historical") {
+      opts.historical = true;
+    } else if (arg === "--target-sha" && args[i + 1]) {
+      opts.targetSha = args[++i];
+    } else if (arg === "--verifier-sha" && args[i + 1]) {
+      opts.verifierSha = args[++i];
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
@@ -435,7 +595,9 @@ async function main() {
     process.exit(0);
   }
 
-  const result = await verifyReleaseRef(opts);
+  const result = opts.historical
+    ? await verifyHistoricalRelease(opts)
+    : await verifyReleaseRef(opts);
   printResult(result);
   process.exit(result.ok ? 0 : 1);
 }

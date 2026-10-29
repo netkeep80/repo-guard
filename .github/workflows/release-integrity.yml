@@ -254,10 +254,24 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout selected release tag
+      - name: Authorize trusted manual evaluator
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$DISPATCH_REF" = "refs/heads/main"
+          [[ "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$DISPATCH_SHA" = "$WORKFLOW_SHA"
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+
+      - name: Checkout trusted manual evaluator
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -266,8 +280,31 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Verify selected published release tag
+      - name: Acquire selected historical target as data
+        id: target
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERIFIER_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$VERIFIER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$VERIFIER_SHA"
+          git fetch --force --no-tags origin "refs/tags/$RELEASE_TAG:refs/repo-guard/manual-target-tag"
+          TARGET_SHA="$(GIT_NO_REPLACE_OBJECTS=1 git rev-parse --verify "refs/repo-guard/manual-target-tag^{commit}")"
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          GIT_NO_REPLACE_OBJECTS=1 git cat-file -e "$TARGET_SHA^{commit}"
+          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Verify historical published release with trusted evaluator
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-        run: node scripts/verify-release-ref.mjs --tag "$RELEASE_TAG"
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          VERIFIER_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-ref.mjs --historical \
+            --tag "$RELEASE_TAG" \
+            --target-sha "$TARGET_SHA" \
+            --verifier-sha "$VERIFIER_SHA"
