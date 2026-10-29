@@ -162,8 +162,11 @@ function requirementDeltas(base, head) {
 function constraintDeltas(base, head) {
     const out = [];
     const ids = sorted(new Set([...Object.keys(base.requirements.index), ...Object.keys(head.requirements.index)]));
-    const indexed = (value) => {
-        const raw = obj(value)?.constraints;
+    const indexed = (state, requirementId) => {
+        if (state.compiledConstraints !== undefined) {
+            return new Map((state.compiledConstraints[requirementId] || []).map(rule => [rule.id, rule]));
+        }
+        const raw = obj(state.requirements.index[requirementId]?.value)?.constraints;
         const result = new Map();
         if (!Array.isArray(raw))
             return result;
@@ -179,7 +182,7 @@ function constraintDeltas(base, head) {
         const afterRequirement = head.requirements.index[requirementId];
         if (!beforeRequirement || !afterRequirement)
             continue;
-        const before = indexed(beforeRequirement.value), after = indexed(afterRequirement.value);
+        const before = indexed(base, requirementId), after = indexed(head, requirementId);
         for (const constraintId of sorted(new Set([...before.keys(), ...after.keys()]))) {
             const b = before.get(constraintId), a = after.get(constraintId);
             if (b === undefined)
@@ -423,6 +426,8 @@ function evaluateScopedObligations(input, deltas, applicability) {
     const problems = [], explanations = [];
     const root = (state, id) => obj(state.requirements.index[id]?.value);
     const parseRules = (state, label, id) => {
+        if (state.compiledConstraints !== undefined)
+            return [...(state.compiledConstraints[id] || [])];
         const raw = root(state, id)?.constraints;
         if (raw === undefined)
             return [];
