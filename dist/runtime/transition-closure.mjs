@@ -1,5 +1,5 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
-import { validateCompiledConstraint } from "./canonical-requirements.mjs";
+import { validateCompiledConstraint, } from "./canonical-requirements.mjs";
 const sha = /^[0-9a-f]{40}$/;
 const allDeltaKinds = new Set([
     "requirement_add", "requirement_modify", "requirement_remove", "requirement_relocate",
