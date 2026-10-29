@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseDocument } from "yaml";
 
 import { validateEligibilityEvidence } from "../scripts/release-preflight.mjs";
@@ -235,6 +236,57 @@ describe("#835 automatic release integrity trusted boundary", () => {
     assert.match(text, /run_url/);
     assert.match(text, /conclusion/);
     assert.match(text, /release-integrity-/);
+  });
+
+
+  it("#852 RED selected historical tag can substitute the manual verifier implementation", () => {
+    const manual = workflow.jobs?.["verify-manual"];
+    assert.ok(manual);
+
+    const checkout = manual.steps.find((step) => /Checkout selected release tag/.test(step.name ?? ""));
+    const verifier = manual.steps.find((step) => /Verify selected published release tag/.test(step.name ?? ""));
+    assert.equal(checkout?.with?.ref, "${{ inputs.tag }}");
+    assert.match(verifier?.run ?? "", /node scripts\/verify-release-ref\.mjs/);
+
+    const root = mkdtempSync(join(process.env.RUNNER_TEMP || process.cwd(), "repo-guard-852-red-"));
+    const marker = join(root, "TARGET_OWNED_VERIFIER_EXECUTED");
+    const runGit = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const put = (path, value) => {
+      const full = join(root, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, value);
+    };
+    try {
+      runGit("init", "-q", "--object-format=sha1");
+      put("TRUSTED-EVALUATOR", "trusted evaluator base\n");
+      runGit("add", "-A");
+      runGit("-c", "user.name=#852", "-c", "user.email=852@example.invalid", "commit", "-qm", "trusted evaluator");
+      const evaluatorSha = runGit("rev-parse", "HEAD");
+
+      put("scripts/verify-release-ref.mjs",
+        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "executed");\n`);
+      put("package.json", JSON.stringify({ name: "repo-guard", version: "1.2.3" }));
+      runGit("add", "-A");
+      runGit("-c", "user.name=#852", "-c", "user.email=852@example.invalid", "commit", "-qm", "historical target");
+      const targetSha = runGit("rev-parse", "HEAD");
+      runGit("tag", "v1.2.3", targetSha);
+
+      const selectedTag = "v1.2.3";
+      const executionRef = selectedTag; // current workflow: checkout.ref = inputs.tag
+      runGit("checkout", "-q", executionRef);
+      execFileSync(process.execPath, ["scripts/verify-release-ref.mjs"], { cwd: root });
+
+      console.log("#852 RED_TARGET_SHA=" + targetSha);
+      console.log("#852 RED_EVALUATOR_SHA=" + evaluatorSha);
+      assert.notEqual(targetSha, evaluatorSha);
+      assert.equal(
+        existsSync(marker),
+        false,
+        "selected historical target can substitute and execute its own manual verifier",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps manual tag verification separate from trusted automatic evidence", () => {
