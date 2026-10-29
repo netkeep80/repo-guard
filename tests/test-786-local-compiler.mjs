@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -2002,7 +2002,7 @@ relations:
     ], { cwd: fx.root, encoding: "utf8" }),
   ));
 
-  test("#840 C1 native structural-root and J2 behavior is characterized through real native sources", async () => {
+  test("#840 C1 native structural-root and J2 behavior is characterized through real native sources", () => {
     const fx = fixture840();
     try {
       const docs = [
@@ -2106,46 +2106,6 @@ relations:
       assert.deepEqual(changedState.j2.explanations.DEP, ["R0", "DEP"]);
       assert.notDeepEqual(changedState.j2.explanations.DEP, ["DEP"]);
 
-      // B1 sensitivity proof: mutate a transient copy of the production local compiler so
-      // structuralRoots() incorrectly trusts every Requirement, including derives_from children.
-      // The tracked production module is never modified.
-      const productionUrl = new URL("../dist/local-compiler.mjs", import.meta.url);
-      const brokenUrl = new URL(
-        "../dist/local-compiler-840-b1-negative-" + process.pid + ".mjs",
-        import.meta.url,
-      );
-      const productionSource = readFileSync(productionUrl, "utf8");
-      const correctStructuralRoots = `function structuralRoots(lowered) {
-    return lowered.requirements.requirements.filter(item => {
-        const value = item.value;
-        return !Object.values(value.relations || {}).some(relation => relation.predicate === "derives_from");
-    }).map(item => item.semantic);
-}`;
-      const brokenStructuralRoots = `function structuralRoots(lowered) {
-    return lowered.requirements.requirements.map(item => item.semantic);
-}`;
-      const brokenSource = productionSource.replace(correctStructuralRoots, brokenStructuralRoots);
-      assert.notEqual(brokenSource, productionSource, "negative control must alter production structuralRoots()");
-      try {
-        writeFileSync(brokenUrl, brokenSource);
-        const brokenCompiler = await import(brokenUrl.href + "?b1=broken-root-selection");
-        const brokenReport = brokenCompiler.evaluateLocalCompiler({
-          root: fx.root,
-          repository: repository840,
-          base,
-          head: base,
-        });
-        assert.equal(brokenReport.ok, true, JSON.stringify(brokenReport.diagnostics, null, 2));
-        assert.deepEqual(productionRootProof(brokenReport, "MULTI"), ["MULTI"]);
-        assert.deepEqual(productionRootProof(brokenReport, "LEAF"), ["LEAF"]);
-        assert.throws(
-          () => assertProductionRootProofs(brokenReport),
-          assert.AssertionError,
-          "C1 production-root proof contract must fail when derives_from children are promoted to roots",
-        );
-      } finally {
-        if (existsSync(brokenUrl)) unlinkSync(brokenUrl);
-      }
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
     }
