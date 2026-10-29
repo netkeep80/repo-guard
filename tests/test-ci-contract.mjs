@@ -113,15 +113,15 @@ assert.equal(
   concurrencyGroup(pr100b),
   "same PR must keep one concurrency group across newer commits",
 );
-assert.equal(
-  concurrencyGroup(pr100a),
-  concurrencyGroup(pr100Renamed),
-  "PR concurrency identity must not depend on fork owner or source branch label",
-);
 assert.notEqual(
   concurrencyGroup(pr100a),
   concurrencyGroup(pr101SameBranch),
   "different PRs with identical head_ref must not share CI concurrency group",
+);
+assert.equal(
+  concurrencyGroup(pr100a),
+  concurrencyGroup(pr100Renamed),
+  "PR concurrency identity must not depend on fork owner or source branch label",
 );
 assert.notEqual(
   concurrencyGroup(pr100a),
