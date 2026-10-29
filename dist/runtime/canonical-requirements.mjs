@@ -1,18 +1,18 @@
 import { createHash } from "node:crypto";
-import { parseDocument } from "yaml";
+import { isMap, isScalar, parseDocument, visit } from "yaml";
 import { normalizeDocumentFact, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
 import { decodeUtf8Strict } from "../utils/repository-files.mjs";
 const fail = (code, path, message, otherPath) => ({ code, path, message, ...(otherPath ? { otherPath } : {}) });
 function canonical(value) {
     if (value === null || typeof value === "string" || typeof value === "boolean")
         return value;
-    if (typeof value === "number" && Number.isFinite(value))
+    if (typeof value === "number" && Number.isSafeInteger(value))
         return value;
     if (Array.isArray(value))
         return value.map(canonical);
     if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype)
         return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
-    throw new Error("non-JSON or non-finite canonical Requirement semantic value");
+    throw new Error("canonical Requirement semantic numbers must be safe integers");
 }
 export const canonicalSemanticDigest = (value) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 export function strictCanonicalJson(raw) {
@@ -27,6 +27,29 @@ export function strictCanonicalJson(raw) {
             : "invalid canonical JSON: " + messages.join("; "));
     }
     return parsed;
+}
+const semanticIntegerSource = /^(?:0|[1-9][0-9]*|-[1-9][0-9]*)$/;
+function validateSemanticNumericSource(raw, scope) {
+    const document = parseDocument(raw, { schema: "core", uniqueKeys: true, merge: false, prettyErrors: false });
+    let root = document.contents;
+    if (scope === "normative") {
+        if (!isMap(root))
+            return;
+        const normative = root.items.find(item => isScalar(item.key) && item.key.value === "normative");
+        root = normative?.value ?? null;
+    }
+    if (!root)
+        return;
+    visit(root, (_key, node) => {
+        if (!isScalar(node) || typeof node.value !== "number")
+            return;
+        const source = typeof node.source === "string"
+            ? node.source
+            : Array.isArray(node.range) ? raw.slice(node.range[0], node.range[1]) : "";
+        if (!semanticIntegerSource.test(source) || !Number.isSafeInteger(node.value)) {
+            throw new Error("semantic Requirement numeric source must be a plain decimal safe integer");
+        }
+    });
 }
 function canonicalPath(path) {
     // Reuse existing repository path fact validation; reject aliases rather than silently normalize.
@@ -70,6 +93,7 @@ function parseRequirement(raw, path) {
     const value = path.endsWith(".json") ? strictCanonicalJson(raw) : parseYaml(raw);
     if (value === null || typeof value !== "object" || Array.isArray(value))
         throw new Error("canonical Requirement source requires an object");
+    validateSemanticNumericSource(raw, "document");
     return value;
 }
 export function loadCanonicalRequirements(input) {
@@ -488,7 +512,9 @@ function nativeRequirementSourcePath(path) {
 }
 function parseNativeRequirement(raw, path) {
     const value = path.endsWith(".json") ? strictCanonicalJson(raw) : parseYaml(raw);
-    return nativeObject(value, "native Requirement");
+    const input = nativeObject(value, "native Requirement");
+    validateSemanticNumericSource(raw, "normative");
+    return input;
 }
 export function loadNativeRequirements(input) {
     const errors = [];
