@@ -11,105 +11,185 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  preflight:
+  eligibility:
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
     outputs:
-      sha: ${{ steps.proof.outputs.sha }}
+      repository: ${{ steps.proof.outputs.repository }}
+      target_sha: ${{ steps.proof.outputs.target_sha }}
       version: ${{ steps.proof.outputs.version }}
       tag: ${{ steps.proof.outputs.tag }}
+      evaluator_sha: ${{ steps.proof.outputs.evaluator_sha }}
+      ci_run_id: ${{ steps.proof.outputs.ci_run_id }}
+      ci_run_attempt: ${{ steps.proof.outputs.ci_run_attempt }}
+      source_run_id: ${{ steps.proof.outputs.source_run_id }}
+      source_run_attempt: ${{ steps.proof.outputs.source_run_attempt }}
     steps:
-      - name: Checkout exact release target
+      - name: Authorize exact release dispatch
+        env:
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          TARGET_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -euo pipefail
+          test "$REPOSITORY" = "netkeep80/repo-guard"
+          test "$EVENT_NAME" = "repository_dispatch"
+          test "$EVENT_ACTION" = "release"
+          test "$ACTOR" = "netkeep80"
+          test "$REPOSITORY_OWNER" = "netkeep80"
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout trusted release evaluator
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ github.event.client_payload.sha }}
-          fetch-depth: 1
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
-          node-version: 24
-          cache: npm
+          node-version: "24"
 
-      - name: Install read-only preflight dependencies
-        run: npm ci
+      - name: Acquire exact release target as data
+        env:
+          TARGET_SHA: ${{ github.event.client_payload.sha }}
+          EVALUATOR_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EVALUATOR_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EVALUATOR_SHA"
+          git fetch --no-tags --prune origin "$TARGET_SHA"
+          git cat-file -e "$TARGET_SHA^{commit}"
 
-      - name: Prove exact accepted release target
+      - name: Prove independently trusted release eligibility
         id: proof
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           TARGET_SHA: ${{ github.event.client_payload.sha }}
-        run: |
-          set -euo pipefail
-          RESULT="$(node scripts/release-preflight.mjs --sha "$TARGET_SHA" --repo "$GITHUB_REPOSITORY")"
-          SHA="$(jq -er '.sha' <<<"$RESULT")"
-          VERSION="$(jq -er '.version' <<<"$RESULT")"
-          TAG="$(jq -er '.tag' <<<"$RESULT")"
-          test "$SHA" = "$TARGET_SHA"
-          test "$TAG" = "v${VERSION}"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Record exact release target identity
-        env:
-          TARGET_SHA: ${{ steps.proof.outputs.sha }}
-          TAG: ${{ steps.proof.outputs.tag }}
+          EVALUATOR_SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
           SOURCE_RUN_ID: ${{ github.run_id }}
           SOURCE_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          jq -n \
-            --arg target_sha "$TARGET_SHA" \
-            --arg tag "$TAG" \
-            --argjson source_run_id "$SOURCE_RUN_ID" \
-            --argjson source_run_attempt "$SOURCE_RUN_ATTEMPT" \
-            '{schema_version:1,target_sha:$target_sha,tag:$tag,source_run_id:$source_run_id,source_run_attempt:$source_run_attempt}' \
-            > release-target.json
+          RESULT="$(node scripts/release-preflight.mjs eligibility \
+            --repo "$REPOSITORY" \
+            --sha "$TARGET_SHA" \
+            --evaluator-sha "$EVALUATOR_SHA" \
+            --actor "$ACTOR" \
+            --repository-owner "$REPOSITORY_OWNER" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --source-run-attempt "$SOURCE_RUN_ATTEMPT")"
+          printf '%s\n' "$RESULT" > release-eligibility.json
 
-      - name: Upload exact release target identity
+          jq -e '
+            type == "object"
+            and .schema_version == 2
+            and .eligibility == "eligible"
+            and (keys | sort) == [
+              "ci_run_attempt",
+              "ci_run_id",
+              "eligibility",
+              "evaluator_sha",
+              "repository",
+              "schema_version",
+              "source_release_run_attempt",
+              "source_release_run_id",
+              "tag",
+              "target_sha",
+              "version"
+            ]
+          ' release-eligibility.json >/dev/null
+
+          PROVED_REPOSITORY="$(jq -er '.repository' release-eligibility.json)"
+          PROVED_SHA="$(jq -er '.target_sha' release-eligibility.json)"
+          VERSION="$(jq -er '.version' release-eligibility.json)"
+          TAG="$(jq -er '.tag' release-eligibility.json)"
+          PROVED_EVALUATOR="$(jq -er '.evaluator_sha' release-eligibility.json)"
+          CI_RUN_ID="$(jq -er '.ci_run_id' release-eligibility.json)"
+          CI_RUN_ATTEMPT="$(jq -er '.ci_run_attempt' release-eligibility.json)"
+          PROVED_RUN_ID="$(jq -er '.source_release_run_id' release-eligibility.json)"
+          PROVED_RUN_ATTEMPT="$(jq -er '.source_release_run_attempt' release-eligibility.json)"
+
+          test "$PROVED_REPOSITORY" = "$REPOSITORY"
+          test "$PROVED_SHA" = "$TARGET_SHA"
+          test "$PROVED_EVALUATOR" = "$EVALUATOR_SHA"
+          test "$PROVED_RUN_ID" = "$SOURCE_RUN_ID"
+          test "$PROVED_RUN_ATTEMPT" = "$SOURCE_RUN_ATTEMPT"
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$TAG" = "v$VERSION"
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CI_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+
+          echo "repository=$PROVED_REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$PROVED_SHA" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "evaluator_sha=$PROVED_EVALUATOR" >> "$GITHUB_OUTPUT"
+          echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "ci_run_attempt=$CI_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$PROVED_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_run_attempt=$PROVED_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload trusted release eligibility evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-target-${{ github.run_id }}-${{ github.run_attempt }}
-          path: release-target.json
+          name: release-eligibility-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-eligibility.json
           if-no-files-found: error
           retention-days: 14
 
   publish:
-    needs: preflight
+    needs: eligibility
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      TARGET_SHA: ${{ needs.preflight.outputs.sha }}
-      VERSION: ${{ needs.preflight.outputs.version }}
-      TAG: ${{ needs.preflight.outputs.tag }}
+      REPOSITORY: ${{ needs.eligibility.outputs.repository }}
+      TARGET_SHA: ${{ needs.eligibility.outputs.target_sha }}
+      VERSION: ${{ needs.eligibility.outputs.version }}
+      TAG: ${{ needs.eligibility.outputs.tag }}
+      EVALUATOR_SHA: ${{ needs.eligibility.outputs.evaluator_sha }}
+      CI_RUN_ID: ${{ needs.eligibility.outputs.ci_run_id }}
+      CI_RUN_ATTEMPT: ${{ needs.eligibility.outputs.ci_run_attempt }}
+      SOURCE_RUN_ID: ${{ needs.eligibility.outputs.source_run_id }}
+      SOURCE_RUN_ATTEMPT: ${{ needs.eligibility.outputs.source_run_attempt }}
+      CURRENT_RUN_ID: ${{ github.run_id }}
+      CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
     steps:
-      - name: Publish exact tag and Release
+      - name: Publish exact trusted-eligible tag and Release
         run: |
           set -euo pipefail
+          test "$REPOSITORY" = "netkeep80/repo-guard"
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$TAG" = "v${VERSION}"
+          [[ "$EVALUATOR_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$TAG" = "v$VERSION"
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CI_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$SOURCE_RUN_ID" = "$CURRENT_RUN_ID"
+          test "$SOURCE_RUN_ATTEMPT" = "$CURRENT_RUN_ATTEMPT"
 
           resolve_tag_commit() {
             local OBJECT OBJECT_TYPE OBJECT_SHA DEPTH=0
-            OBJECT="$(gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}")" || return 1
+            OBJECT="$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG")" || return 1
             OBJECT_TYPE="$(jq -er '.object.type' <<<"$OBJECT")"
             OBJECT_SHA="$(jq -er '.object.sha' <<<"$OBJECT")"
 
             while test "$OBJECT_TYPE" = "tag"; do
               DEPTH=$((DEPTH + 1))
               test "$DEPTH" -le 8
-              OBJECT="$(gh api "repos/${REPOSITORY}/git/tags/${OBJECT_SHA}")"
+              OBJECT="$(gh api "repos/$REPOSITORY/git/tags/$OBJECT_SHA")"
               OBJECT_TYPE="$(jq -er '.object.type' <<<"$OBJECT")"
               OBJECT_SHA="$(jq -er '.object.sha' <<<"$OBJECT")"
             done
@@ -122,21 +202,21 @@ jobs:
           if EXISTING_TAG_SHA="$(resolve_tag_commit 2>/dev/null)"; then
             test "$EXISTING_TAG_SHA" = "$TARGET_SHA"
           else
-            gh api --method POST "repos/${REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${TAG}" \
+            gh api --method POST "repos/$REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
               -f sha="$TARGET_SHA" >/dev/null
           fi
 
           TAG_SHA="$(resolve_tag_commit)"
           test "$TAG_SHA" = "$TARGET_SHA"
 
-          if RELEASE_STATE="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" --jq '[.tag_name, .draft, .prerelease] | @tsv' 2>/dev/null)"; then
+          if RELEASE_STATE="$(gh api "repos/$REPOSITORY/releases/tags/$TAG" --jq '[.tag_name, .draft, .prerelease] | @tsv' 2>/dev/null)"; then
             IFS=$'\t' read -r RELEASE_TAG RELEASE_DRAFT RELEASE_PRERELEASE <<<"$RELEASE_STATE"
             test "$RELEASE_TAG" = "$TAG"
             test "$RELEASE_DRAFT" = "false"
             test "$RELEASE_PRERELEASE" = "false"
           else
-            gh api --method POST "repos/${REPOSITORY}/releases" \
+            gh api --method POST "repos/$REPOSITORY/releases" \
               -f tag_name="$TAG" \
               -f name="$TAG" \
               -F draft=false \
@@ -146,7 +226,7 @@ jobs:
           FINAL_TAG_SHA="$(resolve_tag_commit)"
           test "$FINAL_TAG_SHA" = "$TARGET_SHA"
 
-          FINAL_RELEASE_STATE="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" --jq '[.tag_name, .draft, .prerelease] | @tsv')"
+          FINAL_RELEASE_STATE="$(gh api "repos/$REPOSITORY/releases/tags/$TAG" --jq '[.tag_name, .draft, .prerelease] | @tsv')"
           IFS=$'\t' read -r FINAL_RELEASE_TAG FINAL_DRAFT FINAL_PRERELEASE <<<"$FINAL_RELEASE_STATE"
           test "$FINAL_RELEASE_TAG" = "$TAG"
           test "$FINAL_DRAFT" = "false"

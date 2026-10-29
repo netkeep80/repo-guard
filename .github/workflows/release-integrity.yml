@@ -21,13 +21,19 @@ jobs:
       actions: read
       contents: read
     outputs:
+      repository: ${{ steps.target.outputs.repository }}
       target_sha: ${{ steps.target.outputs.target_sha }}
+      version: ${{ steps.target.outputs.version }}
       tag: ${{ steps.target.outputs.tag }}
+      evaluator_sha: ${{ steps.target.outputs.evaluator_sha }}
+      ci_run_id: ${{ steps.target.outputs.ci_run_id }}
+      ci_run_attempt: ${{ steps.target.outputs.ci_run_attempt }}
       source_run_id: ${{ steps.target.outputs.source_run_id }}
       source_run_attempt: ${{ steps.target.outputs.source_run_attempt }}
     steps:
       - name: Verify Atomic release workflow origin
         env:
+          CURRENT_REPOSITORY: ${{ github.repository }}
           SOURCE_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
           SOURCE_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
           SOURCE_EVENT: ${{ github.event.workflow_run.event }}
@@ -35,45 +41,75 @@ jobs:
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
           set -euo pipefail
-          test "$SOURCE_REPOSITORY" = "$GITHUB_REPOSITORY"
+          test "$CURRENT_REPOSITORY" = "netkeep80/repo-guard"
+          test "$SOURCE_REPOSITORY" = "netkeep80/repo-guard"
           test "$SOURCE_WORKFLOW_PATH" = ".github/workflows/release.yml"
           test "$SOURCE_EVENT" = "repository_dispatch"
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
 
-      - name: Download exact release target identity
+      - name: Download exact trusted eligibility evidence
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
-          name: release-target-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
-          path: ${{ runner.temp }}/release-target
+          name: release-eligibility-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: ${{ runner.temp }}/release-eligibility
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - name: Validate exact release target identity
+      - name: Validate exact trusted eligibility evidence
         id: target
         env:
-          TARGET_FILE: ${{ runner.temp }}/release-target/release-target.json
+          ELIGIBILITY_FILE: ${{ runner.temp }}/release-eligibility/release-eligibility.json
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
           set -euo pipefail
           jq -e '
             type == "object"
-            and .schema_version == 1
-            and (keys | sort) == ["schema_version", "source_run_attempt", "source_run_id", "tag", "target_sha"]
-          ' "$TARGET_FILE" >/dev/null
-          TARGET_SHA="$(jq -er '.target_sha' "$TARGET_FILE")"
-          TAG="$(jq -er '.tag' "$TARGET_FILE")"
-          ARTIFACT_RUN_ID="$(jq -er '.source_run_id' "$TARGET_FILE")"
-          ARTIFACT_RUN_ATTEMPT="$(jq -er '.source_run_attempt' "$TARGET_FILE")"
+            and .schema_version == 2
+            and .eligibility == "eligible"
+            and (keys | sort) == [
+              "ci_run_attempt",
+              "ci_run_id",
+              "eligibility",
+              "evaluator_sha",
+              "repository",
+              "schema_version",
+              "source_release_run_attempt",
+              "source_release_run_id",
+              "tag",
+              "target_sha",
+              "version"
+            ]
+          ' "$ELIGIBILITY_FILE" >/dev/null
+
+          REPOSITORY="$(jq -er '.repository' "$ELIGIBILITY_FILE")"
+          TARGET_SHA="$(jq -er '.target_sha' "$ELIGIBILITY_FILE")"
+          VERSION="$(jq -er '.version' "$ELIGIBILITY_FILE")"
+          TAG="$(jq -er '.tag' "$ELIGIBILITY_FILE")"
+          EVALUATOR_SHA="$(jq -er '.evaluator_sha' "$ELIGIBILITY_FILE")"
+          CI_RUN_ID="$(jq -er '.ci_run_id' "$ELIGIBILITY_FILE")"
+          CI_RUN_ATTEMPT="$(jq -er '.ci_run_attempt' "$ELIGIBILITY_FILE")"
+          ARTIFACT_RUN_ID="$(jq -er '.source_release_run_id' "$ELIGIBILITY_FILE")"
+          ARTIFACT_RUN_ATTEMPT="$(jq -er '.source_release_run_attempt' "$ELIGIBILITY_FILE")"
+
+          test "$REPOSITORY" = "netkeep80/repo-guard"
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$ARTIFACT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$TAG" = "v$VERSION"
+          [[ "$EVALUATOR_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CI_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           test "$ARTIFACT_RUN_ID" = "$SOURCE_RUN_ID"
           test "$ARTIFACT_RUN_ATTEMPT" = "$SOURCE_RUN_ATTEMPT"
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
           echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "evaluator_sha=$EVALUATOR_SHA" >> "$GITHUB_OUTPUT"
+          echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "ci_run_attempt=$CI_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "source_run_id=$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
           echo "source_run_attempt=$SOURCE_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
@@ -82,12 +118,13 @@ jobs:
     needs: resolve-automatic-target
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Checkout exact release target
+      - name: Checkout trusted integrity evaluator
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.resolve-automatic-target.outputs.target_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -96,12 +133,44 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Verify exact published release target
+      - name: Acquire published target as data
+        env:
+          TARGET_SHA: ${{ needs.resolve-automatic-target.outputs.target_sha }}
+          VERIFIER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERIFIER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$VERIFIER_SHA"
+          git fetch --no-tags --prune origin "$TARGET_SHA"
+          git cat-file -e "$TARGET_SHA^{commit}"
+
+      - name: Verify publication with trusted integrity evaluator
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.resolve-automatic-target.outputs.tag }}
+          REPOSITORY: ${{ needs.resolve-automatic-target.outputs.repository }}
           TARGET_SHA: ${{ needs.resolve-automatic-target.outputs.target_sha }}
-        run: node scripts/verify-release-ref.mjs --tag "$RELEASE_TAG" --expected-sha "$TARGET_SHA"
+          VERSION: ${{ needs.resolve-automatic-target.outputs.version }}
+          TAG: ${{ needs.resolve-automatic-target.outputs.tag }}
+          ELIGIBILITY_EVALUATOR_SHA: ${{ needs.resolve-automatic-target.outputs.evaluator_sha }}
+          CI_RUN_ID: ${{ needs.resolve-automatic-target.outputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ needs.resolve-automatic-target.outputs.ci_run_attempt }}
+          SOURCE_RUN_ID: ${{ needs.resolve-automatic-target.outputs.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ needs.resolve-automatic-target.outputs.source_run_attempt }}
+          VERIFIER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release-preflight.mjs integrity \
+            --repo "$REPOSITORY" \
+            --sha "$TARGET_SHA" \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --evaluator-sha "$ELIGIBILITY_EVALUATOR_SHA" \
+            --verifier-sha "$VERIFIER_SHA" \
+            --ci-run-id "$CI_RUN_ID" \
+            --ci-run-attempt "$CI_RUN_ATTEMPT" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --source-run-attempt "$SOURCE_RUN_ATTEMPT"
 
   record-automatic-evidence:
     if: ${{ always() && github.event_name == 'workflow_run' && needs.resolve-automatic-target.result == 'success' }}
@@ -113,8 +182,12 @@ jobs:
     steps:
       - name: Record exact release integrity evidence
         env:
+          REPOSITORY: ${{ needs.resolve-automatic-target.outputs.repository }}
           TARGET_SHA: ${{ needs.resolve-automatic-target.outputs.target_sha }}
+          VERSION: ${{ needs.resolve-automatic-target.outputs.version }}
           TAG: ${{ needs.resolve-automatic-target.outputs.tag }}
+          ELIGIBILITY_EVALUATOR_SHA: ${{ needs.resolve-automatic-target.outputs.evaluator_sha }}
+          VERIFIER_SHA: ${{ github.sha }}
           SOURCE_RELEASE_RUN_ID: ${{ needs.resolve-automatic-target.outputs.source_run_id }}
           SOURCE_RELEASE_RUN_ATTEMPT: ${{ needs.resolve-automatic-target.outputs.source_run_attempt }}
           VERIFY_CONCLUSION: ${{ needs.verify-automatic.result }}
@@ -123,8 +196,12 @@ jobs:
           VERIFY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          test "$REPOSITORY" = "netkeep80/repo-guard"
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$TAG" = "v$VERSION"
+          [[ "$ELIGIBILITY_EVALUATOR_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERIFIER_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_RELEASE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           [[ "$VERIFY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
@@ -134,21 +211,39 @@ jobs:
             *) exit 1 ;;
           esac
           jq -n \
+            --arg repository "$REPOSITORY" \
             --arg target_sha "$TARGET_SHA" \
+            --arg version "$VERSION" \
             --arg tag "$TAG" \
+            --arg eligibility_evaluator_sha "$ELIGIBILITY_EVALUATOR_SHA" \
+            --arg verifier_sha "$VERIFIER_SHA" \
             --argjson source_release_run_id "$SOURCE_RELEASE_RUN_ID" \
             --argjson source_release_run_attempt "$SOURCE_RELEASE_RUN_ATTEMPT" \
             --argjson run_id "$VERIFY_RUN_ID" \
             --argjson run_attempt "$VERIFY_RUN_ATTEMPT" \
             --arg run_url "$VERIFY_RUN_URL" \
             --arg conclusion "$VERIFY_CONCLUSION" \
-            '{schema_version:1,source:"atomic_release",target_sha:$target_sha,tag:$tag,source_release_run_id:$source_release_run_id,source_release_run_attempt:$source_release_run_attempt,run_id:$run_id,run_attempt:$run_attempt,run_url:$run_url,conclusion:$conclusion}' \
-            > release-integrity.json
+            '{
+              schema_version:2,
+              source:"atomic_release",
+              repository:$repository,
+              target_sha:$target_sha,
+              version:$version,
+              tag:$tag,
+              eligibility_evaluator_sha:$eligibility_evaluator_sha,
+              verifier_sha:$verifier_sha,
+              source_release_run_id:$source_release_run_id,
+              source_release_run_attempt:$source_release_run_attempt,
+              run_id:$run_id,
+              run_attempt:$run_attempt,
+              run_url:$run_url,
+              conclusion:$conclusion
+            }' > release-integrity.json
 
       - name: Upload exact release integrity evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-integrity-${{ needs.resolve-automatic-target.outputs.target_sha }}-${{ github.run_attempt }}
+          name: release-integrity-${{ needs.resolve-automatic-target.outputs.source_run_id }}-${{ needs.resolve-automatic-target.outputs.source_run_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-integrity.json
           if-no-files-found: error
           retention-days: 14
