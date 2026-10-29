@@ -1981,6 +1981,7 @@ relations:
   const transitionState840 = (state) => ({
     revision: state.revision,
     requirements: state.requirements,
+    nativeRequirements: state.native.requirements,
     compiledConstraints: state.lowered.compiledConstraints,
     j2: state.j2,
     j1: state.j1,
@@ -2446,7 +2447,11 @@ relations:
       fx.put("gen/out.txt", "generated\n");
       const head = fx.save("C3 relation head");
 
-      const transition = transition840(open840(fx.root, base), open840(fx.root, head));
+      const baseState = open840(fx.root, base);
+      const headState = open840(fx.root, head);
+      const transition = transition840(baseState, headState);
+      const legacyTransition = legacyTransition840(baseState, headState);
+      assert.deepEqual(transition, legacyTransition);
       assert.equal(transition.ok, true, JSON.stringify(transition.reasons, null, 2));
       const relationDeltas = transition.deltas.filter((delta) => delta.kind.startsWith("relation_"));
       const addId =
@@ -2531,7 +2536,10 @@ relations:
         }));
       }
       const targetHead = fx.save("C3 impact targets");
-      const targetImpact = transition840(open840(fx.root, impactBase), open840(fx.root, targetHead));
+      const targetBaseState = open840(fx.root, impactBase);
+      const targetHeadState = open840(fx.root, targetHead);
+      const targetImpact = transition840(targetBaseState, targetHeadState);
+      assert.deepEqual(targetImpact, legacyTransition840(targetBaseState, targetHeadState));
       const targetWhy = Object.fromEntries(
         targetImpact.explanations.whyChanged
           .filter((item) => item.kind === "requirement_modify")
@@ -2578,7 +2586,10 @@ relations:
         relations: [relation840("constrains", requirementRef840("CONTARGET"))],
       }));
       const sourceHead = fx.save("C3 impact sources");
-      const sourceImpact = transition840(open840(fx.root, impactBase), open840(fx.root, sourceHead));
+      const sourceBaseState = open840(fx.root, impactBase);
+      const sourceHeadState = open840(fx.root, sourceHead);
+      const sourceImpact = transition840(sourceBaseState, sourceHeadState);
+      assert.deepEqual(sourceImpact, legacyTransition840(sourceBaseState, sourceHeadState));
       const sourceWhy = Object.fromEntries(
         sourceImpact.explanations.whyChanged
           .filter((item) => item.kind === "requirement_modify")
