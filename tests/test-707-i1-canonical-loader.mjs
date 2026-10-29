@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { strictCanonicalJson, loadCanonicalRequirements, loadNativeRequirements, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
+import { strictCanonicalJson, loadCanonicalRequirements, loadNativeRequirements, canonicalSemanticDigest, semanticRequirementSubject, exactRepresentationSubject } from "../dist/runtime/canonical-requirements.mjs";
 import { parseJson } from "../dist/document-facts.mjs";
 import { test } from "node:test";
 const sha = "a".repeat(40), repo = "netkeep80/repo-guard";
@@ -292,51 +292,111 @@ const numericNativeYaml = (literal) => [
 const numericNativeResult = (codec, literal) => nativeLoad([
   item("requirements/R1.rg." + codec, codec === "json" ? numericNativeJson(literal) : numericNativeYaml(literal)),
 ]);
+const numericLegacyResult = (codec, literal) => load([
+  item("requirements/R1." + codec, codec === "json"
+    ? `{"id":"R1","value":${literal}}`
+    : ["id: R1", "value: " + literal, ""].join("\n")),
+]);
 
-test("#851 RED JSON distinct unsafe integers must not alias one accepted semantic Requirement", () => {
-  const a = numericNativeResult("json", "9007199254740992");
-  const b = numericNativeResult("json", "9007199254740993");
-  assert.equal(a.ok, true, JSON.stringify(a.errors));
-  assert.equal(b.ok, true, JSON.stringify(b.errors));
-  assert.notEqual(
-    a.index.R1.semantic.digest,
-    b.index.R1.semantic.digest,
-    "JSON 9007199254740992 and 9007199254740993 silently share one accepted semantic digest",
-  );
-});
-
-test("#851 RED YAML distinct unsafe integers must not alias one accepted semantic Requirement", () => {
-  const a = numericNativeResult("yaml", "9007199254740992");
-  const b = numericNativeResult("yaml", "9007199254740993");
-  assert.equal(a.ok, true, JSON.stringify(a.errors));
-  assert.equal(b.ok, true, JSON.stringify(b.errors));
-  assert.notEqual(
-    a.index.R1.semantic.digest,
-    b.index.R1.semantic.digest,
-    "YAML 9007199254740992 and 9007199254740993 silently share one accepted semantic digest",
-  );
-});
-
-test("#851 characterize native numeric source classes before correction", () => {
-  const literals = [
-    "0", "1", "-1", "9007199254740991", "-9007199254740991",
-    "9007199254740992", "9007199254740993", "-9007199254740992", "-9007199254740993",
-    "0.1", "0.10000000000000001", "1.0000000000000001",
-    "1e3", "1e0", "1e-324", "1e999",
-  ];
-  const observed = {};
+test("#851 N1/N2 unsafe integer collision classes fail closed for JSON and YAML", () => {
   for (const codec of ["json", "yaml"]) {
-    observed[codec] = Object.fromEntries(literals.map((literal) => {
+    for (const literal of [
+      "9007199254740992", "9007199254740993",
+      "-9007199254740992", "-9007199254740993",
+    ]) {
       const result = numericNativeResult(codec, literal);
-      return [literal, {
-        ok: result.ok,
-        value: result.ok ? result.index.R1.normative.value : null,
-        digest: result.ok ? result.index.R1.semantic.digest : null,
-        errors: result.errors.map((error) => error.message),
-      }];
-    }));
+      assert.equal(result.ok, false, codec + " unexpectedly accepted " + literal);
+      assert.equal(result.requirements.length, 0, codec + " produced semantic subject for " + literal);
+      assert.ok(result.errors.some(error => /plain decimal safe integer/.test(error.message)), JSON.stringify(result.errors));
+    }
   }
-  console.log("#851 BASELINE_NUMERIC_CHARACTERIZATION=" + JSON.stringify(observed));
-  assert.equal(observed.json["1e999"].ok, false);
-  assert.equal(observed.yaml["1e999"].ok, false);
 });
+
+test("#851 N3/N4 source rounding, fractional and exponent forms are rejected before semantic digest", () => {
+  for (const codec of ["json", "yaml"]) {
+    for (const literal of [
+      "1.0000000000000001", "0.1", "0.10000000000000001",
+      "1e0", "1e3", "1e-324",
+    ]) {
+      const result = numericNativeResult(codec, literal);
+      assert.equal(result.ok, false, codec + " unexpectedly accepted source form " + literal);
+      assert.equal(result.requirements.length, 0);
+    }
+    assert.equal(numericNativeResult(codec, "1").ok, true);
+    assert.equal(numericNativeResult(codec, "0").ok, true);
+  }
+});
+
+test("#851 N5/N6/N7 safe integer boundary is exact and nonfinite remains rejected", () => {
+  for (const codec of ["json", "yaml"]) {
+    for (const literal of ["0", "1", "-1", "9007199254740991", "-9007199254740991"]) {
+      const result = numericNativeResult(codec, literal);
+      assert.equal(result.ok, true, codec + " rejected supported integer " + literal + ": " + JSON.stringify(result.errors));
+    }
+    assert.equal(numericNativeResult(codec, "1e999").ok, false);
+  }
+});
+
+test("#851 supported numeric semantics remain codec-equivalent without source-spelling identity", () => {
+  const json = numericNativeResult("json", "42");
+  const yaml = numericNativeResult("yaml", "42");
+  assert.equal(json.ok, true);
+  assert.equal(yaml.ok, true);
+  assert.deepEqual(json.index.R1.semantic, yaml.index.R1.semantic);
+  assert.equal(numericNativeResult("json", "1.0").ok, false);
+  assert.equal(numericNativeResult("yaml", "1.0").ok, false);
+  assert.equal(numericNativeResult("json", "1e0").ok, false);
+  assert.equal(numericNativeResult("yaml", "1e0").ok, false);
+});
+
+test("#851 nonnumeric normative digest and object-key canonicalization stay stable", () => {
+  const stable = nativeLoad([item("requirements/R1.rg.yaml", nativeYaml())]);
+  assert.equal(stable.ok, true);
+  assert.equal(stable.index.R1.semantic.digest, "6616417413b04e4cbf763d37231b28162c994f32a4a4f87bcad88cb7df5f0dfb");
+
+  const json = nativeLoad([item("requirements/R1.rg.json",
+    '{"format":"repo-guard/requirement-v1","id":"R1","normative":{"b":"x","a":true}}')]);
+  const yaml = nativeLoad([item("requirements/R1.rg.yaml", [
+    "format: repo-guard/requirement-v1",
+    "id: R1",
+    "normative:",
+    "  a: true",
+    "  b: x",
+    "",
+  ].join("\n"))]);
+  assert.equal(json.ok, true);
+  assert.equal(yaml.ok, true);
+  assert.deepEqual(json.index.R1.semantic, yaml.index.R1.semantic);
+});
+
+test("#851 general canonical Requirement identity uses the same exact numeric source contract", () => {
+  for (const codec of ["json", "yaml"]) {
+    assert.equal(numericLegacyResult(codec, "42").ok, true);
+    for (const literal of ["9007199254740993", "1.0000000000000001", "0.1", "1e0", "1e-324"]) {
+      assert.equal(numericLegacyResult(codec, literal).ok, false, codec + " legacy canonical accepted " + literal);
+    }
+  }
+  assert.throws(() => canonicalSemanticDigest({ value: 0.1 }), /safe integers/);
+  assert.throws(() => canonicalSemanticDigest({ value: 9007199254740992 }), /safe integers/);
+});
+
+test("#851 Constraint metric numeric semantics remain separate", () => {
+  const result = nativeLoad([item("requirements/R1.rg.json", JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id: "R1",
+    normative: "constraint numeric semantics stay separate",
+    relations: [{
+      predicates: ["implemented_by"],
+      target: { kind: "artifact", path: "src/a.mts" },
+    }],
+    constraints: [{
+      id: "lines",
+      scope: { relations: ["implemented_by"] },
+      metric: { key: "git.changed_lines", max: 10 },
+    }],
+  }).replace('"max":10', '"max":1e1'))]);
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.index.R1.constraints[0].metric.max, 10);
+});
+
+console.log("#851 exact semantic numeric contract matrix loaded");
