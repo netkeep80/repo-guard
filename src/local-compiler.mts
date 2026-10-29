@@ -195,6 +195,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
         j2,
         trackedPaths,
         resourceRelations: lowered.resourceRelations,
+        nativeRequirements: native.requirements,
         resolver,
       });
     }

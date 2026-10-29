@@ -1,6 +1,10 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
 import { decodeUtf8Strict } from "../utils/repository-files.mjs";
-import { strictCanonicalJson, type CanonicalRequirementsResult } from "./canonical-requirements.mjs";
+import {
+  strictCanonicalJson,
+  type CanonicalRequirementsResult,
+  type NativeRequirement,
+} from "./canonical-requirements.mjs";
 import type { RootedRequirementResult } from "./requirement-closure.mjs";
 
 export interface ResourceLink { from: string; kind: "generates"; to: string; }
@@ -17,6 +21,7 @@ export interface ResourceClosureInput {
   j2: RootedRequirementResult;
   trackedPaths: readonly string[];
   resourceRelations?: readonly ResourceLink[];
+  nativeRequirements?: readonly NativeRequirement[];
   resolver: {
     resolve(
       ref: unknown,
@@ -37,6 +42,44 @@ const norm = (path: unknown): string => {
 };
 const obj = (v: unknown): Record<string,unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string,unknown> : null;
+
+interface J1RelationCandidate {
+  key: string;
+  predicate: string;
+  target: unknown;
+  collection: unknown;
+}
+
+const canonicalJ1Relations = (requirement: CanonicalRequirementsResult["index"][string]): J1RelationCandidate[] => {
+  const relations=obj(obj(requirement.value)?.relations);
+  const result:J1RelationCandidate[]=[];
+  for(const key of Object.keys(relations||{}).sort()) {
+    const relation=obj(relations![key]);
+    if(!relation)continue;
+    result.push({
+      key,
+      predicate:String(relation.predicate),
+      target:relation.target,
+      collection:relation.collection,
+    });
+  }
+  return result;
+};
+
+const nativeJ1Relations = (requirement: NativeRequirement | undefined): J1RelationCandidate[] => {
+  const result:J1RelationCandidate[]=[];
+  let relationIndex=0;
+  for(const relation of requirement?.relations || []) {
+    if(relation.predicate==="generates")continue;
+    result.push({
+      key:"native_"+String(relationIndex++).padStart(6,"0"),
+      predicate:relation.predicate,
+      target:relation.target,
+      collection:relation.collection,
+    });
+  }
+  return result;
+};
 const resolvedArtifact = (input: ResourceClosureInput, path: string): Record<string,unknown> | null => {
   const resolved=input.resolver.resolve({kind:"artifact",path});
   if(!resolved.ok) return null;
@@ -72,6 +115,9 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
   const owners=new Map<string,Set<string>>();
   const links=new Map<string,{kind:string;to:string}[]>();
   const collections:ResourceCollectionOwnership[]=[];
+  const nativeIndex=input.nativeRequirements
+    ? new Map(input.nativeRequirements.map(requirement=>[requirement.id,requirement] as const))
+    : null;
   const collectionCache=new Map<string,
     {ok:true;members:string[]} |
     {ok:false;code:"invalid_resource_collection"|"missing_resource_target"|"nested_resource_collection";target?:string}>();
@@ -152,11 +198,12 @@ export function evaluateTrackedResourceClosure(input: ResourceClosureInput) {
       const source=requirement.source.path;
       if(tracked.has(source))add(source,[...proof,"source:"+source],id);
       else errors.push({code:"missing_canonical_source",path:source});
-      const relations=obj(obj(requirement.value)?.relations);
-      for(const key of Object.keys(relations||{}).sort()) {
-        const relation=obj(relations![key]);
-        if(!relation)continue;
-        const predicate=String(relation.predicate);
+      const relationCandidates=nativeIndex
+        ? nativeJ1Relations(nativeIndex.get(id))
+        : canonicalJ1Relations(requirement);
+      for(const relation of relationCandidates) {
+        const key=relation.key;
+        const predicate=relation.predicate;
         const target=obj(relation.target);
         if(target?.kind==="document") {
           if(relation.collection===true) {
