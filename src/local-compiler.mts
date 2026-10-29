@@ -12,6 +12,7 @@ import { evaluateProjectionCheck } from "./projection-check.mjs";
 
 const sha40 = /^[0-9a-f]{40}$/;
 type Diagnostic = { code: string; subject: string; detail?: string };
+type Native = ReturnType<typeof loadNativeRequirements>;
 type Lowered = ReturnType<typeof lowerNativeRequirements>;
 type J1 = ReturnType<typeof evaluateTrackedResourceClosure>;
 interface LocalState {
@@ -33,11 +34,10 @@ function resolveCommit(root: string, ref: string): string {
   return resolved;
 }
 
-function structuralRoots(lowered: Lowered) {
-  return lowered.requirements.requirements.filter(item => {
-    const value = item.value as { relations?: Record<string, { predicate?: string }> };
-    return !Object.values(value.relations || {}).some(relation => relation.predicate === "derives_from");
-  }).map(item => item.semantic);
+function structuralRoots(native: Native) {
+  return native.requirements
+    .filter(item => !item.relations.some(relation => relation.predicate === "derives_from"))
+    .map(item => item.semantic);
 }
 
 function parseChangedLinesZ(raw: string): Map<string, number> {
@@ -167,7 +167,11 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       readFile: readExact,
     });
     const lowered = lowerNativeRequirements(native);
-    const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: structuralRoots(lowered) });
+    const j2 = evaluateRootedRequirements({
+      requirements: lowered.requirements,
+      trustedRoots: structuralRoots(native),
+      nativeRequirements: native.requirements,
+    });
     let j1: J1 = {
       ok: false,
       justified: [],
