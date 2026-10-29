@@ -84,7 +84,7 @@ interface RelationFact {
   targetKey: string;
   targetRequirement?: string;
   targetPath?: string;
-  targetKind?: string;
+  targetKind?: unknown;
   scopePath?: unknown;
   sourceLabel?: string;
   collection?: boolean;
@@ -208,7 +208,7 @@ function canonicalRelations(state: TransitionState | TrustedAuthorityState): Rel
           from: id,
           predicate: item.predicate,
           targetKey: stable(rawTarget),
-          ...(typeof rawTarget.kind === "string" ? { targetKind: rawTarget.kind } : {}),
+          targetKind: rawTarget.kind,
           ...(Object.hasOwn(rawTarget, "path") ? { scopePath: rawTarget.path } : {}),
           sourceLabel: label,
           ...(item.collection === true ? { collection: true } : {}),
