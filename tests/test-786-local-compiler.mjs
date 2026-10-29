@@ -2109,6 +2109,10 @@ relations:
       const state = open840(fx.root, revision);
       for (const path of ["src/requires.txt", "src/impl.txt", "tests/verifier.mjs", "docs/owned.md", "src/source.txt"])
         assert.deepEqual(state.j1.owners[path], ["ROOT"], path);
+      assert.deepEqual(state.j1.explanations["src/requires.txt"], ["ROOT", "requires:src/requires.txt"]);
+      assert.deepEqual(state.j1.explanations["src/impl.txt"], ["ROOT", "implemented_by:src/impl.txt"]);
+      assert.deepEqual(state.j1.explanations["tests/verifier.mjs"], ["ROOT", "verified_by:tests/verifier.mjs"]);
+      assert.deepEqual(state.j1.explanations["docs/owned.md"], ["ROOT", "documents:docs/owned.md"]);
       assert.deepEqual(state.j1.owners["src/shared.txt"], ["OWNER"]);
       assert.deepEqual(state.j1.owners["docs/data.json"], ["DOCOWNER"]);
       assert.deepEqual(state.j1.owners["inventory/resources.json"], ["ROOT"]);
@@ -2543,6 +2547,29 @@ relations:
         relations: [relation840("derives_from", requirementRef840("MISSING"))],
       }));
       const revision = dangling.save("C5 dangling requirement");
+      const entries = listTrackedEntriesAtRef(revision, dangling.root);
+      const requirementPath = "requirements/A.rg.json";
+      const raw = readFileBytesAtRef(revision, requirementPath, dangling.root);
+      assert.ok(raw);
+      const native = loadNativeRequirements({
+        repository: repository840,
+        revision,
+        paths: [requirementPath],
+        readFile: (sha, path) => sha === revision && path === requirementPath ? raw : null,
+      });
+      assert.equal(native.ok, true, JSON.stringify(native.errors, null, 2));
+      const lowered = lowerNativeRequirements(native);
+      assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors, null, 2));
+      const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: [] });
+      assert.deepEqual(j2, {
+        ok: false,
+        rooted: [],
+        unrooted: ["A"],
+        errors: [{ code: "missing_requirement_target", requirement: "A", target: "MISSING" }],
+        explanations: {},
+      });
+      assert.deepEqual(entries.map((entry) => entry.path), [requirementPath]);
+
       const report = evaluateLocalCompiler({
         root: dangling.root,
         repository: repository840,
