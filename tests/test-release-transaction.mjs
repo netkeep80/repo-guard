@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -398,6 +398,67 @@ describe("#835 independently trusted release eligibility", () => {
     assert.equal(result.target_sha, fixture.target);
     assert.equal(result.evaluator_sha, fixture.evaluator);
     assert.equal(existsSync(fixture.marker), false, "target-owned verifier code executed");
+  });
+
+
+
+  it("#850 release eligibility exact target package read ignores refs/replace", async () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-850-release-"));
+    const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
+    try {
+      localGit(root, "init", "-q", "--object-format=sha1");
+      write(root, "TRUSTED-EVALUATOR", "trusted\n");
+      const evaluator = localCommit(root, "evaluator");
+
+      write(root, "package.json", JSON.stringify({ name: "repo-guard", version: "5.0.0" }));
+      write(root, "package-lock.json", JSON.stringify({
+        name: "repo-guard",
+        version: "5.0.0",
+        lockfileVersion: 3,
+        packages: { "": { name: "repo-guard", version: "5.0.0" } },
+      }));
+      const targetA = localCommit(root, "target A");
+
+      localGit(root, "checkout", "-q", "-b", "replacement", evaluator);
+      write(root, "package.json", JSON.stringify({ name: "repo-guard", version: "9.9.9" }));
+      write(root, "package-lock.json", JSON.stringify({
+        name: "repo-guard",
+        version: "9.9.9",
+        lockfileVersion: 3,
+        packages: { "": { name: "repo-guard", version: "9.9.9" } },
+      }));
+      const targetB = localCommit(root, "target B");
+      localGit(root, "checkout", "-q", "--detach", evaluator);
+      localGit(root, "replace", targetA, targetB);
+      assert.equal(localGit(root, "show", targetA + ":package.json").includes("9.9.9"), true);
+
+      process.env.GIT_NO_REPLACE_OBJECTS = "0";
+      const result = await preflightRelease({
+        repoRoot: root,
+        repo,
+        sha: targetA,
+        evaluatorSha: evaluator,
+        actor: "netkeep80",
+        repositoryOwner: "netkeep80",
+        sourceRunId,
+        sourceRunAttempt,
+        fetchImpl: fakeFetch(preflightRoutes({
+          mainSha: targetA,
+          ciRuns: [workflowRun({ head_sha: targetA })],
+          version: "5.0.0",
+          tagSha: targetA,
+        })),
+      });
+
+      assert.equal(result.eligibility, "eligible");
+      assert.equal(result.target_sha, targetA);
+      assert.equal(result.version, "5.0.0");
+      assert.equal(result.tag, "v5.0.0");
+    } finally {
+      if (previousNoReplace === undefined) delete process.env.GIT_NO_REPLACE_OBJECTS;
+      else process.env.GIT_NO_REPLACE_OBJECTS = previousNoReplace;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("F27 target workflow substitution is ineffective against evaluator provenance", async () => {

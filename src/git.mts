@@ -91,6 +91,10 @@ function gitSubcommand(args: readonly string[]): string {
   return "";
 }
 
+function exactObjectEnvironment(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+  return { ...(env ?? process.env), GIT_NO_REPLACE_OBJECTS: "1" };
+}
+
 export function runGit(args: string[], options: RunGitOptions = {}): string {
   const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES;
   if (!Number.isSafeInteger(maxBuffer) || maxBuffer <= 0) {
@@ -102,7 +106,7 @@ export function runGit(args: string[], options: RunGitOptions = {}): string {
       cwd: options.cwd,
       stdio: options.stdio || "pipe",
       maxBuffer,
-      env: options.env,
+      env: exactObjectEnvironment(options.env),
     });
   } catch (error) {
     const command = gitSubcommand(args);
@@ -114,7 +118,7 @@ export function runGit(args: string[], options: RunGitOptions = {}): string {
   }
 }
 
-function runGitBytes(args: string[], options: Pick<RunGitOptions, "cwd" | "maxBuffer"> = {}): Buffer {
+function runGitBytes(args: string[], options: Pick<RunGitOptions, "cwd" | "maxBuffer" | "env"> = {}): Buffer {
   const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER_BYTES;
   if (!Number.isSafeInteger(maxBuffer) || maxBuffer <= 0) {
     throw new Error("git maxBuffer must be a positive safe integer");
@@ -124,6 +128,7 @@ function runGitBytes(args: string[], options: Pick<RunGitOptions, "cwd" | "maxBu
       cwd: options.cwd,
       stdio: "pipe",
       maxBuffer,
+      env: exactObjectEnvironment(options.env),
     });
   } catch (error) {
     const command = gitSubcommand(args);

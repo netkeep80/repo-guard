@@ -1831,10 +1831,25 @@ relations:
 
       git850(root, "replace", headA, headB);
       assert.equal(git850(root, "rev-parse", "refs/replace/" + headA), headB);
+      assert.equal(
+        git850(root, "show", headA + ":requirements/core.rg.yaml"),
+        requirementB.trim(),
+        "fixture must prove ordinary Git is honoring the hostile replacement ref",
+      );
 
-      const replaced = check850(root, base, headA);
-      const replacedEntries = listTrackedEntriesAtRef(headA, root);
-      const replacedRequirement = readFileBytesAtRef(headA, "requirements/core.rg.yaml", root);
+      const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
+      process.env.GIT_NO_REPLACE_OBJECTS = "0";
+      let replaced;
+      let replacedEntries;
+      let replacedRequirement;
+      try {
+        replaced = check850(root, base, headA);
+        replacedEntries = listTrackedEntriesAtRef(headA, root);
+        replacedRequirement = readFileBytesAtRef(headA, "requirements/core.rg.yaml", root);
+      } finally {
+        if (previousNoReplace === undefined) delete process.env.GIT_NO_REPLACE_OBJECTS;
+        else process.env.GIT_NO_REPLACE_OBJECTS = previousNoReplace;
+      }
       assert.ok(replacedRequirement);
 
       assert.deepEqual(
