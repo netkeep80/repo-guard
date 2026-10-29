@@ -720,6 +720,7 @@ export function lowerNativeRequirements(native: NativeRequirementsResult) {
   const requirements: CanonicalRequirement[] = [];
   const lifecycle: Record<string, Record<string, boolean>> = {};
   const resourceRelations: Array<{ from: string; kind: "generates"; to: string }> = [];
+  const compiledConstraints: Record<string, readonly CompiledConstraint[]> = Object.create(null);
   const generatedSeen = new Set<string>();
 
   for (const item of native.requirements) {
@@ -777,6 +778,7 @@ export function lowerNativeRequirements(native: NativeRequirementsResult) {
       }
       constraints.push(validated.value);
     }
+    compiledConstraints[item.id] = constraints;
     const value = { id: item.id, normative: item.normative, relations, constraints } as unknown as CanonicalRequirement["value"];
     requirements.push({ ...item, value, semantic: item.semantic });
     lifecycle[item.id] = { ...item.lifecycle };
@@ -810,6 +812,6 @@ export function lowerNativeRequirements(native: NativeRequirementsResult) {
       }
     },
   };
-  return { requirements: result, lifecycle, resourceRelations };
+  return { requirements: result, lifecycle, resourceRelations, compiledConstraints };
 }
 
