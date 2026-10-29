@@ -1,6 +1,6 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
 import { decodeUtf8Strict } from "../utils/repository-files.mjs";
-import { strictCanonicalJson } from "./canonical-requirements.mjs";
+import { strictCanonicalJson, } from "./canonical-requirements.mjs";
 const direct = new Set(["requires", "implemented_by", "verified_by", "documents", "generates"]);
 const collectionDirect = new Set(["requires", "implemented_by", "verified_by", "documents"]);
 const collectionSchema = "repo-guard/resource-collection/v0";
@@ -13,6 +13,37 @@ const norm = (path) => {
     return path;
 };
 const obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
+const canonicalJ1Relations = (requirement) => {
+    const relations = obj(obj(requirement.value)?.relations);
+    const result = [];
+    for (const key of Object.keys(relations || {}).sort()) {
+        const relation = obj(relations[key]);
+        if (!relation)
+            continue;
+        result.push({
+            key,
+            predicate: String(relation.predicate),
+            target: relation.target,
+            collection: relation.collection,
+        });
+    }
+    return result;
+};
+const nativeJ1Relations = (requirement) => {
+    const result = [];
+    let relationIndex = 0;
+    for (const relation of requirement?.relations || []) {
+        if (relation.predicate === "generates")
+            continue;
+        result.push({
+            key: "native_" + String(relationIndex++).padStart(6, "0"),
+            predicate: relation.predicate,
+            target: relation.target,
+            collection: relation.collection,
+        });
+    }
+    return result;
+};
 const resolvedArtifact = (input, path) => {
     const resolved = input.resolver.resolve({ kind: "artifact", path });
     if (!resolved.ok)
@@ -57,6 +88,9 @@ export function evaluateTrackedResourceClosure(input) {
     const owners = new Map();
     const links = new Map();
     const collections = [];
+    const nativeIndex = input.nativeRequirements
+        ? new Map(input.nativeRequirements.map(requirement => [requirement.id, requirement]))
+        : null;
     const collectionCache = new Map();
     const parseCollection = (manifest) => {
         const cached = collectionCache.get(manifest);
@@ -154,12 +188,12 @@ export function evaluateTrackedResourceClosure(input) {
                 add(source, [...proof, "source:" + source], id);
             else
                 errors.push({ code: "missing_canonical_source", path: source });
-            const relations = obj(obj(requirement.value)?.relations);
-            for (const key of Object.keys(relations || {}).sort()) {
-                const relation = obj(relations[key]);
-                if (!relation)
-                    continue;
-                const predicate = String(relation.predicate);
+            const relationCandidates = nativeIndex
+                ? nativeJ1Relations(nativeIndex.get(id))
+                : canonicalJ1Relations(requirement);
+            for (const relation of relationCandidates) {
+                const key = relation.key;
+                const predicate = relation.predicate;
                 const target = obj(relation.target);
                 if (target?.kind === "document") {
                     if (relation.collection === true) {

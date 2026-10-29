@@ -184,6 +184,7 @@ export function evaluateLocalCompiler(input) {
                 j2,
                 trackedPaths,
                 resourceRelations: lowered.resourceRelations,
+                nativeRequirements: native.requirements,
                 resolver,
             });
         }
