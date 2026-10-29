@@ -2551,7 +2551,7 @@ relations:
       });
       assert.equal(report.ok, false);
       assert.deepEqual(report.diagnostics, [
-        { code: "j2_not_rooted", subject: revision + ":" },
+        { code: "j2_not_rooted", subject: revision + ":", detail: undefined },
         { code: "j3", subject: "authority_base:j2_not_rooted" },
         { code: "j3", subject: "base:j2_not_rooted" },
         { code: "j3", subject: "head:j1_not_closed" },
@@ -2584,7 +2584,7 @@ relations:
       });
       assert.equal(report.ok, false);
       assert.deepEqual(report.diagnostics, [
-        { code: "j2_not_rooted", subject: revision + ":" },
+        { code: "j2_not_rooted", subject: revision + ":", detail: undefined },
         { code: "j3", subject: "authority_base:j2_not_rooted" },
         { code: "j3", subject: "base:j2_not_rooted" },
         { code: "j3", subject: "head:j1_not_closed" },
