@@ -279,3 +279,64 @@ test("C2.1 N16-N20 constraints normalize exact lifecycle/scope/activation/eviden
   }))]);
   assert.equal(providerInProject.ok, false);
 });
+
+
+const numericNativeJson = (literal) => `{"format":"repo-guard/requirement-v1","id":"R1","normative":{"value":${literal}}}`;
+const numericNativeYaml = (literal) => [
+  "format: repo-guard/requirement-v1",
+  "id: R1",
+  "normative:",
+  "  value: " + literal,
+  "",
+].join("\n");
+const numericNativeResult = (codec, literal) => nativeLoad([
+  item("requirements/R1.rg." + codec, codec === "json" ? numericNativeJson(literal) : numericNativeYaml(literal)),
+]);
+
+test("#851 RED JSON distinct unsafe integers must not alias one accepted semantic Requirement", () => {
+  const a = numericNativeResult("json", "9007199254740992");
+  const b = numericNativeResult("json", "9007199254740993");
+  assert.equal(a.ok, true, JSON.stringify(a.errors));
+  assert.equal(b.ok, true, JSON.stringify(b.errors));
+  assert.notEqual(
+    a.index.R1.semantic.digest,
+    b.index.R1.semantic.digest,
+    "JSON 9007199254740992 and 9007199254740993 silently share one accepted semantic digest",
+  );
+});
+
+test("#851 RED YAML distinct unsafe integers must not alias one accepted semantic Requirement", () => {
+  const a = numericNativeResult("yaml", "9007199254740992");
+  const b = numericNativeResult("yaml", "9007199254740993");
+  assert.equal(a.ok, true, JSON.stringify(a.errors));
+  assert.equal(b.ok, true, JSON.stringify(b.errors));
+  assert.notEqual(
+    a.index.R1.semantic.digest,
+    b.index.R1.semantic.digest,
+    "YAML 9007199254740992 and 9007199254740993 silently share one accepted semantic digest",
+  );
+});
+
+test("#851 characterize native numeric source classes before correction", () => {
+  const literals = [
+    "0", "1", "-1", "9007199254740991", "-9007199254740991",
+    "9007199254740992", "9007199254740993", "-9007199254740992", "-9007199254740993",
+    "0.1", "0.10000000000000001", "1.0000000000000001",
+    "1e3", "1e0", "1e-324", "1e999",
+  ];
+  const observed = {};
+  for (const codec of ["json", "yaml"]) {
+    observed[codec] = Object.fromEntries(literals.map((literal) => {
+      const result = numericNativeResult(codec, literal);
+      return [literal, {
+        ok: result.ok,
+        value: result.ok ? result.index.R1.normative.value : null,
+        digest: result.ok ? result.index.R1.semantic.digest : null,
+        errors: result.errors.map((error) => error.message),
+      }];
+    }));
+  }
+  console.log("#851 BASELINE_NUMERIC_CHARACTERIZATION=" + JSON.stringify(observed));
+  assert.equal(observed.json["1e999"].ok, false);
+  assert.equal(observed.yaml["1e999"].ok, false);
+});
