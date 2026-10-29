@@ -105,4 +105,45 @@ test("J3 compiler: stale authority snapshot is rejected exactly", () => {
   red(evaluate(base, head, { trustedAuthorityBase: stale, resourceDeltas: [{ kind: "modify", path: "src/a.ts" }] }), "authority_base:snapshot_mismatch", "stale");
 });
 
+
+test("#840 Slice 4 legacy malformed relation map remains fail-closed", () => {
+  const base = state(A, [requirement("ROOT")]), head = state(B, [requirement("ROOT")]);
+  base.requirements.index.ROOT.value.relations = [];
+  head.requirements.index.ROOT.value.relations = [];
+  const result = evaluate(base, head);
+  red(result, "base:invalid_relation_map:ROOT", "legacy relation map");
+  red(result, "head:invalid_relation_map:ROOT", "legacy relation map");
+});
+
+test("#840 Slice 4 legacy malformed relation item remains fail-closed", () => {
+  const base = state(A, [requirement("ROOT")]), head = state(B, [requirement("ROOT")]);
+  base.requirements.index.ROOT.value.relations = { bad: { predicate: "", target: { kind: "artifact", path: "src/a.ts" } } };
+  head.requirements.index.ROOT.value.relations = { bad: { predicate: "", target: { kind: "artifact", path: "src/a.ts" } } };
+  const result = evaluate(base, head);
+  red(result, "base:invalid_relation:ROOT:bad", "legacy relation item");
+  red(result, "head:invalid_relation:ROOT:bad", "legacy relation item");
+});
+
+test("#840 Slice 4 legacy malformed resource relation remains fail-closed", () => {
+  const base = state(A, [requirement("ROOT")]), head = state(B, [requirement("ROOT")]);
+  base.resourceRelations = [{ from: "src/a.ts", kind: "unsupported", to: "dist/a.js" }];
+  head.resourceRelations = [{ from: "src/a.ts", kind: "unsupported", to: "dist/a.js" }];
+  const result = evaluate(base, head);
+  red(result, "base:invalid_resource_relation:0:unsupported_kind", "legacy resource relation");
+  red(result, "head:invalid_resource_relation:0:unsupported_kind", "legacy resource relation");
+});
+
+test("#840 Slice 4 legacy duplicate Relation identity remains fail-closed", () => {
+  const base = state(A, [requirement("ROOT")]), head = state(B, [requirement("ROOT")]);
+  const duplicate = {
+    first: { predicate: "implemented_by", target: { kind: "artifact", path: "src/a.ts" } },
+    second: { predicate: "implemented_by", target: { kind: "artifact", path: "src/a.ts" } },
+  };
+  base.requirements.index.ROOT.value.relations = duplicate;
+  head.requirements.index.ROOT.value.relations = duplicate;
+  const result = evaluate(base, head);
+  red(result, "base:duplicate_relation:", "legacy duplicate relation");
+  red(result, "head:duplicate_relation:", "legacy duplicate relation");
+});
+
 console.log("J3 compiler-only transition closure witnesses loaded");
