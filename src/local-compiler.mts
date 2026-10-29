@@ -280,6 +280,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     base: {
       revision: base,
       requirements: before.requirements,
+      nativeRequirements: before.native.requirements,
       compiledConstraints: before.compiledConstraints,
       j2: before.j2,
       j1: before.j1,
@@ -288,6 +289,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     head: {
       revision: head,
       requirements: after.requirements,
+      nativeRequirements: after.native.requirements,
       compiledConstraints: after.compiledConstraints,
       j2: after.j2,
       j1: after.j1,
@@ -296,6 +298,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     trustedAuthorityBase: {
       revision: base,
       requirements: before.requirements,
+      nativeRequirements: before.native.requirements,
       compiledConstraints: before.compiledConstraints,
       j2: before.j2,
       j1: before.j1,
