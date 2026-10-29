@@ -2128,7 +2128,7 @@ relations:
       assert.notEqual(brokenSource, productionSource, "negative control must alter production structuralRoots()");
       try {
         writeFileSync(brokenUrl, brokenSource);
-        const brokenCompiler = await import(brokenUrl.href + "?b1=" + oldHead);
+        const brokenCompiler = await import(brokenUrl.href + "?b1=broken-root-selection");
         const brokenReport = brokenCompiler.evaluateLocalCompiler({
           root: fx.root,
           repository: repository840,
