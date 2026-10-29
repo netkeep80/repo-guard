@@ -106,6 +106,26 @@ test("J3 compiler: stale authority snapshot is rejected exactly", () => {
 });
 
 
+test("#840 B1 legacy malformed nested Relation target remains structured RED", () => {
+  const base = state(A, [requirement("ROOT")]), head = state(B, [requirement("ROOT")]);
+  const malformed = {
+    bad: {
+      predicate: "documents",
+      target: { kind: "document", path: "docs/a.json", pointer: NaN },
+    },
+  };
+  base.requirements.index.ROOT.value.relations = malformed;
+  head.requirements.index.ROOT.value.relations = malformed;
+
+  let result;
+  assert.doesNotThrow(() => {
+    result = evaluate(base, head);
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.reasons.includes("base:invalid_relation:ROOT:bad:non-canonical transition value"), result.reasons.join(" | "));
+  assert.ok(result.reasons.includes("head:invalid_relation:ROOT:bad:non-canonical transition value"), result.reasons.join(" | "));
+});
+
 test("#840 Slice 4 legacy malformed relation map remains fail-closed", () => {
   const base = state(A, [requirement("ROOT")]), head = state(B, [requirement("ROOT")]);
   base.requirements.index.ROOT.value.relations = [];
