@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadCanonicalRequirements } from "../dist/runtime/canonical-requirements.mjs";
+import { loadCanonicalRequirements, validateCompiledConstraint } from "../dist/runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
@@ -97,6 +97,160 @@ test("requirement_cause Constraint activates from repository causal ownership",(
   assert.ok(redResult.reasons.some(x=>x.includes("constraint_exceeded:R2:no-ui:1>0")),redResult.reasons.join(" | "));
   const greenResult=hardening([{kind:"modify",path:"src/shared.ts"}]);
   assert.equal(greenResult.ok,true,greenResult.reasons.join(" | "));
+});
+
+
+const metricEvidence = ({ metric = "changed_resources", max = 10, kind = "domain", verifierPath = null } = {}) => ({
+  id: "combo",
+  relations: ["implemented_by"],
+  metric,
+  max,
+  evidence: {
+    kind,
+    key: kind === "execution" ? "execution:tests/t.mjs" : "domain:test",
+    ...(verifierPath ? { verifierPath } : {}),
+  },
+});
+const constraintExplanation = (x, id = "combo") => scopes(x).find(item => item.constraintId === id);
+
+test("#836 F1 metric PASS + no evidence", () => {
+  const x = run({ baseConstraints: [lines(10)], observed: 5 });
+  yes(x, "metric pass");
+  assert.equal(constraintExplanation(x, "lines")?.verdict, "PASS");
+  assert.equal(constraintExplanation(x, "lines")?.evidenceStatus, null);
+});
+test("#836 F2 metric RED + no evidence", () => {
+  const x = run({ baseConstraints: [lines(0)], observed: 1 });
+  no(x, "constraint_exceeded:R1:lines:1>0", "metric red");
+  assert.equal(constraintExplanation(x, "lines")?.verdict, "RED");
+  assert.equal(constraintExplanation(x, "lines")?.evidenceStatus, null);
+});
+test("#836 F3 evidence-only valid domain delegation", () => {
+  const x = run({ baseConstraints: [check("domain", "domain:test", null)] });
+  yes(x, "domain evidence");
+  assert.equal(constraintExplanation(x, "verify")?.verdict, "DELEGATED");
+  assert.equal(constraintExplanation(x, "verify")?.evidenceStatus, "DELEGATED");
+});
+test("#836 F4 metric PASS + valid domain evidence", () => {
+  const x = run({ baseConstraints: [metricEvidence({ max: 2 })] });
+  yes(x, "metric pass domain");
+  assert.equal(constraintExplanation(x)?.verdict, "DELEGATED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F5 metric RED + valid domain evidence", () => {
+  const x = run({ baseConstraints: [metricEvidence({ max: 0 })] });
+  no(x, "constraint_exceeded:R1:combo:1>0", "metric red domain");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F6 metric PASS + valid execution evidence", () => {
+  const x = run({
+    baseConstraints: [metricEvidence({ max: 2, kind: "execution", verifierPath: "tests/t.mjs" })],
+    baseRelations: verifierRelations(),
+    baseFiles: ["src/a.ts", "tests/t.mjs"],
+  });
+  yes(x, "metric pass execution");
+  assert.equal(constraintExplanation(x)?.verdict, "DELEGATED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F7 metric RED + valid execution evidence", () => {
+  const x = run({
+    baseConstraints: [metricEvidence({ max: 0, kind: "execution", verifierPath: "tests/t.mjs" })],
+    baseRelations: verifierRelations(),
+    baseFiles: ["src/a.ts", "tests/t.mjs"],
+  });
+  no(x, "constraint_exceeded:R1:combo:1>0", "metric red execution");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+test("#836 F8 invalid execution verifier stays RED", () => {
+  const x = run({ baseConstraints: [metricEvidence({ max: 2, kind: "execution", verifierPath: "tests/t.mjs" })] });
+  no(x, "invalid_external_verifier:R1:combo", "invalid verifier");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "INVALID");
+});
+test("#836 F9 inactive Constraint does not activate evidence", () => {
+  const x = run({ baseConstraints: [check("domain", "domain:test", null)], resourceDeltas: [] });
+  yes(x, "inactive evidence");
+  assert.equal(constraintExplanation(x, "verify")?.verdict, "NOT_APPLICABLE");
+  assert.equal(constraintExplanation(x, "verify")?.evidenceStatus, null);
+});
+test("#836 F10 missing changed_lines observation stays RED with evidence", () => {
+  const x = run({ baseConstraints: [metricEvidence({ metric: "changed_lines", max: 10 })] });
+  no(x, "missing_observation:R1:combo:src/a.ts", "missing observation with evidence");
+  assert.equal(constraintExplanation(x)?.verdict, "RED");
+  assert.equal(constraintExplanation(x)?.evidenceStatus, "DELEGATED");
+});
+
+
+const b1Canonical = (rule) => {
+  const parsed = validateCompiledConstraint(rule);
+  assert.equal(parsed.ok, true, JSON.stringify(parsed));
+  return parsed.value;
+};
+const b1Original = {
+  id: "guard", relations: ["implemented_by", "documents"],
+  metric: "changed_resources", max: 1,
+};
+const b1Explicit = {
+  id: "guard", activation: "scoped_change",
+  relations: ["documents", "implemented_by"], includeGenerated: false,
+  metric: "changed_resources", max: 1,
+};
+function b1Replay(authorityRule, baseRule) {
+  const relations = {
+    parent, implementation: art("implemented_by", "src/a.ts"),
+    document: art("documents", "docs/a.md"),
+  };
+  const paths = ["src/a.ts", "docs/a.md"];
+  const authority = snapshot(C, defaultNodes(relations, [authorityRule]), paths);
+  const base = snapshot(A, defaultNodes(relations, [baseRule]), paths);
+  const head = snapshot(B, defaultNodes(relations, [baseRule]), paths);
+  const result = evaluateTransitionCauseClosure({
+    repository: repo, base, head,
+    trustedAuthorityBase: {
+      revision: authority.revision, requirements: authority.requirements,
+      j1: authority.j1, j2: authority.j2,
+      resourceRelations: authority.resourceRelations,
+    },
+    resourceDeltas: [{kind:"modify", path:"src/a.ts"}],
+  });
+  return result.explanations.constraints.filter(x => x.requirementId === "R1" && x.constraintId === "guard");
+}
+test("#836 B1 blocked-head direct compiled reproducer: semantic equivalents must apply once", () => {
+  assert.equal(b1Canonical(b1Original).id, "guard");
+  assert.equal(b1Canonical(b1Explicit).id, "guard");
+  assert.equal(b1Replay(b1Original, b1Explicit).length, 1, "AUTHORITY/BASE/HEAD duplicate obligation");
+});
+test("#836 B1 default and relation order canonical fingerprints", () => {
+  const variants = [
+    {...b1Original, activation: "scoped_change"},
+    {...b1Original, includeGenerated: false},
+    {...b1Original, relations: [...b1Original.relations].reverse()},
+    b1Explicit,
+  ];
+  for (const variant of variants) {
+    assert.deepEqual(b1Canonical(variant), b1Canonical(b1Original));
+    assert.equal(b1Replay(b1Original, variant).length, 1, JSON.stringify(variant));
+  }
+});
+test("#836 B1 preserve true semantic differences and reject duplicate relations", () => {
+  const variants = [
+    {...b1Original, activation:"requirement_cause"},
+    {...b1Original, includeGenerated:true},
+    {...b1Original, relations:["implemented_by"]},
+    {...b1Original, relations:["documents"]},
+    {...b1Original, metric:"changed_lines"},
+    {...b1Original, max:2},
+    {...b1Original, evidence:{kind:"domain",key:"domain:test"}},
+  ];
+  for (const variant of variants) {
+    assert.notDeepEqual(b1Canonical(variant),b1Canonical(b1Original));
+    assert.equal(b1Replay(b1Original,variant).length,2,JSON.stringify(variant));
+  }
+  assert.equal(validateCompiledConstraint({
+    ...b1Original,relations:["documents","documents"],
+  }).ok,false);
 });
 
 console.log("compiler-only scoped Constraint witnesses loaded");

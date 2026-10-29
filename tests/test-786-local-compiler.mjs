@@ -5,6 +5,7 @@ import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
+import { loadNativeRequirements, lowerNativeRequirements, validateCompiledConstraint } from "../dist/runtime/canonical-requirements.mjs";
 import { parseNameStatusZ } from "../dist/diff/parser.mjs";
 
 const root = mkdtempSync(join(tmpdir(), "repo-guard-c1-"));
@@ -1404,4 +1405,242 @@ try {
   });
 
   console.log("#833 B1 causal applicability regression matrix: PASS");
+}
+
+
+{
+  const repo836 = "fixture/836";
+  const put836 = (root, path, value) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), value);
+  };
+  const git836 = (root, ...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const commit836 = (root, message) => {
+    git836(root, "add", "-A");
+    git836(root, "-c", "user.name=#836", "-c", "user.email=836@example.invalid", "commit", "-qm", message);
+    return git836(root, "rev-parse", "HEAD");
+  };
+
+  test("#836 D1 metric RED must dominate valid domain delegation", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-836-d1-"));
+    try {
+      git836(root, "init", "-q");
+      const requirement = JSON.stringify({
+        format: "repo-guard/requirement-v1",
+        id: "R1",
+        normative: "#836 D1 metric/evidence conjunction",
+        relations: [{
+          predicates: ["implemented_by"],
+          target: { kind: "artifact", path: "src/a.txt" },
+        }],
+        constraints: [{
+          id: "guard",
+          activation: "scoped_change",
+          scope: { relations: ["implemented_by"] },
+          metric: { key: "git.changed_resources", max: 0 },
+          evidence: { class: "domain", key: "domain:test" },
+        }],
+      }, null, 2) + "\n";
+      put836(root, "requirements/r1.rg.json", requirement);
+      put836(root, "src/a.txt", "before\n");
+      const base = commit836(root, "base");
+      put836(root, "src/a.txt", "after\n");
+      const head = commit836(root, "head");
+      const report = evaluateLocalCompiler({ root, repository: repo836, base, head });
+      const guard = report.j3.constraints.find(item => item.requirementId === "R1" && item.constraintId === "guard");
+      assert.ok(guard, JSON.stringify(report, null, 2));
+      assert.equal(report.ok, false, JSON.stringify(report, null, 2));
+      assert.ok(
+        report.diagnostics.some(item => item.code === "j3" && item.subject === "I7:constraint_exceeded:R1:guard:1>0"),
+        JSON.stringify(report.diagnostics, null, 2),
+      );
+      assert.equal(
+        guard.verdict,
+        "RED",
+        JSON.stringify({ observed: guard.observed, verdict: guard.verdict, requiredEvidence: guard.requiredEvidence }, null, 2),
+      );
+      assert.equal(guard.evidenceStatus, "DELEGATED");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("#836 D2 native and runtime Constraint ID grammar must agree", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-836-d2-"));
+    const raw = JSON.stringify({
+      format: "repo-guard/requirement-v1",
+      id: "R1",
+      normative: "#836 D2 identifier grammar",
+      relations: [{
+        predicates: ["implemented_by"],
+        target: { kind: "artifact", path: "src/a.txt" },
+      }],
+      constraints: [{
+        id: "guard:strict",
+        scope: { relations: ["implemented_by"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      }],
+    }, null, 2) + "\n";
+    try {
+      git836(root, "init", "-q");
+      put836(root, "requirements/r1.rg.json", raw);
+      put836(root, "src/a.txt", "stable\n");
+      const revision = commit836(root, "single");
+
+      const native = loadNativeRequirements({
+        repository: repo836,
+        revision,
+        paths: ["requirements/r1.rg.json"],
+        readFile: (sha, path) =>
+          sha === revision && path === "requirements/r1.rg.json" ? Buffer.from(raw, "utf8") : null,
+      });
+      const lowered = lowerNativeRequirements(native);
+      const report = evaluateLocalCompiler({ root, repository: repo836, base: revision, head: revision });
+      const runtimeRejected = report.diagnostics.some(item =>
+        item.code === "j3" && item.subject.includes("I7:invalid_constraint:"),
+      );
+
+      assert.equal(
+        native.ok,
+        false,
+        JSON.stringify({
+          nativeOk: native.ok,
+          nativeErrors: native.errors,
+          loweredOk: lowered.requirements.ok,
+          runtimeRejected,
+          runtimeDiagnostics: report.diagnostics,
+        }, null, 2),
+      );
+      assert.ok(native.errors.some(error => error.code === "invalid_constraint"));
+      assert.equal(runtimeRejected, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+
+
+  test("#836 F12 Constraint ID grammar is consistent across native and compiled contracts", () => {
+    const revision = "a".repeat(40);
+    const valid = ["A", "guard", "guard-1", "guard_1", "guard.1", "A0"];
+    const invalid = [":guard", "guard:", "guard:strict", "1guard", "guard space", "guard/", ""];
+    const rawFor = (id) => JSON.stringify({
+      format: "repo-guard/requirement-v1",
+      id: "R1",
+      normative: "#836 id grammar",
+      relations: [{
+        predicates: ["implemented_by"],
+        target: { kind: "artifact", path: "src/a.txt" },
+      }],
+      constraints: [{
+        id,
+        scope: { relations: ["implemented_by"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      }],
+    });
+
+    for (const id of valid) {
+      const raw = rawFor(id);
+      const native = loadNativeRequirements({
+        repository: repo836,
+        revision,
+        paths: ["requirements/r1.rg.json"],
+        readFile: (_sha, path) => path === "requirements/r1.rg.json" ? raw : null,
+      });
+      assert.equal(native.ok, true, id + ": " + JSON.stringify(native.errors));
+      const lowered = lowerNativeRequirements(native);
+      assert.equal(lowered.requirements.ok, true, id + ": " + JSON.stringify(lowered.requirements.errors));
+      const compiled = lowered.requirements.index.R1.value.constraints[0];
+      const checked = validateCompiledConstraint(compiled);
+      assert.equal(checked.ok, true, id + ": " + JSON.stringify(checked));
+    }
+    for (const id of invalid) {
+      const raw = rawFor(id);
+      const native = loadNativeRequirements({
+        repository: repo836,
+        revision,
+        paths: ["requirements/r1.rg.json"],
+        readFile: (_sha, path) => path === "requirements/r1.rg.json" ? raw : null,
+      });
+      assert.equal(native.ok, false, "native unexpectedly accepted " + JSON.stringify(id));
+      assert.ok(native.errors.some(error => error.code === "invalid_constraint"), JSON.stringify(native.errors));
+    }
+  });
+
+  test("#836 F13 native lowering and compiled Constraint validator remain differential-compatible", () => {
+    const revision = "b".repeat(40);
+    const samples = [
+      { activation: "scoped_change", metric: { key: "git.changed_resources", max: 2 } },
+      { activation: "requirement_cause", metric: { key: "git.changed_lines", max: 10 } },
+      { activation: "scoped_change", evidence: { class: "domain", key: "domain:test" } },
+      { activation: "scoped_change", evidence: { class: "execution", key: "execution:test", verifier: { kind: "artifact", path: "tests/t.mjs" } } },
+      { activation: "scoped_change", metric: { key: "git.changed_resources", max: 2 }, evidence: { class: "domain", key: "domain:test" } },
+      { activation: "requirement_cause", metric: { key: "git.changed_lines", max: 10 }, evidence: { class: "execution", key: "execution:test", verifier: { kind: "artifact", path: "tests/t.mjs" } } },
+    ];
+    for (const includeGenerated of [false, true]) {
+      for (const sample of samples) {
+        const raw = JSON.stringify({
+          format: "repo-guard/requirement-v1",
+          id: "R1",
+          normative: "#836 compiled differential",
+          relations: [
+            { predicates: ["implemented_by"], target: { kind: "artifact", path: "src/a.txt" } },
+            { predicates: ["verified_by"], target: { kind: "artifact", path: "tests/t.mjs" } },
+          ],
+          constraints: [{
+            id: "guard",
+            activation: sample.activation,
+            scope: { relations: ["implemented_by"], include_generated: includeGenerated },
+            ...(sample.metric ? { metric: sample.metric } : {}),
+            ...(sample.evidence ? { evidence: sample.evidence } : {}),
+          }],
+        });
+        const native = loadNativeRequirements({
+          repository: repo836,
+          revision,
+          paths: ["requirements/r1.rg.json"],
+          readFile: (_sha, path) => path === "requirements/r1.rg.json" ? raw : null,
+        });
+        assert.equal(native.ok, true, JSON.stringify(native.errors));
+        const lowered = lowerNativeRequirements(native);
+        assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors));
+        const compiled = lowered.requirements.index.R1.value.constraints[0];
+        const checked = validateCompiledConstraint(compiled);
+        assert.equal(checked.ok, true, JSON.stringify(checked));
+      }
+    }
+
+    for (const badMetric of [
+      { key: "git.unknown", max: 1 },
+      { key: "git.changed_resources", max: 0.5 },
+    ]) {
+      const raw = JSON.stringify({
+        format: "repo-guard/requirement-v1",
+        id: "R1",
+        normative: "#836 invalid metric",
+        relations: [{ predicates: ["implemented_by"], target: { kind: "artifact", path: "src/a.txt" } }],
+        constraints: [{ id: "guard", scope: { relations: ["implemented_by"] }, metric: badMetric }],
+      });
+      const native = loadNativeRequirements({
+        repository: repo836,
+        revision,
+        paths: ["requirements/r1.rg.json"],
+        readFile: (_sha, path) => path === "requirements/r1.rg.json" ? raw : null,
+      });
+      assert.equal(native.ok, false, JSON.stringify(badMetric));
+      assert.ok(native.errors.some(error => error.code === "invalid_constraint"), JSON.stringify(native.errors));
+    }
+
+    for (const malformed of [
+      { id: "guard:strict", relations: ["implemented_by"], metric: "changed_resources", max: 0 },
+      { id: "guard", relations: ["generates"], metric: "changed_resources", max: 0 },
+      { id: "guard", relations: ["implemented_by"], metric: "unknown", max: 0 },
+      { id: "guard", relations: ["implemented_by"], metric: "changed_resources", max: 0.5 },
+      { id: "guard", relations: ["implemented_by"], evidence: { kind: "execution", key: "execution:test" } },
+    ]) {
+      assert.equal(validateCompiledConstraint(malformed).ok, false, JSON.stringify(malformed));
+    }
+  });
+
+  console.log("#836 D1/D2 and compiled-contract regressions loaded");
 }
