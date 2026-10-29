@@ -282,10 +282,11 @@ describe("#835 automatic release integrity trusted boundary", () => {
   it("#852 selected historical target cannot provide executable workflow or verifier code", () => {
     const text = JSON.stringify(manual);
     assert.doesNotMatch(text, /ref":"\$\{\{ inputs\.tag \}\}"/);
-    assert.doesNotMatch(text, /node .*TARGET_SHA/);
+    assert.doesNotMatch(text, /git checkout|git switch/);
     assert.doesNotMatch(text, /npm\s+(?:ci|install|run)/);
     const verifier = manual.steps.find((step) => step.name === "Verify historical published release with trusted evaluator");
-    assert.match(verifier?.run ?? "", /scripts\/verify-release-ref\.mjs --historical/);
+    assert.match(verifier?.run ?? "", /node scripts\/verify-release-ref\.mjs --historical/);
+    assert.doesNotMatch(verifier?.run ?? "", /node ["']?\$TARGET_SHA|node ["']?\$RELEASE_TAG/);
   });
 
   it("keeps manual tag verification separate from trusted automatic evidence", () => {
