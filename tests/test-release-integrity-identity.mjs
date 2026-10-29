@@ -239,54 +239,53 @@ describe("#835 automatic release integrity trusted boundary", () => {
   });
 
 
-  it("#852 RED selected historical tag can substitute the manual verifier implementation", () => {
-    const manual = workflow.jobs?.["verify-manual"];
+  it("#852 manual historical verification binds executable verifier to trusted main workflow SHA", () => {
     assert.ok(manual);
+    assert.deepEqual(manual.permissions, { contents: "read" });
 
-    const checkout = manual.steps.find((step) => /Checkout selected release tag/.test(step.name ?? ""));
-    const verifier = manual.steps.find((step) => /Verify selected published release tag/.test(step.name ?? ""));
-    assert.equal(checkout?.with?.ref, "${{ inputs.tag }}");
-    assert.match(verifier?.run ?? "", /node scripts\/verify-release-ref\.mjs/);
+    const authorize = manual.steps.find((step) => step.name === "Authorize trusted manual evaluator");
+    assert.ok(authorize);
+    assert.equal(authorize.env?.DISPATCH_REF, "${{ github.ref }}");
+    assert.equal(authorize.env?.DISPATCH_SHA, "${{ github.sha }}");
+    assert.equal(authorize.env?.WORKFLOW_SHA, "${{ github.workflow_sha }}");
+    assert.equal(authorize.env?.RELEASE_TAG, "${{ inputs.tag }}");
+    assert.match(authorize.run, /test "\$DISPATCH_REF" = "refs\/heads\/main"/);
+    assert.match(authorize.run, /test "\$DISPATCH_SHA" = "\$WORKFLOW_SHA"/);
+    assert.match(authorize.run, /\^v\(0\|\[1-9\]/);
 
-    const root = mkdtempSync(join(process.env.RUNNER_TEMP || process.cwd(), "repo-guard-852-red-"));
-    const marker = join(root, "TARGET_OWNED_VERIFIER_EXECUTED");
-    const runGit = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-    const put = (path, value) => {
-      const full = join(root, path);
-      mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, value);
-    };
-    try {
-      runGit("init", "-q", "--object-format=sha1");
-      put("TRUSTED-EVALUATOR", "trusted evaluator base\n");
-      runGit("add", "-A");
-      runGit("-c", "user.name=#852", "-c", "user.email=852@example.invalid", "commit", "-qm", "trusted evaluator");
-      const evaluatorSha = runGit("rev-parse", "HEAD");
+    const checkout = manual.steps.find((step) => step.name === "Checkout trusted manual evaluator");
+    assert.ok(checkout);
+    assert.equal(checkout.with?.ref, "${{ github.workflow_sha }}");
+    assert.notEqual(checkout.with?.ref, "${{ inputs.tag }}");
+    assert.equal(checkout.with?.["persist-credentials"], false);
 
-      put("scripts/verify-release-ref.mjs",
-        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "executed");\n`);
-      put("package.json", JSON.stringify({ name: "repo-guard", version: "1.2.3" }));
-      runGit("add", "-A");
-      runGit("-c", "user.name=#852", "-c", "user.email=852@example.invalid", "commit", "-qm", "historical target");
-      const targetSha = runGit("rev-parse", "HEAD");
-      runGit("tag", "v1.2.3", targetSha);
+    const acquire = manual.steps.find((step) => step.name === "Acquire selected historical target as data");
+    assert.ok(acquire);
+    assert.match(acquire.run, /git fetch --force --no-tags origin "refs\/tags\/\$RELEASE_TAG:refs\/repo-guard\/manual-target-tag"/);
+    assert.match(acquire.run, /GIT_NO_REPLACE_OBJECTS=1 git rev-parse/);
+    assert.doesNotMatch(acquire.run, /git checkout|git switch/);
 
-      const selectedTag = "v1.2.3";
-      const executionRef = selectedTag; // current workflow: checkout.ref = inputs.tag
-      runGit("checkout", "-q", executionRef);
-      execFileSync(process.execPath, ["scripts/verify-release-ref.mjs"], { cwd: root });
+    const verifier = manual.steps.find((step) => step.name === "Verify historical published release with trusted evaluator");
+    assert.ok(verifier);
+    assert.match(verifier.run, /node scripts\/verify-release-ref\.mjs --historical/);
+    assert.equal(verifier.env?.VERIFIER_SHA, "${{ github.workflow_sha }}");
+    assert.equal(verifier.env?.TARGET_SHA, "${{ steps.target.outputs.target_sha }}");
+    assert.doesNotMatch(JSON.stringify(manual), /Checkout selected release tag/);
+  });
 
-      console.log("#852 RED_TARGET_SHA=" + targetSha);
-      console.log("#852 RED_EVALUATOR_SHA=" + evaluatorSha);
-      assert.notEqual(targetSha, evaluatorSha);
-      assert.equal(
-        existsSync(marker),
-        false,
-        "selected historical target can substitute and execute its own manual verifier",
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it("#852 non-main workflow_dispatch cannot silently become verifier authority", () => {
+    const authorize = manual.steps.find((step) => step.name === "Authorize trusted manual evaluator");
+    assert.match(authorize.run, /test "\$DISPATCH_REF" = "refs\/heads\/main"/);
+    assert.match(authorize.run, /test "\$DISPATCH_SHA" = "\$WORKFLOW_SHA"/);
+  });
+
+  it("#852 selected historical target cannot provide executable workflow or verifier code", () => {
+    const text = JSON.stringify(manual);
+    assert.doesNotMatch(text, /ref":"\$\{\{ inputs\.tag \}\}"/);
+    assert.doesNotMatch(text, /node .*TARGET_SHA/);
+    assert.doesNotMatch(text, /npm\s+(?:ci|install|run)/);
+    const verifier = manual.steps.find((step) => step.name === "Verify historical published release with trusted evaluator");
+    assert.match(verifier?.run ?? "", /scripts\/verify-release-ref\.mjs --historical/);
   });
 
   it("keeps manual tag verification separate from trusted automatic evidence", () => {

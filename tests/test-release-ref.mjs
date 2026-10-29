@@ -1,11 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import * as releaseRef from "../scripts/verify-release-ref.mjs";
 
-const { verifyReleaseRef } = releaseRef;
+const { verifyReleaseRef, verifyHistoricalRelease } = releaseRef;
 const exactHead = "a".repeat(40);
 const otherHead = "b".repeat(40);
 const annotatedTagObject = "c".repeat(40);
@@ -379,5 +380,242 @@ describe("release ref verification", () => {
       check.name === "release-observation"
       && check.status === "FAIL"
     )));
+  });
+});
+
+
+function makeHistoricalRepo() {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-852-history-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const put = (path, value) => {
+    const full = join(root, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, value);
+  };
+  const commit = (message) => {
+    git("add", "-A");
+    git("-c", "user.name=#852", "-c", "user.email=852@example.invalid", "commit", "-qm", message);
+    return git("rev-parse", "HEAD");
+  };
+
+  git("init", "-q", "--object-format=sha1");
+  put("package.json", JSON.stringify({ name: "repo-guard", version: "2.3.4" }));
+  put("package-lock.json", JSON.stringify({
+    name: "repo-guard",
+    version: "2.3.4",
+    lockfileVersion: 3,
+    packages: { "": { name: "repo-guard", version: "2.3.4" } },
+  }));
+  const marker = join(root, "TARGET_OWNED_VERIFIER_EXECUTED");
+  put("scripts/verify-release-ref.mjs",
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "executed");\n`);
+  const target = commit("historical v2.3.4 target");
+  git("tag", "v2.3.4", target);
+
+  put("package.json", JSON.stringify({ name: "repo-guard", version: "5.0.0" }));
+  put("package-lock.json", JSON.stringify({
+    name: "repo-guard",
+    version: "5.0.0",
+    lockfileVersion: 3,
+    packages: { "": { name: "repo-guard", version: "5.0.0" } },
+  }));
+  put("scripts/verify-release-ref.mjs", "throw new Error('trusted evaluator fixture; target script must stay inert');\n");
+  const verifier = commit("newer trusted evaluator");
+  return { root, git, put, commit, target, verifier, marker };
+}
+
+function historicalRoutes(target, {
+  tag = "v2.3.4",
+  release = publishedRelease(tag),
+  tagType = "commit",
+  tagObjectSha = annotatedTagObject,
+} = {}) {
+  const routes = [[
+    `/repos/netkeep80/repo-guard/git/ref/tags/${tag}`,
+    200,
+    tagObject(tagType, tagType === "commit" ? target : tagObjectSha),
+  ]];
+  if (tagType === "tag") {
+    routes.push([
+      `/repos/netkeep80/repo-guard/git/tags/${tagObjectSha}`,
+      200,
+      tagObject("commit", target),
+    ]);
+  }
+  routes.push([
+    `/repos/netkeep80/repo-guard/releases/tags/${tag}`,
+    200,
+    release,
+  ]);
+  return routes;
+}
+
+describe("#852 trusted historical release verification", () => {
+  it("verifies an older release from a newer trusted evaluator without executing target verifier code", async () => {
+    const fixture = makeHistoricalRepo();
+    try {
+      const result = await verifyHistoricalRelease({
+        packageRoot: fixture.root,
+        repo: "netkeep80/repo-guard",
+        tag: "v2.3.4",
+        targetSha: fixture.target,
+        verifierSha: fixture.verifier,
+        fetchImpl: fakeFetch(historicalRoutes(fixture.target)),
+      });
+      assert.equal(result.ok, true, JSON.stringify(result.checks));
+      assert.equal(result.packageVersion, "2.3.4");
+      assert.equal(result.targetSha, fixture.target);
+      assert.equal(result.verifierSha, fixture.verifier);
+      assert.notEqual(fixture.target, fixture.verifier);
+      assert.equal(existsSync(fixture.marker), false, "target-owned verifier executed");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves annotated-tag resolution for historical verification", async () => {
+    const fixture = makeHistoricalRepo();
+    try {
+      const result = await verifyHistoricalRelease({
+        packageRoot: fixture.root,
+        tag: "v2.3.4",
+        targetSha: fixture.target,
+        verifierSha: fixture.verifier,
+        fetchImpl: fakeFetch(historicalRoutes(fixture.target, { tagType: "tag" })),
+      });
+      assert.equal(result.ok, true, JSON.stringify(result.checks));
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when observed tag target differs from acquired exact target", async () => {
+    const fixture = makeHistoricalRepo();
+    try {
+      const result = await verifyHistoricalRelease({
+        packageRoot: fixture.root,
+        tag: "v2.3.4",
+        targetSha: fixture.target,
+        verifierSha: fixture.verifier,
+        fetchImpl: fakeFetch(historicalRoutes(otherHead)),
+      });
+      assert.equal(result.ok, false);
+      assert.ok(result.checks.some((check) => check.name === "historical-target-binding" && check.status === "FAIL"));
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  for (const [name, routes] of [
+    ["missing tag", [
+      ["/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4", 404],
+      ["/repos/netkeep80/repo-guard/releases/tags/v2.3.4", 404],
+    ]],
+    ["missing release", [
+      ["/repos/netkeep80/repo-guard/git/ref/tags/v2.3.4", 200, tagObject("commit", exactHead)],
+      ["/repos/netkeep80/repo-guard/releases/tags/v2.3.4", 404],
+    ]],
+  ]) {
+    it(`fails closed on ${name}`, async () => {
+      const fixture = makeHistoricalRepo();
+      try {
+        const mapped = routes.map(([path, status, body]) => [
+          path,
+          status,
+          body?.object?.sha === exactHead ? tagObject("commit", fixture.target) : body,
+        ]);
+        const result = await verifyHistoricalRelease({
+          packageRoot: fixture.root,
+          tag: "v2.3.4",
+          targetSha: fixture.target,
+          verifierSha: fixture.verifier,
+          fetchImpl: fakeFetch(mapped),
+        });
+        assert.equal(result.ok, false);
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  for (const [name, release] of [
+    ["draft", publishedRelease("v2.3.4", { draft: true })],
+    ["prerelease", publishedRelease("v2.3.4", { prerelease: true })],
+  ]) {
+    it(`fails closed on historical ${name} release`, async () => {
+      const fixture = makeHistoricalRepo();
+      try {
+        const result = await verifyHistoricalRelease({
+          packageRoot: fixture.root,
+          tag: "v2.3.4",
+          targetSha: fixture.target,
+          verifierSha: fixture.verifier,
+          fetchImpl: fakeFetch(historicalRoutes(fixture.target, { release })),
+        });
+        assert.equal(result.ok, false);
+        assert.ok(result.checks.some((check) => check.name === "published-github-release" && check.status === "FAIL"));
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("fails closed when selected tag does not match historical package version", async () => {
+    const fixture = makeHistoricalRepo();
+    try {
+      const result = await verifyHistoricalRelease({
+        packageRoot: fixture.root,
+        tag: "v2.3.5",
+        targetSha: fixture.target,
+        verifierSha: fixture.verifier,
+        fetchImpl: fakeFetch(historicalRoutes(fixture.target, {
+          tag: "v2.3.5",
+          release: publishedRelease("v2.3.5"),
+        })),
+      });
+      assert.equal(result.ok, false);
+      assert.ok(result.checks.some((check) => check.name === "historical-package-tag-binding" && check.status === "FAIL"));
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves #850 replacement-ref invariance for exact historical package reads", async () => {
+    const fixture = makeHistoricalRepo();
+    const previousNoReplace = process.env.GIT_NO_REPLACE_OBJECTS;
+    try {
+      fixture.git("checkout", "-q", "-b", "replacement", fixture.target);
+      fixture.put("package.json", JSON.stringify({ name: "repo-guard", version: "9.9.9" }));
+      fixture.put("package-lock.json", JSON.stringify({
+        name: "repo-guard",
+        version: "9.9.9",
+        lockfileVersion: 3,
+        packages: { "": { name: "repo-guard", version: "9.9.9" } },
+      }));
+      const replacement = fixture.commit("replacement target");
+      fixture.git("checkout", "-q", "--detach", fixture.verifier);
+      fixture.git("replace", fixture.target, replacement);
+
+      delete process.env.GIT_NO_REPLACE_OBJECTS;
+      assert.match(
+        fixture.git("show", fixture.target + ":package.json"),
+        /9\.9\.9/,
+        "raw Git control must honor refs/replace",
+      );
+
+      const result = await verifyHistoricalRelease({
+        packageRoot: fixture.root,
+        tag: "v2.3.4",
+        targetSha: fixture.target,
+        verifierSha: fixture.verifier,
+        fetchImpl: fakeFetch(historicalRoutes(fixture.target)),
+      });
+      assert.equal(result.ok, true, JSON.stringify(result.checks));
+      assert.equal(result.packageVersion, "2.3.4");
+    } finally {
+      if (previousNoReplace === undefined) delete process.env.GIT_NO_REPLACE_OBJECTS;
+      else process.env.GIT_NO_REPLACE_OBJECTS = previousNoReplace;
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 });
