@@ -1,173 +1,166 @@
-import { spawnSync } from "node:child_process";
-import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { describe, it } from "node:test";
+import { resolve } from "node:path";
 import { parseDocument } from "yaml";
 
-import { verifyReleaseRef } from "../scripts/verify-release-ref.mjs";
+import { validateEligibilityEvidence } from "../scripts/release-preflight.mjs";
 
 const exactSha = "a".repeat(40);
-const otherSha = "b".repeat(40);
-const currentVersion = JSON.parse(readFileSync(resolve("package.json"), "utf8")).version;
 
-function makePackageRoot(version = "2.3.4") {
-  const root = mkdtempSync(join(tmpdir(), "repo-guard-release-integrity-identity-"));
-  writeFileSync(join(root, "package.json"), JSON.stringify({ version }), "utf8");
-  return root;
-}
-
-function runAt(sha, calls = []) {
-  return (command, args, options = {}) => {
-    calls.push({ command, args, options });
-    if (command === "git" && args.join(" ") === "rev-parse HEAD") return sha;
-    throw new Error(`unexpected process call: ${command} ${args.join(" ")}`);
-  };
-}
-
-function networkMustNotRun(calls = []) {
-  return async (url) => {
-    calls.push(url);
-    throw new Error(`network must not run before target identity is proved: ${url}`);
-  };
-}
-
-describe("release integrity target identity", () => {
-  it("rejects checkout T when automatic verification expects exact target S before release observation", async () => {
-    const networkCalls = [];
-    const result = await verifyReleaseRef({
-      packageRoot: makePackageRoot(),
-      repo: "netkeep80/repo-guard",
-      tag: "v2.3.4",
-      expectedSha: exactSha,
-      run: runAt(otherSha),
-      fetchImpl: networkMustNotRun(networkCalls),
-    });
-
-    assert.equal(result.ok, false);
-    assert.equal(networkCalls.length, 0);
-    assert.ok(result.checks.some((check) => (
-      check.name === "release-target-sha"
-      && check.status === "FAIL"
-      && check.message.includes(exactSha)
-      && check.message.includes(otherSha)
-    )));
-  });
-
-  it("rejects malformed expected target before checkout or GitHub observation", async () => {
-    const processCalls = [];
-    const networkCalls = [];
-    const result = await verifyReleaseRef({
-      packageRoot: makePackageRoot(),
-      repo: "netkeep80/repo-guard",
-      tag: "v2.3.4",
-      expectedSha: "main",
-      run: runAt(exactSha, processCalls),
-      fetchImpl: networkMustNotRun(networkCalls),
-    });
-
-    assert.equal(result.ok, false);
-    assert.equal(processCalls.length, 0);
-    assert.equal(networkCalls.length, 0);
-    assert.ok(result.checks.some((check) => (
-      check.name === "release-target-sha"
-      && check.status === "FAIL"
-      && /40-hex SHA/i.test(check.message)
-    )));
-  });
-
-  it("exposes expected target identity through the CLI", () => {
-    const result = spawnSync(process.execPath, [
-      resolve("scripts/verify-release-ref.mjs"),
-      "--tag",
-      `v${currentVersion}`,
-      "--expected-sha",
-      "main",
-    ], {
-      cwd: resolve("."),
-      encoding: "utf8",
-      env: { ...process.env, GITHUB_TOKEN: "", GH_TOKEN: "" },
-    });
-
-    assert.equal(result.status, 1);
-    assert.match(result.stdout, /release-target-sha/);
-    assert.match(result.stdout, /40-hex SHA/i);
-    assert.doesNotMatch(result.stderr, /Unknown option/);
-  });
-});
-
-describe("atomic release target transport", () => {
-  const source = readFileSync(resolve(".github/workflows/release.yml"), "utf8");
+function yaml(path) {
+  const source = readFileSync(resolve(path), "utf8");
   const document = parseDocument(source);
-  assert.deepEqual(document.errors, []);
-  const workflow = document.toJS();
-  const preflight = workflow.jobs?.preflight;
+  assert.deepEqual(document.errors, [], path);
+  return document.toJS();
+}
+
+function stepsText(job) {
+  return (job?.steps ?? []).map((step) => step.run ?? "").join("\n");
+}
+
+function assertPinnedActions(workflow, label) {
+  for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (step.uses === undefined) continue;
+      assert.match(
+        step.uses,
+        /^[^@]+@[0-9a-f]{40}$/,
+        `${label} ${jobName} uses non-pinned Action ${step.uses}`,
+      );
+    }
+  }
+}
+
+describe("#835 atomic release trusted boundary", () => {
+  const workflow = yaml(".github/workflows/release.yml");
+  const eligibility = workflow.jobs?.eligibility;
   const publish = workflow.jobs?.publish;
 
-  it("records the proved target as a non-executable data artifact in read-only preflight", () => {
-    assert.ok(preflight);
-    assert.deepEqual(preflight.permissions, { actions: "read", contents: "read" });
-
-    const proofIndex = preflight.steps.findIndex((step) => step.id === "proof");
-    const recordIndex = preflight.steps.findIndex((step) => step.name === "Record exact release target identity");
-    const uploadIndex = preflight.steps.findIndex((step) => step.name === "Upload exact release target identity");
-    assert.ok(proofIndex >= 0);
-    assert.ok(recordIndex > proofIndex);
-    assert.ok(uploadIndex > recordIndex);
-
-    const record = preflight.steps[recordIndex];
-    assert.equal(typeof record.run, "string");
-    const recordEnv = JSON.stringify(record.env ?? {});
-    assert.match(recordEnv, /steps\.proof\.outputs\.sha/);
-    assert.match(recordEnv, /steps\.proof\.outputs\.tag/);
-    assert.match(recordEnv, /github\.run_id/);
-    assert.match(recordEnv, /github\.run_attempt/);
-    for (const variable of ["TARGET_SHA", "TAG", "SOURCE_RUN_ID", "SOURCE_RUN_ATTEMPT"]) {
-      assert.match(record.run, new RegExp(`\\$${variable}\\b`));
-    }
-    assert.match(record.run, /schema_version/);
-    assert.match(record.run, /target_sha/);
-    assert.match(record.run, /source_run_id/);
-    assert.match(record.run, /source_run_attempt/);
-    assert.match(record.run, /release-target\.json/);
-    assert.doesNotMatch(record.run, /\$\{\{/);
-    assert.doesNotMatch(record.run, /client_payload/);
-
-    const upload = preflight.steps[uploadIndex];
-    assert.equal(upload.uses, "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
-    assert.equal(upload.with?.name, "release-target-${{ github.run_id }}-${{ github.run_attempt }}");
-    assert.equal(upload.with?.path, "release-target.json");
-    assert.equal(upload.with?.["if-no-files-found"], "error");
+  it("preserves repository_dispatch release and release concurrency semantics", () => {
+    assert.deepEqual(workflow.on?.repository_dispatch?.types, ["release"]);
+    assert.deepEqual(workflow.permissions, {});
+    assert.equal(workflow.concurrency?.group, "release");
+    assert.equal(workflow.concurrency?.["cancel-in-progress"], false);
   });
 
-  it("keeps the privileged publish job free of Actions and repository execution", () => {
+  it("F1 target-owned preflight substitution is ineffective", () => {
+    assert.ok(eligibility);
+    assert.deepEqual(eligibility.permissions, { actions: "read", contents: "read" });
+    const checkout = eligibility.steps.find((step) => step.name === "Checkout trusted release evaluator");
+    assert.ok(checkout);
+    assert.equal(checkout.with?.ref, "${{ github.sha }}");
+    assert.equal(checkout.with?.["persist-credentials"], false);
+    assert.notEqual(checkout.with?.ref, "${{ github.event.client_payload.sha }}");
+
+    const acquire = eligibility.steps.find((step) => step.name === "Acquire exact release target as data");
+    assert.ok(acquire);
+    assert.match(acquire.run, /git fetch --no-tags --prune origin "\$TARGET_SHA"/);
+    assert.match(acquire.run, /git cat-file -e "\$TARGET_SHA\^\{commit\}"/);
+    assert.doesNotMatch(acquire.run, /git checkout|git switch/);
+
+    const proof = eligibility.steps.find((step) => step.id === "proof");
+    assert.ok(proof);
+    assert.match(proof.run, /node scripts\/release-preflight\.mjs eligibility/);
+    assert.match(String(proof.env?.EVALUATOR_SHA), /github\.sha/);
+    assert.match(String(proof.env?.TARGET_SHA), /client_payload\.sha/);
+    assert.doesNotMatch(stepsText(eligibility), /npm\s+(?:ci|install|run)/);
+  });
+
+  it("F2 forged legacy three-field proof is rejected by exact evidence schema", () => {
+    assert.throws(
+      () => validateEligibilityEvidence({
+        sha: exactSha,
+        version: "5.0.0",
+        tag: "v5.0.0",
+      }),
+      /unexpected fields/i,
+    );
+  });
+
+  it("authorizer policy is explicit and executes before trusted checkout", () => {
+    const first = eligibility.steps?.[0];
+    assert.equal(first?.name, "Authorize exact release dispatch");
+    assert.match(first.run, /netkeep80\/repo-guard/);
+    assert.match(first.run, /test "\$ACTOR" = "netkeep80"/);
+    assert.match(first.run, /repository_dispatch/);
+    assert.match(first.run, /release/);
+    assert.match(String(first.env?.TARGET_SHA), /client_payload\.sha/);
+  });
+
+  it("trusted evidence is versioned and bound to evaluator, target, CI and current run", () => {
+    const proof = eligibility.steps.find((step) => step.id === "proof");
+    assert.match(proof.run, /schema_version == 2/);
+    for (const field of [
+      "eligibility",
+      "repository",
+      "target_sha",
+      "version",
+      "tag",
+      "evaluator_sha",
+      "ci_run_id",
+      "ci_run_attempt",
+      "source_release_run_id",
+      "source_release_run_attempt",
+    ]) {
+      assert.match(proof.run, new RegExp(field));
+    }
+
+    const upload = eligibility.steps.find((step) => step.name === "Upload trusted release eligibility evidence");
+    assert.equal(upload?.uses, "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
+    assert.equal(upload?.with?.name, "release-eligibility-${{ github.run_id }}-${{ github.run_attempt }}");
+    assert.equal(upload?.with?.path, "release-eligibility.json");
+    assert.equal(upload?.with?.["if-no-files-found"], "error");
+  });
+
+  it("privileged publish consumes only trusted eligibility outputs and executes no repository code", () => {
     assert.ok(publish);
+    assert.equal(publish.needs, "eligibility");
     assert.deepEqual(publish.permissions, { contents: "write" });
+    assert.match(String(publish.env?.TARGET_SHA), /needs\.eligibility\.outputs\.target_sha/);
+    assert.match(String(publish.env?.VERSION), /needs\.eligibility\.outputs\.version/);
+    assert.match(String(publish.env?.TAG), /needs\.eligibility\.outputs\.tag/);
+    assert.doesNotMatch(JSON.stringify(publish), /client_payload/);
+
     for (const step of publish.steps ?? []) assert.equal(step.uses, undefined);
-    const text = (publish.steps ?? []).map((step) => step.run ?? "").join("\n");
+    const text = stepsText(publish);
     assert.doesNotMatch(text, /\bnpm\b/);
     assert.doesNotMatch(text, /\bnode\b/);
     assert.doesNotMatch(text, /scripts\//);
+    assert.doesNotMatch(text, /git checkout|git switch/);
+    assert.match(text, /SOURCE_RUN_ID.*CURRENT_RUN_ID/s);
+    assert.match(text, /SOURCE_RUN_ATTEMPT.*CURRENT_RUN_ATTEMPT/s);
+  });
+
+  it("does not interpolate payload-controlled expressions directly into shell bodies", () => {
+    for (const step of eligibility.steps ?? []) {
+      if (step.run) assert.doesNotMatch(step.run, /\$\{\{/);
+    }
+    for (const step of publish.steps ?? []) {
+      if (step.run) assert.doesNotMatch(step.run, /\$\{\{/);
+    }
+  });
+
+  it("keeps all Actions immutable-SHA pinned", () => {
+    assertPinnedActions(workflow, "release");
   });
 });
 
-describe("automatic release integrity workflow", () => {
-  const source = readFileSync(resolve(".github/workflows/release-integrity.yml"), "utf8");
-  const document = parseDocument(source);
-  assert.deepEqual(document.errors, []);
-  const workflow = document.toJS();
+describe("#835 automatic release integrity trusted boundary", () => {
+  const workflow = yaml(".github/workflows/release-integrity.yml");
+  const resolveTarget = workflow.jobs?.["resolve-automatic-target"];
+  const verify = workflow.jobs?.["verify-automatic"];
+  const record = workflow.jobs?.["record-automatic-evidence"];
+  const manual = workflow.jobs?.["verify-manual"];
 
-  it("uses Atomic release completion as the automatic transport and keeps manual verification", () => {
+  it("preserves automatic Atomic release completion plus separate manual diagnostic", () => {
     assert.deepEqual(workflow.on?.workflow_run?.workflows, ["Atomic release"]);
     assert.deepEqual(workflow.on?.workflow_run?.types, ["completed"]);
     assert.ok(workflow.on?.workflow_dispatch?.inputs?.tag);
-    assert.equal(workflow.on?.release, undefined);
     assert.deepEqual(workflow.permissions, {});
   });
 
-  it("establishes and validates target identity before any target checkout", () => {
-    const resolveTarget = workflow.jobs?.["resolve-automatic-target"];
+  it("validates source repository/path/event/run identity before accepting eligibility artifact", () => {
     assert.ok(resolveTarget);
     assert.deepEqual(resolveTarget.permissions, { actions: "read", contents: "read" });
     const text = JSON.stringify(resolveTarget);
@@ -175,37 +168,54 @@ describe("automatic release integrity workflow", () => {
     assert.doesNotMatch(text, /actions\/setup-node/);
     assert.doesNotMatch(text, /npm\s/);
     assert.doesNotMatch(text, /scripts\//);
+    assert.match(text, /workflow_run\.repository\.full_name/);
     assert.match(text, /workflow_run\.path/);
     assert.match(text, /workflow_run\.event/);
     assert.match(text, /workflow_run\.id/);
     assert.match(text, /workflow_run\.run_attempt/);
     assert.match(text, /\.github\/workflows\/release\.yml/);
     assert.match(text, /repository_dispatch/);
-    assert.match(text, /actions\/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0/);
-    assert.match(text, /release-target-/);
-    assert.match(text, /release-target\.json/);
+    assert.match(text, /release-eligibility-/);
     assert.match(text, /schema_version/);
-    assert.match(text, /target_sha/);
-    assert.match(text, /source_run_id/);
-    assert.match(text, /source_run_attempt/);
+    assert.match(text, /evaluator_sha/);
+    assert.match(text, /ci_run_id/);
   });
 
-  it("checks out only the established target and binds verifier CLI to target SHA and tag", () => {
-    const verify = workflow.jobs?.["verify-automatic"];
+  it("F3 target-owned automatic integrity verifier is no longer executed", () => {
     assert.ok(verify);
     assert.equal(verify.needs, "resolve-automatic-target");
-    assert.deepEqual(verify.permissions, { contents: "read" });
-    const text = JSON.stringify(verify);
-    assert.match(text, /needs\.resolve-automatic-target\.outputs\.target_sha/);
-    assert.match(text, /needs\.resolve-automatic-target\.outputs\.tag/);
-    assert.match(text, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/);
-    assert.match(text, /persist-credentials/);
-    assert.match(text, /--expected-sha/);
-    assert.match(text, /--tag/);
+    assert.deepEqual(verify.permissions, { actions: "read", contents: "read" });
+
+    const checkout = verify.steps.find((step) => step.name === "Checkout trusted integrity evaluator");
+    assert.ok(checkout);
+    assert.equal(checkout.with?.ref, "${{ github.sha }}");
+    assert.notEqual(checkout.with?.ref, "${{ needs.resolve-automatic-target.outputs.target_sha }}");
+    assert.equal(checkout.with?.["persist-credentials"], false);
+
+    const acquire = verify.steps.find((step) => step.name === "Acquire published target as data");
+    assert.match(acquire?.run ?? "", /git fetch --no-tags --prune origin "\$TARGET_SHA"/);
+    assert.doesNotMatch(acquire?.run ?? "", /git checkout|git switch/);
+
+    const verifier = verify.steps.find((step) => step.name === "Verify publication with trusted integrity evaluator");
+    assert.match(verifier?.run ?? "", /node scripts\/release-preflight\.mjs integrity/);
+    assert.doesNotMatch(verifier?.run ?? "", /verify-release-ref\.mjs/);
+    assert.match(String(verifier?.env?.VERIFIER_SHA), /github\.sha/);
   });
 
-  it("records identity-bound verifier evidence even when verification fails", () => {
-    const record = workflow.jobs?.["record-automatic-evidence"];
+  it("F27 target workflow substitution cannot select evaluator provenance", () => {
+    const automaticCheckout = verify.steps.find((step) => step.name === "Checkout trusted integrity evaluator");
+    assert.equal(automaticCheckout?.with?.ref, "${{ github.sha }}");
+    assert.doesNotMatch(JSON.stringify(automaticCheckout), /client_payload/);
+
+    const release = yaml(".github/workflows/release.yml");
+    const eligibilityCheckout = release.jobs?.eligibility?.steps?.find(
+      (step) => step.name === "Checkout trusted release evaluator",
+    );
+    assert.equal(eligibilityCheckout?.with?.ref, "${{ github.sha }}");
+    assert.doesNotMatch(JSON.stringify(eligibilityCheckout), /client_payload/);
+  });
+
+  it("records exact trusted verifier identity even when verification fails", () => {
     assert.ok(record);
     assert.deepEqual(record.needs, ["resolve-automatic-target", "verify-automatic"]);
     assert.match(String(record.if), /always\(\)/);
@@ -214,87 +224,40 @@ describe("automatic release integrity workflow", () => {
 
     const text = JSON.stringify(record);
     assert.match(text, /needs\.verify-automatic\.result/);
+    assert.match(text, /eligibility_evaluator_sha/);
+    assert.match(text, /verifier_sha/);
+    assert.match(text, /github\.sha/);
     assert.match(text, /target_sha/);
     assert.match(text, /source_release_run_id/);
     assert.match(text, /source_release_run_attempt/);
     assert.match(text, /github\.run_id/);
     assert.match(text, /github\.run_attempt/);
     assert.match(text, /run_url/);
-    assert.match(text, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+    assert.match(text, /conclusion/);
     assert.match(text, /release-integrity-/);
   });
 
-  it("keeps manual tag verification separate from automatic accepted-target evidence", () => {
-    const manual = workflow.jobs?.["verify-manual"];
+  it("keeps manual tag verification separate from trusted automatic evidence", () => {
     assert.ok(manual);
     assert.match(String(manual.if), /workflow_dispatch/);
     const text = JSON.stringify(manual);
     assert.match(text, /inputs\.tag/);
-    assert.match(text, /actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/);
-    assert.match(text, /--tag/);
-    assert.doesNotMatch(text, /--expected-sha/);
+    assert.match(text, /verify-release-ref\.mjs/);
+    assert.doesNotMatch(text, /source_release_run_id/);
+  });
+
+  it("keeps automatic evaluator read-only and all Actions pinned", () => {
+    assert.deepEqual(verify.permissions, { actions: "read", contents: "read" });
+    assertPinnedActions(workflow, "release-integrity");
+  });
+
+  it("does not interpolate source/target expressions directly into automatic shell bodies", () => {
+    for (const job of [resolveTarget, verify, record]) {
+      for (const step of job?.steps ?? []) {
+        if (step.run) assert.doesNotMatch(step.run, /\$\{\{/);
+      }
+    }
   });
 });
 
-
-function legacyProofConsumer(payload, requestedSha = exactSha) {
-  const parsed = JSON.parse(payload);
-  const sha = parsed.sha;
-  const version = parsed.version;
-  const tag = parsed.tag;
-  if (sha !== requestedSha) throw new Error("sha mismatch");
-  if (tag !== `v${version}`) throw new Error("tag mismatch");
-  return { sha, version, tag };
-}
-
-describe("#835 falsification-first release trust boundary", () => {
-  it("F1 reproduces target-owned preflight trust", () => {
-    const releaseSource = readFileSync(resolve(".github/workflows/release.yml"), "utf8");
-    const releaseWorkflow = parseDocument(releaseSource).toJS();
-    const preflight = releaseWorkflow.jobs?.preflight;
-    assert.ok(preflight);
-    const checkout = preflight.steps.find((step) => String(step.name).includes("Checkout exact release target"));
-    const install = preflight.steps.find((step) => String(step.name).includes("Install read-only preflight dependencies"));
-    const proof = preflight.steps.find((step) => step.id === "proof");
-    assert.equal(checkout?.with?.ref, "${{ github.event.client_payload.sha }}");
-    assert.ok((install?.run ?? "").includes("npm ci"));
-    assert.ok((proof?.run ?? "").includes("node scripts/release-preflight.mjs"));
-
-    const root = mkdtempSync(join(tmpdir(), "repo-guard-835-f1-"));
-    const script = join(root, "scripts", "release-preflight.mjs");
-    mkdirSync(dirname(script), { recursive: true });
-    writeFileSync(script, `process.stdout.write(JSON.stringify({sha:"${exactSha}",version:"5.0.0",tag:"v5.0.0"})+"\\n");\n`);
-    const executed = spawnSync(process.execPath, [script], { encoding: "utf8" });
-    assert.equal(executed.status, 0);
-    assert.deepEqual(legacyProofConsumer(executed.stdout.trim()), {
-      sha: exactSha,
-      version: "5.0.0",
-      tag: "v5.0.0",
-    });
-    assert.fail("F1_TARGET_OWNED_PREFLIGHT_TRUST_REPRODUCED");
-  });
-
-  it("F2 reproduces forged three-field preflight payload acceptance", () => {
-    const forged = JSON.stringify({ sha: exactSha, version: "5.0.0", tag: "v5.0.0" });
-    assert.deepEqual(legacyProofConsumer(forged), {
-      sha: exactSha,
-      version: "5.0.0",
-      tag: "v5.0.0",
-    });
-    assert.fail("F2_FORGED_PREFLIGHT_PAYLOAD_REPRODUCED");
-  });
-
-  it("F3 reproduces target-owned automatic integrity verifier provenance", () => {
-    const source = readFileSync(resolve(".github/workflows/release-integrity.yml"), "utf8");
-    const workflow = parseDocument(source).toJS();
-    const verify = workflow.jobs?.["verify-automatic"];
-    assert.ok(verify);
-    const checkout = verify.steps.find((step) => String(step.name).includes("Checkout exact release target"));
-    const runStep = verify.steps.find((step) => String(step.run ?? "").includes("verify-release-ref.mjs"));
-    assert.equal(checkout?.with?.ref, "${{ needs.resolve-automatic-target.outputs.target_sha }}");
-    assert.ok((runStep?.run ?? "").includes("node scripts/verify-release-ref.mjs"));
-    assert.fail("F3_TARGET_OWNED_INTEGRITY_VERIFIER_REPRODUCED");
-  });
-});
-
-console.log("Release integrity target identity contract passed");
+console.log("#835 release trust structural contract passed");
