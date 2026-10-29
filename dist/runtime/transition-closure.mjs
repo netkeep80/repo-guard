@@ -43,13 +43,24 @@ function targetIdentity(value) {
     if (target.kind === "requirement") {
         if (typeof target.id !== "string" || !target.id)
             throw new Error("requirement relation target requires id");
-        return { key: stable({ kind: "requirement", id: target.id }), requirement: target.id };
+        return { key: stable({ kind: "requirement", id: target.id }), requirement: target.id, kind: "requirement" };
     }
     if (target.kind === "artifact") {
         const path = normPath(target.path);
-        return { key: stable({ kind: "artifact", path }), path };
+        return { key: stable({ kind: "artifact", path }), path, kind: "artifact", scopePath: path };
     }
-    return { key: stable(target) };
+    return {
+        key: stable(target),
+        kind: target.kind,
+        ...(Object.hasOwn(target, "path") ? { scopePath: target.path } : {}),
+    };
+}
+function typedTargetIdentity(target) {
+    if (target.kind === "requirement")
+        return { key: stable({ kind: "requirement", id: target.id }), requirement: target.id, kind: target.kind };
+    if (target.kind === "artifact")
+        return { key: stable({ kind: "artifact", path: target.path }), path: target.path, kind: target.kind, scopePath: target.path };
+    return { key: stable(target), kind: target.kind, scopePath: target.path };
 }
 function relationFactKey(fact) {
     return stable({
@@ -60,8 +71,8 @@ function relationFactKey(fact) {
         ...(fact.collection === true ? { collection: true } : {}),
     });
 }
-function relations(state) {
-    const facts = [], errors = [];
+function canonicalRelations(state) {
+    const facts = [], interpreted = [], errors = [];
     for (const id of Object.keys(state.requirements.index).sort((a, b) => a.localeCompare(b, "en"))) {
         const root = obj(state.requirements.index[id]?.value);
         const relationMap = obj(root?.relations);
@@ -75,11 +86,34 @@ function relations(state) {
                 errors.push(`invalid_relation:${id}:${label}`);
                 continue;
             }
+            const rawTarget = obj(item.target);
+            if (rawTarget) {
+                const interpretedBase = {
+                    origin: "requirement",
+                    from: id,
+                    predicate: item.predicate,
+                    targetKey: stable(rawTarget),
+                    targetKind: rawTarget.kind,
+                    ...(Object.hasOwn(rawTarget, "path") ? { scopePath: rawTarget.path } : {}),
+                    sourceLabel: label,
+                    ...(item.collection === true ? { collection: true } : {}),
+                };
+                interpreted.push({ ...interpretedBase, key: relationFactKey(interpretedBase) });
+            }
             try {
                 const target = targetIdentity(item.target);
-                const factBase = { origin: "requirement", from: id, predicate: item.predicate, targetKey: target.key,
-                    ...(target.requirement ? { targetRequirement: target.requirement } : {}), ...(target.path ? { targetPath: target.path } : {}),
-                    ...(item.collection === true ? { collection: true } : {}) };
+                const factBase = {
+                    origin: "requirement",
+                    from: id,
+                    predicate: item.predicate,
+                    targetKey: target.key,
+                    ...(target.requirement ? { targetRequirement: target.requirement } : {}),
+                    ...(target.path ? { targetPath: target.path } : {}),
+                    targetKind: target.kind,
+                    ...(Object.hasOwn(target, "scopePath") ? { scopePath: target.scopePath } : {}),
+                    sourceLabel: label,
+                    ...(item.collection === true ? { collection: true } : {}),
+                };
                 facts.push({ ...factBase, key: relationFactKey(factBase) });
             }
             catch (error) {
@@ -94,8 +128,18 @@ function relations(state) {
         }
         try {
             const from = normPath(edge.from), to = normPath(edge.to);
-            const factBase = { origin: "resource", from, predicate: "generates", targetKey: stable({ kind: "artifact", path: to }), targetPath: to };
-            facts.push({ ...factBase, key: relationFactKey(factBase) });
+            const factBase = {
+                origin: "resource",
+                from,
+                predicate: "generates",
+                targetKey: stable({ kind: "artifact", path: to }),
+                targetPath: to,
+                targetKind: "artifact",
+                scopePath: to,
+            };
+            const fact = { ...factBase, key: relationFactKey(factBase) };
+            facts.push(fact);
+            interpreted.push(fact);
         }
         catch (error) {
             errors.push(`invalid_resource_relation:${index}:${error.message}`);
@@ -108,7 +152,64 @@ function relations(state) {
         else
             dedup.set(fact.key, fact);
     }
-    return { facts: [...dedup.values()].sort((a, b) => a.key.localeCompare(b.key, "en")), errors: sorted(errors) };
+    return {
+        facts: [...dedup.values()].sort((a, b) => a.key.localeCompare(b.key, "en")),
+        interpreted,
+        errors: sorted(errors),
+    };
+}
+function nativeRelations(state) {
+    const facts = [], interpreted = [];
+    for (const requirement of state.nativeRequirements || []) {
+        let relationIndex = 0;
+        for (const relation of requirement.relations) {
+            const target = typedTargetIdentity(relation.target);
+            if (relation.predicate === "generates") {
+                const source = relation.source;
+                const factBase = {
+                    origin: "resource",
+                    from: source.path,
+                    predicate: relation.predicate,
+                    targetKey: target.key,
+                    ...(target.path ? { targetPath: target.path } : {}),
+                    targetKind: target.kind,
+                    ...(target.scopePath !== undefined ? { scopePath: target.scopePath } : {}),
+                    ...(relation.collection === true ? { collection: true } : {}),
+                };
+                const fact = { ...factBase, key: relationFactKey(factBase) };
+                facts.push(fact);
+                interpreted.push(fact);
+                continue;
+            }
+            const source = relation.source;
+            const sourceLabel = "native_" + String(relationIndex++).padStart(6, "0");
+            const factBase = {
+                origin: "requirement",
+                from: source.id,
+                predicate: relation.predicate,
+                targetKey: target.key,
+                ...(target.requirement ? { targetRequirement: target.requirement } : {}),
+                ...(target.path ? { targetPath: target.path } : {}),
+                targetKind: target.kind,
+                ...(target.scopePath !== undefined ? { scopePath: target.scopePath } : {}),
+                sourceLabel,
+                ...(relation.collection === true ? { collection: true } : {}),
+            };
+            const fact = { ...factBase, key: relationFactKey(factBase) };
+            facts.push(fact);
+            interpreted.push(fact);
+        }
+    }
+    return {
+        facts: facts.sort((a, b) => a.key.localeCompare(b.key, "en")),
+        interpreted,
+        errors: [],
+    };
+}
+function relations(state) {
+    return state.nativeRequirements !== undefined && state.requirements.ok
+        ? nativeRelations(state)
+        : canonicalRelations(state);
 }
 function relationDeltas(base, head) {
     const before = new Map(base.map(x => [x.key, x])), after = new Map(head.map(x => [x.key, x]));
@@ -422,7 +523,7 @@ function snapshotErrors(label, state, repository) {
         errors.push(`${label}:j2_not_rooted`);
     return errors;
 }
-function evaluateScopedObligations(input, deltas, applicability) {
+function evaluateScopedObligations(input, deltas, applicability, relationStates) {
     const problems = [], explanations = [];
     const root = (state, id) => obj(state.requirements.index[id]?.value);
     const parseRules = (state, label, id) => {
@@ -447,28 +548,27 @@ function evaluateScopedObligations(input, deltas, applicability) {
         }
         return rules;
     };
-    const derive = (state, id, rule, fallbackEdges) => {
+    const derive = (state, relationState, id, rule, fallbackEdges) => {
         const paths = new Map();
-        const direct = obj(root(state, id)?.relations);
         const expectedCollections = [];
         const put = (path, proof) => {
             const old = paths.get(path);
             if (!old || proof.length < old.length || (proof.length === old.length && proof.join("\0") < old.join("\0")))
                 paths.set(path, proof);
         };
-        for (const name of Object.keys(direct || {}).sort()) {
-            const rel = obj(direct[name]), target = obj(rel?.target);
-            if (!rel || !target || !rule.relations.includes(rel.predicate))
+        for (const rel of relationState.interpreted) {
+            if (rel.origin !== "requirement" || rel.from !== id || !rule.relations.includes(rel.predicate))
                 continue;
-            if (target.kind !== "artifact" && target.kind !== "document") {
-                problems.push("I7:unsupported_scope_target:" + id + ":" + name + ":" + String(target.kind));
+            const name = rel.sourceLabel || "";
+            if (rel.targetKind !== "artifact" && rel.targetKind !== "document") {
+                problems.push("I7:unsupported_scope_target:" + id + ":" + name + ":" + String(rel.targetKind));
                 continue;
             }
             try {
-                const path = normPath(target.path);
-                put(path, [id, String(rel.predicate) + ":" + path]);
-                if (target.kind === "artifact" && rel.collection === true)
-                    expectedCollections.push({ predicate: String(rel.predicate), manifest: path });
+                const path = normPath(rel.scopePath);
+                put(path, [id, rel.predicate + ":" + path]);
+                if (rel.targetKind === "artifact" && rel.collection === true)
+                    expectedCollections.push({ predicate: rel.predicate, manifest: path });
             }
             catch {
                 problems.push("I7:invalid_scope:" + id + ":" + name);
@@ -517,9 +617,9 @@ function evaluateScopedObligations(input, deltas, applicability) {
         return paths;
     };
     const versions = [
-        { label: "AUTHORITY", state: input.trustedAuthorityBase },
-        { label: "BASE", state: input.base },
-        { label: "HEAD", state: input.head },
+        { label: "AUTHORITY", state: input.trustedAuthorityBase, relations: relationStates.authority },
+        { label: "BASE", state: input.base, relations: relationStates.base },
+        { label: "HEAD", state: input.head, relations: relationStates.head },
     ];
     const ids = sorted(new Set(versions.flatMap(v => Object.keys(v.state.requirements.index))));
     const observation = input.observationFacts || [];
@@ -564,9 +664,9 @@ function evaluateScopedObligations(input, deltas, applicability) {
                 const trustedEdges = input.trustedAuthorityBase.resourceRelations ||
                     (input.trustedAuthorityBase.revision === input.base.revision ? input.base.resourceRelations || [] : []);
                 const allScopes = [
-                    derive(input.trustedAuthorityBase, id, rule, trustedEdges),
-                    derive(input.base, id, rule, []),
-                    derive(input.head, id, rule, []),
+                    derive(input.trustedAuthorityBase, relationStates.authority, id, rule, trustedEdges),
+                    derive(input.base, relationStates.base, id, rule, []),
+                    derive(input.head, relationStates.head, id, rule, []),
                 ];
                 const proof = new Map();
                 for (const scope of allScopes)
@@ -614,14 +714,12 @@ function evaluateScopedObligations(input, deltas, applicability) {
                 }
                 if (active && rule.evidence !== undefined) {
                     const spec = rule.evidence;
-                    const verifierValid = spec.kind !== "execution" || (() => {
-                        const headRelations = obj(root(input.head, id)?.relations);
-                        return Object.values(headRelations || {}).some(value => {
-                            const rel = obj(value), target = obj(rel?.target);
-                            return rel?.predicate === "verified_by" && target?.kind === "artifact" && target.path === spec.verifierPath &&
-                                (input.head.j1.owners[spec.verifierPath] || []).includes(id);
-                        });
-                    })();
+                    const verifierValid = spec.kind !== "execution" || relationStates.head.interpreted.some(rel => rel.origin === "requirement" &&
+                        rel.from === id &&
+                        rel.predicate === "verified_by" &&
+                        rel.targetKind === "artifact" &&
+                        rel.scopePath === spec.verifierPath &&
+                        (input.head.j1.owners[spec.verifierPath] || []).includes(id));
                     if (!verifierValid) {
                         evidenceStatus = "INVALID";
                         localNegative = true;
@@ -660,6 +758,7 @@ export function evaluateTransitionCauseClosure(input) {
         reasons.push("head:j1_not_closed");
     const normalizedResources = resourceDeltas(input.resourceDeltas || []);
     reasons.push(...normalizedResources.errors.map(x => "input:" + x));
+    const authorityRelationState = relations(input.trustedAuthorityBase);
     const baseRelationState = relations(input.base), headRelationState = relations(input.head);
     reasons.push(...baseRelationState.errors.map(x => "base:" + x), ...headRelationState.errors.map(x => "head:" + x));
     const baseRelations = baseRelationState.facts, headRelations = headRelationState.facts;
@@ -693,7 +792,7 @@ export function evaluateTransitionCauseClosure(input) {
             causalCandidates: candidateIds, causes: sorted(causes) });
     }
     const reverseOnly = new Set([...affectedAll].filter(id => !directApplicableAll.has(id)));
-    const scoped = evaluateScopedObligations(input, normalizedResources.deltas, { direct: directApplicableAll, selected: selectedCausesAll, reverseOnly });
+    const scoped = evaluateScopedObligations(input, normalizedResources.deltas, { direct: directApplicableAll, selected: selectedCausesAll, reverseOnly }, { authority: authorityRelationState, base: baseRelationState, head: headRelationState });
     reasons.push(...scoped.reasons);
     const normalizedReasons = sorted(reasons);
     return { ok: normalizedReasons.length === 0, reasons: normalizedReasons, deltas: deltas.map(delta => ({ id: delta.id, kind: delta.kind, subject: delta.subject,
