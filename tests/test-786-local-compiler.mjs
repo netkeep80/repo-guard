@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -2002,7 +2002,7 @@ relations:
     ], { cwd: fx.root, encoding: "utf8" }),
   ));
 
-  test("#840 C1 native structural-root and J2 behavior is characterized through real native sources", () => {
+  test("#840 C1 native structural-root and J2 behavior is characterized through real native sources", async () => {
     const fx = fixture840();
     try {
       const docs = [
@@ -2025,19 +2025,53 @@ relations:
           relation840("derives_from", requirementRef840("BROOT")),
         ]],
       ];
-      for (const [id, relations] of docs)
-        fx.put("requirements/" + id + ".rg.json", requirement840({ id, relations }));
+      const proofResources = {
+        DEP: "src/dep-proof.txt",
+        MULTI: "src/multi-proof.txt",
+        LEAF: "src/leaf-proof.txt",
+      };
+      const rootProofConstraint = {
+        id: "root-proof",
+        scope: { relations: ["implemented_by"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      };
+      for (const [id, relations] of docs) {
+        const proofPath = proofResources[id];
+        fx.put("requirements/" + id + ".rg.json", requirement840({
+          id,
+          relations: proofPath
+            ? [...relations, relation840("implemented_by", artifactRef840(proofPath))]
+            : relations,
+          constraints: proofPath ? [rootProofConstraint] : [],
+        }));
+      }
       for (const [path, value] of [
         ["src/req.txt", "required\n"],
         ["src/imp.txt", "implementation\n"],
         ["tests/verifier.txt", "verification\n"],
         ["docs/doc.md", "documentation\n"],
+        ["src/dep-proof.txt", "DEP proof resource\n"],
+        ["src/multi-proof.txt", "MULTI proof resource\n"],
+        ["src/leaf-proof.txt", "LEAF proof resource\n"],
       ]) fx.put(path, value);
+
+      const productionRootProof = (report, id) => {
+        const constraint = report.j3.constraints.find((item) =>
+          item.requirementId === id && item.constraintId === "root-proof");
+        assert.ok(constraint, id + ": missing production Constraint explanation");
+        return constraint.rootedProof;
+      };
+      const assertProductionRootProofs = (report) => {
+        assert.deepEqual(productionRootProof(report, "MULTI"), ["AROOT", "MULTI"]);
+        assert.deepEqual(productionRootProof(report, "LEAF"), ["BROOT", "LEAF"]);
+        assert.deepEqual(productionRootProof(report, "DEP"), ["DEP"]);
+      };
 
       const base = fx.save("C1 native roots");
       const report = evaluateLocalCompiler({ root: fx.root, repository: repository840, base, head: base });
       assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
       assert.equal(report.j2.rooted, docs.length);
+      assertProductionRootProofs(report);
 
       const state = open840(fx.root, base);
       assert.deepEqual(state.j2.rooted, [
@@ -2052,12 +2086,66 @@ relations:
 
       fx.put("requirements/DEP.rg.json", requirement840({
         id: "DEP",
-        relations: [relation840("derives_from", requirementRef840("R0"))],
+        relations: [
+          relation840("derives_from", requirementRef840("R0")),
+          relation840("implemented_by", artifactRef840("src/dep-proof.txt")),
+        ],
+        constraints: [rootProofConstraint],
       }));
       const changed = fx.save("C1 negative control derives_from");
+      const changedReport = evaluateLocalCompiler({
+        root: fx.root,
+        repository: repository840,
+        base: changed,
+        head: changed,
+      });
+      assert.equal(changedReport.ok, true, JSON.stringify(changedReport.diagnostics, null, 2));
+      assert.deepEqual(productionRootProof(changedReport, "DEP"), ["R0", "DEP"]);
+
       const changedState = open840(fx.root, changed);
       assert.deepEqual(changedState.j2.explanations.DEP, ["R0", "DEP"]);
       assert.notDeepEqual(changedState.j2.explanations.DEP, ["DEP"]);
+
+      // B1 sensitivity proof: mutate a transient copy of the production local compiler so
+      // structuralRoots() incorrectly trusts every Requirement, including derives_from children.
+      // The tracked production module is never modified.
+      const productionUrl = new URL("../dist/local-compiler.mjs", import.meta.url);
+      const brokenUrl = new URL(
+        "../dist/local-compiler-840-b1-negative-" + process.pid + ".mjs",
+        import.meta.url,
+      );
+      const productionSource = readFileSync(productionUrl, "utf8");
+      const correctStructuralRoots = `function structuralRoots(lowered) {
+    return lowered.requirements.requirements.filter(item => {
+        const value = item.value;
+        return !Object.values(value.relations || {}).some(relation => relation.predicate === "derives_from");
+    }).map(item => item.semantic);
+}`;
+      const brokenStructuralRoots = `function structuralRoots(lowered) {
+    return lowered.requirements.requirements.map(item => item.semantic);
+}`;
+      const brokenSource = productionSource.replace(correctStructuralRoots, brokenStructuralRoots);
+      assert.notEqual(brokenSource, productionSource, "negative control must alter production structuralRoots()");
+      try {
+        writeFileSync(brokenUrl, brokenSource);
+        const brokenCompiler = await import(brokenUrl.href + "?b1=" + oldHead);
+        const brokenReport = brokenCompiler.evaluateLocalCompiler({
+          root: fx.root,
+          repository: repository840,
+          base,
+          head: base,
+        });
+        assert.equal(brokenReport.ok, true, JSON.stringify(brokenReport.diagnostics, null, 2));
+        assert.deepEqual(productionRootProof(brokenReport, "MULTI"), ["MULTI"]);
+        assert.deepEqual(productionRootProof(brokenReport, "LEAF"), ["LEAF"]);
+        assert.throws(
+          () => assertProductionRootProofs(brokenReport),
+          assert.AssertionError,
+          "C1 production-root proof contract must fail when derives_from children are promoted to roots",
+        );
+      } finally {
+        if (existsSync(brokenUrl)) unlinkSync(brokenUrl);
+      }
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
     }
