@@ -30,9 +30,11 @@ export interface TransitionCauseRule {
   paths?: readonly string[];
 }
 export interface TransitionResourceLink { from: string; kind: "generates"; to: string; }
+export type CompiledConstraintIndex = Readonly<Record<string, readonly CompiledConstraint[]>>;
 export interface TransitionState {
   revision: string;
   requirements: CanonicalRequirementsResult;
+  compiledConstraints?: CompiledConstraintIndex;
   j2: RootedRequirementResult;
   j1: {
     ok: boolean;
@@ -44,6 +46,7 @@ export interface TransitionState {
 export interface TrustedAuthorityState {
   revision: string;
   requirements: CanonicalRequirementsResult;
+  compiledConstraints?: CompiledConstraintIndex;
   j2: RootedRequirementResult;
   j1?: {
     ok: boolean;
@@ -231,8 +234,11 @@ function requirementDeltas(base: TransitionState, head: TransitionState): Delta[
 function constraintDeltas(base: TransitionState, head: TransitionState): Delta[] {
   const out: Delta[] = [];
   const ids = sorted(new Set([...Object.keys(base.requirements.index), ...Object.keys(head.requirements.index)]));
-  const indexed = (value: unknown): Map<string, unknown> => {
-    const raw = obj(value)?.constraints;
+  const indexed = (state: TransitionState, requirementId: string): Map<string, unknown> => {
+    if (state.compiledConstraints !== undefined) {
+      return new Map((state.compiledConstraints[requirementId] || []).map(rule => [rule.id, rule]));
+    }
+    const raw = obj(state.requirements.index[requirementId]?.value)?.constraints;
     const result = new Map<string, unknown>();
     if (!Array.isArray(raw)) return result;
     for (const item of raw) {
@@ -245,7 +251,7 @@ function constraintDeltas(base: TransitionState, head: TransitionState): Delta[]
     const beforeRequirement = base.requirements.index[requirementId];
     const afterRequirement = head.requirements.index[requirementId];
     if (!beforeRequirement || !afterRequirement) continue;
-    const before = indexed(beforeRequirement.value), after = indexed(afterRequirement.value);
+    const before = indexed(base, requirementId), after = indexed(head, requirementId);
     for (const constraintId of sorted(new Set([...before.keys(), ...after.keys()]))) {
       const b = before.get(constraintId), a = after.get(constraintId);
       if (b === undefined) out.push({
@@ -424,7 +430,9 @@ function evaluateScopedObligations(
 ) {
     const problems: string[] = [], explanations: any[] = [];
     const root = (state: any, id: string) => obj(state.requirements.index[id]?.value);
-    const parseRules = (state: any, label: string, id: string): CompiledConstraint[] => {
+    const parseRules = (state: TransitionState | TrustedAuthorityState, label: string, id: string): CompiledConstraint[] => {
+        if (state.compiledConstraints !== undefined)
+            return [...(state.compiledConstraints[id] || [])];
         const raw = root(state, id)?.constraints;
         if (raw === undefined) return [];
         if (!Array.isArray(raw)) {

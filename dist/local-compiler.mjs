@@ -209,6 +209,7 @@ export function evaluateLocalCompiler(input) {
             requirements: lowered.requirements,
             lifecycle: lowered.lifecycle,
             resourceRelations: lowered.resourceRelations,
+            compiledConstraints: lowered.compiledConstraints,
             j2,
             j1,
         };
@@ -263,6 +264,7 @@ export function evaluateLocalCompiler(input) {
         base: {
             revision: base,
             requirements: before.requirements,
+            compiledConstraints: before.compiledConstraints,
             j2: before.j2,
             j1: before.j1,
             resourceRelations: before.resourceRelations,
@@ -270,6 +272,7 @@ export function evaluateLocalCompiler(input) {
         head: {
             revision: head,
             requirements: after.requirements,
+            compiledConstraints: after.compiledConstraints,
             j2: after.j2,
             j1: after.j1,
             resourceRelations: after.resourceRelations,
@@ -277,6 +280,7 @@ export function evaluateLocalCompiler(input) {
         trustedAuthorityBase: {
             revision: base,
             requirements: before.requirements,
+            compiledConstraints: before.compiledConstraints,
             j2: before.j2,
             j1: before.j1,
             resourceRelations: before.resourceRelations,

@@ -165,5 +165,6 @@ export declare function lowerNativeRequirements(native: NativeRequirementsResult
         kind: "generates";
         to: string;
     }[];
+    compiledConstraints: Record<string, readonly CompiledConstraint[]>;
 };
 export {};

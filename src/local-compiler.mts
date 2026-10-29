@@ -22,6 +22,7 @@ interface LocalState {
   requirements: Lowered["requirements"];
   lifecycle: Lowered["lifecycle"];
   resourceRelations: Lowered["resourceRelations"];
+  compiledConstraints: Lowered["compiledConstraints"];
   j2: ReturnType<typeof evaluateRootedRequirements>;
   j1: J1;
 }
@@ -222,6 +223,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
       requirements: lowered.requirements,
       lifecycle: lowered.lifecycle,
       resourceRelations: lowered.resourceRelations,
+      compiledConstraints: lowered.compiledConstraints,
       j2,
       j1,
     };
@@ -278,6 +280,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     base: {
       revision: base,
       requirements: before.requirements,
+      compiledConstraints: before.compiledConstraints,
       j2: before.j2,
       j1: before.j1,
       resourceRelations: before.resourceRelations,
@@ -285,6 +288,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     head: {
       revision: head,
       requirements: after.requirements,
+      compiledConstraints: after.compiledConstraints,
       j2: after.j2,
       j1: after.j1,
       resourceRelations: after.resourceRelations,
@@ -292,6 +296,7 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
     trustedAuthorityBase: {
       revision: base,
       requirements: before.requirements,
+      compiledConstraints: before.compiledConstraints,
       j2: before.j2,
       j1: before.j1,
       resourceRelations: before.resourceRelations,

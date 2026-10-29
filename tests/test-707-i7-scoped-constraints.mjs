@@ -253,4 +253,22 @@ test("#836 B1 preserve true semantic differences and reject duplicate relations"
   }).ok,false);
 });
 
+
+test("#840 Slice 3 legacy malformed Constraint collection remains fail-closed", () => {
+  no(
+    run({ baseConstraints: { malformed: true }, headConstraints: { malformed: true }, resourceDeltas: [] }),
+    "I7:invalid_constraints:AUTHORITY:R1",
+    "legacy malformed constraints collection",
+  );
+});
+
+test("#840 Slice 3 legacy malformed Constraint item remains fail-closed", () => {
+  const malformed = [{ id: "bad", relations: ["implemented_by"], metric: "changed_resources" }];
+  no(
+    run({ baseConstraints: malformed, headConstraints: malformed, resourceDeltas: [] }),
+    "I7:invalid_constraint:AUTHORITY:R1",
+    "legacy malformed constraint item",
+  );
+});
+
 console.log("compiler-only scoped Constraint witnesses loaded");
