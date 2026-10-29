@@ -1,9 +1,14 @@
-import type { CanonicalRequirementsResult, SemanticRequirementSubject } from "./canonical-requirements.mjs";
+import type {
+  CanonicalRequirementsResult,
+  NativeRequirement,
+  SemanticRequirementSubject,
+} from "./canonical-requirements.mjs";
 
 export interface RootedRequirementInput {
   requirements: CanonicalRequirementsResult;
   trustedRoots: readonly SemanticRequirementSubject[];
   rootSubjects?: Readonly<Record<string, SemanticRequirementSubject>>;
+  nativeRequirements?: readonly NativeRequirement[];
 }
 export interface ClosureError { code: string; requirement: string; target?: string; }
 export interface RootedRequirementResult {
@@ -20,13 +25,12 @@ const valid = (s: unknown): s is SemanticRequirementSubject => {
 };
 const obj = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v==="object" && !Array.isArray(v) ? v as Record<string,unknown> : null;
-export function evaluateRootedRequirements(input: RootedRequirementInput): RootedRequirementResult {
-  const errors: ClosureError[]=[];
-  const universe=input.requirements;
-  if (!universe.ok) errors.push(...universe.errors.map(e=>({code:"invalid_canonical_universe",requirement:e.path})));
-  const ids=Object.keys(universe.index).sort();
-  const rooted=new Set<string>();
-  const paths=new Map<string,string[]>();
+
+function canonicalParents(
+  universe: CanonicalRequirementsResult,
+  ids: readonly string[],
+  errors: ClosureError[],
+): Map<string, string[]> {
   const parents=new Map<string,string[]>();
   for (const id of ids) {
     const node=universe.index[id], relations=obj(obj(node.value)?.relations);
@@ -43,6 +47,43 @@ export function evaluateRootedRequirements(input: RootedRequirementInput): Roote
     }
     parents.set(id,[...new Set(targets)].sort());
   }
+  return parents;
+}
+
+function nativeParents(
+  universe: CanonicalRequirementsResult,
+  ids: readonly string[],
+  requirements: readonly NativeRequirement[],
+  errors: ClosureError[],
+): Map<string, string[]> {
+  const parents=new Map<string,string[]>();
+  const nativeIndex=new Map(requirements.map(requirement => [requirement.id, requirement]));
+  for (const id of ids) {
+    const targets:string[]=[];
+    for (const relation of nativeIndex.get(id)?.relations || []) {
+      if (relation.predicate!=="derives_from") continue;
+      if (relation.target.kind!=="requirement") {
+        errors.push({code:"invalid_provenance_target",requirement:id}); continue;
+      }
+      if (!Object.hasOwn(universe.index,relation.target.id))
+        errors.push({code:"missing_requirement_target",requirement:id,target:relation.target.id});
+      else targets.push(relation.target.id);
+    }
+    parents.set(id,[...new Set(targets)].sort());
+  }
+  return parents;
+}
+
+export function evaluateRootedRequirements(input: RootedRequirementInput): RootedRequirementResult {
+  const errors: ClosureError[]=[];
+  const universe=input.requirements;
+  if (!universe.ok) errors.push(...universe.errors.map(e=>({code:"invalid_canonical_universe",requirement:e.path})));
+  const ids=Object.keys(universe.index).sort();
+  const rooted=new Set<string>();
+  const paths=new Map<string,string[]>();
+  const parents=input.nativeRequirements
+    ? nativeParents(universe, ids, input.nativeRequirements, errors)
+    : canonicalParents(universe, ids, errors);
   const roots=[...input.trustedRoots].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
   for(const subject of roots) {
     if (!valid(subject)) {errors.push({code:"invalid_trusted_root",requirement:""});continue}

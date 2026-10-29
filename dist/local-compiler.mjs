@@ -20,11 +20,10 @@ function resolveCommit(root, ref) {
         throw new Error("Git revision resolved to a different commit identity");
     return resolved;
 }
-function structuralRoots(lowered) {
-    return lowered.requirements.requirements.filter(item => {
-        const value = item.value;
-        return !Object.values(value.relations || {}).some(relation => relation.predicate === "derives_from");
-    }).map(item => item.semantic);
+function structuralRoots(native) {
+    return native.requirements
+        .filter(item => !item.relations.some(relation => relation.predicate === "derives_from"))
+        .map(item => item.semantic);
 }
 function parseChangedLinesZ(raw) {
     const fields = raw.split("\0");
@@ -157,7 +156,11 @@ export function evaluateLocalCompiler(input) {
             readFile: readExact,
         });
         const lowered = lowerNativeRequirements(native);
-        const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: structuralRoots(lowered) });
+        const j2 = evaluateRootedRequirements({
+            requirements: lowered.requirements,
+            trustedRoots: structuralRoots(native),
+            nativeRequirements: native.requirements,
+        });
         let j1 = {
             ok: false,
             justified: [],

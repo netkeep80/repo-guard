@@ -2111,6 +2111,60 @@ relations:
     }
   });
 
+  test("#840 Slice 1 typed J2 ignores non-bearing native Requirement predicates exactly like legacy J2", () => {
+    const fx = fixture840();
+    try {
+      for (const [id, relations] of [
+        ["ROOT", []],
+        ["DEP", [relation840("depends_on", requirementRef840("ROOT"))]],
+        ["CON", [relation840("constrains", requirementRef840("ROOT"))]],
+        ["SUP", [relation840("supersedes", requirementRef840("ROOT"))]],
+      ]) {
+        fx.put("requirements/" + id + ".rg.json", requirement840({ id, relations }));
+      }
+
+      const revision = fx.save("Slice 1 typed non-bearing predicate parity");
+      const trackedPaths = listTrackedEntriesAtRef(revision, fx.root).map((entry) => entry.path);
+      const tracked = new Set(trackedPaths);
+      const requirementPaths = trackedPaths.filter((path) => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
+      const native = loadNativeRequirements({
+        repository: repository840,
+        revision,
+        paths: requirementPaths,
+        readFile: (sha, path) =>
+          sha === revision && tracked.has(path) ? readFileBytesAtRef(sha, path, fx.root) : null,
+      });
+      assert.equal(native.ok, true, JSON.stringify(native.errors, null, 2));
+
+      const lowered = lowerNativeRequirements(native);
+      assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors, null, 2));
+
+      const root = native.index.ROOT.semantic;
+      const legacy = evaluateRootedRequirements({
+        requirements: lowered.requirements,
+        trustedRoots: [root],
+      });
+      const typed = evaluateRootedRequirements({
+        requirements: lowered.requirements,
+        trustedRoots: [root],
+        nativeRequirements: native.requirements,
+      });
+
+      assert.deepEqual(typed, legacy);
+      assert.deepEqual(typed, {
+        ok: false,
+        rooted: ["ROOT"],
+        unrooted: ["CON", "DEP", "SUP"],
+        errors: [],
+        explanations: {
+          ROOT: ["ROOT"],
+        },
+      });
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
   test("#840 C2 native J1 target-kind, collection and generates ownership matrix is characterized", () => {
     const fx = fixture840();
     try {
