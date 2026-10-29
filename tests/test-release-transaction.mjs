@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -120,6 +124,45 @@ async function runPreflight(overrides = {}) {
       calls: overrides.runCalls,
     }),
   });
+}
+
+function write(root, path, value) {
+  const full = join(root, path);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, value);
+}
+
+function localGit(root, ...args) {
+  return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+}
+
+function localCommit(root, message) {
+  localGit(root, "add", "-A");
+  localGit(root, "-c", "user.name=#835", "-c", "user.email=835@example.invalid", "commit", "-qm", message);
+  return localGit(root, "rev-parse", "HEAD");
+}
+
+function substitutionTargetRepo() {
+  const root = mkdtempSync(join(tmpdir(), "repo-guard-835-substitution-"));
+  localGit(root, "init", "-q");
+  write(root, "TRUSTED-EVALUATOR", "trusted control-plane checkout\n");
+  const evaluator = localCommit(root, "trusted evaluator");
+
+  write(root, "package.json", JSON.stringify({ name: "repo-guard", version: "5.0.0" }));
+  write(root, "package-lock.json", JSON.stringify({
+    name: "repo-guard",
+    version: "5.0.0",
+    lockfileVersion: 3,
+    packages: { "": { name: "repo-guard", version: "5.0.0" } },
+  }));
+  const marker = join(root, "TARGET_CODE_EXECUTED");
+  const malicious = `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "executed");\nprocess.stdout.write('{"sha":"forged"}\\n');\n`;
+  write(root, "scripts/release-preflight.mjs", malicious);
+  write(root, "scripts/verify-release-ref.mjs", malicious);
+  write(root, ".github/workflows/release.yml", "name: target-controlled-forgery\n");
+  const target = localCommit(root, "malicious target verifier substitution");
+  localGit(root, "checkout", "-q", "--detach", evaluator);
+  return { root, evaluator, target, marker };
 }
 
 const exactEvidence = (overrides = {}) => ({
@@ -313,25 +356,50 @@ describe("#835 independently trusted release eligibility", () => {
     );
   });
 
-  it("F26 target verifier substitution is ineffective because target scripts are never executed", async () => {
-    const calls = [];
-    const result = await runPreflight({ runCalls: calls });
+  it("F26 target verifier substitution is ineffective against the trusted evaluator", async () => {
+    const fixture = substitutionTargetRepo();
+    const result = await preflightRelease({
+      repoRoot: fixture.root,
+      repo,
+      sha: fixture.target,
+      evaluatorSha: fixture.evaluator,
+      actor: "netkeep80",
+      repositoryOwner: "netkeep80",
+      sourceRunId,
+      sourceRunAttempt,
+      fetchImpl: fakeFetch(preflightRoutes({
+        mainSha: fixture.target,
+        ciRuns: [workflowRun({ head_sha: fixture.target })],
+        tagSha: fixture.target,
+      })),
+    });
     assert.equal(result.eligibility, "eligible");
-    assert.ok(calls.length > 0);
-    assert.ok(calls.every((call) => call.command === "git"));
-    const observed = calls.map((call) => call.args.join(" "));
-    assert.ok(observed.some((text) => text.endsWith(":package.json")));
-    assert.ok(observed.some((text) => text.endsWith(":package-lock.json")));
-    assert.ok(observed.every((text) => !text.includes("scripts/release-preflight.mjs")));
-    assert.ok(observed.every((text) => !text.includes("scripts/verify-release-ref.mjs")));
+    assert.equal(result.target_sha, fixture.target);
+    assert.equal(result.evaluator_sha, fixture.evaluator);
+    assert.equal(existsSync(fixture.marker), false, "target-owned verifier code executed");
   });
 
-  it("F27 target workflow substitution is ineffective because target workflow bytes are not read", async () => {
-    const calls = [];
-    await runPreflight({ runCalls: calls });
-    const observed = calls.map((call) => call.args.join(" "));
-    assert.ok(observed.every((text) => !text.includes(".github/workflows/release.yml")));
-    assert.ok(observed.every((text) => !text.includes(".github/workflows/release-integrity.yml")));
+  it("F27 target workflow substitution is ineffective against evaluator provenance", async () => {
+    const fixture = substitutionTargetRepo();
+    const result = await preflightRelease({
+      repoRoot: fixture.root,
+      repo,
+      sha: fixture.target,
+      evaluatorSha: fixture.evaluator,
+      actor: "netkeep80",
+      repositoryOwner: "netkeep80",
+      sourceRunId,
+      sourceRunAttempt,
+      fetchImpl: fakeFetch(preflightRoutes({
+        mainSha: fixture.target,
+        ciRuns: [workflowRun({ head_sha: fixture.target })],
+        tagSha: fixture.target,
+      })),
+    });
+    assert.equal(result.eligibility, "eligible");
+    assert.equal(result.evaluator_sha, fixture.evaluator);
+    assert.equal(existsSync(fixture.marker), false);
+    assert.notEqual(fixture.target, fixture.evaluator);
   });
 
   it("F28 fully synthetic exact release fixture is eligible", async () => {
