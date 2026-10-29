@@ -2040,6 +2040,11 @@ relations:
       assert.equal(report.j2.rooted, docs.length);
 
       const state = open840(fx.root, base);
+      assert.deepEqual(state.j2.rooted, [
+        "AROOT", "BROOT", "CON", "DEP", "DOC", "IMP", "LEAF", "MULTI", "R0", "REQ", "SUP", "VER",
+      ]);
+      assert.deepEqual(state.j2.unrooted, []);
+      assert.deepEqual(state.j2.errors, []);
       for (const id of ["R0", "DEP", "CON", "SUP", "REQ", "IMP", "VER", "DOC", "AROOT", "BROOT"])
         assert.deepEqual(state.j2.explanations[id], [id], id);
       assert.deepEqual(state.j2.explanations.MULTI, ["AROOT", "MULTI"]);
@@ -2151,11 +2156,16 @@ relations:
         B2: [],
         ADD: [],
         B3: [],
+        COLL: [relation840("requires", artifactRef840("inventory/empty.resources.json"))],
         GEN: [relation840("implemented_by", artifactRef840("src/source.txt"))],
       };
       for (const [id, relations] of Object.entries(baseDocs))
         fx.put("requirements/" + id + ".rg.json", requirement840({ id, relations }));
       fx.put("src/source.txt", "source\n");
+      fx.put("inventory/empty.resources.json", JSON.stringify({
+        schema: collectionSchema840,
+        members: [],
+      }, null, 2) + "\n");
       const base = fx.save("C3 relation base");
 
       fx.put("requirements/REPLACE.rg.json", requirement840({
@@ -2166,6 +2176,10 @@ relations:
       fx.put("requirements/ADD.rg.json", requirement840({
         id: "ADD",
         relations: [relation840("supersedes", requirementRef840("B3"))],
+      }));
+      fx.put("requirements/COLL.rg.json", requirement840({
+        id: "COLL",
+        relations: [relation840("requires", artifactRef840("inventory/empty.resources.json"), { collection: true })],
       }));
       fx.put("requirements/GEN.rg.json", requirement840({
         id: "GEN",
@@ -2180,19 +2194,63 @@ relations:
       const transition = transition840(open840(fx.root, base), open840(fx.root, head));
       assert.equal(transition.ok, true, JSON.stringify(transition.reasons, null, 2));
       const relationDeltas = transition.deltas.filter((delta) => delta.kind.startsWith("relation_"));
-      assert.equal(relationDeltas.length, 4, JSON.stringify(transition.deltas, null, 2));
-      assert.deepEqual(
-        relationDeltas.map((delta) => delta.kind).sort(),
-        ["relation_add", "relation_add", "relation_remove", "relation_replace"],
-      );
-      const generated = transition.explanations.whyChanged.find((item) =>
-        item.kind === "relation_add" && item.subject === "src/source.txt");
-      assert.ok(generated, JSON.stringify(transition.explanations.whyChanged, null, 2));
-      assert.deepEqual(generated.affected, ["GEN"]);
-      console.log("#840 C3_RELATION_DELTAS=" + JSON.stringify(relationDeltas));
-      console.log("#840 C3_RELATION_WHY=" + JSON.stringify(
-        transition.explanations.whyChanged.filter((item) => item.kind.startsWith("relation_")),
-      ));
+      const addId =
+        'relation_add:{"from":"ADD","origin":"requirement","predicate":"supersedes","target":"{\\\"id\\\":\\\"B3\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const generatesId =
+        'relation_add:{"from":"src/source.txt","origin":"resource","predicate":"generates","target":"{\\\"kind\\\":\\\"artifact\\\",\\\"path\\\":\\\"gen/out.txt\\\"}"}';
+      const removeId =
+        'relation_remove:{"from":"REMOVE","origin":"requirement","predicate":"constrains","target":"{\\\"id\\\":\\\"B2\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const collectionBefore =
+        '{"from":"COLL","origin":"requirement","predicate":"requires","target":"{\\\"kind\\\":\\\"artifact\\\",\\\"path\\\":\\\"inventory/empty.resources.json\\\"}"}';
+      const collectionAfter =
+        '{"collection":true,"from":"COLL","origin":"requirement","predicate":"requires","target":"{\\\"kind\\\":\\\"artifact\\\",\\\"path\\\":\\\"inventory/empty.resources.json\\\"}"}';
+      const collectionId = "relation_replace:" + collectionBefore + "->" + collectionAfter;
+      const replaceBefore =
+        '{"from":"REPLACE","origin":"requirement","predicate":"depends_on","target":"{\\\"id\\\":\\\"B1\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const replaceAfter =
+        '{"from":"REPLACE","origin":"requirement","predicate":"depends_on","target":"{\\\"id\\\":\\\"C1\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const replaceId = "relation_replace:" + replaceBefore + "->" + replaceAfter;
+      assert.deepEqual(relationDeltas, [
+        { id: addId, kind: "relation_add", subject: "ADD" },
+        { id: generatesId, kind: "relation_add", subject: "src/source.txt" },
+        { id: removeId, kind: "relation_remove", subject: "REMOVE" },
+        { id: collectionId, kind: "relation_replace", subject: "COLL" },
+        { id: replaceId, kind: "relation_replace", subject: "REPLACE" },
+      ]);
+      const relationWhy = transition.explanations.whyChanged.filter((item) => item.kind.startsWith("relation_"));
+      assert.deepEqual(relationWhy, [
+        {
+          id: addId, kind: "relation_add", subject: "ADD",
+          affected: ["ADD", "B3"], applicable: ["ADD", "B3"],
+          directApplicable: ["ADD", "B3"], reverseImpact: [],
+          causalCandidates: ["ADD", "B3"], causes: ["ADD", "B3"],
+        },
+        {
+          id: generatesId, kind: "relation_add", subject: "src/source.txt",
+          affected: ["GEN"], applicable: ["GEN"], directApplicable: ["GEN"], reverseImpact: [],
+          causalCandidates: ["GEN"], causes: ["GEN"],
+        },
+        {
+          id: removeId, kind: "relation_remove", subject: "REMOVE",
+          affected: ["B2", "REMOVE"], applicable: ["B2", "REMOVE"],
+          directApplicable: ["B2", "REMOVE"], reverseImpact: [],
+          causalCandidates: ["B2", "REMOVE"], causes: ["B2", "REMOVE"],
+        },
+        {
+          id: collectionId, kind: "relation_replace", subject: "COLL",
+          affected: ["COLL"], applicable: ["COLL"], directApplicable: ["COLL"], reverseImpact: [],
+          causalCandidates: ["COLL"], causes: ["COLL"],
+        },
+        {
+          id: replaceId, kind: "relation_replace", subject: "REPLACE",
+          affected: ["B1", "C1", "REPLACE"], applicable: ["B1", "C1", "REPLACE"],
+          directApplicable: ["B1", "C1", "REPLACE"], reverseImpact: [],
+          causalCandidates: ["B1", "C1", "REPLACE"], causes: ["B1", "C1", "REPLACE"],
+        },
+      ]);
+      assert.deepEqual(transition.affectedRequirements, [
+        "ADD", "B1", "B2", "B3", "C1", "COLL", "GEN", "REMOVE", "REPLACE",
+      ]);
 
       // Directional impact negative controls use Requirement semantic mutation, not relation deltas,
       // so direct relation endpoints do not mask reverse-impact semantics.
@@ -2224,9 +2282,29 @@ relations:
           .filter((item) => item.kind === "requirement_modify")
           .map((item) => [item.subject, item]),
       );
-      assert.deepEqual(targetWhy.DPARENT.affected, ["DCHILD", "DPARENT"]);
-      assert.deepEqual(targetWhy.DEPTARGET.affected, ["DEPEND", "DEPTARGET"]);
-      assert.deepEqual(targetWhy.CONTARGET.affected, ["CONSTRAINER", "CONTARGET"]);
+      const expectedRequirementImpact = (subject, affected, reverseImpact) => ({
+        id: "requirement_modify:" + subject,
+        kind: "requirement_modify",
+        subject,
+        affected,
+        applicable: affected,
+        directApplicable: [subject],
+        reverseImpact,
+        causalCandidates: [subject],
+        causes: [subject],
+      });
+      assert.deepEqual(
+        targetWhy.DPARENT,
+        expectedRequirementImpact("DPARENT", ["DCHILD", "DPARENT"], ["DCHILD"]),
+      );
+      assert.deepEqual(
+        targetWhy.DEPTARGET,
+        expectedRequirementImpact("DEPTARGET", ["DEPEND", "DEPTARGET"], ["DEPEND"]),
+      );
+      assert.deepEqual(
+        targetWhy.CONTARGET,
+        expectedRequirementImpact("CONTARGET", ["CONSTRAINER", "CONTARGET"], ["CONSTRAINER"]),
+      );
 
       fx.git("checkout", "-q", impactBase);
       fx.put("requirements/DCHILD.rg.json", requirement840({
@@ -2251,11 +2329,18 @@ relations:
           .filter((item) => item.kind === "requirement_modify")
           .map((item) => [item.subject, item]),
       );
-      assert.deepEqual(sourceWhy.DCHILD.affected, ["DCHILD", "DPARENT"]);
-      assert.deepEqual(sourceWhy.DEPEND.affected, ["DEPEND"]);
-      assert.deepEqual(sourceWhy.CONSTRAINER.affected, ["CONSTRAINER"]);
-      console.log("#840 C3_IMPACT_TARGETS=" + JSON.stringify(targetWhy));
-      console.log("#840 C3_IMPACT_SOURCES=" + JSON.stringify(sourceWhy));
+      assert.deepEqual(
+        sourceWhy.DCHILD,
+        expectedRequirementImpact("DCHILD", ["DCHILD", "DPARENT"], ["DPARENT"]),
+      );
+      assert.deepEqual(
+        sourceWhy.DEPEND,
+        expectedRequirementImpact("DEPEND", ["DEPEND"], []),
+      );
+      assert.deepEqual(
+        sourceWhy.CONSTRAINER,
+        expectedRequirementImpact("CONSTRAINER", ["CONSTRAINER"], []),
+      );
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
     }
@@ -2304,11 +2389,34 @@ relations:
       const guards = convergence.explanations.constraints.filter((item) =>
         item.requirementId === "R" && item.constraintId === "guard");
       assert.equal(guards.length, 1, JSON.stringify(convergence.explanations.constraints, null, 2));
-      assert.equal(guards[0].basis, "AUTHORITY");
-      assert.deepEqual(guards[0].scope, ["src/a.txt", "tests/v.mjs"]);
-      assert.deepEqual(guards[0].touched, []);
-      assert.equal(guards[0].verdict, "NOT_APPLICABLE");
-      console.log("#840 C4_CONVERGENCE=" + JSON.stringify(guards[0]));
+      assert.deepEqual(guards[0], {
+        requirementId: "R",
+        constraintId: "guard",
+        basis: "AUTHORITY",
+        activation: "scoped_change",
+        directApplicable: false,
+        selectedCause: false,
+        reverseImpacted: false,
+        rootedProof: ["R"],
+        exactTransition: {
+          authorityBaseRevision: base,
+          baseRevision: base,
+          headRevision: head,
+        },
+        metric: "changed_resources",
+        max: 10,
+        scope: ["src/a.txt", "tests/v.mjs"],
+        scopeProofs: {
+          "src/a.txt": ["R", "implemented_by:src/a.txt"],
+          "tests/v.mjs": ["R", "verified_by:tests/v.mjs"],
+        },
+        touched: [],
+        observed: null,
+        observationSources: [],
+        requiredEvidence: null,
+        evidenceStatus: null,
+        verdict: "NOT_APPLICABLE",
+      });
     } finally {
       rmSync(defaults.root, { recursive: true, force: true });
     }
@@ -2403,23 +2511,25 @@ relations:
       assert.deepEqual(constraints["c-col"].touched, ["tests/member.txt"]);
       assert.deepEqual(constraints["c-gen"].scope, ["gen/out.txt", "src/source.txt"]);
       assert.deepEqual(constraints["c-gen"].touched, ["gen/out.txt"]);
-      console.log("#840 C4_SCOPES=" + JSON.stringify(
-        Object.fromEntries(Object.entries(constraints).map(([id, item]) => [id, {
-          requirementId: item.requirementId,
-          constraintId: item.constraintId,
-          basis: item.basis,
-          activation: item.activation,
-          scope: item.scope,
-          scopeProofs: item.scopeProofs,
-          touched: item.touched,
-          observed: item.observed,
-          metric: item.metric,
-          max: item.max,
-          requiredEvidence: item.requiredEvidence,
-          evidenceStatus: item.evidenceStatus,
-          verdict: item.verdict,
-        }])),
-      ));
+      assert.deepEqual(constraints["c-art"].scopeProofs, {
+        "src/art.txt": ["ART", "implemented_by:src/art.txt"],
+      });
+      assert.deepEqual(constraints["c-doc"].scopeProofs, {
+        "docs/data.json": ["DOC", "documents:docs/data.json"],
+      });
+      assert.deepEqual(constraints["c-col"].scopeProofs, {
+        "inventory/resources.json": ["COL", "requires:inventory/resources.json"],
+        "tests/member.txt": [
+          "COL",
+          "requires:inventory/resources.json",
+          "collection:" + collectionSchema840,
+          "member:tests/member.txt",
+        ],
+      });
+      assert.deepEqual(constraints["c-gen"].scopeProofs, {
+        "gen/out.txt": ["GEN", "implemented_by:src/source.txt", "generates:gen/out.txt"],
+        "src/source.txt": ["GEN", "implemented_by:src/source.txt"],
+      });
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
     }
@@ -2440,16 +2550,17 @@ relations:
         head: revision,
       });
       assert.equal(report.ok, false);
-      assert.equal(
-        report.diagnostics.filter((item) =>
-          item.code === "missing_requirement_target" &&
-          item.subject === revision + ":A" &&
-          item.detail === "MISSING").length,
-        2,
-        JSON.stringify(report.diagnostics, null, 2),
-      );
-      assert.ok(report.diagnostics.some((item) => item.code === "unrooted_requirement"));
-      console.log("#840 C5_DANGLING=" + JSON.stringify(report.diagnostics));
+      assert.deepEqual(report.diagnostics, [
+        { code: "j2_not_rooted", subject: revision + ":" },
+        { code: "j3", subject: "authority_base:j2_not_rooted" },
+        { code: "j3", subject: "base:j2_not_rooted" },
+        { code: "j3", subject: "head:j1_not_closed" },
+        { code: "j3", subject: "head:j2_not_rooted" },
+        { code: "missing_requirement_target", subject: revision + ":A", detail: "MISSING" },
+        { code: "missing_requirement_target", subject: revision + ":A", detail: "MISSING" },
+        { code: "unjustified_resource", subject: revision + ":requirements/A.rg.json" },
+        { code: "unrooted_requirement", subject: revision + ":A" },
+      ]);
     } finally {
       rmSync(dangling.root, { recursive: true, force: true });
     }
@@ -2472,9 +2583,17 @@ relations:
         head: revision,
       });
       assert.equal(report.ok, false);
-      assert.ok(report.diagnostics.some((item) => item.code === "unrooted_requirement" && item.subject === revision + ":A"));
-      assert.ok(report.diagnostics.some((item) => item.code === "unrooted_requirement" && item.subject === revision + ":B"));
-      console.log("#840 C5_CYCLE=" + JSON.stringify(report.diagnostics));
+      assert.deepEqual(report.diagnostics, [
+        { code: "j2_not_rooted", subject: revision + ":" },
+        { code: "j3", subject: "authority_base:j2_not_rooted" },
+        { code: "j3", subject: "base:j2_not_rooted" },
+        { code: "j3", subject: "head:j1_not_closed" },
+        { code: "j3", subject: "head:j2_not_rooted" },
+        { code: "unjustified_resource", subject: revision + ":requirements/A.rg.json" },
+        { code: "unjustified_resource", subject: revision + ":requirements/B.rg.json" },
+        { code: "unrooted_requirement", subject: revision + ":A" },
+        { code: "unrooted_requirement", subject: revision + ":B" },
+      ]);
     } finally {
       rmSync(cycle.root, { recursive: true, force: true });
     }
@@ -2493,11 +2612,10 @@ relations:
         head: revision,
       });
       assert.equal(report.ok, false);
-      assert.ok(report.diagnostics.some((item) =>
-        item.code === "missing_resource_target" &&
-        item.subject === revision + ":ROOT" &&
-        item.detail === "src/missing.txt"));
-      console.log("#840 C5_MISSING_RESOURCE=" + JSON.stringify(report.diagnostics));
+      assert.deepEqual(report.diagnostics, [
+        { code: "j3", subject: "head:j1_not_closed" },
+        { code: "missing_resource_target", subject: revision + ":ROOT", detail: "src/missing.txt" },
+      ]);
     } finally {
       rmSync(missing.root, { recursive: true, force: true });
     }
