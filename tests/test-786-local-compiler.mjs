@@ -1644,3 +1644,104 @@ try {
 
   console.log("#836 D1/D2 and compiled-contract regressions loaded");
 }
+
+
+{
+  const cli847 = new URL("../dist/repo-guard.mjs", import.meta.url).pathname;
+  const git847 = (root, ...args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const put847 = (root, path, value) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), value);
+  };
+  const commit847 = (root, message) => {
+    git847(root, "add", "-A");
+    git847(root, "-c", "user.name=#847 Fixture", "-c", "user.email=847@example.invalid",
+      "commit", "-qm", message);
+    return git847(root, "rev-parse", "HEAD");
+  };
+  const check847 = (root, base, head) => {
+    const result = spawnSync(process.execPath, [
+      cli847,
+      "--repo-root", root,
+      "check",
+      "--base", base,
+      "--head", head,
+      "--format", "json",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH },
+    });
+    assert.equal(result.error, undefined);
+    return result;
+  };
+  const reject847 = (result, label) => {
+    assert.equal(result.status, 1, label + " must be rejected before semantic evaluation");
+    assert.equal(result.stdout, "", label + " must not emit a semantic report");
+  };
+
+  test("#847 public check accepts only literal exact BASE/HEAD commit SHA identities", () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-847-"));
+    try {
+      git847(root, "init", "-q", "--object-format=sha1");
+      git847(root, "branch", "-M", "main");
+
+      put847(root, "requirements/core.rg.yaml", `format: repo-guard/requirement-v1
+id: CORE
+normative: "exact identity fixture"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/a.txt"
+`);
+      put847(root, "src/a.txt", "base\n");
+      const base = commit847(root, "base");
+
+      put847(root, "src/a.txt", "head\n");
+      const head = commit847(root, "head");
+      git847(root, "tag", "fixture-tag", head);
+
+      const exact = check847(root, base, head);
+      assert.equal(exact.status, 0, exact.stderr);
+      const report = JSON.parse(exact.stdout);
+      assert.equal(report.ok, true);
+      assert.equal(report.base, base);
+      assert.equal(report.head, head);
+
+      const aliases = [
+        ["main", "main"],
+        ["HEAD", "HEAD"],
+        ["tag", "fixture-tag"],
+        ["abbreviated SHA", head.slice(0, 12)],
+        ["parent expression", head + "^1"],
+        ["tilde expression", head + "~1"],
+      ];
+      for (const [label, alias] of aliases) {
+        reject847(check847(root, alias, head), "BASE " + label);
+        reject847(check847(root, base, alias), "HEAD " + label);
+      }
+
+      const nonexistent = "f".repeat(40);
+      assert.notEqual(nonexistent, base);
+      assert.notEqual(nonexistent, head);
+      reject847(check847(root, nonexistent, head), "nonexistent exact BASE SHA");
+      reject847(check847(root, base, nonexistent), "nonexistent exact HEAD SHA");
+
+      const blob = git847(root, "hash-object", "-w", "src/a.txt");
+      assert.match(blob, /^[0-9a-f]{40}$/);
+      reject847(check847(root, blob, head), "non-commit exact BASE SHA");
+      reject847(check847(root, base, blob), "non-commit exact HEAD SHA");
+
+      for (const malformed of ["A".repeat(40), "bad revision", "bad\nrevision"]) {
+        reject847(check847(root, malformed, head), "malformed BASE " + JSON.stringify(malformed));
+        reject847(check847(root, base, malformed), "malformed HEAD " + JSON.stringify(malformed));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#847 literal exact public check identity matrix loaded");
+}

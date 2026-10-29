@@ -11,11 +11,13 @@ import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff } from "./
 import { evaluateProjectionCheck } from "./projection-check.mjs";
 const sha40 = /^[0-9a-f]{40}$/;
 function resolveCommit(root, ref) {
-    if (!ref || ref.startsWith("-") || /[\s\x00-\x1f]/.test(ref))
-        throw new Error("invalid Git revision");
+    if (!sha40.test(ref))
+        throw new Error("Git revision must be a literal lowercase 40-hex commit SHA");
     const resolved = runGit(["rev-parse", "--verify", ref + "^{commit}"], { cwd: root }).trim();
     if (!sha40.test(resolved))
         throw new Error("Git revision is not an exact SHA-1 commit");
+    if (resolved !== ref)
+        throw new Error("Git revision resolved to a different commit identity");
     return resolved;
 }
 function structuralRoots(lowered) {
