@@ -5,6 +5,10 @@ import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
+import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
+import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
+import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
+import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff } from "../dist/runtime/transition-closure.mjs";
 import { loadNativeRequirements, lowerNativeRequirements, validateCompiledConstraint } from "../dist/runtime/canonical-requirements.mjs";
 import { parseNameStatusZ } from "../dist/diff/parser.mjs";
 import { listTrackedEntriesAtRef, readFileBytesAtRef } from "../dist/git.mjs";
@@ -1884,4 +1888,813 @@ relations:
   });
 
   console.log("#850 replacement-ref exact-object invariant matrix loaded");
+}
+
+
+{
+  const repository840 = "fixture/840";
+  const collectionSchema840 = "repo-guard/resource-collection/v0";
+  const relation840 = (predicate, target, extra = {}) => ({ predicates: [predicate], target, ...extra });
+  const requirementRef840 = (id) => ({ kind: "requirement", id });
+  const artifactRef840 = (path) => ({ kind: "artifact", path });
+  const documentRef840 = (path, pointer = "") => ({ kind: "document", path, pointer });
+  const generates840 = (from, to) => ({
+    source: artifactRef840(from),
+    predicates: ["generates"],
+    target: artifactRef840(to),
+  });
+  const requirement840 = ({ id, normative = "characterize " + id, relations = [], constraints = [] }) =>
+    JSON.stringify({
+      format: "repo-guard/requirement-v1",
+      id,
+      normative,
+      ...(relations.length ? { relations } : {}),
+      ...(constraints.length ? { constraints } : {}),
+    }, null, 2) + "\n";
+
+  const fixture840 = () => {
+    const root = mkdtempSync(join(tmpdir(), "repo-guard-840-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+    const put = (path, value) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), value);
+    };
+    const save = (message) => {
+      git("add", "-A");
+      git("-c", "user.name=#840 Characterization", "-c", "user.email=840@example.invalid", "commit", "-qm", message);
+      return git("rev-parse", "HEAD");
+    };
+    git("init", "-q", "--object-format=sha1");
+    git("branch", "-M", "main");
+    return { root, git, put, save };
+  };
+
+  const open840 = (root, revision) => {
+    const entries = listTrackedEntriesAtRef(revision, root);
+    const trackedPaths = entries.map((entry) => entry.path);
+    const tracked = new Set(trackedPaths);
+    const readExact = (sha, path) =>
+      sha === revision && tracked.has(path) ? readFileBytesAtRef(sha, path, root) : null;
+    const paths = trackedPaths.filter((path) => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
+    const native = loadNativeRequirements({
+      repository: repository840,
+      revision,
+      paths,
+      readFile: readExact,
+    });
+    assert.equal(native.ok, true, JSON.stringify(native.errors, null, 2));
+    const lowered = lowerNativeRequirements(native);
+    assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors, null, 2));
+    const structural = native.requirements
+      .filter((item) => !item.relations.some((relation) => relation.predicate === "derives_from"))
+      .map((item) => item.semantic);
+    const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: structural });
+    assert.equal(j2.ok, true, JSON.stringify(j2, null, 2));
+    const resolver = createResourceResolver({
+      repository: repository840,
+      revision,
+      requirements: lowered.requirements,
+      readers: { [repository840]: readExact },
+    });
+    const j1 = evaluateTrackedResourceClosure({
+      repository: repository840,
+      revision,
+      requirements: lowered.requirements,
+      j2,
+      trackedPaths,
+      resourceRelations: lowered.resourceRelations,
+      resolver,
+    });
+    assert.equal(j1.ok, true, JSON.stringify(j1, null, 2));
+    return {
+      revision,
+      native,
+      lowered,
+      requirements: lowered.requirements,
+      lifecycle: lowered.lifecycle,
+      resourceRelations: lowered.resourceRelations,
+      j2,
+      j1,
+    };
+  };
+
+  const transitionState840 = (state) => ({
+    revision: state.revision,
+    requirements: state.requirements,
+    j2: state.j2,
+    j1: state.j1,
+    resourceRelations: state.resourceRelations,
+  });
+  const transition840 = (baseState, headState, resourceDeltas = []) =>
+    evaluateTransitionCauseClosure({
+      repository: repository840,
+      base: transitionState840(baseState),
+      head: transitionState840(headState),
+      trustedAuthorityBase: transitionState840(baseState),
+      resourceDeltas,
+      baseLifecycle: baseState.lifecycle,
+      headLifecycle: headState.lifecycle,
+    });
+  const diffResources840 = (fx, base, head) => resourceDeltasFromParsedDiff(parseNameStatusZ(
+    execFileSync("git", [
+      "-c", "core.quotepath=false",
+      "diff", "--name-status", "-z", "--find-renames", base, head,
+    ], { cwd: fx.root, encoding: "utf8" }),
+  ));
+
+  test("#840 C1 native structural-root and J2 behavior is characterized through real native sources", () => {
+    const fx = fixture840();
+    try {
+      const docs = [
+        ["R0", []],
+        ["DEP", [relation840("depends_on", requirementRef840("R0"))]],
+        ["CON", [relation840("constrains", requirementRef840("R0"))]],
+        ["SUP", [relation840("supersedes", requirementRef840("R0"))]],
+        ["REQ", [relation840("requires", artifactRef840("src/req.txt"))]],
+        ["IMP", [relation840("implemented_by", artifactRef840("src/imp.txt"))]],
+        ["VER", [relation840("verified_by", artifactRef840("tests/verifier.txt"))]],
+        ["DOC", [relation840("documents", artifactRef840("docs/doc.md"))]],
+        ["AROOT", []],
+        ["BROOT", []],
+        ["MULTI", [
+          relation840("derives_from", requirementRef840("BROOT")),
+          relation840("derives_from", requirementRef840("AROOT")),
+        ]],
+        ["LEAF", [
+          relation840("derives_from", requirementRef840("MULTI")),
+          relation840("derives_from", requirementRef840("BROOT")),
+        ]],
+      ];
+      const proofResources = {
+        DEP: "src/dep-proof.txt",
+        MULTI: "src/multi-proof.txt",
+        LEAF: "src/leaf-proof.txt",
+      };
+      const rootProofConstraint = {
+        id: "root-proof",
+        scope: { relations: ["implemented_by"] },
+        metric: { key: "git.changed_resources", max: 0 },
+      };
+      for (const [id, relations] of docs) {
+        const proofPath = proofResources[id];
+        fx.put("requirements/" + id + ".rg.json", requirement840({
+          id,
+          relations: proofPath
+            ? [...relations, relation840("implemented_by", artifactRef840(proofPath))]
+            : relations,
+          constraints: proofPath ? [rootProofConstraint] : [],
+        }));
+      }
+      for (const [path, value] of [
+        ["src/req.txt", "required\n"],
+        ["src/imp.txt", "implementation\n"],
+        ["tests/verifier.txt", "verification\n"],
+        ["docs/doc.md", "documentation\n"],
+        ["src/dep-proof.txt", "DEP proof resource\n"],
+        ["src/multi-proof.txt", "MULTI proof resource\n"],
+        ["src/leaf-proof.txt", "LEAF proof resource\n"],
+      ]) fx.put(path, value);
+
+      const productionRootProof = (report, id) => {
+        const constraint = report.j3.constraints.find((item) =>
+          item.requirementId === id && item.constraintId === "root-proof");
+        assert.ok(constraint, id + ": missing production Constraint explanation");
+        return constraint.rootedProof;
+      };
+      const assertProductionRootProofs = (report) => {
+        assert.deepEqual(productionRootProof(report, "MULTI"), ["AROOT", "MULTI"]);
+        assert.deepEqual(productionRootProof(report, "LEAF"), ["BROOT", "LEAF"]);
+        assert.deepEqual(productionRootProof(report, "DEP"), ["DEP"]);
+      };
+
+      const base = fx.save("C1 native roots");
+      const report = evaluateLocalCompiler({ root: fx.root, repository: repository840, base, head: base });
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics, null, 2));
+      assert.equal(report.j2.rooted, docs.length);
+      assertProductionRootProofs(report);
+
+      const state = open840(fx.root, base);
+      assert.deepEqual(state.j2.rooted, [
+        "AROOT", "BROOT", "CON", "DEP", "DOC", "IMP", "LEAF", "MULTI", "R0", "REQ", "SUP", "VER",
+      ]);
+      assert.deepEqual(state.j2.unrooted, []);
+      assert.deepEqual(state.j2.errors, []);
+      for (const id of ["R0", "DEP", "CON", "SUP", "REQ", "IMP", "VER", "DOC", "AROOT", "BROOT"])
+        assert.deepEqual(state.j2.explanations[id], [id], id);
+      assert.deepEqual(state.j2.explanations.MULTI, ["AROOT", "MULTI"]);
+      assert.deepEqual(state.j2.explanations.LEAF, ["BROOT", "LEAF"]);
+
+      fx.put("requirements/DEP.rg.json", requirement840({
+        id: "DEP",
+        relations: [
+          relation840("derives_from", requirementRef840("R0")),
+          relation840("implemented_by", artifactRef840("src/dep-proof.txt")),
+        ],
+        constraints: [rootProofConstraint],
+      }));
+      const changed = fx.save("C1 negative control derives_from");
+      const changedReport = evaluateLocalCompiler({
+        root: fx.root,
+        repository: repository840,
+        base: changed,
+        head: changed,
+      });
+      assert.equal(changedReport.ok, true, JSON.stringify(changedReport.diagnostics, null, 2));
+      assert.deepEqual(productionRootProof(changedReport, "DEP"), ["R0", "DEP"]);
+
+      const changedState = open840(fx.root, changed);
+      assert.deepEqual(changedState.j2.explanations.DEP, ["R0", "DEP"]);
+      assert.notDeepEqual(changedState.j2.explanations.DEP, ["DEP"]);
+
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  test("#840 C2 native J1 target-kind, collection and generates ownership matrix is characterized", () => {
+    const fx = fixture840();
+    try {
+      const rootRelations = [
+        relation840("requires", artifactRef840("src/requires.txt")),
+        relation840("implemented_by", artifactRef840("src/impl.txt")),
+        relation840("verified_by", artifactRef840("tests/verifier.mjs")),
+        relation840("documents", artifactRef840("docs/owned.md")),
+        relation840("requires", artifactRef840("inventory/resources.json"), { collection: true }),
+        relation840("implemented_by", artifactRef840("src/source.txt")),
+        generates840("src/source.txt", "gen/out.txt"),
+        relation840("constrains", artifactRef840("src/shared.txt")),
+      ];
+      fx.put("requirements/ROOT.rg.json", requirement840({ id: "ROOT", relations: rootRelations }));
+      fx.put("requirements/OWNER.rg.json", requirement840({
+        id: "OWNER",
+        relations: [relation840("implemented_by", artifactRef840("src/shared.txt"))],
+      }));
+      fx.put("requirements/DOC.rg.json", requirement840({
+        id: "DOC",
+        relations: [relation840("documents", documentRef840("docs/data.json", "/section"))],
+      }));
+      fx.put("requirements/DOCOWNER.rg.json", requirement840({
+        id: "DOCOWNER",
+        relations: [relation840("implemented_by", artifactRef840("docs/data.json"))],
+      }));
+      for (const [path, value] of [
+        ["src/requires.txt", "requires\n"],
+        ["src/impl.txt", "implementation\n"],
+        ["tests/verifier.mjs", "export {};\n"],
+        ["docs/owned.md", "owned docs\n"],
+        ["src/source.txt", "source\n"],
+        ["gen/out.txt", "generated\n"],
+        ["src/shared.txt", "shared\n"],
+        ["docs/data.json", JSON.stringify({ section: { value: 1 } }) + "\n"],
+        ["inventory/resources.json", JSON.stringify({
+          schema: collectionSchema840,
+          members: ["tests/member.txt"],
+        }, null, 2) + "\n"],
+        ["tests/member.txt", "member\n"],
+      ]) fx.put(path, value);
+
+      const revision = fx.save("C2 ownership matrix");
+      const state = open840(fx.root, revision);
+      for (const path of ["src/requires.txt", "src/impl.txt", "tests/verifier.mjs", "docs/owned.md", "src/source.txt"])
+        assert.deepEqual(state.j1.owners[path], ["ROOT"], path);
+      assert.deepEqual(state.j1.explanations["src/requires.txt"], ["ROOT", "requires:src/requires.txt"]);
+      assert.deepEqual(state.j1.explanations["src/impl.txt"], ["ROOT", "implemented_by:src/impl.txt"]);
+      assert.deepEqual(state.j1.explanations["tests/verifier.mjs"], ["ROOT", "verified_by:tests/verifier.mjs"]);
+      assert.deepEqual(state.j1.explanations["docs/owned.md"], ["ROOT", "documents:docs/owned.md"]);
+      assert.deepEqual(state.j1.owners["src/shared.txt"], ["OWNER"]);
+      assert.deepEqual(state.j1.owners["docs/data.json"], ["DOCOWNER"]);
+      assert.deepEqual(state.j1.owners["inventory/resources.json"], ["ROOT"]);
+      assert.deepEqual(state.j1.owners["tests/member.txt"], ["ROOT"]);
+      assert.deepEqual(state.j1.owners["gen/out.txt"], ["ROOT"]);
+
+      assert.deepEqual(state.j1.explanations["gen/out.txt"], [
+        "ROOT",
+        "implemented_by:src/source.txt",
+        "generates:gen/out.txt",
+      ]);
+      assert.deepEqual(state.j1.explanations["tests/member.txt"], [
+        "ROOT",
+        "requires:inventory/resources.json",
+        "collection:" + collectionSchema840,
+        "member:tests/member.txt",
+      ]);
+      assert.deepEqual(state.j1.collections, [{
+        owner: "ROOT",
+        predicate: "requires",
+        manifest: "inventory/resources.json",
+        schema: collectionSchema840,
+        members: ["tests/member.txt"],
+      }]);
+      assert.deepEqual(state.resourceRelations, [{
+        from: "src/source.txt",
+        kind: "generates",
+        to: "gen/out.txt",
+      }]);
+      const loweredRootRelations = state.requirements.index.ROOT.value.relations;
+      assert.equal(Object.values(loweredRootRelations).some((item) => item.predicate === "generates"), false);
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  test("#840 C3 native J3 relation delta reconstruction and predicate impact are characterized", () => {
+    const fx = fixture840();
+    try {
+      const baseDocs = {
+        REPLACE: [relation840("depends_on", requirementRef840("B1"))],
+        B1: [],
+        C1: [],
+        REMOVE: [relation840("constrains", requirementRef840("B2"))],
+        B2: [],
+        ADD: [],
+        B3: [],
+        COLL: [relation840("requires", artifactRef840("inventory/empty.resources.json"))],
+        GEN: [relation840("implemented_by", artifactRef840("src/source.txt"))],
+      };
+      for (const [id, relations] of Object.entries(baseDocs))
+        fx.put("requirements/" + id + ".rg.json", requirement840({ id, relations }));
+      fx.put("src/source.txt", "source\n");
+      fx.put("inventory/empty.resources.json", JSON.stringify({
+        schema: collectionSchema840,
+        members: [],
+      }, null, 2) + "\n");
+      const base = fx.save("C3 relation base");
+
+      fx.put("requirements/REPLACE.rg.json", requirement840({
+        id: "REPLACE",
+        relations: [relation840("depends_on", requirementRef840("C1"))],
+      }));
+      fx.put("requirements/REMOVE.rg.json", requirement840({ id: "REMOVE" }));
+      fx.put("requirements/ADD.rg.json", requirement840({
+        id: "ADD",
+        relations: [relation840("supersedes", requirementRef840("B3"))],
+      }));
+      fx.put("requirements/COLL.rg.json", requirement840({
+        id: "COLL",
+        relations: [relation840("requires", artifactRef840("inventory/empty.resources.json"), { collection: true })],
+      }));
+      fx.put("requirements/GEN.rg.json", requirement840({
+        id: "GEN",
+        relations: [
+          relation840("implemented_by", artifactRef840("src/source.txt")),
+          generates840("src/source.txt", "gen/out.txt"),
+        ],
+      }));
+      fx.put("gen/out.txt", "generated\n");
+      const head = fx.save("C3 relation head");
+
+      const transition = transition840(open840(fx.root, base), open840(fx.root, head));
+      assert.equal(transition.ok, true, JSON.stringify(transition.reasons, null, 2));
+      const relationDeltas = transition.deltas.filter((delta) => delta.kind.startsWith("relation_"));
+      const addId =
+        'relation_add:{"from":"ADD","origin":"requirement","predicate":"supersedes","target":"{\\\"id\\\":\\\"B3\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const generatesId =
+        'relation_add:{"from":"src/source.txt","origin":"resource","predicate":"generates","target":"{\\\"kind\\\":\\\"artifact\\\",\\\"path\\\":\\\"gen/out.txt\\\"}"}';
+      const removeId =
+        'relation_remove:{"from":"REMOVE","origin":"requirement","predicate":"constrains","target":"{\\\"id\\\":\\\"B2\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const collectionBefore =
+        '{"from":"COLL","origin":"requirement","predicate":"requires","target":"{\\\"kind\\\":\\\"artifact\\\",\\\"path\\\":\\\"inventory/empty.resources.json\\\"}"}';
+      const collectionAfter =
+        '{"collection":true,"from":"COLL","origin":"requirement","predicate":"requires","target":"{\\\"kind\\\":\\\"artifact\\\",\\\"path\\\":\\\"inventory/empty.resources.json\\\"}"}';
+      const collectionId = "relation_replace:" + collectionBefore + "->" + collectionAfter;
+      const replaceBefore =
+        '{"from":"REPLACE","origin":"requirement","predicate":"depends_on","target":"{\\\"id\\\":\\\"B1\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const replaceAfter =
+        '{"from":"REPLACE","origin":"requirement","predicate":"depends_on","target":"{\\\"id\\\":\\\"C1\\\",\\\"kind\\\":\\\"requirement\\\"}"}';
+      const replaceId = "relation_replace:" + replaceBefore + "->" + replaceAfter;
+      assert.deepEqual(relationDeltas, [
+        { id: addId, kind: "relation_add", subject: "ADD" },
+        { id: generatesId, kind: "relation_add", subject: "src/source.txt" },
+        { id: removeId, kind: "relation_remove", subject: "REMOVE" },
+        { id: collectionId, kind: "relation_replace", subject: "COLL" },
+        { id: replaceId, kind: "relation_replace", subject: "REPLACE" },
+      ]);
+      const relationWhy = transition.explanations.whyChanged.filter((item) => item.kind.startsWith("relation_"));
+      assert.deepEqual(relationWhy, [
+        {
+          id: addId, kind: "relation_add", subject: "ADD",
+          affected: ["ADD", "B3"], applicable: ["ADD", "B3"],
+          directApplicable: ["ADD", "B3"], reverseImpact: [],
+          causalCandidates: ["ADD", "B3"], causes: ["ADD", "B3"],
+        },
+        {
+          id: generatesId, kind: "relation_add", subject: "src/source.txt",
+          affected: ["GEN"], applicable: ["GEN"], directApplicable: ["GEN"], reverseImpact: [],
+          causalCandidates: ["GEN"], causes: ["GEN"],
+        },
+        {
+          id: removeId, kind: "relation_remove", subject: "REMOVE",
+          affected: ["B2", "REMOVE"], applicable: ["B2", "REMOVE"],
+          directApplicable: ["B2", "REMOVE"], reverseImpact: [],
+          causalCandidates: ["B2", "REMOVE"], causes: ["B2", "REMOVE"],
+        },
+        {
+          id: collectionId, kind: "relation_replace", subject: "COLL",
+          affected: ["COLL"], applicable: ["COLL"], directApplicable: ["COLL"], reverseImpact: [],
+          causalCandidates: ["COLL"], causes: ["COLL"],
+        },
+        {
+          id: replaceId, kind: "relation_replace", subject: "REPLACE",
+          affected: ["B1", "C1", "REPLACE"], applicable: ["B1", "C1", "REPLACE"],
+          directApplicable: ["B1", "C1", "REPLACE"], reverseImpact: [],
+          causalCandidates: ["B1", "C1", "REPLACE"], causes: ["B1", "C1", "REPLACE"],
+        },
+      ]);
+      assert.deepEqual(transition.affectedRequirements, [
+        "ADD", "B1", "B2", "B3", "C1", "COLL", "GEN", "REMOVE", "REPLACE",
+      ]);
+
+      // Directional impact negative controls use Requirement semantic mutation, not relation deltas,
+      // so direct relation endpoints do not mask reverse-impact semantics.
+      fx.git("checkout", "-q", base);
+      for (const id of ["DPARENT", "DCHILD", "DEPTARGET", "DEPEND", "CONTARGET", "CONSTRAINER"]) {
+        const relations =
+          id === "DCHILD" ? [relation840("derives_from", requirementRef840("DPARENT"))] :
+          id === "DEPEND" ? [relation840("depends_on", requirementRef840("DEPTARGET"))] :
+          id === "CONSTRAINER" ? [relation840("constrains", requirementRef840("CONTARGET"))] :
+          [];
+        fx.put("requirements/" + id + ".rg.json", requirement840({ id, relations }));
+      }
+      const impactBase = fx.save("C3 impact base");
+
+      for (const id of ["DPARENT", "DEPTARGET", "CONTARGET"]) {
+        const relations =
+          id === "DEPTARGET" ? [] :
+          id === "CONTARGET" ? [] : [];
+        fx.put("requirements/" + id + ".rg.json", requirement840({
+          id,
+          normative: "changed target " + id,
+          relations,
+        }));
+      }
+      const targetHead = fx.save("C3 impact targets");
+      const targetImpact = transition840(open840(fx.root, impactBase), open840(fx.root, targetHead));
+      const targetWhy = Object.fromEntries(
+        targetImpact.explanations.whyChanged
+          .filter((item) => item.kind === "requirement_modify")
+          .map((item) => [item.subject, item]),
+      );
+      const expectedRequirementImpact = (subject, affected, reverseImpact) => ({
+        id: "requirement_modify:" + subject,
+        kind: "requirement_modify",
+        subject,
+        affected,
+        applicable: affected,
+        directApplicable: [subject],
+        reverseImpact,
+        causalCandidates: [subject],
+        causes: [subject],
+      });
+      assert.deepEqual(
+        targetWhy.DPARENT,
+        expectedRequirementImpact("DPARENT", ["DCHILD", "DPARENT"], ["DCHILD"]),
+      );
+      assert.deepEqual(
+        targetWhy.DEPTARGET,
+        expectedRequirementImpact("DEPTARGET", ["DEPEND", "DEPTARGET"], ["DEPEND"]),
+      );
+      assert.deepEqual(
+        targetWhy.CONTARGET,
+        expectedRequirementImpact("CONTARGET", ["CONSTRAINER", "CONTARGET"], ["CONSTRAINER"]),
+      );
+
+      fx.git("checkout", "-q", impactBase);
+      fx.put("requirements/DCHILD.rg.json", requirement840({
+        id: "DCHILD",
+        normative: "changed source DCHILD",
+        relations: [relation840("derives_from", requirementRef840("DPARENT"))],
+      }));
+      fx.put("requirements/DEPEND.rg.json", requirement840({
+        id: "DEPEND",
+        normative: "changed source DEPEND",
+        relations: [relation840("depends_on", requirementRef840("DEPTARGET"))],
+      }));
+      fx.put("requirements/CONSTRAINER.rg.json", requirement840({
+        id: "CONSTRAINER",
+        normative: "changed source CONSTRAINER",
+        relations: [relation840("constrains", requirementRef840("CONTARGET"))],
+      }));
+      const sourceHead = fx.save("C3 impact sources");
+      const sourceImpact = transition840(open840(fx.root, impactBase), open840(fx.root, sourceHead));
+      const sourceWhy = Object.fromEntries(
+        sourceImpact.explanations.whyChanged
+          .filter((item) => item.kind === "requirement_modify")
+          .map((item) => [item.subject, item]),
+      );
+      assert.deepEqual(
+        sourceWhy.DCHILD,
+        expectedRequirementImpact("DCHILD", ["DCHILD", "DPARENT"], ["DPARENT"]),
+      );
+      assert.deepEqual(
+        sourceWhy.DEPEND,
+        expectedRequirementImpact("DEPEND", ["DEPEND"], []),
+      );
+      assert.deepEqual(
+        sourceWhy.CONSTRAINER,
+        expectedRequirementImpact("CONSTRAINER", ["CONSTRAINER"], []),
+      );
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  test("#840 C4 native Constraint lowering and J3 scope equivalence are characterized", () => {
+    const defaults = fixture840();
+    try {
+      const relations = [
+        relation840("implemented_by", artifactRef840("src/a.txt")),
+        relation840("verified_by", artifactRef840("tests/v.mjs")),
+      ];
+      defaults.put("requirements/R.rg.json", requirement840({
+        id: "R",
+        relations,
+        constraints: [{
+          id: "guard",
+          scope: { relations: ["verified_by", "implemented_by"] },
+          metric: { key: "git.changed_resources", max: 10 },
+        }],
+      }));
+      defaults.put("src/a.txt", "a\n");
+      defaults.put("tests/v.mjs", "export {};\n");
+      const base = defaults.save("C4 defaults base");
+      defaults.put("requirements/R.rg.json", requirement840({
+        id: "R",
+        relations,
+        constraints: [{
+          id: "guard",
+          activation: "scoped_change",
+          scope: { relations: ["implemented_by", "verified_by"], include_generated: false },
+          metric: { key: "git.changed_resources", max: 10 },
+        }],
+      }));
+      const head = defaults.save("C4 explicit defaults head");
+      const baseState = open840(defaults.root, base);
+      const headState = open840(defaults.root, head);
+      assert.deepEqual(baseState.native.index.R.constraints, headState.native.index.R.constraints);
+      assert.deepEqual(
+        baseState.requirements.index.R.value.constraints,
+        headState.requirements.index.R.value.constraints,
+      );
+      const convergence = transition840(baseState, headState);
+      assert.equal(convergence.ok, true, JSON.stringify(convergence.reasons, null, 2));
+      assert.equal(convergence.deltas.some((delta) => delta.kind.startsWith("constraint_")), false);
+      const guards = convergence.explanations.constraints.filter((item) =>
+        item.requirementId === "R" && item.constraintId === "guard");
+      assert.equal(guards.length, 1, JSON.stringify(convergence.explanations.constraints, null, 2));
+      assert.deepEqual(guards[0], {
+        requirementId: "R",
+        constraintId: "guard",
+        basis: "AUTHORITY",
+        activation: "scoped_change",
+        directApplicable: false,
+        selectedCause: false,
+        reverseImpacted: false,
+        rootedProof: ["R"],
+        exactTransition: {
+          authorityBaseRevision: base,
+          baseRevision: base,
+          headRevision: head,
+        },
+        metric: "changed_resources",
+        max: 10,
+        scope: ["src/a.txt", "tests/v.mjs"],
+        scopeProofs: {
+          "src/a.txt": ["R", "implemented_by:src/a.txt"],
+          "tests/v.mjs": ["R", "verified_by:tests/v.mjs"],
+        },
+        touched: [],
+        observed: null,
+        observationSources: [],
+        requiredEvidence: null,
+        evidenceStatus: null,
+        verdict: "NOT_APPLICABLE",
+      });
+    } finally {
+      rmSync(defaults.root, { recursive: true, force: true });
+    }
+
+    const fx = fixture840();
+    try {
+      fx.put("requirements/ART.rg.json", requirement840({
+        id: "ART",
+        relations: [relation840("implemented_by", artifactRef840("src/art.txt"))],
+        constraints: [{
+          id: "c-art",
+          scope: { relations: ["implemented_by"] },
+          metric: { key: "git.changed_resources", max: 1 },
+        }],
+      }));
+      fx.put("requirements/DOC.rg.json", requirement840({
+        id: "DOC",
+        relations: [relation840("documents", documentRef840("docs/data.json", "/section"))],
+        constraints: [{
+          id: "c-doc",
+          scope: { relations: ["documents"] },
+          metric: { key: "git.changed_resources", max: 1 },
+        }],
+      }));
+      fx.put("requirements/DOCOWNER.rg.json", requirement840({
+        id: "DOCOWNER",
+        relations: [relation840("implemented_by", artifactRef840("docs/data.json"))],
+      }));
+      fx.put("requirements/COL.rg.json", requirement840({
+        id: "COL",
+        relations: [relation840("requires", artifactRef840("inventory/resources.json"), { collection: true })],
+        constraints: [{
+          id: "c-col",
+          scope: { relations: ["requires"] },
+          metric: { key: "git.changed_resources", max: 1 },
+        }],
+      }));
+      fx.put("requirements/GEN.rg.json", requirement840({
+        id: "GEN",
+        relations: [
+          relation840("implemented_by", artifactRef840("src/source.txt")),
+          generates840("src/source.txt", "gen/out.txt"),
+        ],
+        constraints: [{
+          id: "c-gen",
+          scope: { relations: ["implemented_by"], include_generated: true },
+          metric: { key: "git.changed_resources", max: 1 },
+        }],
+      }));
+      fx.put("src/art.txt", "before art\n");
+      fx.put("docs/data.json", JSON.stringify({ section: { value: "before" } }) + "\n");
+      fx.put("inventory/resources.json", JSON.stringify({
+        schema: collectionSchema840,
+        members: ["tests/member.txt"],
+      }, null, 2) + "\n");
+      fx.put("tests/member.txt", "before member\n");
+      fx.put("src/source.txt", "stable source\n");
+      fx.put("gen/out.txt", "before generated\n");
+      const base = fx.save("C4 scope base");
+
+      fx.put("src/art.txt", "after art\n");
+      fx.put("docs/data.json", JSON.stringify({ section: { value: "after" } }) + "\n");
+      fx.put("tests/member.txt", "after member\n");
+      fx.put("gen/out.txt", "after generated\n");
+      const head = fx.save("C4 scope head");
+
+      const transition = transition840(
+        open840(fx.root, base),
+        open840(fx.root, head),
+        diffResources840(fx, base, head),
+      );
+      assert.equal(transition.ok, true, JSON.stringify(transition.reasons, null, 2));
+      const constraints = Object.fromEntries(
+        transition.explanations.constraints.map((item) => [item.constraintId, item]),
+      );
+      for (const id of ["c-art", "c-doc", "c-col", "c-gen"]) {
+        assert.ok(constraints[id], JSON.stringify(transition.explanations.constraints, null, 2));
+        assert.equal(constraints[id].basis, "AUTHORITY");
+        assert.equal(constraints[id].activation, "scoped_change");
+        assert.equal(constraints[id].observed, 1);
+        assert.equal(constraints[id].metric, "changed_resources");
+        assert.equal(constraints[id].max, 1);
+        assert.equal(constraints[id].requiredEvidence, null);
+        assert.equal(constraints[id].evidenceStatus, null);
+        assert.equal(constraints[id].verdict, "PASS");
+      }
+      assert.deepEqual(constraints["c-art"].scope, ["src/art.txt"]);
+      assert.deepEqual(constraints["c-art"].touched, ["src/art.txt"]);
+      assert.deepEqual(constraints["c-doc"].scope, ["docs/data.json"]);
+      assert.deepEqual(constraints["c-doc"].touched, ["docs/data.json"]);
+      assert.deepEqual(constraints["c-col"].scope, ["inventory/resources.json", "tests/member.txt"]);
+      assert.deepEqual(constraints["c-col"].touched, ["tests/member.txt"]);
+      assert.deepEqual(constraints["c-gen"].scope, ["gen/out.txt", "src/source.txt"]);
+      assert.deepEqual(constraints["c-gen"].touched, ["gen/out.txt"]);
+      assert.deepEqual(constraints["c-art"].scopeProofs, {
+        "src/art.txt": ["ART", "implemented_by:src/art.txt"],
+      });
+      assert.deepEqual(constraints["c-doc"].scopeProofs, {
+        "docs/data.json": ["DOC", "documents:docs/data.json"],
+      });
+      assert.deepEqual(constraints["c-col"].scopeProofs, {
+        "inventory/resources.json": ["COL", "requires:inventory/resources.json"],
+        "tests/member.txt": [
+          "COL",
+          "requires:inventory/resources.json",
+          "collection:" + collectionSchema840,
+          "member:tests/member.txt",
+        ],
+      });
+      assert.deepEqual(constraints["c-gen"].scopeProofs, {
+        "gen/out.txt": ["GEN", "implemented_by:src/source.txt", "generates:gen/out.txt"],
+        "src/source.txt": ["GEN", "implemented_by:src/source.txt"],
+      });
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  test("#840 C5 native local-compiler diagnostics multiplicity and ordering are characterized", () => {
+    const dangling = fixture840();
+    try {
+      dangling.put("requirements/A.rg.json", requirement840({
+        id: "A",
+        relations: [relation840("derives_from", requirementRef840("MISSING"))],
+      }));
+      const revision = dangling.save("C5 dangling requirement");
+      const entries = listTrackedEntriesAtRef(revision, dangling.root);
+      const requirementPath = "requirements/A.rg.json";
+      const raw = readFileBytesAtRef(revision, requirementPath, dangling.root);
+      assert.ok(raw);
+      const native = loadNativeRequirements({
+        repository: repository840,
+        revision,
+        paths: [requirementPath],
+        readFile: (sha, path) => sha === revision && path === requirementPath ? raw : null,
+      });
+      assert.equal(native.ok, true, JSON.stringify(native.errors, null, 2));
+      const lowered = lowerNativeRequirements(native);
+      assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors, null, 2));
+      const j2 = evaluateRootedRequirements({ requirements: lowered.requirements, trustedRoots: [] });
+      assert.deepEqual(j2, {
+        ok: false,
+        rooted: [],
+        unrooted: ["A"],
+        errors: [{ code: "missing_requirement_target", requirement: "A", target: "MISSING" }],
+        explanations: {},
+      });
+      assert.deepEqual(entries.map((entry) => entry.path), [requirementPath]);
+
+      const report = evaluateLocalCompiler({
+        root: dangling.root,
+        repository: repository840,
+        base: revision,
+        head: revision,
+      });
+      assert.equal(report.ok, false);
+      assert.deepEqual(report.diagnostics, [
+        { code: "j2_not_rooted", subject: revision + ":", detail: undefined },
+        { code: "j3", subject: "authority_base:j2_not_rooted" },
+        { code: "j3", subject: "base:j2_not_rooted" },
+        { code: "j3", subject: "head:j1_not_closed" },
+        { code: "j3", subject: "head:j2_not_rooted" },
+        { code: "missing_requirement_target", subject: revision + ":A", detail: "MISSING" },
+        { code: "missing_requirement_target", subject: revision + ":A", detail: "MISSING" },
+        { code: "unjustified_resource", subject: revision + ":requirements/A.rg.json" },
+        { code: "unrooted_requirement", subject: revision + ":A" },
+      ]);
+    } finally {
+      rmSync(dangling.root, { recursive: true, force: true });
+    }
+
+    const cycle = fixture840();
+    try {
+      cycle.put("requirements/A.rg.json", requirement840({
+        id: "A",
+        relations: [relation840("derives_from", requirementRef840("B"))],
+      }));
+      cycle.put("requirements/B.rg.json", requirement840({
+        id: "B",
+        relations: [relation840("derives_from", requirementRef840("A"))],
+      }));
+      const revision = cycle.save("C5 unrooted cycle");
+      const report = evaluateLocalCompiler({
+        root: cycle.root,
+        repository: repository840,
+        base: revision,
+        head: revision,
+      });
+      assert.equal(report.ok, false);
+      assert.deepEqual(report.diagnostics, [
+        { code: "j2_not_rooted", subject: revision + ":", detail: undefined },
+        { code: "j3", subject: "authority_base:j2_not_rooted" },
+        { code: "j3", subject: "base:j2_not_rooted" },
+        { code: "j3", subject: "head:j1_not_closed" },
+        { code: "j3", subject: "head:j2_not_rooted" },
+        { code: "unjustified_resource", subject: revision + ":requirements/A.rg.json" },
+        { code: "unjustified_resource", subject: revision + ":requirements/B.rg.json" },
+        { code: "unrooted_requirement", subject: revision + ":A" },
+        { code: "unrooted_requirement", subject: revision + ":B" },
+      ]);
+    } finally {
+      rmSync(cycle.root, { recursive: true, force: true });
+    }
+
+    const missing = fixture840();
+    try {
+      missing.put("requirements/ROOT.rg.json", requirement840({
+        id: "ROOT",
+        relations: [relation840("implemented_by", artifactRef840("src/missing.txt"))],
+      }));
+      const revision = missing.save("C5 missing resource");
+      const report = evaluateLocalCompiler({
+        root: missing.root,
+        repository: repository840,
+        base: revision,
+        head: revision,
+      });
+      assert.equal(report.ok, false);
+      assert.deepEqual(report.diagnostics, [
+        { code: "j3", subject: "head:j1_not_closed" },
+        { code: "missing_resource_target", subject: revision + ":ROOT", detail: "src/missing.txt" },
+      ]);
+    } finally {
+      rmSync(missing.root, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#840 characterization scaffold C1-C5 loaded; C6 remains covered by test-707-i5 legacy value.transition sentinel");
 }
