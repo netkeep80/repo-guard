@@ -1981,6 +1981,14 @@ relations:
   const transitionState840 = (state) => ({
     revision: state.revision,
     requirements: state.requirements,
+    compiledConstraints: state.lowered.compiledConstraints,
+    j2: state.j2,
+    j1: state.j1,
+    resourceRelations: state.resourceRelations,
+  });
+  const legacyTransitionState840 = (state) => ({
+    revision: state.revision,
+    requirements: state.requirements,
     j2: state.j2,
     j1: state.j1,
     resourceRelations: state.resourceRelations,
@@ -1991,6 +1999,16 @@ relations:
       base: transitionState840(baseState),
       head: transitionState840(headState),
       trustedAuthorityBase: transitionState840(baseState),
+      resourceDeltas,
+      baseLifecycle: baseState.lifecycle,
+      headLifecycle: headState.lifecycle,
+    });
+  const legacyTransition840 = (baseState, headState, resourceDeltas = []) =>
+    evaluateTransitionCauseClosure({
+      repository: repository840,
+      base: legacyTransitionState840(baseState),
+      head: legacyTransitionState840(headState),
+      trustedAuthorityBase: legacyTransitionState840(baseState),
       resourceDeltas,
       baseLifecycle: baseState.lifecycle,
       headLifecycle: headState.lifecycle,
@@ -2620,7 +2638,10 @@ relations:
         baseState.requirements.index.R.value.constraints,
         headState.requirements.index.R.value.constraints,
       );
+      assert.deepEqual(baseState.lowered.compiledConstraints, headState.lowered.compiledConstraints);
       const convergence = transition840(baseState, headState);
+      const legacyConvergence = legacyTransition840(baseState, headState);
+      assert.deepEqual(convergence, legacyConvergence);
       assert.equal(convergence.ok, true, JSON.stringify(convergence.reasons, null, 2));
       assert.equal(convergence.deltas.some((delta) => delta.kind.startsWith("constraint_")), false);
       const guards = convergence.explanations.constraints.filter((item) =>
@@ -2720,11 +2741,12 @@ relations:
       fx.put("gen/out.txt", "after generated\n");
       const head = fx.save("C4 scope head");
 
-      const transition = transition840(
-        open840(fx.root, base),
-        open840(fx.root, head),
-        diffResources840(fx, base, head),
-      );
+      const baseState = open840(fx.root, base);
+      const headState = open840(fx.root, head);
+      const resourceDeltas = diffResources840(fx, base, head);
+      const transition = transition840(baseState, headState, resourceDeltas);
+      const legacyTransition = legacyTransition840(baseState, headState, resourceDeltas);
+      assert.deepEqual(transition, legacyTransition);
       assert.equal(transition.ok, true, JSON.stringify(transition.reasons, null, 2));
       const constraints = Object.fromEntries(
         transition.explanations.constraints.map((item) => [item.constraintId, item]),
@@ -2767,6 +2789,181 @@ relations:
         "gen/out.txt": ["GEN", "implemented_by:src/source.txt", "generates:gen/out.txt"],
         "src/source.txt": ["GEN", "implemented_by:src/source.txt"],
       });
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+
+  test("#840 Slice 3 typed compiled Constraint engine is exact legacy parity for activation metrics generation and evidence", () => {
+    const fx = fixture840();
+    try {
+      const relations = [
+        relation840("implemented_by", artifactRef840("src/a.txt")),
+        relation840("implemented_by", artifactRef840("src/ui.txt")),
+        relation840("implemented_by", artifactRef840("docs/data.json")),
+        relation840("documents", documentRef840("docs/data.json", "/section")),
+        relation840("verified_by", artifactRef840("tests/v.mjs")),
+        relation840("constrains", artifactRef840("src/ui.txt")),
+        generates840("src/a.txt", "gen/a.js"),
+      ];
+      const constraints = [
+        {
+          id: "scoped",
+          activation: "scoped_change",
+          scope: { relations: ["implemented_by"], include_generated: false },
+          metric: { key: "git.changed_resources", max: 10 },
+        },
+        {
+          id: "generated",
+          scope: { relations: ["implemented_by"], include_generated: true },
+          metric: { key: "git.changed_resources", max: 10 },
+        },
+        {
+          id: "cause",
+          activation: "requirement_cause",
+          scope: { relations: ["constrains"] },
+          metric: { key: "git.changed_resources", max: 10 },
+        },
+        {
+          id: "lines",
+          scope: { relations: ["documents"] },
+          metric: { key: "git.changed_lines", max: 10 },
+        },
+        {
+          id: "domain",
+          scope: { relations: ["implemented_by"] },
+          evidence: { class: "domain", key: "domain:parity" },
+        },
+        {
+          id: "execution",
+          scope: { relations: ["implemented_by"] },
+          evidence: {
+            class: "execution",
+            key: "execution:tests/v.mjs",
+            verifier: artifactRef840("tests/v.mjs"),
+          },
+        },
+      ];
+      fx.put("requirements/R.rg.json", requirement840({ id: "R", relations, constraints }));
+      fx.put("src/a.txt", "before a\n");
+      fx.put("src/ui.txt", "before ui\n");
+      fx.put("docs/data.json", JSON.stringify({ section: { value: "before" } }) + "\n");
+      fx.put("tests/v.mjs", "export {};\n");
+      fx.put("gen/a.js", "before generated\n");
+      const base = fx.save("Slice 3 parity base");
+
+      fx.put("src/a.txt", "after a\n");
+      fx.put("src/ui.txt", "after ui\n");
+      fx.put("docs/data.json", JSON.stringify({ section: { value: "after" } }) + "\n");
+      fx.put("gen/a.js", "after generated\n");
+      const head = fx.save("Slice 3 parity head");
+
+      const baseState = open840(fx.root, base);
+      const headState = open840(fx.root, head);
+      const resourceDeltas = diffResources840(fx, base, head);
+      const observationFacts = [{
+        authorityBaseRevision: base,
+        baseRevision: base,
+        headRevision: head,
+        path: "docs/data.json",
+        metric: "changed_lines",
+        value: 2,
+      }];
+      const evaluateWith = (stateOf) => evaluateTransitionCauseClosure({
+        repository: repository840,
+        base: stateOf(baseState),
+        head: stateOf(headState),
+        trustedAuthorityBase: stateOf(baseState),
+        resourceDeltas,
+        baseLifecycle: baseState.lifecycle,
+        headLifecycle: headState.lifecycle,
+        observationFacts,
+      });
+      const typed = evaluateWith(transitionState840);
+      const legacy = evaluateWith(legacyTransitionState840);
+      assert.deepEqual(typed, legacy);
+      assert.equal(typed.ok, true, JSON.stringify(typed.reasons, null, 2));
+
+      const byId = Object.fromEntries(typed.explanations.constraints.map((item) => [item.constraintId, item]));
+      for (const id of ["scoped", "generated", "cause", "lines", "domain", "execution"]) {
+        assert.equal(
+          typed.explanations.constraints.filter((item) => item.constraintId === id).length,
+          1,
+          id + " must execute once across AUTHORITY/BASE/HEAD",
+        );
+      }
+      assert.equal(byId.scoped.activation, "scoped_change");
+      assert.equal(byId.cause.activation, "requirement_cause");
+      assert.equal(byId.cause.directApplicable, true);
+      assert.equal(byId.scoped.metric, "changed_resources");
+      assert.equal(byId.lines.metric, "changed_lines");
+      assert.equal(byId.lines.observed, 2);
+      assert.equal(byId.scoped.scope.includes("gen/a.js"), false);
+      assert.equal(byId.generated.scope.includes("gen/a.js"), true);
+      assert.equal(byId.domain.evidenceStatus, "DELEGATED");
+      assert.equal(byId.domain.verdict, "DELEGATED");
+      assert.equal(byId.execution.evidenceStatus, "DELEGATED");
+      assert.equal(byId.execution.verdict, "DELEGATED");
+    } finally {
+      rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+
+  test("#840 Slice 3 typed Constraint deltas preserve add modify remove identity ordering and legacy parity", () => {
+    const fx = fixture840();
+    try {
+      const relations = [relation840("implemented_by", artifactRef840("src/a.txt"))];
+      fx.put("requirements/R.rg.json", requirement840({
+        id: "R",
+        relations,
+        constraints: [
+          {
+            id: "modify",
+            scope: { relations: ["implemented_by"] },
+            metric: { key: "git.changed_resources", max: 1 },
+          },
+          {
+            id: "remove",
+            scope: { relations: ["implemented_by"] },
+            metric: { key: "git.changed_resources", max: 1 },
+          },
+        ],
+      }));
+      fx.put("src/a.txt", "stable\n");
+      const base = fx.save("Slice 3 delta base");
+
+      fx.put("requirements/R.rg.json", requirement840({
+        id: "R",
+        relations,
+        constraints: [
+          {
+            id: "add",
+            scope: { relations: ["implemented_by"] },
+            metric: { key: "git.changed_resources", max: 1 },
+          },
+          {
+            id: "modify",
+            scope: { relations: ["implemented_by"] },
+            metric: { key: "git.changed_resources", max: 2 },
+          },
+        ],
+      }));
+      const head = fx.save("Slice 3 delta head");
+
+      const baseState = open840(fx.root, base);
+      const headState = open840(fx.root, head);
+      const typed = transition840(baseState, headState);
+      const legacy = legacyTransition840(baseState, headState);
+      assert.deepEqual(typed, legacy);
+      assert.deepEqual(
+        typed.deltas.filter((delta) => delta.kind.startsWith("constraint_")),
+        [
+          { id: "constraint_add:R:add", kind: "constraint_add", subject: "R", constraintId: "add" },
+          { id: "constraint_modify:R:modify", kind: "constraint_modify", subject: "R", constraintId: "modify" },
+          { id: "constraint_remove:R:remove", kind: "constraint_remove", subject: "R", constraintId: "remove" },
+        ],
+      );
     } finally {
       rmSync(fx.root, { recursive: true, force: true });
     }
