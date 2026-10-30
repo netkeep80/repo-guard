@@ -9,7 +9,15 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "src/compiler-core.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/local-compiler.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/compiler-core.mjs"
   - predicates: [verified_by]
     target:
       kind: artifact
