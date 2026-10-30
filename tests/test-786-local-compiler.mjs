@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync,
 import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";\nimport { evaluateCompiler } from "../dist/compiler-core.mjs";
+import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
+import { evaluateCompiler } from "../dist/compiler-core.mjs";
 import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
