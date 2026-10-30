@@ -1,14 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { listTrackedEntriesAtRef, readFileBytesAtRef, runGit } from "./git.mjs";
+import { evaluateCompiler } from "./compiler-core.mjs";
 import { parseNameStatusZ } from "./diff/parser.mjs";
-import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
-import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
-import { evaluateTrackedResourceClosure } from "./runtime/resource-closure.mjs";
-import { createResourceResolver } from "./runtime/resource-resolver.mjs";
-import { evaluateTransitionCauseClosure, resourceDeltasFromParsedDiff } from "./runtime/transition-closure.mjs";
-import { evaluateProjectionCheck } from "./projection-check.mjs";
+import { listTrackedEntriesAtRef, readFileBytesAtRef, runGit } from "./git.mjs";
+import { resourceDeltasFromParsedDiff, } from "./runtime/transition-closure.mjs";
 const sha40 = /^[0-9a-f]{40}$/;
 function resolveCommit(root, ref) {
     if (!sha40.test(ref))
@@ -19,11 +15,6 @@ function resolveCommit(root, ref) {
     if (resolved !== ref)
         throw new Error("Git revision resolved to a different commit identity");
     return resolved;
-}
-function structuralRoots(native) {
-    return native.requirements
-        .filter(item => !item.relations.some(relation => relation.predicate === "derives_from"))
-        .map(item => item.semantic);
 }
 function parseChangedLinesZ(raw) {
     const fields = raw.split("\0");
@@ -137,198 +128,45 @@ function localObservations(repository, base, head, raw) {
         value,
     }));
 }
-export function evaluateLocalCompiler(input) {
-    const diagnostics = [];
-    const states = new Map();
-    const open = (revision) => {
-        const existing = states.get(revision);
-        if (existing)
-            return existing;
-        const entries = listTrackedEntriesAtRef(revision, input.root);
-        const trackedPaths = entries.map(entry => entry.path);
-        const tracked = new Set(trackedPaths);
-        const readExact = (sha, path) => sha === revision && tracked.has(path) ? readFileBytesAtRef(sha, path, input.root) : null;
-        const paths = trackedPaths.filter(path => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
-        const native = loadNativeRequirements({
-            repository: input.repository,
-            revision,
-            paths,
-            readFile: readExact,
-        });
-        const lowered = lowerNativeRequirements(native);
-        const j2 = evaluateRootedRequirements({
-            requirements: lowered.requirements,
-            trustedRoots: structuralRoots(native),
-            nativeRequirements: native.requirements,
-        });
-        let j1 = {
-            ok: false,
-            justified: [],
-            unjustified: entries.map(entry => entry.path),
-            errors: [{ code: "j2_not_rooted", path: "" }],
-            explanations: {},
-            owners: {},
-            collections: [],
-        };
-        if (lowered.requirements.ok && j2.ok) {
-            const resolver = createResourceResolver({
-                repository: input.repository,
-                revision,
-                requirements: lowered.requirements,
-                readers: { [input.repository]: readExact },
-            });
-            j1 = evaluateTrackedResourceClosure({
-                repository: input.repository,
-                revision,
-                requirements: lowered.requirements,
-                j2,
-                trackedPaths,
-                resourceRelations: lowered.resourceRelations,
-                nativeRequirements: native.requirements,
-                resolver,
-            });
-        }
-        for (const error of lowered.requirements.errors)
-            diagnostics.push({ code: "invalid_requirement", subject: revision + ":" + error.path, detail: error.message });
-        for (const error of j2.errors)
-            diagnostics.push({ code: error.code, subject: revision + ":" + error.requirement, detail: error.target });
-        for (const id of j2.unrooted)
-            diagnostics.push({ code: "unrooted_requirement", subject: revision + ":" + id });
-        for (const error of j1.errors)
-            diagnostics.push({ code: error.code, subject: revision + ":" + error.path, detail: error.target });
-        for (const path of j1.unjustified)
-            diagnostics.push({ code: "unjustified_resource", subject: revision + ":" + path });
-        for (const requirement of native.requirements)
-            for (const relation of requirement.relations)
-                if (relation.target.kind === "requirement" && !Object.hasOwn(native.index, relation.target.id))
-                    diagnostics.push({ code: "missing_requirement_target", subject: revision + ":" + requirement.id, detail: relation.target.id });
-        const state = {
-            revision,
-            entries,
-            native,
-            requirements: lowered.requirements,
-            lifecycle: lowered.lifecycle,
-            resourceRelations: lowered.resourceRelations,
-            compiledConstraints: lowered.compiledConstraints,
-            j2,
-            j1,
-        };
-        states.set(revision, state);
-        return state;
+function acquireLocalSnapshot(root, revision) {
+    const entries = listTrackedEntriesAtRef(revision, root);
+    const tracked = new Set(entries.map(entry => entry.path));
+    const treeIdentity = runGit(["rev-parse", "--verify", revision + "^{tree}"], { cwd: root }).trim();
+    if (!sha40.test(treeIdentity))
+        throw new Error("Git tree is not an exact SHA-1 identity");
+    return {
+        revision,
+        treeIdentity,
+        entries,
+        readBytes: (path) => tracked.has(path) ? readFileBytesAtRef(revision, path, root) : null,
     };
+}
+export function evaluateLocalCompiler(input) {
     const base = resolveCommit(input.root, input.base);
     const head = resolveCommit(input.root, input.head);
-    const before = open(base);
-    const after = open(head);
-    const transitionDiff = deterministicTransitionDiff(input.root, base, head);
-    const diff = parseNameStatusZ(transitionDiff.nameStatus);
-    const projectionPath = ".repo-guard/projections.json";
-    const baseProjectionPaths = new Set(before.entries.map((entry) => entry.path));
-    const headProjectionPaths = new Set(after.entries.map((entry) => entry.path));
-    const projectionReport = evaluateProjectionCheck({
-        baseRaw: baseProjectionPaths.has(projectionPath)
-            ? readFileBytesAtRef(base, projectionPath, input.root)
-            : null,
-        headRaw: headProjectionPaths.has(projectionPath)
-            ? readFileBytesAtRef(head, projectionPath, input.root)
-            : null,
-        readHead: (path) => headProjectionPaths.has(path) ? readFileBytesAtRef(head, path, input.root) : null,
-        facts: {
-            readFile: (path) => readFileBytesAtRef(head, path, input.root),
-            diff: { files: { checked: diff } },
-        },
-        resolveRequirement: (id) => {
-            // A partially populated native index is not authoritative on invalid snapshots.
-            if (!after.native.ok)
-                return null;
-            const requirement = after.native.index[id];
-            return requirement
-                ? {
-                    digest: requirement.semantic.digest,
-                    path: requirement.source.path,
-                }
-                : null;
-        },
-    });
-    if (projectionReport.present) {
-        for (const diagnostic of projectionReport.diagnostics) {
-            diagnostics.push({
-                code: diagnostic.code,
-                subject: diagnostic.subject,
-                ...(diagnostic.detail ? { detail: diagnostic.detail } : {}),
-            });
-        }
-    }
-    const transition = evaluateTransitionCauseClosure({
-        repository: input.repository,
-        base: {
-            revision: base,
-            requirements: before.requirements,
-            nativeRequirements: before.native.requirements,
-            compiledConstraints: before.compiledConstraints,
-            j2: before.j2,
-            j1: before.j1,
-            resourceRelations: before.resourceRelations,
-        },
-        head: {
-            revision: head,
-            requirements: after.requirements,
-            nativeRequirements: after.native.requirements,
-            compiledConstraints: after.compiledConstraints,
-            j2: after.j2,
-            j1: after.j1,
-            resourceRelations: after.resourceRelations,
-        },
-        trustedAuthorityBase: {
-            revision: base,
-            requirements: before.requirements,
-            nativeRequirements: before.native.requirements,
-            compiledConstraints: before.compiledConstraints,
-            j2: before.j2,
-            j1: before.j1,
-            resourceRelations: before.resourceRelations,
-        },
-        resourceDeltas: resourceDeltasFromParsedDiff(diff),
-        baseLifecycle: before.lifecycle,
-        headLifecycle: after.lifecycle,
-        observationFacts: localObservations(input.repository, base, head, transitionDiff.numstat),
-    });
-    for (const reason of transition.reasons)
-        diagnostics.push({ code: "j3", subject: reason });
-    diagnostics.sort((a, b) => a.code.localeCompare(b.code, "en") ||
-        a.subject.localeCompare(b.subject, "en") ||
-        (a.detail || "").localeCompare(b.detail || "", "en"));
-    return {
-        format: "repo-guard/local-compiler-v1",
-        repository: input.repository,
-        base,
-        head,
-        ok: diagnostics.length === 0
-            && before.j1.ok
-            && after.j1.ok
-            && transition.ok
-            && (!projectionReport.present || projectionReport.ok),
-        j1: {
-            base: before.j1.ok,
-            head: after.j1.ok,
-            tracked: after.entries.length,
-            justified: after.j1.justified.length,
-        },
-        j2: {
-            base: before.j2.ok,
-            head: after.j2.ok,
-            rooted: after.j2.rooted.length,
-        },
-        j3: {
-            changed: diff.length,
-            ok: transition.ok,
-            affectedRequirements: transition.affectedRequirements,
-            deltas: transition.deltas,
-            constraints: transition.explanations.constraints,
-        },
-        diagnostics,
-        ...(projectionReport.present ? { projections: projectionReport } : {}),
+    const snapshots = new Map();
+    const snapshot = (revision) => {
+        const existing = snapshots.get(revision);
+        if (existing)
+            return existing;
+        const acquired = acquireLocalSnapshot(input.root, revision);
+        snapshots.set(revision, acquired);
+        return acquired;
     };
+    const before = snapshot(base);
+    const after = snapshot(head);
+    const transitionDiff = deterministicTransitionDiff(input.root, base, head);
+    const files = parseNameStatusZ(transitionDiff.nameStatus);
+    return evaluateCompiler({
+        repository: input.repository,
+        base: before,
+        head: after,
+        transition: {
+            files,
+            resourceDeltas: resourceDeltasFromParsedDiff(files),
+            observationFacts: localObservations(input.repository, base, head, transitionDiff.numstat),
+        },
+    });
 }
 export function runLocalCheck(roots, args) {
     const option = (name) => {
