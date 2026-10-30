@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync,
 import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
+import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";\nimport { evaluateCompiler } from "../dist/compiler-core.mjs";
 import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
@@ -3395,6 +3395,48 @@ relations:
         },
         diagnostics: [],
       });
+
+      const snapshot861 = (revision) => {
+        const entries = listTrackedEntriesAtRef(revision, root861);
+        const bytes = new Map(entries.map((entry) => [
+          entry.path,
+          readFileBytesAtRef(revision, entry.path, root861),
+        ]));
+        return {
+          revision,
+          treeIdentity: git861("rev-parse", "--verify", revision + "^{tree}"),
+          entries,
+          readBytes: (path) => bytes.get(path) ?? null,
+        };
+      };
+      const baseSnapshot = snapshot861(base);
+      const headSnapshot = snapshot861(head);
+
+      rmSync(root861, { recursive: true, force: true });
+
+      const coreReport = evaluateCompiler({
+        repository: "fixture/861",
+        base: baseSnapshot,
+        head: headSnapshot,
+        transition: {
+          files: [{
+            path: "src/a.txt",
+            addedLines: [],
+            deletedLines: [],
+            status: "modified",
+          }],
+          resourceDeltas: [{ kind: "modify", path: "src/a.txt" }],
+          observationFacts: [{
+            authorityBaseRevision: base,
+            baseRevision: base,
+            headRevision: head,
+            path: "src/a.txt",
+            metric: "changed_lines",
+            value: 2,
+          }],
+        },
+      });
+      assert.deepEqual(coreReport, report, "provider-neutral core must reproduce the exact LocalGit report after acquisition");
     } finally {
       rmSync(root861, { recursive: true, force: true });
     }
