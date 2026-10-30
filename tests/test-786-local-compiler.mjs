@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -3329,6 +3329,13 @@ relations:
 
 
 {
+  test("#861 A2 compiler core has no LocalGit/process/provider dependency", () => {
+    const source = readFileSync(new URL("../src/compiler-core.mts", import.meta.url), "utf8");
+    assert.doesNotMatch(source, /(?:^|\/)git\.mjs["']/m);
+    assert.doesNotMatch(source, /node:child_process/);
+    assert.doesNotMatch(source, /repoRoot|GitHub|GitLab|GH_TOKEN|GITHUB_/);
+  });
+
   test("#861 A1 accepted LocalGit whole-report characterization", () => {
     const root861 = mkdtempSync(join(tmpdir(), "repo-guard-861-a1-"));
     const git861 = (...args) => execFileSync("git", args, { cwd: root861, encoding: "utf8" }).trim();
