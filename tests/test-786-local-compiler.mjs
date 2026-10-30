@@ -3325,3 +3325,80 @@ relations:
 
   console.log("#840 characterization scaffold C1-C5 loaded; C6 remains covered by test-707-i5 legacy value.transition sentinel");
 }
+
+
+{
+  test("#861 A1 accepted LocalGit whole-report characterization", () => {
+    const root861 = mkdtempSync(join(tmpdir(), "repo-guard-861-a1-"));
+    const git861 = (...args) => execFileSync("git", args, { cwd: root861, encoding: "utf8" }).trim();
+    const put861 = (path, value) => {
+      mkdirSync(dirname(join(root861, path)), { recursive: true });
+      writeFileSync(join(root861, path), value);
+    };
+    const commit861 = (message) => {
+      git861("add", "-A");
+      git861("-c", "user.name=#861 A1", "-c", "user.email=861@example.invalid", "commit", "-qm", message);
+      return git861("rev-parse", "HEAD");
+    };
+    try {
+      git861("init", "-q", "--object-format=sha1");
+      put861("requirements/core.rg.yaml", `format: repo-guard/requirement-v1
+id: CORE
+normative: "Slice A characterization"
+relations:
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/a.txt"
+`);
+      put861("src/a.txt", "before\n");
+      const base = commit861("base");
+      put861("src/a.txt", "after\n");
+      const head = commit861("head");
+
+      const report = evaluateLocalCompiler({
+        root: root861,
+        repository: "fixture/861",
+        base,
+        head,
+      });
+
+      assert.deepEqual(report, {
+        format: "repo-guard/local-compiler-v1",
+        repository: "fixture/861",
+        base,
+        head,
+        ok: true,
+        j1: {
+          base: true,
+          head: true,
+          tracked: 2,
+          justified: 2,
+        },
+        j2: {
+          base: true,
+          head: true,
+          rooted: 1,
+        },
+        j3: {
+          changed: 1,
+          ok: true,
+          affectedRequirements: ["CORE"],
+          deltas: [{
+            id: "resource_modify:src/a.txt",
+            kind: "resource_modify",
+            subject: "src/a.txt",
+            afterPath: "src/a.txt",
+            beforePath: "src/a.txt",
+          }],
+          constraints: [],
+        },
+        diagnostics: [],
+      });
+    } finally {
+      rmSync(root861, { recursive: true, force: true });
+    }
+  });
+
+  console.log("#861 Slice A LocalGit whole-report characterization loaded");
+}
