@@ -3472,22 +3472,22 @@ relations:
     return git861(root861, "rev-parse", "HEAD");
   }
   function requirement861(path = "src/a.txt", changedLines = false) {
-    return \`format: repo-guard/requirement-v1
+    return `format: repo-guard/requirement-v1
 id: CORE
 normative: "snapshot transition fixture"
 relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
-      path: "\${path}"
-\${changedLines ? \`constraints:
+      path: "${path}"
+${changedLines ? `constraints:
   - id: lines
     scope:
       relations: [implemented_by]
     metric:
       key: git.changed_lines
       max: 100
-\` : ""}\`;
+` : ""}`;
   }
   function fixture861({ changedLines = false } = {}) {
     const root861 = mkdtempSync(join(tmpdir(), "repo-guard-861-"));
@@ -3601,10 +3601,10 @@ relations:
     const wrapper = join(wrapperRoot, "git");
     const oldPath = process.env.PATH;
     try {
-      writeFileSync(wrapper, \`#!/bin/sh
-printf '%s\\\\n' "$*" >> "\${log}"
-exec "\${realGit861}" "$@"
-\`);
+      writeFileSync(wrapper, `#!/bin/sh
+printf '%s\\\\n' "$*" >> "${log}"
+exec "${realGit861}" "$@"
+`);
       chmodSync(wrapper, 0o755);
       process.env.PATH = wrapperRoot + ":" + oldPath;
       const report = evaluateLocalCompiler({ root: root861, repository: repository861, base, head });
