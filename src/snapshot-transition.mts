@@ -212,6 +212,7 @@ export function snapshotFromImmutableData(input: unknown): SnapshotObservation {
   });
   const repository = typeof value.repository === "string" ? value.repository : fail("repository identity is missing");
   return validateSnapshotObservation(repository, {
+    repository,
     revision: typeof value.revision === "string" ? value.revision : fail("revision is missing"),
     treeIdentity: typeof value.treeIdentity === "string" ? value.treeIdentity : fail("tree identity is missing"),
     complete: value.complete === true ? true : fail("snapshot is incomplete"),
