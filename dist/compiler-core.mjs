@@ -17,8 +17,8 @@ export function evaluateCompiler(input) {
     const headSnapshot = structural.head;
     const states = new Map();
     const snapshots = new Map();
-    snapshots.set(baseSnapshot.revision, input.base);
-    snapshots.set(headSnapshot.revision, input.head);
+    snapshots.set(baseSnapshot.revision, baseSnapshot);
+    snapshots.set(headSnapshot.revision, headSnapshot);
     const open = (revision) => {
         const existing = states.get(revision);
         if (existing)
@@ -167,7 +167,7 @@ export function evaluateCompiler(input) {
         resourceDeltas: structural.resourceDeltas,
         baseLifecycle: before.lifecycle,
         headLifecycle: after.lifecycle,
-        observationFacts: input.transition.observationFacts,
+        observationFacts: input.transition.trustedObservationFacts?.() ?? [],
     });
     for (const reason of transition.reasons)
         diagnostics.push({ code: "j3", subject: reason });

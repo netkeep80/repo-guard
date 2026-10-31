@@ -156,17 +156,17 @@ export function evaluateLocalCompiler(input) {
     };
     const before = snapshot(base);
     const after = snapshot(head);
-    const evaluate = (observationFacts) => evaluateCompiler({
+    const evaluate = (trustedObservationFacts) => evaluateCompiler({
         repository: input.repository,
         base: before,
         head: after,
-        transition: { observationFacts },
+        transition: { trustedObservationFacts },
     });
-    const initial = evaluate([]);
+    const initial = evaluate();
     const needsChangedLines = initial.diagnostics.some(item => item.code === "j3" && item.subject.startsWith("I7:missing_observation:"));
     if (!needsChangedLines)
         return initial;
-    return evaluate(localObservations(input.repository, base, head, deterministicChangedLines(input.root, base, head)));
+    return evaluate(() => localObservations(input.repository, base, head, deterministicChangedLines(input.root, base, head)));
 }
 export function runLocalCheck(roots, args) {
     const option = (name) => {
