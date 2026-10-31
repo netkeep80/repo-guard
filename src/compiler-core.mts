@@ -1,12 +1,15 @@
-import type { ParsedDiffFile } from "./diff/parser.mjs";
 import { evaluateProjectionCheck } from "./projection-check.mjs";
+import {
+  normalizeSnapshotTransition,
+  type SnapshotEntry,
+  type SnapshotObservation,
+} from "./snapshot-transition.mjs";
 import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "./runtime/resource-closure.mjs";
 import { createResourceResolver } from "./runtime/resource-resolver.mjs";
 import {
   evaluateTransitionCauseClosure,
-  type ResourceDeltaObservation,
   type TransitionObservationFact,
 } from "./runtime/transition-closure.mjs";
 
@@ -15,24 +18,11 @@ type Native = ReturnType<typeof loadNativeRequirements>;
 type Lowered = ReturnType<typeof lowerNativeRequirements>;
 type J1 = ReturnType<typeof evaluateTrackedResourceClosure>;
 
-export interface CompilerSnapshotEntry {
-  mode: string;
-  type: "blob" | "commit";
-  object: string;
-  path: string;
-}
-
-export interface CompilerSnapshotObservation {
-  revision: string;
-  treeIdentity: string;
-  entries: readonly CompilerSnapshotEntry[];
-  readBytes: (path: string) => Buffer | null | undefined;
-}
+export type CompilerSnapshotEntry = SnapshotEntry;
+export type CompilerSnapshotObservation = SnapshotObservation;
 
 export interface CompilerTransitionObservation {
-  files: readonly ParsedDiffFile[];
-  resourceDeltas: readonly ResourceDeltaObservation[];
-  observationFacts: readonly TransitionObservationFact[];
+  trustedObservationFacts?: () => readonly TransitionObservationFact[];
 }
 
 export interface CompilerInput {
@@ -62,10 +52,13 @@ function structuralRoots(native: Native) {
 
 export function evaluateCompiler(input: CompilerInput) {
   const diagnostics: Diagnostic[] = [];
+  const structural = normalizeSnapshotTransition(input.repository, input.base, input.head);
+  const baseSnapshot = structural.base;
+  const headSnapshot = structural.head;
   const states = new Map<string, CompilerState>();
   const snapshots = new Map<string, CompilerSnapshotObservation>();
-  snapshots.set(input.base.revision, input.base);
-  snapshots.set(input.head.revision, input.head);
+  snapshots.set(baseSnapshot.revision, baseSnapshot);
+  snapshots.set(headSnapshot.revision, headSnapshot);
 
   const open = (revision: string): CompilerState => {
     const existing = states.get(revision);
@@ -147,23 +140,23 @@ export function evaluateCompiler(input: CompilerInput) {
     return state;
   };
 
-  const before = open(input.base.revision);
-  const after = open(input.head.revision);
+  const before = open(baseSnapshot.revision);
+  const after = open(headSnapshot.revision);
   const projectionPath = ".repo-guard/projections.json";
   const baseProjectionPaths = new Set(before.entries.map((entry) => entry.path));
   const headProjectionPaths = new Set(after.entries.map((entry) => entry.path));
   const projectionReport = evaluateProjectionCheck({
     baseRaw: baseProjectionPaths.has(projectionPath)
-      ? input.base.readBytes(projectionPath)
+      ? baseSnapshot.readBytes(projectionPath)
       : null,
     headRaw: headProjectionPaths.has(projectionPath)
-      ? input.head.readBytes(projectionPath)
+      ? headSnapshot.readBytes(projectionPath)
       : null,
     readHead: (path) =>
-      headProjectionPaths.has(path) ? input.head.readBytes(path) : null,
+      headProjectionPaths.has(path) ? headSnapshot.readBytes(path) : null,
     facts: {
-      readFile: (path) => input.head.readBytes(path),
-      diff: { files: { checked: [...input.transition.files] } },
+      readFile: (path) => headSnapshot.readBytes(path),
+      diff: { files: { checked: [...structural.files] } },
     },
     resolveRequirement: (id) => {
       if (!after.native.ok) return null;
@@ -189,7 +182,7 @@ export function evaluateCompiler(input: CompilerInput) {
   const transition = evaluateTransitionCauseClosure({
     repository: input.repository,
     base: {
-      revision: input.base.revision,
+      revision: baseSnapshot.revision,
       requirements: before.requirements,
       nativeRequirements: before.native.requirements,
       compiledConstraints: before.compiledConstraints,
@@ -198,7 +191,7 @@ export function evaluateCompiler(input: CompilerInput) {
       resourceRelations: before.resourceRelations,
     },
     head: {
-      revision: input.head.revision,
+      revision: headSnapshot.revision,
       requirements: after.requirements,
       nativeRequirements: after.native.requirements,
       compiledConstraints: after.compiledConstraints,
@@ -207,7 +200,7 @@ export function evaluateCompiler(input: CompilerInput) {
       resourceRelations: after.resourceRelations,
     },
     trustedAuthorityBase: {
-      revision: input.base.revision,
+      revision: baseSnapshot.revision,
       requirements: before.requirements,
       nativeRequirements: before.native.requirements,
       compiledConstraints: before.compiledConstraints,
@@ -215,10 +208,10 @@ export function evaluateCompiler(input: CompilerInput) {
       j1: before.j1,
       resourceRelations: before.resourceRelations,
     },
-    resourceDeltas: input.transition.resourceDeltas,
+    resourceDeltas: structural.resourceDeltas,
     baseLifecycle: before.lifecycle,
     headLifecycle: after.lifecycle,
-    observationFacts: input.transition.observationFacts,
+    observationFacts: input.transition.trustedObservationFacts?.() ?? [],
   });
   for (const reason of transition.reasons)
     diagnostics.push({ code: "j3", subject: reason });
@@ -231,8 +224,8 @@ export function evaluateCompiler(input: CompilerInput) {
   return {
     format: "repo-guard/local-compiler-v1",
     repository: input.repository,
-    base: input.base.revision,
-    head: input.head.revision,
+    base: baseSnapshot.revision,
+    head: headSnapshot.revision,
     ok:
       diagnostics.length === 0
       && before.j1.ok
@@ -251,7 +244,7 @@ export function evaluateCompiler(input: CompilerInput) {
       rooted: after.j2.rooted.length,
     },
     j3: {
-      changed: input.transition.files.length,
+      changed: structural.files.length,
       ok: transition.ok,
       affectedRequirements: transition.affectedRequirements,
       deltas: transition.deltas,

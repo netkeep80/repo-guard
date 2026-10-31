@@ -33,7 +33,7 @@ Snapshot
 
 ### RG-03 — Ограниченная причинная область изменения
 
-**`MUST`:** изменённый tracked Resource обосновывается явной причинной цепочкой от rooted Requirement; связь или Constraint одного Requirement не распространяется на несвязанный Resource. Requirement-scoped Constraint измеряет только область, выбранную его объявленными отношениями.
+**`MUST`:** изменённый tracked Resource обосновывается явной причинной цепочкой от rooted Requirement; связь или Constraint одного Requirement не распространяется на несвязанный Resource. Requirement-scoped Constraint измеряет только область, выбранную его объявленными отношениями. Структурный переход Resource (`add`/`delete`/`modify`/`type_change`) определяется только полными точными неизменяемыми `BASE/HEAD`-снимками; provider/Git diff presentation и эвристика similarity/rename не являются причинной authority.
 
 Риск — соседний или переименованный Resource проходит проверку без собственного причинного основания либо локальное ограничение превращается в скрытый глобальный барьер. Нарушение — orphan Resource считается допустимым только из-за близости пути, общего каталога или несвязанного изменения.
 
@@ -41,7 +41,7 @@ Snapshot
 
 ### RG-04 — Свидетельство соответствует утверждению
 
-**`MUST`:** результат сообщает точную identity входов, проверенное ограничение, наблюдение и предел вывода. Отсутствующее обязательное свидетельство нельзя называть успехом. `verified_by` задаёт traceability к проверочной поверхности, но не подменяет фактическое исполнение предметного теста или доказательства обычным CI. **`SHOULD`:** существенная гарантия имеет положительный и отрицательный свидетель.
+**`MUST`:** результат сообщает точную identity входов, проверенное ограничение, наблюдение и предел вывода. Отсутствующее обязательное свидетельство нельзя называть успехом. Сериализованное/provider-controlled числовое observation само по себе не является проверенным свидетельством: optional `git.changed_lines` может удовлетворить Constraint только через доверенную acquisition capability вызывающего адаптера; отсутствие такой capability остаётся RED. `verified_by` задаёт traceability к проверочной поверхности, но не подменяет фактическое исполнение предметного теста или доказательства обычным CI. **`SHOULD`:** существенная гарантия имеет положительный и отрицательный свидетель.
 
 Риск — зелёный цвет, наличие тестового файла или соседнее изменение выдаются за доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката.
 
@@ -97,7 +97,7 @@ repo-guard build --base <sha> --head <sha> --outputs outputs.json
 
 ### `check`
 
-Локально проверяет exact `BASE/HEAD`, Requirements, Relations, Constraints и Projection freshness/ownership без записи. Для `git.changed_lines` и `git.changed_resources` используется единая фиксированная Git diff-семантика: Myers, indent heuristic включён, rename detection 50% с limit 1000, copy detection выключен, submodule transitions учитываются, external diff и textconv выключены. `git.changed_lines` — сумма additions+deletions `--numstat` по resulting path; binary `-/-` не создаёт numeric observation. Атрибуты читаются только из versioned `.gitattributes` exact HEAD; repository/user/system Git config, `.git/info/attributes`, global/system attributes и diff-related environment не являются semantic input. Воспроизводимость остаётся зависимой от совместимой реализации Git для Myers, rename similarity, binary classification и attribute semantics и требует Git с поддержкой используемого `--attr-source`.
+Локально проверяет exact `BASE/HEAD`, Requirements, Relations, Constraints и Projection freshness/ownership без записи. Авторитетный структурный переход выводится только из полных точных неизменяемых снимков: появление/исчезновение пути даёт add/delete, изменение объекта или mode в том же классе — modify, смена класса regular file/symlink/gitlink — type_change. Git/GitHub rename presentation, similarity и previous_filename не являются причинной authority; relocation представлен delete+add. `git.changed_resources` считает эти структурные deltas. `git.changed_lines` — optional need-driven observation с семантикой `git-numstat-v2`: LocalGit получает его только для активного Constraint через изолированный Myers `--numstat --no-renames`, с indent heuristic, без external diff/textconv, с versioned `.gitattributes` exact HEAD; binary `-/-` не создаёт numeric observation. Отсутствующее обязательное observation остаётся RED; GitHub additions/deletions/patch не принимаются как trusted metric. Сериализованные/provider-controlled данные не могут сами объявить `changed_lines`: data-only snapshot path без trusted acquisition capability оставляет активный `git.changed_lines` RED; LocalGit передаёт такую capability как исполняемую функцию, а не как поле JSON.
 
 ```bash
 repo-guard check --base <40-char-sha> --head <40-char-sha>
