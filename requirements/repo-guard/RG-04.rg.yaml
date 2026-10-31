@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-04
-normative: "### RG-04 — Свидетельство соответствует утверждению\n\n**`MUST`:** результат сообщает точную identity входов, проверенное ограничение, наблюдение и предел вывода. Отсутствующее обязательное свидетельство нельзя называть успехом. `verified_by` задаёт traceability к проверочной поверхности, но не подменяет фактическое исполнение предметного теста или доказательства обычным CI. **`SHOULD`:** существенная гарантия имеет положительный и отрицательный свидетель.\n\nРиск — зелёный цвет, наличие тестового файла или соседнее изменение выдаются за доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката."
+normative: "### RG-04 — Свидетельство соответствует утверждению\n\n**`MUST`:** результат сообщает точную identity входов, проверенное ограничение, наблюдение и предел вывода. Отсутствующее обязательное свидетельство нельзя называть успехом. Сериализованное/provider-controlled числовое observation само по себе не является проверенным свидетельством: optional `git.changed_lines` может удовлетворить Constraint только через доверенную acquisition capability вызывающего адаптера; отсутствие такой capability остаётся RED. `verified_by` задаёт traceability к проверочной поверхности, но не подменяет фактическое исполнение предметного теста или доказательства обычным CI. **`SHOULD`:** существенная гарантия имеет положительный и отрицательный свидетель.\n\nРиск — зелёный цвет, наличие тестового файла или соседнее изменение выдаются за доказательство поведения. Нарушение — заявленная гарантия шире реально проверенного предиката."
 relations:
   - predicates: [implemented_by]
     target:
@@ -66,6 +66,26 @@ relations:
     target:
       kind: artifact
       path: "dist/runtime/transition-closure.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/compiler-core.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "dist/local-compiler.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/compiler-core.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
+      path: "src/local-compiler.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-786-local-compiler.mjs"
   - predicates: [implemented_by]
     target:
       kind: artifact

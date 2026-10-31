@@ -224,6 +224,8 @@ export function snapshotFromImmutableData(input: unknown): SnapshotObservation {
 export function normalizeSnapshotTransition(repository: string, baseInput: SnapshotObservation, headInput: SnapshotObservation): StructuralTransition {
   const base = validateSnapshotObservation(repository, baseInput);
   const head = validateSnapshotObservation(repository, headInput);
+  if (base.revision === head.revision && base.treeIdentity !== head.treeIdentity)
+    fail(`same revision identity ${base.revision} has conflicting tree identities ${base.treeIdentity} and ${head.treeIdentity}`);
   const baseEntries = new Map(base.entries.map(entry => [entry.path, entry]));
   const headEntries = new Map(head.entries.map(entry => [entry.path, entry]));
   const paths = [...new Set([...baseEntries.keys(), ...headEntries.keys()])].sort((a, b) => a.localeCompare(b, "en"));

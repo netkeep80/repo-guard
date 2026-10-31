@@ -22,7 +22,7 @@ export type CompilerSnapshotEntry = SnapshotEntry;
 export type CompilerSnapshotObservation = SnapshotObservation;
 
 export interface CompilerTransitionObservation {
-  observationFacts: readonly TransitionObservationFact[];
+  trustedObservationFacts?: () => readonly TransitionObservationFact[];
 }
 
 export interface CompilerInput {
@@ -57,8 +57,8 @@ export function evaluateCompiler(input: CompilerInput) {
   const headSnapshot = structural.head;
   const states = new Map<string, CompilerState>();
   const snapshots = new Map<string, CompilerSnapshotObservation>();
-  snapshots.set(baseSnapshot.revision, input.base);
-  snapshots.set(headSnapshot.revision, input.head);
+  snapshots.set(baseSnapshot.revision, baseSnapshot);
+  snapshots.set(headSnapshot.revision, headSnapshot);
 
   const open = (revision: string): CompilerState => {
     const existing = states.get(revision);
@@ -211,7 +211,7 @@ export function evaluateCompiler(input: CompilerInput) {
     resourceDeltas: structural.resourceDeltas,
     baseLifecycle: before.lifecycle,
     headLifecycle: after.lifecycle,
-    observationFacts: input.transition.observationFacts,
+    observationFacts: input.transition.trustedObservationFacts?.() ?? [],
   });
   for (const reason of transition.reasons)
     diagnostics.push({ code: "j3", subject: reason });
