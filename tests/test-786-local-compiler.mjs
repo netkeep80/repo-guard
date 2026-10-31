@@ -6,6 +6,7 @@ import { join, dirname } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { evaluateLocalCompiler } from "../dist/local-compiler.mjs";
 import { evaluateCompiler } from "../dist/compiler-core.mjs";
+import { normalizeSnapshotTransition, snapshotFromImmutableData } from "../dist/snapshot-transition.mjs";
 import { evaluateRootedRequirements } from "../dist/runtime/requirement-closure.mjs";
 import { createResourceResolver } from "../dist/runtime/resource-resolver.mjs";
 import { evaluateTrackedResourceClosure } from "../dist/runtime/resource-closure.mjs";
@@ -455,13 +456,13 @@ try {
     });
   });
   
-  test("#834 F3 rename identity and changed_resources ignore local diff.renames/diff.renameLimit", () => {
+  test("#834 F3 snapshot relocations count delete+add and ignore local diff rename configuration", () => {
     const root = mkdtempSync(join(tmpdir(), "repo-guard-834-renames-"));
     try {
       init(root);
       const oldPaths = Array.from({ length: 6 }, (_, i) => `src/old${i}.txt`);
       const newPaths = Array.from({ length: 6 }, (_, i) => `src/new${i}.txt`);
-      put(root, "requirements/core.rg.yaml", metricRequirement(oldPaths, "git.changed_resources", 6));
+      put(root, "requirements/core.rg.yaml", metricRequirement(oldPaths, "git.changed_resources", 12));
       for (let i = 0; i < oldPaths.length; i++) {
         put(root, oldPaths[i], Array.from({ length: 20 }, (_, j) => `common-${i}-${j}`).join("\n") + "\nold-tail\n");
       }
@@ -471,7 +472,7 @@ try {
         git(root, "mv", oldPaths[i], newPaths[i]);
         put(root, newPaths[i], Array.from({ length: 20 }, (_, j) => `common-${i}-${j}`).join("\n") + "\nnew-tail\n");
       }
-      put(root, "requirements/core.rg.yaml", metricRequirement(newPaths, "git.changed_resources", 6));
+      put(root, "requirements/core.rg.yaml", metricRequirement(newPaths, "git.changed_resources", 12));
       const head = commit(root, "rename head");
   
       const configs = [
@@ -485,7 +486,7 @@ try {
         const current = semantic(runCheck(root, base, head));
         expected ??= current;
         assert.deepEqual(current, expected);
-        assert.equal(current.constraint.observed, 6);
+        assert.equal(current.constraint.observed, 12);
         assert.equal(current.constraint.verdict, "PASS");
       }
     } finally {
@@ -651,8 +652,7 @@ try {
           "--ignore-submodules=none",
           "--diff-algorithm=myers",
           "--indent-heuristic",
-          "--find-renames=50%",
-          "-l1000",
+          "--no-renames",
           "--numstat",
           "-z",
           base,
@@ -1058,7 +1058,7 @@ try {
         const scoped = r833Constraint(report);
         assert.equal(report.ok, false);
         assert.equal(scoped.verdict, "RED");
-        assert.equal(scoped.observed, 1);
+        assert.equal(scoped.observed, 2);
         assert.deepEqual(scoped.scope, ["docs/a.json", "docs/b.json"]);
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -3114,6 +3114,7 @@ relations:
         headRevision: head,
         path: "docs/data.json",
         metric: "changed_lines",
+        semantics: "git-numstat-v2",
         value: 2,
       }];
       const evaluateWith = (stateOf) => evaluateTransitionCauseClosure({
@@ -3411,8 +3412,10 @@ relations:
           readFileBytesAtRef(revision, entry.path, root861),
         ]));
         return {
+          repository: "fixture/861",
           revision,
           treeIdentity: git861("rev-parse", "--verify", revision + "^{tree}"),
+          complete: true,
           entries,
           readBytes: (path) => bytes.get(path) ?? null,
         };
@@ -3427,21 +3430,7 @@ relations:
         base: baseSnapshot,
         head: headSnapshot,
         transition: {
-          files: [{
-            path: "src/a.txt",
-            addedLines: [],
-            deletedLines: [],
-            status: "modified",
-          }],
-          resourceDeltas: [{ kind: "modify", path: "src/a.txt" }],
-          observationFacts: [{
-            authorityBaseRevision: base,
-            baseRevision: base,
-            headRevision: head,
-            path: "src/a.txt",
-            metric: "changed_lines",
-            value: 2,
-          }],
+          observationFacts: [],
         },
       });
       assert.deepEqual(coreReport, report, "provider-neutral core must reproduce the exact LocalGit report after acquisition");
@@ -3517,6 +3506,22 @@ ${changedLines ? `constraints:
     return { ...local, readBytes: (path) => bytes.get(path) };
   }
 
+  function immutableData861(root861, revision) {
+    const local = localSnapshot861(root861, revision);
+    return {
+      repository: repository861,
+      revision,
+      treeIdentity: local.treeIdentity,
+      complete: true,
+      entries: local.entries.map((entry) => ({
+        ...entry,
+        ...(entry.type === "blob"
+          ? { bytesBase64: Buffer.from(local.readBytes(entry.path)).toString("base64") }
+          : {}),
+      })),
+    };
+  }
+
   test("#861 B1 caller-supplied empty structural deltas cannot hide a real tree change", () => {
     const { root861, base, head } = fixture861();
     try {
@@ -3543,8 +3548,11 @@ ${changedLines ? `constraints:
         transition: { observationFacts: [] },
       });
       const local = evaluateCompiler(input(localSnapshot861(root861, base), localSnapshot861(root861, head)));
-      const memory = evaluateCompiler(input(memorySnapshot861(root861, base), memorySnapshot861(root861, head)));
-      assert.deepEqual(memory, local);
+      const provider = evaluateCompiler(input(
+        snapshotFromImmutableData(immutableData861(root861, base)),
+        snapshotFromImmutableData(immutableData861(root861, head)),
+      ));
+      assert.deepEqual(provider, local);
       assert.ok(local.j3.deltas.some((delta) => delta.kind === "resource_modify"));
     } finally {
       rmSync(root861, { recursive: true, force: true });
@@ -3649,4 +3657,167 @@ exec "${realGit861}" "$@"
       rmSync(root861, { recursive: true, force: true });
     }
   });
+
+  test("#861 B8 provider-neutral immutable data survives .git removal and an empty PATH", () => {
+    const { root861, base, head } = fixture861();
+    const baseData = immutableData861(root861, base);
+    const headData = immutableData861(root861, head);
+    rmSync(root861, { recursive: true, force: true });
+    const oldPath = process.env.PATH;
+    try {
+      process.env.PATH = "";
+      const report = evaluateCompiler({
+        repository: repository861,
+        base: snapshotFromImmutableData(baseData),
+        head: snapshotFromImmutableData(headData),
+        transition: { observationFacts: [] },
+      });
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics));
+      assert.deepEqual(
+        report.j3.deltas.filter((delta) => delta.kind.startsWith("resource_")),
+        [{
+          id: "resource_modify:src/a.txt",
+          kind: "resource_modify",
+          subject: "src/a.txt",
+          afterPath: "src/a.txt",
+          beforePath: "src/a.txt",
+        }],
+      );
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  });
+
+  test("#861 B9 snapshot structural algebra covers binary, add/delete, mode, type and ambiguous relocations", () => {
+    const root861 = mkdtempSync(join(tmpdir(), "repo-guard-861-structural-"));
+    try {
+      git861(root861, "init", "-q");
+      put861(root861, "a.bin", Buffer.from([0, 1, 2]));
+      put861(root861, "delete.txt", "delete\n");
+      put861(root861, "mode.txt", "mode\n");
+      put861(root861, "type.txt", "target-a\n");
+      put861(root861, "old-exact.txt", "same\n");
+      put861(root861, "old-modified.txt", "common\nold\n");
+      put861(root861, "one-old.txt", "duplicate\n");
+      put861(root861, "many-a.txt", "duplicate-two\n");
+      put861(root861, "many-b.txt", "duplicate-two\n");
+      const base = commit861(root861, "structural base");
+
+      put861(root861, "a.bin", Buffer.from([0, 1, 3]));
+      unlinkSync(join(root861, "delete.txt"));
+      put861(root861, "add.txt", "add\n");
+      chmodSync(join(root861, "mode.txt"), 0o755);
+      unlinkSync(join(root861, "type.txt"));
+      symlinkSync("target-b", join(root861, "type.txt"));
+      git861(root861, "mv", "old-exact.txt", "new-exact.txt");
+      git861(root861, "mv", "old-modified.txt", "new-modified.txt");
+      put861(root861, "new-modified.txt", "common\nnew\n");
+      unlinkSync(join(root861, "one-old.txt"));
+      put861(root861, "one-new-a.txt", "duplicate\n");
+      put861(root861, "one-new-b.txt", "duplicate\n");
+      unlinkSync(join(root861, "many-a.txt"));
+      unlinkSync(join(root861, "many-b.txt"));
+      put861(root861, "many-new.txt", "duplicate-two\n");
+      const head = commit861(root861, "structural head");
+
+      const transition = normalizeSnapshotTransition(
+        repository861,
+        localSnapshot861(root861, base),
+        localSnapshot861(root861, head),
+      );
+      const byPath = Object.fromEntries(transition.resourceDeltas.map((delta) => [delta.path, delta.kind]));
+      assert.equal(byPath["a.bin"], "modify");
+      assert.equal(byPath["delete.txt"], "delete");
+      assert.equal(byPath["add.txt"], "add");
+      assert.equal(byPath["mode.txt"], "modify");
+      assert.equal(byPath["type.txt"], "type_change");
+      assert.equal(byPath["old-exact.txt"], "delete");
+      assert.equal(byPath["new-exact.txt"], "add");
+      assert.equal(byPath["old-modified.txt"], "delete");
+      assert.equal(byPath["new-modified.txt"], "add");
+      assert.equal(byPath["one-old.txt"], "delete");
+      assert.equal(byPath["one-new-a.txt"], "add");
+      assert.equal(byPath["one-new-b.txt"], "add");
+      assert.equal(byPath["many-a.txt"], "delete");
+      assert.equal(byPath["many-b.txt"], "delete");
+      assert.equal(byPath["many-new.txt"], "add");
+      assert.equal(transition.resourceDeltas.some((delta) => delta.kind === "rename"), false);
+
+      unlinkSync(join(root861, "type.txt"));
+      put861(root861, "type.txt", "regular again\n");
+      const regularHead = commit861(root861, "symlink to regular");
+      const reverse = normalizeSnapshotTransition(
+        repository861,
+        localSnapshot861(root861, head),
+        localSnapshot861(root861, regularHead),
+      );
+      assert.deepEqual(
+        reverse.resourceDeltas.filter((delta) => delta.path === "type.txt"),
+        [{ kind: "type_change", path: "type.txt", beforeType: "symlink", afterType: "file" }],
+      );
+    } finally {
+      rmSync(root861, { recursive: true, force: true });
+    }
+  });
+
+  test("#861 B10 strict snapshot ingestion rejects incomplete, aliased, forged and byte-inconsistent observations", () => {
+    const { root861, base, head } = fixture861();
+    try {
+      const baseData = immutableData861(root861, base);
+      const headData = immutableData861(root861, head);
+      const clone = (value) => structuredClone(value);
+
+      assert.throws(() => snapshotFromImmutableData({ ...clone(baseData), revision: "main" }), /revision/);
+      assert.throws(() => snapshotFromImmutableData({ ...clone(baseData), treeIdentity: "x".repeat(40) }), /tree identity/);
+      assert.throws(() => snapshotFromImmutableData({ ...clone(baseData), complete: false }), /incomplete/);
+
+      const duplicate = clone(baseData);
+      duplicate.entries.push(clone(duplicate.entries[0]));
+      assert.throws(() => snapshotFromImmutableData(duplicate), /duplicate tracked path/);
+
+      const alias = clone(baseData);
+      alias.entries[0].path = "a/../b";
+      assert.throws(() => snapshotFromImmutableData(alias), /not canonical/);
+
+      const badMode = clone(baseData);
+      badMode.entries[0].mode = "100600";
+      assert.throws(() => snapshotFromImmutableData(badMode), /unsupported mode\/type/);
+
+      const badType = clone(baseData);
+      badType.entries[0].type = "tree";
+      assert.throws(() => snapshotFromImmutableData(badType), /invalid object type/);
+
+      const badObject = clone(baseData);
+      badObject.entries[0].object = "not-a-sha";
+      assert.throws(() => snapshotFromImmutableData(badObject), /object identity/);
+
+      const partial = clone(baseData);
+      partial.entries.pop();
+      assert.throws(() => snapshotFromImmutableData(partial), /tree identity mismatch/);
+
+      const forged = clone(baseData);
+      const forgedBlob = forged.entries.find((entry) => entry.type === "blob");
+      forgedBlob.bytesBase64 = Buffer.from("forged\n").toString("base64");
+      assert.throws(() => snapshotFromImmutableData(forged), /blob identity mismatch/);
+
+      const swapped = clone(headData);
+      const headSource = swapped.entries.find((entry) => entry.path === "src/a.txt");
+      const baseSource = baseData.entries.find((entry) => entry.path === "src/a.txt");
+      headSource.bytesBase64 = baseSource.bytesBase64;
+      assert.throws(() => snapshotFromImmutableData(swapped), /blob identity mismatch/);
+
+      const missing = clone(headData);
+      delete missing.entries.find((entry) => entry.path === "requirements/core.rg.yaml").bytesBase64;
+      const missingSnapshot = snapshotFromImmutableData(missing);
+      assert.throws(() => evaluateCompiler({
+        repository: repository861,
+        base: snapshotFromImmutableData(baseData),
+        head: missingSnapshot,
+        transition: { observationFacts: [] },
+      }), /tracked blob bytes are unavailable/);
+    } finally {
+      rmSync(root861, { recursive: true, force: true });
+    }
+  });
+
 }

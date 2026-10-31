@@ -2,10 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { evaluateCompiler, type CompilerSnapshotObservation } from "./compiler-core.mjs";
-import { parseNameStatusZ } from "./diff/parser.mjs";
 import { listTrackedEntriesAtRef, readFileBytesAtRef, runGit } from "./git.mjs";
 import {
-  resourceDeltasFromParsedDiff,
+  CHANGED_LINES_SEMANTICS,
   type TransitionObservationFact,
 } from "./runtime/transition-closure.mjs";
 
@@ -74,12 +73,12 @@ function isolatedGitEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-function deterministicTransitionDiff(root: string, base: string, head: string): { nameStatus: string; numstat: string } {
+function deterministicChangedLines(root: string, base: string, head: string): string {
   const env = isolatedGitEnvironment();
   const objectPath = runGit(["rev-parse", "--git-path", "objects"], { cwd: root, env }).trim();
   if (!objectPath) throw new Error("cannot resolve Git object directory");
   const objectDirectory = isAbsolute(objectPath) ? objectPath : resolve(root, objectPath);
-  const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-diff-"));
+  const tempRoot = mkdtempSync(join(tmpdir(), "repo-guard-lines-"));
   const gitDir = join(tempRoot, "repo.git");
   const templateDir = join(tempRoot, "empty-template");
   try {
@@ -93,7 +92,7 @@ function deterministicTransitionDiff(root: string, base: string, head: string): 
       gitDir,
     ], { cwd: root, env });
     const diffEnv = { ...env, GIT_ALTERNATE_OBJECT_DIRECTORIES: objectDirectory };
-    const args = [
+    return runGit([
       `--git-dir=${gitDir}`,
       `--attr-source=${head}`,
       "-c", "core.quotepath=false",
@@ -104,13 +103,12 @@ function deterministicTransitionDiff(root: string, base: string, head: string): 
       "--ignore-submodules=none",
       "--diff-algorithm=myers",
       "--indent-heuristic",
-      "--find-renames=50%",
-      "-l1000",
-    ];
-    return {
-      nameStatus: runGit([...args, "--name-status", "-z", base, head], { cwd: root, env: diffEnv }),
-      numstat: runGit([...args, "--numstat", "-z", base, head], { cwd: root, env: diffEnv }),
-    };
+      "--no-renames",
+      "--numstat",
+      "-z",
+      base,
+      head,
+    ], { cwd: root, env: diffEnv });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -123,18 +121,21 @@ function localObservations(repository: string, base: string, head: string, raw: 
     headRevision: head,
     path,
     metric: "changed_lines" as const,
+    semantics: CHANGED_LINES_SEMANTICS,
     value,
   }));
 }
 
-function acquireLocalSnapshot(root: string, revision: string): CompilerSnapshotObservation {
+function acquireLocalSnapshot(root: string, repository: string, revision: string): CompilerSnapshotObservation {
   const entries = listTrackedEntriesAtRef(revision, root);
   const tracked = new Set(entries.map(entry => entry.path));
   const treeIdentity = runGit(["rev-parse", "--verify", revision + "^{tree}"], { cwd: root }).trim();
   if (!sha40.test(treeIdentity)) throw new Error("Git tree is not an exact SHA-1 identity");
   return {
+    repository,
     revision,
     treeIdentity,
+    complete: true,
     entries,
     readBytes: (path) =>
       tracked.has(path) ? readFileBytesAtRef(revision, path, root) : null,
@@ -148,25 +149,28 @@ export function evaluateLocalCompiler(input: { root: string; repository: string;
   const snapshot = (revision: string) => {
     const existing = snapshots.get(revision);
     if (existing) return existing;
-    const acquired = acquireLocalSnapshot(input.root, revision);
+    const acquired = acquireLocalSnapshot(input.root, input.repository, revision);
     snapshots.set(revision, acquired);
     return acquired;
   };
   const before = snapshot(base);
   const after = snapshot(head);
-  const transitionDiff = deterministicTransitionDiff(input.root, base, head);
-  const files = parseNameStatusZ(transitionDiff.nameStatus);
-
-  return evaluateCompiler({
+  const evaluate = (observationFacts: readonly TransitionObservationFact[]) => evaluateCompiler({
     repository: input.repository,
     base: before,
     head: after,
-    transition: {
-      files,
-      resourceDeltas: resourceDeltasFromParsedDiff(files),
-      observationFacts: localObservations(input.repository, base, head, transitionDiff.numstat),
-    },
+    transition: { observationFacts },
   });
+  const initial = evaluate([]);
+  const needsChangedLines = initial.diagnostics.some(item =>
+    item.code === "j3" && item.subject.startsWith("I7:missing_observation:"));
+  if (!needsChangedLines) return initial;
+  return evaluate(localObservations(
+    input.repository,
+    base,
+    head,
+    deterministicChangedLines(input.root, base, head),
+  ));
 }
 
 export function runLocalCheck(roots: { repoRoot: string }, args: string[]): number {

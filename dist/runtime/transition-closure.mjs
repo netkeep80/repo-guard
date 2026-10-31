@@ -1,5 +1,6 @@
 import { normalizeDocumentFact } from "../document-facts.mjs";
 import { validateCompiledConstraint, } from "./canonical-requirements.mjs";
+export const CHANGED_LINES_SEMANTICS = "git-numstat-v2";
 const sha = /^[0-9a-f]{40}$/;
 const allDeltaKinds = new Set([
     "requirement_add", "requirement_modify", "requirement_remove", "requirement_relocate",
@@ -633,7 +634,7 @@ function evaluateScopedObligations(input, deltas, applicability, relationStates)
             const path = normPath(o.path);
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
                 o.authorityBaseRevision !== input.trustedAuthorityBase.revision || o.baseRevision !== input.base.revision ||
-                o.headRevision !== input.head.revision || o.metric !== "changed_lines" ||
+                o.headRevision !== input.head.revision || o.metric !== "changed_lines" || o.semantics !== CHANGED_LINES_SEMANTICS ||
                 !Number.isSafeInteger(o.value) || o.value < 0) {
                 problems.push("I7:invalid_observation:" + path);
                 continue;

@@ -1,6 +1,6 @@
 format: repo-guard/requirement-v1
 id: RG-03
-normative: "### RG-03 — Ограниченная причинная область изменения\n\n**`MUST`:** изменённый tracked Resource обосновывается явной причинной цепочкой от rooted Requirement; связь или Constraint одного Requirement не распространяется на несвязанный Resource. Requirement-scoped Constraint измеряет только область, выбранную его объявленными отношениями.\n\nРиск — соседний или переименованный Resource проходит проверку без собственного причинного основания либо локальное ограничение превращается в скрытый глобальный барьер. Нарушение — orphan Resource считается допустимым только из-за близости пути, общего каталога или несвязанного изменения.\n\nСредства: точная Git identity, J1 resource closure, J3 transition cause и relation-scoped Constraints."
+normative: "### RG-03 — Ограниченная причинная область изменения\n\n**`MUST`:** изменённый tracked Resource обосновывается явной причинной цепочкой от rooted Requirement; связь или Constraint одного Requirement не распространяется на несвязанный Resource. Requirement-scoped Constraint измеряет только область, выбранную его объявленными отношениями. Структурный переход Resource (`add`/`delete`/`modify`/`type_change`) определяется только полными точными неизменяемыми `BASE/HEAD`-снимками; provider/Git diff presentation и эвристика similarity/rename не являются причинной authority.\n\nРиск — соседний или переименованный Resource проходит проверку без собственного причинного основания либо локальное ограничение превращается в скрытый глобальный барьер. Нарушение — orphan Resource считается допустимым только из-за близости пути, общего каталога или несвязанного изменения.\n\nСредства: точная Git identity, J1 resource closure, J3 transition cause и relation-scoped Constraints."
 relations:
   - predicates: [implemented_by]
     target:
@@ -21,6 +21,10 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "dist/snapshot-transition.mjs"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "dist/utils/path-patterns.d.mts"
   - predicates: [implemented_by]
     target:
@@ -37,7 +41,15 @@ relations:
   - predicates: [implemented_by]
     target:
       kind: artifact
+      path: "src/snapshot-transition.mts"
+  - predicates: [implemented_by]
+    target:
+      kind: artifact
       path: "src/utils/path-patterns.mts"
+  - predicates: [verified_by]
+    target:
+      kind: artifact
+      path: "tests/test-786-local-compiler.mjs"
   - predicates: [documents]
     target:
       kind: artifact

@@ -33,7 +33,7 @@ function run(opts={}){
   const trustedAuthorityBase=opts.trustedAuthorityBase||{revision:base.revision,requirements:base.requirements,j2:base.j2,j1:base.j1,resourceRelations:base.resourceRelations};
   const resourceDeltas=opts.resourceDeltas===undefined?[{kind:"modify",path:"src/a.ts"}]:opts.resourceDeltas;
   const observationFacts=(opts.observationFacts===undefined?(opts.observed===undefined?[]:[{path:opts.obsPath||"src/a.ts",metric:"changed_lines",value:opts.observed}]):opts.observationFacts)
-    .map(o=>({authorityBaseRevision:trustedAuthorityBase.revision,baseRevision:base.revision,headRevision:head.revision,...o}));
+    .map(o=>({authorityBaseRevision:trustedAuthorityBase.revision,baseRevision:base.revision,headRevision:head.revision,semantics:"git-numstat-v2",...o}));
   const result=evaluateTransitionCauseClosure({repository:repo,base,head,trustedAuthorityBase,resourceDeltas,observationFacts});
   return {result,base,head};
 }
@@ -58,6 +58,7 @@ test("scoped Constraint: candidate deletion or increase cannot erase BASE obliga
 
 test("observation semantics: stale exact transition is rejected",()=>no(run({baseConstraints:[lines(10)],observationFacts:[{authorityBaseRevision:A,baseRevision:A,headRevision:C,path:"src/a.ts",metric:"changed_lines",value:5}]}),"invalid_observation:src/a.ts","stale observation"));
 test("observation semantics: conflicting duplicate numeric observations fail closed",()=>no(run({baseConstraints:[lines(10)],observationFacts:[{path:"src/a.ts",metric:"changed_lines",value:5},{path:"src/a.ts",metric:"changed_lines",value:1}]}),"duplicate_observation:src/a.ts","duplicate"));
+test("#861 changed_lines observation requires exact metric semantics",()=>no(run({baseConstraints:[lines(10)],observationFacts:[{path:"src/a.ts",metric:"changed_lines",semantics:"provider-json",value:5}]}),"invalid_observation:src/a.ts","metric semantics"));
 
 test("external execution constraint is delegated only when verified_by topology is valid",()=>{
   const ok=run({baseConstraints:[check()],baseRelations:verifierRelations(),baseFiles:["src/a.ts","tests/t.mjs"]});

@@ -24,9 +24,10 @@ export interface ResourceDeltaObservation {
   beforeType?: string;
   afterType?: string;
 }
+export const CHANGED_LINES_SEMANTICS = "git-numstat-v2" as const;
 export interface TransitionObservationFact {
   authorityBaseRevision: string; baseRevision: string; headRevision: string;
-  path: string; metric: "changed_lines"; value: number;
+  path: string; metric: "changed_lines"; semantics: typeof CHANGED_LINES_SEMANTICS; value: number;
 }
 export interface TransitionCauseRule {
   authorityRevision: string;
@@ -669,7 +670,7 @@ function evaluateScopedObligations(
             const path = normPath(o.path);
             if (!exactRevision(o.authorityBaseRevision) || !exactRevision(o.baseRevision) || !exactRevision(o.headRevision) ||
                 o.authorityBaseRevision !== input.trustedAuthorityBase.revision || o.baseRevision !== input.base.revision ||
-                o.headRevision !== input.head.revision || o.metric !== "changed_lines" ||
+                o.headRevision !== input.head.revision || o.metric !== "changed_lines" || o.semantics !== CHANGED_LINES_SEMANTICS ||
                 !Number.isSafeInteger(o.value) || o.value < 0) {
                 problems.push("I7:invalid_observation:" + path);
                 continue;
