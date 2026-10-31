@@ -1,5 +1,5 @@
 import { evaluateProjectionCheck } from "./projection-check.mjs";
-import { normalizeSnapshotTransition } from "./snapshot-transition.mjs";
+import { normalizeSnapshotTransition, } from "./snapshot-transition.mjs";
 import { loadNativeRequirements, lowerNativeRequirements } from "./runtime/canonical-requirements.mjs";
 import { evaluateRootedRequirements } from "./runtime/requirement-closure.mjs";
 import { evaluateTrackedResourceClosure } from "./runtime/resource-closure.mjs";
