@@ -3460,7 +3460,7 @@ relations:
     git861(root861, "-c", "user.name=#861 Fixture", "-c", "user.email=861@example.invalid", "commit", "-qm", message);
     return git861(root861, "rev-parse", "HEAD");
   }
-  function requirement861(path = "src/a.txt", changedLines = false) {
+  function requirement861(path = "src/a.txt", changedLines = false, changedLinesMax = 100) {
     return `format: repo-guard/requirement-v1
 id: CORE
 normative: "snapshot transition fixture"
@@ -3475,13 +3475,13 @@ ${changedLines ? `constraints:
       relations: [implemented_by]
     metric:
       key: git.changed_lines
-      max: 100
+      max: ${changedLinesMax}
 ` : ""}`;
   }
-  function fixture861({ changedLines = false } = {}) {
+  function fixture861({ changedLines = false, changedLinesMax = 100 } = {}) {
     const root861 = mkdtempSync(join(tmpdir(), "repo-guard-861-"));
     git861(root861, "init", "-q");
-    put861(root861, "requirements/core.rg.yaml", requirement861("src/a.txt", changedLines));
+    put861(root861, "requirements/core.rg.yaml", requirement861("src/a.txt", changedLines, changedLinesMax));
     put861(root861, "src/a.txt", "base\\n");
     const base = commit861(root861, "base");
     put861(root861, "src/a.txt", "head\\n");
@@ -3820,6 +3820,125 @@ exec "${realGit861}" "$@"
         String(item.detail || "").includes("tracked blob bytes are unavailable")));
     } finally {
       rmSync(root861, { recursive: true, force: true });
+    }
+  });
+
+
+  test("#861 AUDIT-B1 direct CompilerInput forged reader cannot bypass blob validation", () => {
+    const { root861, base, head } = fixture861();
+    try {
+      const baseSnapshot = localSnapshot861(root861, base);
+      const genuineHead = localSnapshot861(root861, head);
+      const forgedRequirement = Buffer.from(
+        requirement861("src/a.txt").replace("snapshot transition fixture", "FORGED semantic requirement"),
+        "utf8",
+      );
+      const forgedHead = {
+        ...genuineHead,
+        readBytes: (path) =>
+          path === "requirements/core.rg.yaml"
+            ? forgedRequirement
+            : genuineHead.readBytes(path),
+      };
+      const report = evaluateCompiler({
+        repository: repository861,
+        base: baseSnapshot,
+        head: forgedHead,
+        transition: { observationFacts: [] },
+      });
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.diagnostics.some((item) => String(item.detail || "").includes("blob identity mismatch")),
+        JSON.stringify(report.diagnostics),
+      );
+    } finally {
+      rmSync(root861, { recursive: true, force: true });
+    }
+  });
+
+  test("#861 AUDIT-B2 self-asserted changed_lines cannot satisfy active Constraint", () => {
+    const { root861, base, head } = fixture861({ changedLines: true, changedLinesMax: 0 });
+    try {
+      const fabricated = evaluateCompiler({
+        repository: repository861,
+        base: localSnapshot861(root861, base),
+        head: localSnapshot861(root861, head),
+        transition: {
+          observationFacts: [{
+            authorityBaseRevision: base,
+            baseRevision: base,
+            headRevision: head,
+            path: "src/a.txt",
+            metric: "changed_lines",
+            semantics: "git-numstat-v2",
+            value: 0,
+          }],
+        },
+      });
+      assert.equal(fabricated.ok, false, "serialized/data-only metric value must not create GREEN");
+      assert.ok(
+        fabricated.diagnostics.some((item) =>
+          item.code === "j3" && item.subject.includes("I7:missing_observation:CORE:lines:src/a.txt")),
+        JSON.stringify(fabricated.diagnostics),
+      );
+
+      const local = evaluateLocalCompiler({ root: root861, repository: repository861, base, head });
+      const constraint = local.j3.constraints.find((item) =>
+        item.requirementId === "CORE" && item.constraintId === "lines");
+      assert.equal(local.ok, false);
+      assert.equal(constraint?.observed, 2);
+      assert.equal(constraint?.verdict, "RED");
+    } finally {
+      rmSync(root861, { recursive: true, force: true });
+    }
+  });
+
+  test("#861 AUDIT-B3 same revision cannot denote different trees; different revisions may share one tree", () => {
+    const { root861, base, head } = fixture861();
+    try {
+      const baseSnapshot = localSnapshot861(root861, base);
+      const actualHead = localSnapshot861(root861, head);
+      const contradictoryHead = { ...actualHead, revision: base };
+      assert.throws(
+        () => evaluateCompiler({
+          repository: repository861,
+          base: baseSnapshot,
+          head: contradictoryHead,
+          transition: { observationFacts: [] },
+        }),
+        /same revision.*tree|revision identity.*tree/i,
+      );
+    } finally {
+      rmSync(root861, { recursive: true, force: true });
+    }
+
+    const rootSameTree = mkdtempSync(join(tmpdir(), "repo-guard-861-same-tree-"));
+    try {
+      git861(rootSameTree, "init", "-q");
+      put861(rootSameTree, "requirements/core.rg.yaml", requirement861("src/a.txt"));
+      put861(rootSameTree, "src/a.txt", "same\n");
+      const first = commit861(rootSameTree, "first");
+      execFileSync(realGit861, [
+        "-c", "user.name=#861 Fixture",
+        "-c", "user.email=861@example.invalid",
+        "commit", "--allow-empty", "-qm", "same tree",
+      ], { cwd: rootSameTree });
+      const second = git861(rootSameTree, "rev-parse", "HEAD");
+      assert.notEqual(first, second);
+      assert.equal(
+        git861(rootSameTree, "rev-parse", first + "^{tree}"),
+        git861(rootSameTree, "rev-parse", second + "^{tree}"),
+      );
+      const report = evaluateCompiler({
+        repository: repository861,
+        base: localSnapshot861(rootSameTree, first),
+        head: localSnapshot861(rootSameTree, second),
+        transition: { observationFacts: [] },
+      });
+      assert.equal(report.ok, true, JSON.stringify(report.diagnostics));
+      assert.equal(report.j3.changed, 0);
+    } finally {
+      rmSync(rootSameTree, { recursive: true, force: true });
     }
   });
 
