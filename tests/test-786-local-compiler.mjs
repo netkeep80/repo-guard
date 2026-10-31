@@ -3809,12 +3809,15 @@ exec "${realGit861}" "$@"
       const missing = clone(headData);
       delete missing.entries.find((entry) => entry.path === "requirements/core.rg.yaml").bytesBase64;
       const missingSnapshot = snapshotFromImmutableData(missing);
-      assert.throws(() => evaluateCompiler({
+      const missingReport = evaluateCompiler({
         repository: repository861,
         base: snapshotFromImmutableData(baseData),
         head: missingSnapshot,
         transition: { observationFacts: [] },
-      }), /tracked blob bytes are unavailable/);
+      });
+      assert.equal(missingReport.ok, false);
+      assert.ok(missingReport.diagnostics.some((item) =>
+        String(item.detail || "").includes("tracked blob bytes are unavailable")));
     } finally {
       rmSync(root861, { recursive: true, force: true });
     }
