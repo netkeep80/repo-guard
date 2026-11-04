@@ -4040,5 +4040,31 @@ exec "${realGit861}" "$@"
     } finally { fx.cleanup(); }
   });
 
+
+  test("#866 RED adding another rooted Requirement does not repair gitlink representability", () => {
+    const fx = fixture866();
+    try {
+      fx.put(".seed", "seed\n");
+      const target = fx.commit("seed gitlink target commit");
+      unlinkSync(join(fx.root, ".seed"));
+      fx.put("requirements/root.rg.json", requirement866([]));
+      fx.put("requirements/owner.rg.json", JSON.stringify({
+        format: "repo-guard/requirement-v1",
+        id: "OWNER",
+        normative: "second owner",
+        relations: [
+          { predicates: ["derives_from"], target: { kind: "requirement", id: "ROOT" } },
+          relation866("requires", "vendor/example"),
+        ],
+      }, null, 2) + "\n");
+      fx.git("add", "-A");
+      fx.git("update-index", "--add", "--cacheinfo", `160000,${target},vendor/example`);
+      fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "two requirements and gitlink");
+      const revision = fx.git("rev-parse", "HEAD");
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
   console.log("#866 gitlink Resource representability falsifier loaded");
 }
