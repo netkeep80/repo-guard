@@ -56,6 +56,7 @@ export function evaluateCompiler(input) {
                 repository: input.repository,
                 revision,
                 requirements: lowered.requirements,
+                entries: snapshot.entries,
                 readers: { [input.repository]: readExact },
             });
             j1 = evaluateTrackedResourceClosure({

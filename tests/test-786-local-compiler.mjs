@@ -3943,3 +3943,313 @@ exec "${realGit861}" "$@"
   });
 
 }
+
+
+{
+  const repository866 = "fixture/866";
+  const artifact866 = (path) => ({ kind: "artifact", path });
+  const relation866 = (predicate, path, extra = {}) => ({ predicates: [predicate], target: artifact866(path), ...extra });
+  const generates866 = (from, to) => ({ source: artifact866(from), predicates: ["generates"], target: artifact866(to) });
+  const requirement866 = (relations = []) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id: "ROOT",
+    normative: "gitlink ownership fixture",
+    relations,
+  }, null, 2) + "\n";
+
+  const fixture866 = () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "repo-guard-866-"));
+    const fixtureGit = (...args) => execFileSync("git", args, { cwd: fixtureRoot, encoding: "utf8" }).trim();
+    const fixturePut = (path, value) => {
+      mkdirSync(dirname(join(fixtureRoot, path)), { recursive: true });
+      writeFileSync(join(fixtureRoot, path), value);
+    };
+    const fixtureCommit = (message) => {
+      fixtureGit("add", "-A");
+      fixtureGit("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", message);
+      return fixtureGit("rev-parse", "HEAD");
+    };
+    fixtureGit("init", "-q", "--object-format=sha1");
+    fixtureGit("branch", "-M", "main");
+    return {
+      root: fixtureRoot,
+      git: fixtureGit,
+      put: fixturePut,
+      commit: fixtureCommit,
+      evaluate: (base, head = base) => evaluateLocalCompiler({ root: fixtureRoot, repository: repository866, base, head }),
+      cleanup: () => rmSync(fixtureRoot, { recursive: true, force: true }),
+    };
+  };
+
+  const stageGitlink866 = (fx, object) =>
+    fx.git("update-index", "--add", "--cacheinfo", `160000,${object},vendor/example`);
+
+  const gitlinkSnapshot866 = (relations, extraFiles = new Map()) => {
+    const fx = fixture866();
+    fx.put(".seed", "seed\n");
+    const target = fx.commit("seed gitlink target commit");
+    unlinkSync(join(fx.root, ".seed"));
+    fx.put("requirements/root.rg.json", requirement866(relations));
+    for (const [path, value] of extraFiles) fx.put(path, value);
+    fx.git("add", "-A");
+    stageGitlink866(fx, target);
+    fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "tracked gitlink fixture");
+    const revision = fx.git("rev-parse", "HEAD");
+    return { fx, target, revision };
+  };
+
+  const immutableData866 = (fx, revision) => ({
+    repository: repository866,
+    revision,
+    treeIdentity: fx.git("rev-parse", revision + "^{tree}"),
+    complete: true,
+    entries: listTrackedEntriesAtRef(revision, fx.root).map((entry) => {
+      if (entry.type !== "blob") return { ...entry };
+      const bytes = readFileBytesAtRef(revision, entry.path, fx.root);
+      assert.ok(bytes instanceof Uint8Array, entry.path);
+      return { ...entry, bytesBase64: Buffer.from(bytes).toString("base64") };
+    }),
+  });
+
+  const openSnapshot866 = (data) => {
+    const snapshot = snapshotFromImmutableData(data);
+    const paths = snapshot.entries.map((entry) => entry.path)
+      .filter((path) => /^requirements\/.*\.rg\.(?:yaml|json)$/.test(path));
+    const readExact = (sha, path) => sha === snapshot.revision ? snapshot.readBytes(path) : null;
+    const native = loadNativeRequirements({
+      repository: repository866,
+      revision: snapshot.revision,
+      paths,
+      readFile: readExact,
+    });
+    assert.equal(native.ok, true, JSON.stringify(native.errors, null, 2));
+    const lowered = lowerNativeRequirements(native);
+    assert.equal(lowered.requirements.ok, true, JSON.stringify(lowered.requirements.errors, null, 2));
+    const roots = native.requirements
+      .filter((item) => !item.relations.some((relation) => relation.predicate === "derives_from"))
+      .map((item) => item.semantic);
+    const j2 = evaluateRootedRequirements({
+      requirements: lowered.requirements,
+      trustedRoots: roots,
+      nativeRequirements: native.requirements,
+    });
+    assert.equal(j2.ok, true, JSON.stringify(j2, null, 2));
+    const resolver = createResourceResolver({
+      repository: repository866,
+      revision: snapshot.revision,
+      requirements: lowered.requirements,
+      entries: snapshot.entries,
+      readers: { [repository866]: readExact },
+    });
+    const j1 = evaluateTrackedResourceClosure({
+      repository: repository866,
+      revision: snapshot.revision,
+      requirements: lowered.requirements,
+      j2,
+      trackedPaths: snapshot.entries.map((entry) => entry.path),
+      resourceRelations: lowered.resourceRelations,
+      nativeRequirements: native.requirements,
+      resolver,
+    });
+    return { snapshot, native, lowered, j2, resolver, j1 };
+  };
+
+  test("#866 F1 ordinary bytes-backed artifact ownership remains GREEN", () => {
+    const fx = fixture866();
+    try {
+      fx.put("requirements/root.rg.json", requirement866([relation866("requires", "src/a.txt")]));
+      fx.put("src/a.txt", "ordinary blob\n");
+      const revision = fx.commit("owned blob");
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F2 tracked gitlink direct ownership is GREEN with exact owner proof", () => {
+    const { fx, target, revision } = gitlinkSnapshot866([relation866("requires", "vendor/example")]);
+    try {
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+      const opened = openSnapshot866(immutableData866(fx, revision));
+      assert.equal(opened.j1.ok, true, JSON.stringify(opened.j1, null, 2));
+      assert.deepEqual(opened.j1.owners["vendor/example"], ["ROOT"]);
+      assert.deepEqual(opened.j1.explanations["vendor/example"], ["ROOT", "requires:vendor/example"]);
+      const resolved = opened.resolver.resolve({ kind: "artifact", path: "vendor/example" });
+      assert.equal(resolved.ok, true, JSON.stringify(resolved));
+      assert.equal(resolved.value.tracked.class, "gitlink");
+      assert.equal(resolved.value.tracked.mode, "160000");
+      assert.equal(resolved.value.tracked.type, "commit");
+      assert.equal(resolved.value.tracked.object, target);
+      assert.equal(Object.hasOwn(resolved.value, "bytes"), false, "gitlink must not expose fabricated blob bytes");
+
+      mkdirSync(join(fx.root, "vendor/example"), { recursive: true });
+      writeFileSync(join(fx.root, "vendor/example/untracked.txt"), "working tree only\n");
+      assert.deepEqual(fx.evaluate(revision), report, "initialized/uninitialized gitlink working tree cannot affect exact snapshot result");
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F3 unowned tracked gitlink remains J1 RED", () => {
+    const { fx, revision } = gitlinkSnapshot866([]);
+    try {
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, false);
+      assert.ok(report.diagnostics.some((item) =>
+        item.code === "unjustified_resource" && item.subject === revision + ":vendor/example"));
+      assert.equal(report.diagnostics.some((item) =>
+        item.code === "missing_resource_target" && item.detail === "vendor/example"), false);
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F4 missing artifact target remains RED", () => {
+    const fx = fixture866();
+    try {
+      fx.put("requirements/root.rg.json", requirement866([relation866("requires", "vendor/missing")]));
+      const revision = fx.commit("missing artifact");
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, false);
+      assert.ok(report.diagnostics.some((item) =>
+        item.code === "missing_resource_target" && item.detail === "vendor/missing"));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F5 gitlink object tampering cannot survive exact tree validation", () => {
+    const { fx, revision } = gitlinkSnapshot866([relation866("requires", "vendor/example")]);
+    try {
+      const data = immutableData866(fx, revision);
+      const tampered = {
+        ...data,
+        entries: data.entries.map((entry) =>
+          entry.path === "vendor/example" ? { ...entry, object: "f".repeat(40) } : entry),
+      };
+      assert.throws(() => snapshotFromImmutableData(tampered), /tree identity mismatch/);
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F6 gitlink exact identity is metadata and bytes stay absent", () => {
+    const { fx, target, revision } = gitlinkSnapshot866([relation866("requires", "vendor/example")]);
+    try {
+      const { resolver } = openSnapshot866(immutableData866(fx, revision));
+      const resolved = resolver.resolve({ kind: "artifact", path: "vendor/example" });
+      assert.equal(resolved.ok, true, JSON.stringify(resolved));
+      assert.deepEqual(resolved.value.tracked, {
+        class: "gitlink",
+        mode: "160000",
+        type: "commit",
+        object: target,
+      });
+      assert.equal(Object.hasOwn(resolved.value, "bytes"), false);
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F7 gitlink cannot resolve as a document", () => {
+    const { fx, revision } = gitlinkSnapshot866([relation866("requires", "vendor/example")]);
+    try {
+      const { resolver } = openSnapshot866(immutableData866(fx, revision));
+      const resolved = resolver.resolve({ kind: "document", path: "vendor/example" });
+      assert.equal(resolved.ok, false);
+      assert.equal(resolved.error.code, "unsupported_resource_class");
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F8 gitlink cannot be a Resource Collection manifest", () => {
+    const { fx, revision } = gitlinkSnapshot866([
+      relation866("verified_by", "vendor/example", { collection: true }),
+    ]);
+    try {
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, false);
+      assert.ok(report.diagnostics.some((item) =>
+        item.code === "invalid_resource_collection" && item.subject === revision + ":vendor/example"));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 collection member and generates target follow generic exact-artifact semantics", () => {
+    const manifest = JSON.stringify({
+      schema: "repo-guard/resource-collection/v0",
+      members: ["vendor/example"],
+    }, null, 2) + "\n";
+    const collection = gitlinkSnapshot866(
+      [relation866("verified_by", "inventory/resources.json", { collection: true })],
+      new Map([["inventory/resources.json", manifest]]),
+    );
+    try {
+      assert.equal(collection.fx.evaluate(collection.revision).ok, true);
+    } finally { collection.fx.cleanup(); }
+
+    const generated = gitlinkSnapshot866(
+      [relation866("implemented_by", "src/source.txt"), generates866("src/source.txt", "vendor/example")],
+      new Map([["src/source.txt", "source\n"]]),
+    );
+    try {
+      assert.equal(generated.fx.evaluate(generated.revision).ok, true);
+    } finally { generated.fx.cleanup(); }
+  });
+
+  test("#866 F9 BASE unowned gitlink keeps compiler RED even when HEAD becomes owned", () => {
+    const fx = fixture866();
+    try {
+      fx.put(".seed", "seed\n");
+      const target = fx.commit("seed target");
+      unlinkSync(join(fx.root, ".seed"));
+      fx.put("requirements/root.rg.json", requirement866([]));
+      fx.git("add", "-A");
+      stageGitlink866(fx, target);
+      fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "base unowned gitlink");
+      const base = fx.git("rev-parse", "HEAD");
+
+      fx.put("requirements/root.rg.json", requirement866([relation866("requires", "vendor/example")]));
+      fx.git("add", "requirements/root.rg.json");
+      stageGitlink866(fx, target);
+      fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "head owns gitlink");
+      const head = fx.git("rev-parse", "HEAD");
+
+      const report = fx.evaluate(base, head);
+      assert.equal(report.ok, false);
+      assert.equal(report.j1.base, false);
+      assert.equal(report.j1.head, true);
+      assert.ok(report.diagnostics.some((item) =>
+        item.code === "unjustified_resource" && item.subject === base + ":vendor/example"));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 F10 owned gitlink closes both BASE and HEAD and supports exact object change", () => {
+    const { fx, revision: base } = gitlinkSnapshot866([relation866("requires", "vendor/example")]);
+    try {
+      stageGitlink866(fx, base);
+      fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "advance gitlink object");
+      const head = fx.git("rev-parse", "HEAD");
+      const report = fx.evaluate(base, head);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+      assert.equal(report.j1.base, true);
+      assert.equal(report.j1.head, true);
+      assert.equal(report.diagnostics.some((item) => item.subject?.includes("vendor/example")), false);
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 additional rooted Requirement uses the same generic gitlink artifact semantics", () => {
+    const fx = fixture866();
+    try {
+      fx.put(".seed", "seed\n");
+      const target = fx.commit("seed gitlink target commit");
+      unlinkSync(join(fx.root, ".seed"));
+      fx.put("requirements/root.rg.json", requirement866([]));
+      fx.put("requirements/owner.rg.json", JSON.stringify({
+        format: "repo-guard/requirement-v1",
+        id: "OWNER",
+        normative: "second owner",
+        relations: [
+          { predicates: ["derives_from"], target: { kind: "requirement", id: "ROOT" } },
+          relation866("requires", "vendor/example"),
+        ],
+      }, null, 2) + "\n");
+      fx.git("add", "-A");
+      stageGitlink866(fx, target);
+      fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "two requirements and gitlink");
+      const revision = fx.git("rev-parse", "HEAD");
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
+  console.log("#866 exact gitlink Resource regression matrix loaded");
+}
