@@ -1,6 +1,6 @@
 {
   "name": "repo-guard",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "Детерминированный локальный causal compiler требований, связей, ограничений и проекций",
   "type": "module",
   "main": "dist/repo-guard.mjs",
