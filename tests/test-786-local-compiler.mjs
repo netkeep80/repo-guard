@@ -3943,3 +3943,102 @@ exec "${realGit861}" "$@"
   });
 
 }
+
+
+{
+  const repository866 = "fixture/866";
+  const artifact866 = (path) => ({ kind: "artifact", path });
+  const relation866 = (predicate, path, extra = {}) => ({ predicates: [predicate], target: artifact866(path), ...extra });
+  const generates866 = (from, to) => ({ source: artifact866(from), predicates: ["generates"], target: artifact866(to) });
+  const requirement866 = (relations) => JSON.stringify({
+    format: "repo-guard/requirement-v1",
+    id: "ROOT",
+    normative: "gitlink ownership fixture",
+    relations,
+  }, null, 2) + "\n";
+
+  const fixture866 = () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "repo-guard-866-"));
+    const fixtureGit = (...args) => execFileSync("git", args, { cwd: fixtureRoot, encoding: "utf8" }).trim();
+    const fixturePut = (path, value) => {
+      mkdirSync(dirname(join(fixtureRoot, path)), { recursive: true });
+      writeFileSync(join(fixtureRoot, path), value);
+    };
+    const fixtureCommit = (message) => {
+      fixtureGit("add", "-A");
+      fixtureGit("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", message);
+      return fixtureGit("rev-parse", "HEAD");
+    };
+    fixtureGit("init", "-q", "--object-format=sha1");
+    fixtureGit("branch", "-M", "main");
+    return {
+      root: fixtureRoot,
+      git: fixtureGit,
+      put: fixturePut,
+      commit: fixtureCommit,
+      evaluate: (base, head = base) => evaluateLocalCompiler({ root: fixtureRoot, repository: repository866, base, head }),
+      cleanup: () => rmSync(fixtureRoot, { recursive: true, force: true }),
+    };
+  };
+
+  const gitlinkSnapshot866 = (relations, extraFiles = new Map()) => {
+    const fx = fixture866();
+    fx.put(".seed", "seed\n");
+    const target = fx.commit("seed gitlink target commit");
+    unlinkSync(join(fx.root, ".seed"));
+    fx.put("requirements/root.rg.json", requirement866(relations));
+    for (const [path, value] of extraFiles) fx.put(path, value);
+    fx.git("add", "-A");
+    fx.git("update-index", "--add", "--cacheinfo", `160000,${target},vendor/example`);
+    fx.git("-c", "user.name=#866", "-c", "user.email=866@example.invalid", "commit", "-qm", "tracked gitlink fixture");
+    const revision = fx.git("rev-parse", "HEAD");
+    return { fx, target, revision };
+  };
+
+  test("#866 F1 ordinary bytes-backed artifact ownership remains GREEN", () => {
+    const fx = fixture866();
+    try {
+      fx.put("requirements/root.rg.json", requirement866([relation866("requires", "src/a.txt")]));
+      fx.put("src/a.txt", "ordinary blob\n");
+      const revision = fx.commit("owned blob");
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 RED F2 tracked gitlink with honest direct artifact ownership must be GREEN", () => {
+    const { fx, revision } = gitlinkSnapshot866([relation866("requires", "vendor/example")]);
+    try {
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 RED generic gap is not repaired by Resource Collection membership", () => {
+    const manifest = JSON.stringify({
+      schema: "repo-guard/resource-collection/v0",
+      members: ["vendor/example"],
+    }, null, 2) + "\n";
+    const { fx, revision } = gitlinkSnapshot866(
+      [relation866("verified_by", "inventory/resources.json", { collection: true })],
+      new Map([["inventory/resources.json", manifest]]),
+    );
+    try {
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
+  test("#866 RED generic gap is not repaired by generates ownership", () => {
+    const { fx, revision } = gitlinkSnapshot866(
+      [relation866("implemented_by", "src/source.txt"), generates866("src/source.txt", "vendor/example")],
+      new Map([["src/source.txt", "source\n"]]),
+    );
+    try {
+      const report = fx.evaluate(revision);
+      assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    } finally { fx.cleanup(); }
+  });
+
+  console.log("#866 gitlink Resource representability falsifier loaded");
+}
