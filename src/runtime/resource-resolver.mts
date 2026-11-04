@@ -1,4 +1,5 @@
 import { normalizeDocumentFact, parseJson, parseYaml, resolveJsonPointer } from "../document-facts.mjs";
+import type { SnapshotEntry } from "../snapshot-transition.mjs";
 import { decodeUtf8Strict } from "../utils/repository-files.mjs";
 import { durablePointer, type CanonicalRequirementsResult, type ExactRepresentationSubject } from "./canonical-requirements.mjs";
 
@@ -11,6 +12,7 @@ export interface ResolverContext {
   repository: string;
   revision: string;
   requirements: CanonicalRequirementsResult;
+  entries?: readonly SnapshotEntry[];
   readers: Readonly<Record<string, (revision: string, path: string) => string | Buffer | null | undefined>>;
 }
 export interface ResolveError { code: string; subject: string; message: string; }
@@ -30,6 +32,14 @@ const safePath = (p: unknown): string => {
 };
 const exactIdentity = (repository: string, revision: string, path: string, pointer = ""): ExactRepresentationSubject =>
   ({ kind: "exact_representation", repository, revision, path, pointer });
+const resourceClass = (entry: SnapshotEntry): "file" | "symlink" | "gitlink" =>
+  entry.type === "commit" ? "gitlink" : entry.mode === "120000" ? "symlink" : "file";
+const trackedIdentity = (entry: SnapshotEntry) => ({
+  class: resourceClass(entry),
+  mode: entry.mode,
+  type: entry.type,
+  object: entry.object,
+});
 function strictRef(value: unknown): ResourceRef {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid ResourceRef object");
   const obj = value as Record<string, unknown>, kind = obj.kind;
@@ -56,6 +66,11 @@ export function createResourceResolver(context: ResolverContext) {
   if (!repositoryPattern.test(context.repository) || !sha.test(context.revision)) throw new Error("resolver context requires exact repository and revision");
   if (!context.requirements.ok || context.requirements.requirements.some(r => r.representation.repository !== context.repository || r.representation.revision !== context.revision))
     throw new Error("inconsistent I1 exact snapshot");
+  const localEntries = context.entries
+    ? new Map(context.entries.map(entry => [entry.path, entry] as const))
+    : null;
+  if (context.entries && localEntries!.size !== context.entries.length)
+    throw new Error("resolver context contains duplicate tracked paths");
   return {
     resolve(rawRef: unknown, options: { durable?: boolean; expectedRevision?: string } = {}): ResolveResult {
       let ref: ResourceRef;
@@ -71,8 +86,6 @@ export function createResourceResolver(context: ResolverContext) {
       if (ref.kind === "external_document") { repository = ref.repository; revision = ref.revision; }
       if (options.expectedRevision && revision !== options.expectedRevision)
         return error("inconsistent_snapshot", subject, "revision differs from expected exact snapshot");
-      const reader = Object.hasOwn(context.readers, repository) ? context.readers[repository] : undefined;
-      if (typeof reader !== "function") return error("unknown_repository", subject, "repository exact reader not registered");
       let path: string;
       try { path = safePath(ref.path); }
       catch (e) { return error("unsafe_path", subject, (e as Error).message); }
@@ -82,12 +95,28 @@ export function createResourceResolver(context: ResolverContext) {
       if (options.durable && !durablePointer(pointer))
         return error("non_durable_pointer", subject, "positional fragment cannot be durable identity");
       const identity = exactIdentity(repository, revision, path, pointer);
+      const localSnapshot = repository === context.repository && revision === context.revision;
+      const entry = localSnapshot ? localEntries?.get(path) : undefined;
+      if (localSnapshot && localEntries && !entry)
+        return error("missing_path", subject, "exact snapshot path does not exist");
+      if (entry?.type === "commit") {
+        if (ref.kind === "artifact")
+          return { ok: true, value: { kind: "resolved_artifact", representation: identity, tracked: trackedIdentity(entry) } };
+        return error("unsupported_resource_class", subject, "gitlink Resource has no repository file bytes");
+      }
+      const reader = Object.hasOwn(context.readers, repository) ? context.readers[repository] : undefined;
+      if (typeof reader !== "function") return error("unknown_repository", subject, "repository exact reader not registered");
       try {
         const raw = reader(revision, path);
         if (raw === undefined || raw === null) return error("missing_path", subject, "exact snapshot path does not exist");
         const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
         if (ref.kind === "artifact")
-          return { ok: true, value: { kind: "resolved_artifact", representation: identity, bytes } };
+          return { ok: true, value: {
+            kind: "resolved_artifact",
+            representation: identity,
+            ...(entry ? { tracked: trackedIdentity(entry) } : {}),
+            bytes,
+          } };
         const document = parsedDocument(decodeUtf8Strict(bytes, `document "${path}"`), path);
         const value = resolveJsonPointer(document, pointer);
         return { ok: true, value: { kind: "resolved_document", representation: identity, value } };
